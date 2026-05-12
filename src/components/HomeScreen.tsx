@@ -1,0 +1,148 @@
+import { open } from "@tauri-apps/plugin-dialog";
+import { useWorkbookStore } from "../store/useWorkbookStore";
+import type { RecentFile, RecoveryCandidate } from "../types/workbook";
+import "./HomeScreen.css";
+
+export default function HomeScreen() {
+  const {
+    recentFiles,
+    recoveryCandidates,
+    lastError,
+    importWarnings,
+    newWorkbook,
+    openCoco,
+    importXlsx,
+    importCsv,
+    restoreCandidate,
+    dismissCandidate,
+    clearError,
+    dismissWarnings,
+  } = useWorkbookStore();
+
+  const handleOpenFile = async () => {
+    const selected = await open({
+      multiple: false,
+      filters: [
+        { name: "Excel / Coco / CSV", extensions: ["xlsx", "xlsm", "coco", "csv"] },
+        { name: "Excel Files", extensions: ["xlsx", "xlsm"] },
+        { name: "Coco Files", extensions: ["coco"] },
+        { name: "CSV Files", extensions: ["csv"] },
+      ],
+    });
+    if (!selected) return;
+    const path = typeof selected === "string" ? selected : selected[0];
+    const lower = path.toLowerCase();
+    if (lower.endsWith(".coco")) {
+      await openCoco(path);
+    } else if (lower.endsWith(".csv")) {
+      await importCsv(path);
+    } else if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) {
+      await importXlsx(path);
+    }
+  };
+
+  const handleRecentFile = async (file: RecentFile) => {
+    if (!file.exists) return;
+    const lower = file.path.toLowerCase();
+    if (lower.endsWith(".csv")) {
+      await importCsv(file.path);
+    } else if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) {
+      await importXlsx(file.path);
+    } else {
+      await openCoco(file.path);
+    }
+  };
+
+  return (
+    <div className="home-screen">
+      <div className="home-header">
+        <h1 className="home-title">Coco</h1>
+        <p className="home-subtitle">ローカルファースト表計算</p>
+      </div>
+      <div className="home-actions">
+        <button type="button" className="btn-primary" onClick={newWorkbook}>
+          新規ワークブック
+        </button>
+        <button type="button" className="btn-secondary" onClick={handleOpenFile}>
+          ファイルを開く
+        </button>
+      </div>
+      {(lastError || importWarnings.length > 0) && (
+        <div className="home-error">
+          <div className="home-error__content">
+            {lastError && <span className="home-error__title">{lastError}</span>}
+            {importWarnings.map((w, i) => (
+              <span key={i} className={`home-error__item home-error__item--${w.severity}`}>
+                {w.message}
+              </span>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="home-error__dismiss"
+            onClick={() => {
+              clearError();
+              dismissWarnings();
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+      {recoveryCandidates.length > 0 && (
+        <div className="home-section">
+          <h2>復元候補</h2>
+          <ul className="recovery-list">
+            {recoveryCandidates.map((c: RecoveryCandidate) => (
+              <li key={c.candidateId} className="recovery-item">
+                <div className="recovery-item__main">
+                  <span className="recovery-item__title">{c.originalPath ?? "無題のワークブック"}</span>
+                  <span className="recovery-date">
+                    {new Date(c.savedAt).toLocaleString("ja-JP")} · {c.reason}
+                  </span>
+                </div>
+                <div className="recovery-item__actions">
+                  <button
+                    type="button"
+                    className="btn-tertiary"
+                    onClick={() => restoreCandidate(c.candidateId)}
+                  >
+                    復元
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-tertiary btn-tertiary--danger"
+                    onClick={() => dismissCandidate(c.candidateId)}
+                  >
+                    破棄
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {recentFiles.length > 0 && (
+        <div className="home-section">
+          <h2>最近使ったファイル</h2>
+          <ul className="recent-list">
+            {recentFiles.map((f: RecentFile) => (
+              <li
+                key={f.path}
+                className={`recent-item ${!f.exists ? "recent-item--missing" : ""}`}
+                onClick={() => handleRecentFile(f)}
+              >
+                <span className="recent-name">{f.name}</span>
+                <span className="recent-path">{f.path}</span>
+                {!f.exists && <span className="recent-badge">見つかりません</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {recentFiles.length === 0 && recoveryCandidates.length === 0 && (
+        <p className="home-empty">最近使ったファイルはありません</p>
+      )}
+    </div>
+  );
+}

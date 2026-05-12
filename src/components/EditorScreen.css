@@ -1,0 +1,203 @@
+.editor-screen {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Top toolbar */
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  background-color: #fafafa;
+  border-bottom: 1px solid #e0e0e0;
+  flex-shrink: 0;
+  height: 40px;
+}
+
+.editor-toolbar__left,
+.editor-toolbar__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.editor-toolbar__filename {
+  font-size: 13px;
+  font-weight: 500;
+  color: #424242;
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 360px;
+}
+
+.toolbar-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #424242;
+  background-color: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.toolbar-btn:hover:not(:disabled) {
+  background-color: #f0f0f0;
+  border-color: #b0b0b0;
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toolbar-btn--primary {
+  background-color: #217346;
+  color: #fff;
+  border-color: #217346;
+}
+
+.toolbar-btn--primary:hover:not(:disabled) {
+  background-color: #1a5c38;
+  border-color: #1a5c38;
+}
+
+/* Warning banner */
+.warning-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  background-color: #fff8e1;
+  border-bottom: 1px solid #ffe082;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.warning-banner__content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 1;
+}
+
+.warning-banner__item {
+  font-size: 13px;
+}
+
+.warning-banner__item--info {
+  color: #1565c0;
+}
+
+.warning-banner__item--warning {
+  color: #e65100;
+  font-weight: 500;
+}
+
+.warning-banner__item--blocking {
+  color: #b71c1c;
+  font-weight: 600;
+}
+
+.warning-banner--export {
+  background-color: #e8f5e9;
+  border-bottom-color: #a5d6a7;
+}
+
+.warning-banner__dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+  color: #888;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 3px;
+  transition: color 0.1s ease;
+}
+
+.warning-banner__dismiss:hover {
+  color: #333;
+}
+
+/* Univer container — must fill all remaining space */
+.univer-container {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Status bar */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px;
+  height: 28px;
+  background-color: #217346;
+  flex-shrink: 0;
+}
+
+.status-bar__status {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.status-bar__status--save_failed,
+.status-bar__status--export_failed {
+  color: #ffcdd2;
+}
+
+.status-bar__status--unsaved {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.status-bar__status--saving,
+.status-bar__status--exporting,
+.status-bar__status--loading {
+  color: #c8e6c9;
+}
+
+/* Idle success messages fade after a few seconds so the bar isn't permanently
+   shouting "saved" — but stay readable for users who glance over late. The
+   React `key={saveStatus}` on the span restarts this animation on each state
+   change. */
+.status-bar__status--saved,
+.status-bar__status--auto_saved,
+.status-bar__status--export_done {
+  animation: status-fade 4s ease-out forwards;
+}
+
+@keyframes status-fade {
+  0% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0.35; }
+}
+
+.status-bar__retry {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  background-color: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.status-bar__retry:hover {
+  background-color: rgba(255, 255, 255, 0.25);
+}

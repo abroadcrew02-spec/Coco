@@ -1,0 +1,135 @@
+.sheet-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.sheet-picker-modal {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  width: 100%;
+  max-width: 420px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sheet-picker-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #212121;
+  padding: 16px 20px 4px;
+  margin: 0;
+}
+
+.sheet-picker-hint {
+  font-size: 12px;
+  color: #757575;
+  padding: 0 20px 12px;
+  margin: 0;
+}
+
+.sheet-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.sheet-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 14px;
+  color: #212121;
+  transition: background-color 0.1s ease;
+}
+
+.sheet-picker-item:hover {
+  background-color: #f0f0f0;
+}
+
+.sheet-picker-item--active {
+  background-color: #e8f5e9;
+  color: #1b5e20;
+  font-weight: 500;
+}
+
+.sheet-picker-item--active:hover {
+  background-color: #c8e6c9;
+}
+
+.sheet-picker-item__index {
+  font-size: 11px;
+  font-weight: 600;
+  color: #757575;
+  min-width: 24px;
+  flex-shrink: 0;
+}
+
+.sheet-picker-item--active .sheet-picker-item__index {
+  color: #2e7d32;
+}
+
+.sheet-picker-item__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid #eee;
+  background-color: #fafafa;
+}
+
+.sheet-picker-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #424242;
+  background-color: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.sheet-picker-btn:hover:not(:disabled) {
+  background-color: #f0f0f0;
+  border-color: #b0b0b0;
+}
+
+.sheet-picker-btn--primary {
+  background-color: #217346;
+  color: #fff;
+  border-color: #217346;
+}
+
+.sheet-picker-btn--primary:hover:not(:disabled) {
+  background-color: #1a5c38;
+  border-color: #1a5c38;
+}
+
+.sheet-picker-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

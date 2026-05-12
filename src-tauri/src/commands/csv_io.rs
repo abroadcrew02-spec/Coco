@@ -1,0 +1,440 @@
+use serde_json::{json, Map, Value};
+use std::fs::File;
+use std::io::{BufRead, BufReader, BufWriter, Write};
+
+use crate::commands::workbook::{CompatibilityWarning, ImportWorkbookResult, WorkbookHandle};
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CsvExportResult {
+    pub success: bool,
+    pub path: String,
+    pub rows_written: u32,
+    pub warnings: Vec<CompatibilityWarning>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SheetInfo {
+    pub id: String,
+    pub name: String,
+}
+
+fn escape_csv_field(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
+        let escaped = s.replace('"', "\"\"");
+        format!("\"{escaped}\"")
+    } else {
+        s.to_string()
+    }
+}
+
+fn needs_injection_guard(s: &str) -> bool {
+    matches!(s.chars().next(), Some('=') | Some('+') | Some('-') | Some('@'))
+}
+
+fn format_number(n: f64) -> String {
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        format!("{}", n as i64)
+    } else {
+        format!("{}", n)
+    }
+}
+
+#[tauri::command]
+pub fn list_sheet_names(snapshot_json: String) -> Result<Vec<SheetInfo>, String> {
+    let root: Value = serde_json::from_str(&snapshot_json).map_err(|e| e.to_string())?;
+    let sheet_order = root
+        .get("sheetOrder")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let sheets = root.get("sheets");
+
+    let mut result = Vec::with_capacity(sheet_order.len());
+    for (i, id_v) in sheet_order.iter().enumerate() {
+        let id = match id_v.as_str() {
+            Some(s) => s.to_string(),
+            None => {
+                // sheetOrder entry isn't a string — synthesize a placeholder so the index
+                // stays aligned with the array.
+                result.push(SheetInfo {
+                    id: format!("sheet-{}", i + 1),
+                    name: format!("Sheet{}", i + 1),
+                });
+                continue;
+            }
+        };
+        let name = sheets
+            .and_then(|s| s.get(&id))
+            .and_then(|sh| sh.get("name"))
+            .and_then(|n| n.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("Sheet{}", i + 1));
+        result.push(SheetInfo { id, name });
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn workbook_export_csv(
+    path: String,
+    snapshot_json: String,
+    sheet_id: Option<String>,
+) -> Result<CsvExportResult, String> {
+    if !path.to_lowercase().ends_with(".csv") {
+        return Ok(CsvExportResult {
+            success: false,
+            path,
+            rows_written: 0,
+            warnings: Vec::new(),
+            error: Some("CSV_INVALID_EXTENSION".into()),
+        });
+    }
+
+    let root: Value = serde_json::from_str(&snapshot_json).map_err(|e| e.to_string())?;
+
+    let sheets = root.get("sheets");
+
+    let resolved_sheet_id: String = match &sheet_id {
+        Some(id) => id.clone(),
+        None => {
+            let sheet_order = root.get("sheetOrder").and_then(|v| v.as_array());
+            match sheet_order.and_then(|arr| arr.first()).and_then(|v| v.as_str()) {
+                Some(s) => s.to_string(),
+                None => {
+                    return Ok(CsvExportResult {
+                        success: false,
+                        path,
+                        rows_written: 0,
+                        warnings: Vec::new(),
+                        error: Some("CSV_EMPTY_WORKBOOK".into()),
+                    });
+                }
+            }
+        }
+    };
+
+    let sheet = match sheets.and_then(|s| s.get(&resolved_sheet_id)) {
+        Some(s) => s,
+        None => {
+            return Ok(CsvExportResult {
+                success: false,
+                path,
+                rows_written: 0,
+                warnings: Vec::new(),
+                error: Some(format!("Sheet not found: {}", resolved_sheet_id)),
+            });
+        }
+    };
+
+    let mut warnings: Vec<CompatibilityWarning> = Vec::new();
+    let mut formula_warning_emitted = false;
+
+    let cell_data = sheet.get("cellData").and_then(|v| v.as_object());
+
+    let mut max_row: usize = 0;
+    let mut max_col: usize = 0;
+    let mut any_cell = false;
+
+    if let Some(rows_map) = cell_data {
+        for (r_key, r_val) in rows_map.iter() {
+            let r = match r_key.parse::<usize>() {
+                Ok(n) => n,
+                Err(_) => continue,
+            };
+            let cols_map = match r_val.as_object() {
+                Some(m) => m,
+                None => continue,
+            };
+            for (c_key, _c_val) in cols_map.iter() {
+                let c = match c_key.parse::<usize>() {
+                    Ok(n) => n,
+                    Err(_) => continue,
+                };
+                if !any_cell {
+                    max_row = r;
+                    max_col = c;
+                    any_cell = true;
+                } else {
+                    if r > max_row {
+                        max_row = r;
+                    }
+                    if c > max_col {
+                        max_col = c;
+                    }
+                }
+            }
+        }
+    }
+
+    let (n_rows, n_cols) = if any_cell { (max_row + 1, max_col + 1) } else { (0, 0) };
+
+    let mut rows: Vec<Vec<String>> = vec![vec![String::new(); n_cols]; n_rows];
+
+    if let Some(rows_map) = cell_data {
+        for (r_key, r_val) in rows_map.iter() {
+            let r = match r_key.parse::<usize>() {
+                Ok(n) => n,
+                Err(_) => continue,
+            };
+            let cols_map = match r_val.as_object() {
+                Some(m) => m,
+                None => continue,
+            };
+            for (c_key, cell) in cols_map.iter() {
+                let c = match c_key.parse::<usize>() {
+                    Ok(n) => n,
+                    Err(_) => continue,
+                };
+
+                let v_field = cell.get("v");
+                let f_field = cell.get("f").and_then(|f| f.as_str());
+
+                let (raw, is_string_kind) = if let Some(v) = v_field {
+                    match v {
+                        Value::Null => (String::new(), false),
+                        Value::Bool(b) => (
+                            if *b { "TRUE".to_string() } else { "FALSE".to_string() },
+                            false,
+                        ),
+                        Value::Number(n) => {
+                            let s = if let Some(f) = n.as_f64() {
+                                format_number(f)
+                            } else {
+                                n.to_string()
+                            };
+                            (s, false)
+                        }
+                        Value::String(s) => (s.clone(), true),
+                        other => (other.to_string(), false),
+                    }
+                } else if let Some(f) = f_field {
+                    if !formula_warning_emitted {
+                        warnings.push(CompatibilityWarning {
+                            severity: "info".to_string(),
+                            code: "CSV_FORMULA_FALLBACK".to_string(),
+                            message:
+                                "Some formula cells lack cached values; formula text exported instead"
+                                    .to_string(),
+                            affected_sheets: None,
+                        });
+                        formula_warning_emitted = true;
+                    }
+                    (f.to_string(), true)
+                } else {
+                    (String::new(), false)
+                };
+
+                let guarded = if is_string_kind && needs_injection_guard(&raw) {
+                    format!("'{}", raw)
+                } else {
+                    raw
+                };
+
+                if r < rows.len() && c < rows[r].len() {
+                    rows[r][c] = guarded;
+                }
+            }
+        }
+    }
+
+    let file = File::create(&path).map_err(|e| e.to_string())?;
+    let mut writer = BufWriter::new(file);
+
+    writer.write_all(&[0xEF, 0xBB, 0xBF]).map_err(|e| e.to_string())?;
+
+    for row in rows.iter() {
+        let line: Vec<String> = row.iter().map(|s| escape_csv_field(s)).collect();
+        writer
+            .write_all(line.join(",").as_bytes())
+            .map_err(|e| e.to_string())?;
+        writer.write_all(b"\r\n").map_err(|e| e.to_string())?;
+    }
+
+    writer.flush().map_err(|e| e.to_string())?;
+
+    Ok(CsvExportResult {
+        success: true,
+        path,
+        rows_written: rows.len() as u32,
+        warnings,
+        error: None,
+    })
+}
+
+const CSV_MIN_ROWS: usize = 1000;
+const CSV_MIN_COLS: usize = 100;
+const CSV_MAX_CELLS: usize = 5_000_000;
+
+fn infer_csv_cell(raw: &str) -> Option<Value> {
+    if raw.is_empty() {
+        return None;
+    }
+
+    // CSV injection guard reversal: "'=foo" / "'+foo" / "'-foo" / "'@foo" -> strip leading '
+    let unescaped: String =
+        if let Some(rest) = raw.strip_prefix('\'') {
+            if matches!(rest.chars().next(), Some('=') | Some('+') | Some('-') | Some('@')) {
+                rest.to_string()
+            } else {
+                raw.to_string()
+            }
+        } else {
+            raw.to_string()
+        };
+
+    if let Ok(n) = unescaped.parse::<i64>() {
+        return Some(json!({ "v": n }));
+    }
+    if let Ok(f) = unescaped.parse::<f64>() {
+        if f.is_finite() {
+            return Some(json!({ "v": f }));
+        }
+    }
+    let lower = unescaped.to_ascii_lowercase();
+    if lower == "true" {
+        return Some(json!({ "v": true }));
+    }
+    if lower == "false" {
+        return Some(json!({ "v": false }));
+    }
+    Some(json!({ "v": unescaped }))
+}
+
+/// Pure-Rust CSV import. Directly callable from tests.
+pub fn import_csv_core(path: String) -> Result<ImportWorkbookResult, String> {
+    if !path.to_lowercase().ends_with(".csv") {
+        return Err("CSV_INVALID_EXTENSION".into());
+    }
+
+    let workbook_id = uuid::Uuid::new_v4().to_string();
+
+    let file = File::open(&path).map_err(|e| e.to_string())?;
+    let mut buf_reader = BufReader::new(file);
+
+    // Manual BOM strip: peek first 3 bytes; consume them only if they are the UTF-8 BOM.
+    {
+        let buf = buf_reader.fill_buf().map_err(|e| e.to_string())?;
+        if buf.len() >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF {
+            buf_reader.consume(3);
+        }
+    }
+
+    let mut rdr = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .flexible(true)
+        .from_reader(buf_reader);
+
+    let mut cell_data: Map<String, Value> = Map::new();
+    let mut max_row: usize = 0;
+    let mut max_col: usize = 0;
+    let mut any_cell = false;
+    let mut total_cells: usize = 0;
+
+    for (row_idx, record_result) in rdr.records().enumerate() {
+        let record = record_result.map_err(|e| e.to_string())?;
+        let mut row_map: Map<String, Value> = Map::new();
+        for (col_idx, field) in record.iter().enumerate() {
+            let cell = match infer_csv_cell(field) {
+                Some(c) => c,
+                None => continue,
+            };
+            row_map.insert(col_idx.to_string(), cell);
+            total_cells += 1;
+            if !any_cell {
+                max_row = row_idx;
+                max_col = col_idx;
+                any_cell = true;
+            } else {
+                if row_idx > max_row {
+                    max_row = row_idx;
+                }
+                if col_idx > max_col {
+                    max_col = col_idx;
+                }
+            }
+            if total_cells > CSV_MAX_CELLS {
+                return Err("CSV_TOO_LARGE: more than 5M cells".into());
+            }
+        }
+        if !row_map.is_empty() {
+            cell_data.insert(row_idx.to_string(), Value::Object(row_map));
+        }
+    }
+
+    let (used_rows, used_cols) = if any_cell {
+        (max_row + 1, max_col + 1)
+    } else {
+        (0, 0)
+    };
+    let row_count = used_rows.max(CSV_MIN_ROWS);
+    let col_count = used_cols.max(CSV_MIN_COLS);
+
+    let sheet_name = std::path::Path::new(&path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Sheet1")
+        .to_string();
+
+    let sheet_obj = json!({
+        "id": "sheet-1",
+        "name": sheet_name,
+        "rowCount": row_count,
+        "columnCount": col_count,
+        "cellData": Value::Object(cell_data),
+    });
+
+    let mut sheets_map: Map<String, Value> = Map::new();
+    sheets_map.insert("sheet-1".to_string(), sheet_obj);
+
+    let snapshot = json!({
+        "id": workbook_id,
+        "name": "Imported CSV",
+        "appVersion": "0.1.0",
+        "locale": "enUS",
+        "styles": {},
+        "sheetOrder": ["sheet-1"],
+        "sheets": Value::Object(sheets_map),
+    });
+
+    let snapshot_json = serde_json::to_string(&snapshot).map_err(|e| e.to_string())?;
+
+    let warnings = vec![CompatibilityWarning {
+        severity: "info".to_string(),
+        code: "CSV_POC_IMPORT".to_string(),
+        message:
+            "CSV PoC インポート: 全セルを文字列/数値/真偽値のヒューリスティクスで判定しています。書式や型注釈は保存されません。"
+                .to_string(),
+        affected_sheets: None,
+    }];
+
+    Ok(ImportWorkbookResult {
+        handle: WorkbookHandle {
+            workbook_id,
+            path: Some(path),
+            source_type: "csv".to_string(),
+            snapshot_json: Some(snapshot_json),
+        },
+        warnings,
+    })
+}
+
+/// Tauri command wrapper that records the file in recent_files.
+#[tauri::command]
+pub fn workbook_import_csv(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<ImportWorkbookResult, String> {
+    let result = import_csv_core(path.clone())?;
+    let recent_name = std::path::Path::new(&path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&path)
+        .to_string();
+    if let Ok(app_conn) = crate::db::app_db::open_app_db(&app) {
+        let _ = crate::db::operations::record_recent_file(&app_conn, &path, &recent_name);
+    }
+    Ok(result)
+}

@@ -1,0 +1,114 @@
+.save-fail-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+
+.save-fail-modal {
+  display: flex;
+  gap: 16px;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  width: 100%;
+  max-width: 480px;
+  padding: 20px;
+}
+
+.save-fail-icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: #ffebee;
+  color: #c62828;
+  font-size: 22px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.save-fail-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.save-fail-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #b71c1c;
+  margin: 0 0 6px;
+}
+
+.save-fail-path {
+  font-size: 12px;
+  color: #424242;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background-color: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 3px;
+  padding: 4px 8px;
+  margin: 0 0 8px;
+  word-break: break-all;
+}
+
+.save-fail-detail {
+  font-size: 11px;
+  color: #5d4037;
+  background-color: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 3px;
+  padding: 6px 8px;
+  margin: 0 0 10px;
+  max-height: 100px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.save-fail-hint {
+  font-size: 12px;
+  color: #757575;
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+
+.save-fail-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.save-fail-btn {
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #424242;
+  background-color: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.save-fail-btn:hover:not(:disabled) {
+  background-color: #f0f0f0;
+  border-color: #b0b0b0;
+}
+
+.save-fail-btn--primary {
+  background-color: #217346;
+  color: #fff;
+  border-color: #217346;
+}
+
+.save-fail-btn--primary:hover:not(:disabled) {
+  background-color: #1a5c38;
+  border-color: #1a5c38;
+}

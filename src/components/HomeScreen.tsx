@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
@@ -25,6 +26,17 @@ export default function HomeScreen() {
     clearError,
     dismissWarnings,
   } = useWorkbookStore();
+
+  // Inline filter — shown only when there are enough recents to make
+  // scanning awkward. Below the threshold, an input would just be noise.
+  const FILTER_THRESHOLD = 6;
+  const [filterQuery, setFilterQuery] = useState("");
+  const filteredRecents = filterQuery.trim()
+    ? recentFiles.filter((f) =>
+        f.name.toLowerCase().includes(filterQuery.trim().toLowerCase()) ||
+        f.path.toLowerCase().includes(filterQuery.trim().toLowerCase())
+      )
+    : recentFiles;
 
   useEditorPreload();
 
@@ -183,8 +195,21 @@ export default function HomeScreen() {
               すべて削除
             </button>
           </div>
+          {recentFiles.length >= FILTER_THRESHOLD && (
+            <input
+              type="search"
+              className="recent-filter"
+              placeholder="ファイル名 / パスで絞り込み..."
+              value={filterQuery}
+              onChange={(e) => setFilterQuery(e.target.value)}
+              aria-label="最近使ったファイルを絞り込む"
+            />
+          )}
+          {filterQuery.trim() && filteredRecents.length === 0 && (
+            <p className="recent-empty-filter">該当するファイルがありません</p>
+          )}
           <ul className="recent-list">
-            {recentFiles.map((f: RecentFile) => {
+            {filteredRecents.map((f: RecentFile) => {
               const opened = Date.parse(f.lastOpened);
               const ageLabel = Number.isFinite(opened) ? timeAgoJa(opened) : null;
               const fullDate = Number.isFinite(opened)

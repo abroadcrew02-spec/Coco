@@ -167,6 +167,77 @@ describe("HomeScreen", () => {
       whens.forEach((el) => expect(el.textContent?.trim().length).toBeGreaterThan(0));
     });
 
+    describe("inline filter", () => {
+      beforeEach(() => {
+        // Threshold is 6 — seed enough recents to surface the filter.
+        useWorkbookStore.setState({
+          recentFiles: [
+            { path: "/tmp/budget.xlsx", name: "budget.xlsx", lastOpened: "2026-05-13T10:00:00Z", exists: true },
+            { path: "/tmp/sales.xlsx", name: "sales.xlsx", lastOpened: "2026-05-12T10:00:00Z", exists: true },
+            { path: "/tmp/forecast.coco", name: "forecast.coco", lastOpened: "2026-05-11T10:00:00Z", exists: true },
+            { path: "/tmp/q1.csv", name: "q1.csv", lastOpened: "2026-05-10T10:00:00Z", exists: true },
+            { path: "/tmp/q2.csv", name: "q2.csv", lastOpened: "2026-05-09T10:00:00Z", exists: true },
+            { path: "/tmp/q3.csv", name: "q3.csv", lastOpened: "2026-05-08T10:00:00Z", exists: true },
+            { path: "/tmp/q4.csv", name: "q4.csv", lastOpened: "2026-05-07T10:00:00Z", exists: true },
+          ],
+        });
+      });
+
+      it("renders the filter input when recents reach the threshold (6)", () => {
+        render(<HomeScreen />);
+        expect(screen.getByLabelText("最近使ったファイルを絞り込む")).toBeTruthy();
+      });
+
+      it("filters by name substring", async () => {
+        const user = userEvent.setup();
+        const { container } = render(<HomeScreen />);
+        const input = screen.getByLabelText("最近使ったファイルを絞り込む");
+        await user.type(input, "csv");
+        const visible = container.querySelectorAll(".recent-list .recent-item");
+        // 4 csv entries
+        expect(visible).toHaveLength(4);
+      });
+
+      it("filters by path substring", async () => {
+        const user = userEvent.setup();
+        const { container } = render(<HomeScreen />);
+        await user.type(screen.getByLabelText("最近使ったファイルを絞り込む"), "/tmp/budget");
+        const visible = container.querySelectorAll(".recent-list .recent-item");
+        expect(visible).toHaveLength(1);
+      });
+
+      it("is case-insensitive", async () => {
+        const user = userEvent.setup();
+        const { container } = render(<HomeScreen />);
+        await user.type(screen.getByLabelText("最近使ったファイルを絞り込む"), "BUDGET");
+        const visible = container.querySelectorAll(".recent-list .recent-item");
+        expect(visible).toHaveLength(1);
+      });
+
+      it("shows an empty-state hint when no match", async () => {
+        const user = userEvent.setup();
+        render(<HomeScreen />);
+        await user.type(screen.getByLabelText("最近使ったファイルを絞り込む"), "no-such-file");
+        expect(screen.getByText("該当するファイルがありません")).toBeTruthy();
+      });
+
+      it("clearing the input restores the full list", async () => {
+        const user = userEvent.setup();
+        const { container } = render(<HomeScreen />);
+        const input = screen.getByLabelText("最近使ったファイルを絞り込む");
+        await user.type(input, "csv");
+        await user.clear(input);
+        const visible = container.querySelectorAll(".recent-list .recent-item");
+        expect(visible).toHaveLength(7);
+      });
+    });
+
+    it("does not render the filter input below the threshold", () => {
+      // Default beforeEach above seeds 3 recents — below the threshold (6).
+      render(<HomeScreen />);
+      expect(screen.queryByLabelText("最近使ったファイルを絞り込む")).toBeNull();
+    });
+
     it("does not crash on an unparseable lastOpened value (defensive)", () => {
       useWorkbookStore.setState({
         recentFiles: [

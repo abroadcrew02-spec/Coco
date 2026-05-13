@@ -11,12 +11,21 @@ interface Props {
 // Lists the .coco file's recorded snapshots (up to MAX_SNAPSHOTS_PER_WORKBOOK
 // = 5). Opening a snapshot detaches the working file (path → null) so the
 // user cannot overwrite the current state without going through Save As.
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
 export default function SnapshotHistoryDialog({ onClose }: Props) {
   const listSnapshots = useWorkbookStore((s) => s.listSnapshots);
   const openSnapshot = useWorkbookStore((s) => s.openSnapshot);
+  const vacuumWorkbook = useWorkbookStore((s) => s.vacuumWorkbook);
   const [snapshots, setSnapshots] = useState<SnapshotMeta[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const [vacuumStatus, setVacuumStatus] = useState<string | null>(null);
+  const [vacuumRunning, setVacuumRunning] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,6 +51,23 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
   const handleOpen = async (snapshotId: number) => {
     await openSnapshot(snapshotId);
     onClose();
+  };
+
+  const handleVacuum = async () => {
+    setVacuumRunning(true);
+    setVacuumStatus(null);
+    const result = await vacuumWorkbook();
+    setVacuumRunning(false);
+    if (result) {
+      const saved = result.beforeBytes - result.afterBytes;
+      setVacuumStatus(
+        saved > 0
+          ? `${formatBytes(saved)} を解放しました（${formatBytes(result.beforeBytes)} → ${formatBytes(result.afterBytes)}）`
+          : `既に最適化されています（${formatBytes(result.afterBytes)}）`
+      );
+    } else {
+      setVacuumStatus("最適化に失敗しました。エラーバナーをご確認ください。");
+    }
   };
 
   useEffect(() => {
@@ -135,6 +161,18 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
             </ul>
           )}
         </div>
+        <footer className="snapshot-footer">
+          <button
+            type="button"
+            className="snapshot-footer-btn"
+            onClick={handleVacuum}
+            disabled={vacuumRunning}
+            title="不要領域を解放してファイルサイズを縮小"
+          >
+            {vacuumRunning ? "最適化中..." : "ファイルを最適化"}
+          </button>
+          {vacuumStatus && <span className="snapshot-footer-status">{vacuumStatus}</span>}
+        </footer>
       </div>
     </div>
   );

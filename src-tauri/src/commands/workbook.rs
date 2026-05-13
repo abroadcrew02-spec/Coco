@@ -625,3 +625,44 @@ pub fn workbook_open_snapshot(
     open_snapshot_core(&path, snapshot_id)
 }
 
+/// VACUUM result with the on-disk size before and after, so the UI can show
+/// the user how much they reclaimed. Both sizes are in bytes.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VacuumResult {
+    pub before_bytes: u64,
+    pub after_bytes: u64,
+}
+
+/// Compacts a .coco file via SQLite VACUUM. Reclaims space freed by snapshot
+/// retention and the temp-file rename dance. Safe to run while the user is
+/// not actively editing — VACUUM holds an exclusive lock for the duration.
+///
+/// Returns Err for: empty path (NEEDS_PATH), missing file, or any SQLite
+/// failure. The file is left untouched on error since VACUUM operates on a
+/// temp database internally before swapping.
+pub fn vacuum_core(path: &str) -> Result<VacuumResult, String> {
+    if path.is_empty() {
+        return Err("NEEDS_PATH".to_string());
+    }
+    let p = std::path::Path::new(path);
+    if !p.exists() {
+        return Err(format!("File not found: {path}"));
+    }
+    let before_bytes = std::fs::metadata(p).map_err(|e| e.to_string())?.len();
+    let conn = Connection::open(path).map_err(|e| e.to_string())?;
+    conn.execute_batch("VACUUM;").map_err(|e| e.to_string())?;
+    // Release the connection so the filesystem can report the final size.
+    drop(conn);
+    let after_bytes = std::fs::metadata(p).map_err(|e| e.to_string())?.len();
+    Ok(VacuumResult {
+        before_bytes,
+        after_bytes,
+    })
+}
+
+#[tauri::command]
+pub fn workbook_vacuum(path: String) -> Result<VacuumResult, String> {
+    vacuum_core(&path)
+}
+

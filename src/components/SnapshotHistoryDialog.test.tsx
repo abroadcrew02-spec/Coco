@@ -217,4 +217,45 @@ describe("SnapshotHistoryDialog", () => {
       });
     });
   });
+
+  describe("vacuum", () => {
+    it("clicking ファイルを最適化 invokes workbook_vacuum and shows the byte savings", async () => {
+      const user = userEvent.setup();
+      invokeMock.mockResolvedValueOnce([]); // listSnapshots
+      invokeMock.mockResolvedValueOnce({ beforeBytes: 10240, afterBytes: 6144 }); // vacuum
+      render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => screen.getByText("ファイルを最適化"));
+      await user.click(screen.getByText("ファイルを最適化"));
+      const call = invokeMock.mock.calls.find((c) => c[0] === "workbook_vacuum");
+      expect(call?.[1]).toEqual({ path: "/tmp/wb.coco" });
+      await waitFor(() => {
+        const status = screen.getByText(/解放しました/);
+        expect(status.textContent).toContain("4.0 KB");
+      });
+    });
+
+    it("vacuum on an already-compact file shows the 'already optimized' message", async () => {
+      const user = userEvent.setup();
+      invokeMock.mockResolvedValueOnce([]); // listSnapshots
+      invokeMock.mockResolvedValueOnce({ beforeBytes: 4096, afterBytes: 4096 }); // vacuum
+      render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => screen.getByText("ファイルを最適化"));
+      await user.click(screen.getByText("ファイルを最適化"));
+      await waitFor(() => {
+        expect(screen.getByText(/既に最適化されています/)).toBeTruthy();
+      });
+    });
+
+    it("vacuum failure shows the 'optimization failed' message", async () => {
+      const user = userEvent.setup();
+      invokeMock.mockResolvedValueOnce([]); // listSnapshots
+      invokeMock.mockRejectedValueOnce("disk full"); // vacuum
+      render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => screen.getByText("ファイルを最適化"));
+      await user.click(screen.getByText("ファイルを最適化"));
+      await waitFor(() => {
+        expect(screen.getByText(/最適化に失敗しました/)).toBeTruthy();
+      });
+    });
+  });
 });

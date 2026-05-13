@@ -69,12 +69,18 @@ interface WorkbookState {
   togglePinned: (path: string) => Promise<void>;
   listSnapshots: () => Promise<SnapshotMeta[]>;
   openSnapshot: (snapshotId: number) => Promise<void>;
+  vacuumWorkbook: () => Promise<VacuumResult | null>;
 }
 
 export interface SnapshotMeta {
   snapshotId: number;
   createdAt: string;
   reason: string;
+}
+
+export interface VacuumResult {
+  beforeBytes: number;
+  afterBytes: number;
 }
 
 const AUTOSAVE_KEY = "autosave.interval_ms";
@@ -665,6 +671,17 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       });
     } catch (e) {
       set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
+    }
+  },
+
+  vacuumWorkbook: async () => {
+    const { currentHandle } = get();
+    if (!currentHandle?.path) return null;
+    try {
+      return await invoke<VacuumResult>("workbook_vacuum", { path: currentHandle.path });
+    } catch (e) {
+      set({ lastError: friendlyError(String(e)) });
+      return null;
     }
   },
 }));

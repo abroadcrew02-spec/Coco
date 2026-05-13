@@ -126,3 +126,35 @@
 .snapshot-item__open:hover {
   background: #f0f0f0;
 }
+
+.snapshot-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid #e0e0e0;
+  background: #fafafa;
+}
+
+.snapshot-footer-btn {
+  background: #fff;
+  border: 1px solid #c0c0c0;
+  border-radius: 4px;
+  padding: 5px 11px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.snapshot-footer-btn:hover:not(:disabled) {
+  background: #f0f0f0;
+}
+
+.snapshot-footer-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.snapshot-footer-status {
+  font-size: 11px;
+  color: #555;
+}

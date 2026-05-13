@@ -531,3 +531,54 @@ pub fn workbook_restore_backup(
     restore_backup_core(&data_dir, &candidate_id)
 }
 
+/// One row from the workbook_snapshots table — surfaces the snapshot id,
+/// creation timestamp, and the reason code that triggered the save.
+/// The snapshot JSON itself is NOT included to keep the response cheap;
+/// a follow-up `workbook_open_snapshot(id)` command can load a specific one.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotMeta {
+    pub snapshot_id: i64,
+    pub created_at: String,
+    pub reason: String,
+}
+
+/// Reads the snapshot list from a .coco file at `path`. The result is ordered
+/// newest first. Empty list if the file has no snapshots (e.g. just created)
+/// or the table doesn't exist (corrupted file). Returns Err if the path
+/// doesn't exist or isn't readable so the frontend can surface a friendly
+/// "File not found" message.
+pub fn list_snapshots_core(path: &str) -> Result<Vec<SnapshotMeta>, String> {
+    if path.is_empty() {
+        return Err("NEEDS_PATH".to_string());
+    }
+    if !std::path::Path::new(path).exists() {
+        return Err(format!("File not found: {path}"));
+    }
+    let conn = open_workbook_db(path)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT snapshot_id, created_at, reason FROM workbook_snapshots ORDER BY snapshot_id DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(SnapshotMeta {
+                snapshot_id: row.get::<_, i64>(0)?,
+                created_at: row.get::<_, String>(1)?,
+                reason: row.get::<_, String>(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn workbook_list_snapshots(path: String) -> Result<Vec<SnapshotMeta>, String> {
+    list_snapshots_core(&path)
+}
+

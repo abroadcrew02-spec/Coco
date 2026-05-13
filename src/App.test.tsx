@@ -148,6 +148,60 @@ describe("App", () => {
     });
   });
 
+  describe("xlsm macro-loss dialog", () => {
+    it("mounts when importWarnings contains XLSM_MACROS_DISCARDED and a workbook is open", async () => {
+      useWorkbookStore.setState({
+        screen: "editor",
+        currentHandle: {
+          workbookId: "wb-xlsm",
+          path: "/tmp/macros.xlsm",
+          sourceType: "xlsx",
+          snapshotJson: "{}",
+        },
+        currentSnapshotJson: "{}",
+        blockingImport: null,
+        importWarnings: [
+          {
+            severity: "warning",
+            code: "XLSM_MACROS_DISCARDED",
+            message: "VBAマクロは破棄されました",
+          },
+        ],
+      });
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByText("マクロは読み込まれません")).toBeTruthy();
+      });
+    });
+
+    it("does not mount when blockingImport is also set (no stacked alerts)", () => {
+      useWorkbookStore.setState({
+        screen: "editor",
+        currentHandle: {
+          workbookId: "wb-xlsm2",
+          path: "/tmp/macros.xlsm",
+          sourceType: "xlsx",
+          snapshotJson: "{}",
+        },
+        currentSnapshotJson: "{}",
+        blockingImport: [
+          { severity: "blocking", code: "XLSX_TOO_LARGE", message: "ファイル超過" },
+        ],
+        importWarnings: [
+          {
+            severity: "warning",
+            code: "XLSM_MACROS_DISCARDED",
+            message: "VBAマクロは破棄されました",
+          },
+        ],
+      });
+      render(<App />);
+      // Security block dialog is shown; macro-loss dialog is suppressed.
+      expect(screen.getByText("ファイルを開けません")).toBeTruthy();
+      expect(screen.queryByText("マクロは読み込まれません")).toBeNull();
+    });
+  });
+
   describe("startup loads", () => {
     it("fires the persisted-state loaders on mount (recent / recovery / settings)", async () => {
       render(<App />);

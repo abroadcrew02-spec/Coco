@@ -301,6 +301,14 @@ export default function HomeScreen() {
               return (
               <li
                 key={f.path}
+                ref={(el) => {
+                  // Scroll the focused row into view when keyboard nav moves
+                  // past the visible area. Browsers no-op when the row is
+                  // already visible, so this doesn't cause jitter on click.
+                  if (el && isFocused) {
+                    el.scrollIntoView({ block: "nearest", behavior: "auto" });
+                  }
+                }}
                 className={`recent-item ${!f.exists ? "recent-item--missing" : ""} ${isPinned ? "recent-item--pinned" : ""} ${isFocused ? "recent-item--focused" : ""}`}
                 onClick={() => handleRecentFile(f)}
                 onMouseEnter={() => setFocusedRecentIdx(idx)}

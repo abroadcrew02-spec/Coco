@@ -348,6 +348,37 @@ describe("HomeScreen", () => {
         });
       });
 
+      it("P toggles pin on the focused row (adds path to pinnedPaths)", () => {
+        render(<HomeScreen />);
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        // Row 0 is a.xlsx.
+        fireEvent.keyDown(window, { key: "p" });
+        expect(useWorkbookStore.getState().pinnedPaths).toContain("/tmp/a.xlsx");
+      });
+
+      it("P again on the same focused row removes the pin (toggle)", () => {
+        render(<HomeScreen />);
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        fireEvent.keyDown(window, { key: "p" });
+        expect(useWorkbookStore.getState().pinnedPaths).toContain("/tmp/a.xlsx");
+        fireEvent.keyDown(window, { key: "p" });
+        expect(useWorkbookStore.getState().pinnedPaths).not.toContain("/tmp/a.xlsx");
+      });
+
+      it("Ctrl+P is ignored (no toggle)", () => {
+        render(<HomeScreen />);
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        fireEvent.keyDown(window, { key: "p", ctrlKey: true });
+        expect(useWorkbookStore.getState().pinnedPaths).not.toContain("/tmp/a.xlsx");
+      });
+
+      it("P is a no-op when no row is focused", () => {
+        render(<HomeScreen />);
+        // No ArrowDown — focusedRecentIdx stays at -1.
+        fireEvent.keyDown(window, { key: "p" });
+        expect(useWorkbookStore.getState().pinnedPaths).toEqual([]);
+      });
+
       it("Escape clears the row focus", () => {
         const { container } = render(<HomeScreen />);
         fireEvent.keyDown(window, { key: "ArrowDown" });

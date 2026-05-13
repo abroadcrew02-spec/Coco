@@ -33,6 +33,7 @@ function resetStore() {
     autoSaveIntervalMs: 30_000,
     csvExportEncoding: "utf8-bom",
     csvImportEncoding: "auto",
+    pinnedPaths: [],
   });
 }
 
@@ -339,6 +340,60 @@ describe("HomeScreen", () => {
         ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(c[0] as string)
       );
       expect(importCalls).toHaveLength(0);
+    });
+
+    describe("pin/unpin", () => {
+      it("renders a pin button for each recent", () => {
+        render(<HomeScreen />);
+        const pins = screen.getAllByLabelText(/ピン留め/);
+        expect(pins.length).toBeGreaterThanOrEqual(3);
+      });
+
+      it("clicking pin invokes set_setting with the path added", async () => {
+        const user = userEvent.setup();
+        render(<HomeScreen />);
+        // First entry is a.xlsx.
+        const firstPin = screen.getAllByLabelText("ピン留めする")[0];
+        await user.click(firstPin);
+        const setCalls = invokeMock.mock.calls.filter(
+          (c) => c[0] === "set_setting" && (c[1] as { key: string }).key === "recents.pinned_paths"
+        );
+        expect(setCalls).toHaveLength(1);
+        expect(JSON.parse((setCalls[0][1] as { value: string }).value)).toContain("/tmp/a.xlsx");
+      });
+
+      it("pinned items appear before unpinned ones in the list", () => {
+        // /tmp/c.coco is the last (and missing) entry; pinning it should move it to top.
+        useWorkbookStore.setState({ pinnedPaths: ["/tmp/c.coco"] });
+        const { container } = render(<HomeScreen />);
+        const items = Array.from(container.querySelectorAll(".recent-list .recent-item"));
+        // First item should now be c.coco.
+        expect(items[0].textContent).toContain("c.coco");
+      });
+
+      it("pinned items render the 📌 indicator next to the name", () => {
+        useWorkbookStore.setState({ pinnedPaths: ["/tmp/a.xlsx"] });
+        const { container } = render(<HomeScreen />);
+        const indicator = container.querySelector(".recent-pin-indicator");
+        expect(indicator).toBeTruthy();
+        expect(indicator?.textContent).toBe("📌");
+      });
+
+      it("clicking the recent item does not toggle the pin (stopPropagation on pin button)", async () => {
+        const user = userEvent.setup();
+        invokeMock.mockResolvedValue({
+          handle: { workbookId: "wb", path: "/tmp/a.xlsx", sourceType: "xlsx", snapshotJson: "{}" },
+          warnings: [],
+        });
+        render(<HomeScreen />);
+        const pin = screen.getAllByLabelText("ピン留めする")[0];
+        await user.click(pin);
+        // Pin click should NOT have triggered an open as a side effect.
+        const importCalls = invokeMock.mock.calls.filter((c) =>
+          ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(c[0] as string)
+        );
+        expect(importCalls).toHaveLength(0);
+      });
     });
 
     it("the reveal button is disabled for missing files", () => {

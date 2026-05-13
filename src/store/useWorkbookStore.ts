@@ -31,6 +31,7 @@ interface WorkbookState {
   lastSavedAt: number | null; // epoch ms — manual or auto save success
   csvExportEncoding: "utf8-bom" | "utf8" | "shift_jis";
   csvImportEncoding: "auto" | "utf8" | "shift_jis";
+  pinnedPaths: string[]; // recent files the user has pinned; sorts to top of home list
 
   // Actions
   newWorkbook: () => Promise<void>;
@@ -64,6 +65,8 @@ interface WorkbookState {
   setCsvExportEncoding: (enc: "utf8-bom" | "utf8" | "shift_jis") => Promise<void>;
   loadCsvImportEncoding: () => Promise<void>;
   setCsvImportEncoding: (enc: "auto" | "utf8" | "shift_jis") => Promise<void>;
+  loadPinnedPaths: () => Promise<void>;
+  togglePinned: (path: string) => Promise<void>;
 }
 
 const AUTOSAVE_KEY = "autosave.interval_ms";
@@ -77,6 +80,8 @@ const CSV_IMPORT_ENCODING_KEY = "csv.import_encoding";
 type CsvImportEncoding = "auto" | "utf8" | "shift_jis";
 const DEFAULT_CSV_IMPORT_ENCODING: CsvImportEncoding = "auto";
 const VALID_CSV_IMPORT_ENCODINGS: CsvImportEncoding[] = ["auto", "utf8", "shift_jis"];
+
+const PINNED_PATHS_KEY = "recents.pinned_paths";
 
 export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   screen: "home",
@@ -94,6 +99,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   lastSavedAt: null,
   csvExportEncoding: DEFAULT_CSV_ENCODING,
   csvImportEncoding: DEFAULT_CSV_IMPORT_ENCODING,
+  pinnedPaths: [],
 
   newWorkbook: async () => {
     try {
@@ -587,6 +593,30 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     set({ csvImportEncoding: enc });
     try {
       await invoke("set_setting", { key: CSV_IMPORT_ENCODING_KEY, value: enc });
+    } catch {
+      // best-effort persistence
+    }
+  },
+
+  loadPinnedPaths: async () => {
+    try {
+      const raw = await invoke<string | null>("get_setting", { key: PINNED_PATHS_KEY });
+      if (raw === null) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.every((p) => typeof p === "string")) {
+        set({ pinnedPaths: parsed });
+      }
+    } catch {
+      // non-critical: empty pin list stays
+    }
+  },
+
+  togglePinned: async (path: string) => {
+    const cur = get().pinnedPaths;
+    const next = cur.includes(path) ? cur.filter((p) => p !== path) : [...cur, path];
+    set({ pinnedPaths: next });
+    try {
+      await invoke("set_setting", { key: PINNED_PATHS_KEY, value: JSON.stringify(next) });
     } catch {
       // best-effort persistence
     }

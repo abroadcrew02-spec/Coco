@@ -42,6 +42,7 @@ beforeEach(() => {
     lastSavedAt: null,
     csvExportEncoding: "utf8-bom",
     csvImportEncoding: "auto",
+    pinnedPaths: [],
   });
 });
 
@@ -843,6 +844,62 @@ describe("csvImportEncoding", () => {
     await useWorkbookStore.getState().setCsvImportEncoding("klingon");
     expect(useWorkbookStore.getState().csvImportEncoding).toBe(before);
     expect(invokeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("pinnedPaths", () => {
+  it("defaults to an empty array", () => {
+    expect(useWorkbookStore.getState().pinnedPaths).toEqual([]);
+  });
+
+  it("loadPinnedPaths reads a JSON array from app_settings", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify(["/tmp/a.xlsx", "/tmp/b.csv"]));
+    await useWorkbookStore.getState().loadPinnedPaths();
+    expect(useWorkbookStore.getState().pinnedPaths).toEqual(["/tmp/a.xlsx", "/tmp/b.csv"]);
+  });
+
+  it("loadPinnedPaths leaves default on null", async () => {
+    invokeMock.mockResolvedValue(null);
+    await useWorkbookStore.getState().loadPinnedPaths();
+    expect(useWorkbookStore.getState().pinnedPaths).toEqual([]);
+  });
+
+  it("loadPinnedPaths ignores malformed JSON", async () => {
+    invokeMock.mockResolvedValue("not valid json");
+    await useWorkbookStore.getState().loadPinnedPaths();
+    expect(useWorkbookStore.getState().pinnedPaths).toEqual([]);
+  });
+
+  it("loadPinnedPaths rejects an array containing non-strings", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify(["/tmp/a.xlsx", 42]));
+    await useWorkbookStore.getState().loadPinnedPaths();
+    expect(useWorkbookStore.getState().pinnedPaths).toEqual([]);
+  });
+
+  it("togglePinned adds a path on first call and persists JSON", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await useWorkbookStore.getState().togglePinned("/tmp/a.xlsx");
+    expect(useWorkbookStore.getState().pinnedPaths).toEqual(["/tmp/a.xlsx"]);
+    expect(invokeMock).toHaveBeenCalledWith(
+      "set_setting",
+      expect.objectContaining({
+        key: "recents.pinned_paths",
+        value: JSON.stringify(["/tmp/a.xlsx"]),
+      })
+    );
+  });
+
+  it("togglePinned removes a path on second call", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    useWorkbookStore.setState({ pinnedPaths: ["/tmp/a.xlsx", "/tmp/b.csv"] });
+    await useWorkbookStore.getState().togglePinned("/tmp/a.xlsx");
+    expect(useWorkbookStore.getState().pinnedPaths).toEqual(["/tmp/b.csv"]);
+  });
+
+  it("togglePinned keeps in-memory state even when persistence fails", async () => {
+    invokeMock.mockRejectedValue("db locked");
+    await useWorkbookStore.getState().togglePinned("/tmp/a.xlsx");
+    expect(useWorkbookStore.getState().pinnedPaths).toEqual(["/tmp/a.xlsx"]);
   });
 });
 

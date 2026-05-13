@@ -343,9 +343,10 @@
 
 .recent-item {
   position: relative;
-  padding-right: 68px; /* room for reveal + remove buttons */
+  padding-right: 94px; /* room for pin + reveal + remove buttons */
 }
 
+.recent-pin,
 .recent-reveal,
 .recent-remove {
   position: absolute;
@@ -367,6 +368,10 @@
   transition: opacity 0.12s ease, background-color 0.12s ease, color 0.12s ease;
 }
 
+.recent-pin {
+  right: 60px;
+}
+
 .recent-reveal {
   right: 34px;
 }
@@ -381,6 +386,7 @@
   opacity: 0;
 }
 
+.recent-item:hover .recent-pin,
 .recent-item:hover .recent-reveal,
 .recent-item:hover .recent-remove {
   opacity: 1;
@@ -388,6 +394,16 @@
 
 .recent-item:hover .recent-reveal:disabled {
   opacity: 0.3;
+}
+
+/* Pinned items always show their pin button so it's clear they're pinned. */
+.recent-item--pinned .recent-pin {
+  opacity: 1;
+}
+
+.recent-pin-indicator {
+  margin-right: 6px;
+  font-size: 11px;
 }
 
 .recent-remove:hover {

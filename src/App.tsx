@@ -34,6 +34,7 @@ export default function App() {
     loadAutoSaveInterval,
     loadCsvExportEncoding,
     loadCsvImportEncoding,
+    loadPinnedPaths,
     dismissBlockingImport,
   } = useWorkbookStore();
 
@@ -66,12 +67,14 @@ export default function App() {
     loadAutoSaveInterval();
     loadCsvExportEncoding();
     loadCsvImportEncoding();
+    loadPinnedPaths();
   }, [
     loadRecentFiles,
     loadRecoveryCandidates,
     loadAutoSaveInterval,
     loadCsvExportEncoding,
     loadCsvImportEncoding,
+    loadPinnedPaths,
   ]);
 
   const closeFileName = currentHandle?.path

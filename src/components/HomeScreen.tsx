@@ -27,6 +27,8 @@ export default function HomeScreen() {
     clearRecents,
     clearError,
     dismissWarnings,
+    pinnedPaths,
+    togglePinned,
   } = useWorkbookStore();
 
   // Inline filter — shown only when there are enough recents to make
@@ -34,12 +36,20 @@ export default function HomeScreen() {
   const FILTER_THRESHOLD = 6;
   const [filterQuery, setFilterQuery] = useState("");
   const filterInputRef = useRef<HTMLInputElement | null>(null);
+  // Sort pinned entries to the top; otherwise preserve the backend's
+  // last_opened DESC order. Stable sort ensures non-pinned items keep their
+  // relative order from the backend response.
+  const sortedRecents = [...recentFiles].sort((a, b) => {
+    const ap = pinnedPaths.includes(a.path) ? 1 : 0;
+    const bp = pinnedPaths.includes(b.path) ? 1 : 0;
+    return bp - ap;
+  });
   const filteredRecents = filterQuery.trim()
-    ? recentFiles.filter((f) =>
+    ? sortedRecents.filter((f) =>
         f.name.toLowerCase().includes(filterQuery.trim().toLowerCase()) ||
         f.path.toLowerCase().includes(filterQuery.trim().toLowerCase())
       )
-    : recentFiles;
+    : sortedRecents;
 
   // Ctrl/Cmd+F focuses the recents filter (when present). Escape inside the
   // input clears the query without losing focus. The home screen is the only
@@ -243,13 +253,17 @@ export default function HomeScreen() {
               const fullDate = Number.isFinite(opened)
                 ? new Date(opened).toLocaleString("ja-JP")
                 : f.lastOpened;
+              const isPinned = pinnedPaths.includes(f.path);
               return (
               <li
                 key={f.path}
-                className={`recent-item ${!f.exists ? "recent-item--missing" : ""}`}
+                className={`recent-item ${!f.exists ? "recent-item--missing" : ""} ${isPinned ? "recent-item--pinned" : ""}`}
                 onClick={() => handleRecentFile(f)}
               >
-                <span className="recent-name">{f.name}</span>
+                <span className="recent-name">
+                  {isPinned && <span className="recent-pin-indicator" aria-hidden="true">📌</span>}
+                  {f.name}
+                </span>
                 <span className="recent-path">{f.path}</span>
                 {ageLabel && (
                   <span className="recent-when" title={`最終アクセス: ${fullDate}`}>
@@ -257,6 +271,19 @@ export default function HomeScreen() {
                   </span>
                 )}
                 {!f.exists && <span className="recent-badge">見つかりません</span>}
+                <button
+                  type="button"
+                  className="recent-pin"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    togglePinned(f.path);
+                  }}
+                  aria-label={isPinned ? "ピン留めを外す" : "ピン留めする"}
+                  aria-pressed={isPinned ? "true" : "false"}
+                  title={isPinned ? "ピン留めを外す" : "ピン留めする"}
+                >
+                  {isPinned ? "📌" : "📍"}
+                </button>
                 <button
                   type="button"
                   className="recent-reveal"

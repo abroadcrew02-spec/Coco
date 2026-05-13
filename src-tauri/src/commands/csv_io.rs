@@ -272,6 +272,8 @@ pub fn workbook_export_csv(
                                         Some(d) => d.format("%Y-%m-%d").to_string(),
                                         None => format_number(f),
                                     }
+                                } else if is_time_only_format(fmt) {
+                                    format_time(f)
                                 } else if is_percent_format(fmt) {
                                     format_percent(f, fmt)
                                 } else {
@@ -451,6 +453,46 @@ fn is_datetime_format(fmt: &str) -> bool {
         && lower.contains('h')
 }
 
+/// Parses a time-only string into the Excel fractional-day representation:
+/// 00:00 → 0.0, 12:00 → 0.5, 23:59:59 → ~0.999988. Accepts HH:MM and
+/// HH:MM:SS (24-hour clock). Rejects 24+ hour values to avoid being too
+/// liberal on duration-shaped strings.
+fn parse_csv_time(s: &str) -> Option<f64> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() < 2 || parts.len() > 3 {
+        return None;
+    }
+    let h: u32 = parts[0].parse().ok()?;
+    let m: u32 = parts[1].parse().ok()?;
+    let sec: u32 = if parts.len() == 3 { parts[2].parse().ok()? } else { 0 };
+    if h >= 24 || m >= 60 || sec >= 60 {
+        return None;
+    }
+    let total = h * 3600 + m * 60 + sec;
+    Some(total as f64 / 86400.0)
+}
+
+/// Returns true if the cell's `_fmt` is a time-only format (h/m, no y/d).
+fn is_time_only_format(fmt: &str) -> bool {
+    let lower = fmt.to_ascii_lowercase();
+    let has_hour = lower.contains('h');
+    let has_year = lower.contains('y');
+    let has_day = lower.contains('d');
+    has_hour && !has_year && !has_day
+}
+
+/// Render a time-fractional value (0.0..1.0) as HH:MM:SS, rounding to whole
+/// seconds. Values outside the range are clamped via wrap (modulo 1) since
+/// Excel time semantics treat the integer part as days.
+fn format_time(value: f64) -> String {
+    let frac = value - value.floor();
+    let total_seconds = (frac * 86400.0).round() as i64;
+    let h = (total_seconds / 3600) % 24;
+    let m = (total_seconds % 3600) / 60;
+    let s = total_seconds % 60;
+    format!("{:02}:{:02}:{:02}", h, m, s)
+}
+
 /// Parses a percentage string like "50%" or "-3.5%" → (0.5, fmt).
 /// Returns None for malformed input (multiple %, embedded spaces, etc.).
 fn parse_csv_percent(s: &str) -> Option<(f64, &'static str)> {
@@ -558,6 +600,11 @@ fn infer_csv_cell(raw: &str) -> Option<Value> {
     // Univer treats it as a real date for arithmetic + formula purposes.
     if let Some(date) = parse_csv_date(&unescaped) {
         return Some(json!({ "v": excel_serial_from_date(date), "_fmt": "yyyy-mm-dd" }));
+    }
+    // Time-only strings (HH:MM or HH:MM:SS) become fractional-day values.
+    // Excel stores time as the fraction of a day; "12:00" → 0.5.
+    if let Some(t) = parse_csv_time(&unescaped) {
+        return Some(json!({ "v": t, "_fmt": "hh:mm:ss" }));
     }
     let lower = unescaped.to_ascii_lowercase();
     if lower == "true" {

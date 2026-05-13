@@ -404,6 +404,33 @@ fn unrecognized_format_strings_fall_through_to_plain_number() {
 }
 
 #[test]
+fn time_only_cells_export_as_hh_mm_ss() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "t.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": {
+                        "0": { "v": 0.5, "_fmt": "hh:mm:ss" },
+                        "1": { "v": 0.0, "_fmt": "hh:mm:ss" },
+                        "2": { "v": 0.27083333333, "_fmt": "h:mm" }
+                    }
+                }
+            }
+        }
+    }"#;
+    let _ = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    let bytes = fs::read(&path).unwrap();
+    let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
+    let first_line = s.split("\r\n").next().unwrap();
+    // 0.5 → 12:00:00, 0.0 → 00:00:00, 0.270833... → 06:30:00.
+    assert_eq!(first_line, "12:00:00,00:00:00,06:30:00");
+}
+
+#[test]
 fn percent_cells_export_with_percent_sign() {
     let dir = TempDir::new().unwrap();
     let path = path_in(&dir, "pct.csv");

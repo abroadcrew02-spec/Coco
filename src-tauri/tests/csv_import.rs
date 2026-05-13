@@ -467,6 +467,42 @@ fn percent_with_embedded_garbage_stays_string() {
 }
 
 #[test]
+fn time_only_strings_become_fractional_value_with_time_format() {
+    // "12:00" → 0.5, "00:00:00" → 0.0, "06:30" → 0.27083... etc.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "time.csv");
+    fs::write(&path, "12:00\n00:00:00\n06:30\n23:59:59\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cell_data = &snap["sheets"]["sheet-1"]["cellData"];
+
+    assert!((cell_data["0"]["0"]["v"].as_f64().unwrap() - 0.5).abs() < 1e-9);
+    assert_eq!(cell_data["0"]["0"]["_fmt"], "hh:mm:ss");
+    assert_eq!(cell_data["1"]["0"]["v"].as_f64(), Some(0.0));
+    assert!((cell_data["2"]["0"]["v"].as_f64().unwrap() - 6.5 / 24.0).abs() < 1e-9);
+    // 23:59:59 = (23*3600 + 59*60 + 59) / 86400 = 86399 / 86400
+    assert!((cell_data["3"]["0"]["v"].as_f64().unwrap() - 86399.0 / 86400.0).abs() < 1e-9);
+}
+
+#[test]
+fn invalid_time_strings_stay_as_strings() {
+    // 24:00 is out of our accepted range; 12:60 has out-of-range minutes.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "bad_time.csv");
+    fs::write(&path, "24:00\n12:60\n9:99\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cell_data = &snap["sheets"]["sheet-1"]["cellData"];
+    assert_eq!(cell_data["0"]["0"]["v"], "24:00");
+    assert_eq!(cell_data["1"]["0"]["v"], "12:60");
+    assert_eq!(cell_data["2"]["0"]["v"], "9:99");
+}
+
+#[test]
 fn date_only_strings_do_not_match_the_datetime_branch() {
     // Regression: an empty time portion should still go through the
     // date-only branch (yyyy-mm-dd format), not the datetime branch.

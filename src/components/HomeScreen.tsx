@@ -61,6 +61,13 @@ export default function HomeScreen() {
     });
   }, [filteredRecents.length]);
 
+  // Index where the unpinned-recents section begins. -1 if all pinned or
+  // all unpinned (no separator needed in those cases).
+  const firstUnpinnedIdx = filteredRecents.findIndex(
+    (f) => !pinnedPaths.includes(f.path)
+  );
+  const showSeparator = firstUnpinnedIdx > 0;
+
   // Ctrl/Cmd+F focuses the recents filter (when present). Escape inside the
   // input clears the query without losing focus. The home screen is the only
   // place this shortcut routes — the editor delegates Ctrl+F to Univer.
@@ -298,7 +305,17 @@ export default function HomeScreen() {
                 : f.lastOpened;
               const isPinned = pinnedPaths.includes(f.path);
               const isFocused = idx === focusedRecentIdx;
-              return (
+              const separatorBefore = showSeparator && idx === firstUnpinnedIdx;
+              return [
+                separatorBefore && (
+                  <li
+                    key={`sep-${f.path}`}
+                    className="recent-separator"
+                    aria-hidden="true"
+                  >
+                    最近開いたファイル
+                  </li>
+                ),
               <li
                 key={f.path}
                 ref={(el) => {
@@ -364,8 +381,8 @@ export default function HomeScreen() {
                 >
                   ×
                 </button>
-              </li>
-              );
+              </li>,
+              ];
             })}
           </ul>
         </div>

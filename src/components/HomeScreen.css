@@ -263,6 +263,19 @@
   background-color: #f0f6ff;
 }
 
+.recent-separator {
+  list-style: none;
+  padding: 8px 4px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  text-transform: none;
+  letter-spacing: 0.04em;
+  border-top: 1px dashed #ddd;
+  margin-top: 6px;
+  background: none;
+}
+
 .recent-item--missing {
   opacity: 0.55;
   cursor: default;

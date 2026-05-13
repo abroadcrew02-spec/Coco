@@ -430,6 +430,30 @@ describe("HomeScreen", () => {
         expect(items[0].textContent).toContain("c.coco");
       });
 
+      it("renders a section separator between pinned and unpinned recents", () => {
+        useWorkbookStore.setState({
+          pinnedPaths: ["/tmp/a.xlsx"], // first item is pinned, others are not
+        });
+        const { container } = render(<HomeScreen />);
+        const separator = container.querySelector(".recent-separator");
+        expect(separator).toBeTruthy();
+        expect(separator?.textContent).toBe("最近開いたファイル");
+      });
+
+      it("omits the separator when there are no pinned items", () => {
+        // pinnedPaths empty by default in beforeEach.
+        const { container } = render(<HomeScreen />);
+        expect(container.querySelector(".recent-separator")).toBeNull();
+      });
+
+      it("omits the separator when every recent is pinned", () => {
+        useWorkbookStore.setState({
+          pinnedPaths: ["/tmp/a.xlsx", "/tmp/b.csv", "/tmp/c.coco"],
+        });
+        const { container } = render(<HomeScreen />);
+        expect(container.querySelector(".recent-separator")).toBeNull();
+      });
+
       it("pinned items render the 📌 indicator next to the name", () => {
         useWorkbookStore.setState({ pinnedPaths: ["/tmp/a.xlsx"] });
         const { container } = render(<HomeScreen />);

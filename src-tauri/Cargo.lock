@@ -366,6 +366,7 @@ dependencies = [
  "calamine",
  "chrono",
  "csv",
+ "encoding_rs",
  "rusqlite",
  "rust_xlsxwriter",
  "serde",

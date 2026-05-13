@@ -29,6 +29,8 @@ interface WorkbookState {
   lastError: string | null;
   autoSaveIntervalMs: number; // 0 = disabled
   lastSavedAt: number | null; // epoch ms — manual or auto save success
+  csvExportEncoding: "utf8-bom" | "utf8" | "shift_jis";
+  csvImportEncoding: "auto" | "utf8" | "shift_jis";
 
   // Actions
   newWorkbook: () => Promise<void>;
@@ -58,10 +60,23 @@ interface WorkbookState {
   setSaveStatus: (status: SaveStatus) => void;
   loadAutoSaveInterval: () => Promise<void>;
   setAutoSaveInterval: (ms: number) => Promise<void>;
+  loadCsvExportEncoding: () => Promise<void>;
+  setCsvExportEncoding: (enc: "utf8-bom" | "utf8" | "shift_jis") => Promise<void>;
+  loadCsvImportEncoding: () => Promise<void>;
+  setCsvImportEncoding: (enc: "auto" | "utf8" | "shift_jis") => Promise<void>;
 }
 
 const AUTOSAVE_KEY = "autosave.interval_ms";
 const DEFAULT_AUTOSAVE_MS = 30_000;
+const CSV_ENCODING_KEY = "csv.export_encoding";
+type CsvEncoding = "utf8-bom" | "utf8" | "shift_jis";
+const DEFAULT_CSV_ENCODING: CsvEncoding = "utf8-bom";
+const VALID_CSV_ENCODINGS: CsvEncoding[] = ["utf8-bom", "utf8", "shift_jis"];
+
+const CSV_IMPORT_ENCODING_KEY = "csv.import_encoding";
+type CsvImportEncoding = "auto" | "utf8" | "shift_jis";
+const DEFAULT_CSV_IMPORT_ENCODING: CsvImportEncoding = "auto";
+const VALID_CSV_IMPORT_ENCODINGS: CsvImportEncoding[] = ["auto", "utf8", "shift_jis"];
 
 export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   screen: "home",
@@ -77,6 +92,8 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   lastError: null,
   autoSaveIntervalMs: DEFAULT_AUTOSAVE_MS,
   lastSavedAt: null,
+  csvExportEncoding: DEFAULT_CSV_ENCODING,
+  csvImportEncoding: DEFAULT_CSV_IMPORT_ENCODING,
 
   newWorkbook: async () => {
     try {
@@ -153,7 +170,11 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   importCsv: async (path: string) => {
     try {
       set({ saveStatus: "loading" });
-      const result = await invoke<ImportWorkbookResult>("workbook_import_csv", { path });
+      // "auto" → omit so Rust runs full auto-detect (UTF-8 BOM → UTF-8 → SJIS fallback).
+      // Explicit override forces decoder, bypassing detection.
+      const enc = get().csvImportEncoding;
+      const encoding = enc === "auto" ? undefined : enc;
+      const result = await invoke<ImportWorkbookResult>("workbook_import_csv", { path, encoding });
       set({
         screen: "editor",
         currentHandle: result.handle,
@@ -385,7 +406,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   },
 
   exportCsvToPath: async (path: string, sheetId: string) => {
-    const { currentSnapshotJson } = get();
+    const { currentSnapshotJson, csvExportEncoding } = get();
     set({ isExporting: true, saveStatus: "exporting" });
     try {
       const result = await invoke<{
@@ -397,6 +418,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         path,
         snapshotJson: currentSnapshotJson ?? "{}",
         sheetId,
+        encoding: csvExportEncoding,
       });
       set({
         isExporting: false,
@@ -523,6 +545,50 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       await invoke("set_setting", { key: AUTOSAVE_KEY, value: String(ms) });
     } catch {
       // best-effort persistence; in-memory value stays
+    }
+  },
+
+  loadCsvExportEncoding: async () => {
+    try {
+      const raw = await invoke<string | null>("get_setting", { key: CSV_ENCODING_KEY });
+      if (raw === null) return;
+      if ((VALID_CSV_ENCODINGS as string[]).includes(raw)) {
+        set({ csvExportEncoding: raw as CsvEncoding });
+      }
+    } catch {
+      // non-critical: default stays in effect
+    }
+  },
+
+  setCsvExportEncoding: async (enc) => {
+    if (!(VALID_CSV_ENCODINGS as string[]).includes(enc)) return;
+    set({ csvExportEncoding: enc });
+    try {
+      await invoke("set_setting", { key: CSV_ENCODING_KEY, value: enc });
+    } catch {
+      // best-effort persistence
+    }
+  },
+
+  loadCsvImportEncoding: async () => {
+    try {
+      const raw = await invoke<string | null>("get_setting", { key: CSV_IMPORT_ENCODING_KEY });
+      if (raw === null) return;
+      if ((VALID_CSV_IMPORT_ENCODINGS as string[]).includes(raw)) {
+        set({ csvImportEncoding: raw as CsvImportEncoding });
+      }
+    } catch {
+      // non-critical: default stays in effect
+    }
+  },
+
+  setCsvImportEncoding: async (enc) => {
+    if (!(VALID_CSV_IMPORT_ENCODINGS as string[]).includes(enc)) return;
+    set({ csvImportEncoding: enc });
+    try {
+      await invoke("set_setting", { key: CSV_IMPORT_ENCODING_KEY, value: enc });
+    } catch {
+      // best-effort persistence
     }
   },
 }));

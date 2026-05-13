@@ -8,7 +8,7 @@ fn path_in(dir: &TempDir, name: &str) -> String {
 
 #[test]
 fn bad_extension_rejected() {
-    let result = import_csv_core("not_a_csv.xlsx".to_string());
+    let result = import_csv_core("not_a_csv.xlsx".to_string(), None);
     assert!(result.is_err());
     let err = result.err().unwrap();
     assert!(
@@ -24,7 +24,7 @@ fn simple_values_roundtrip_through_snapshot() {
     let path = path_in(&dir, "values.csv");
     fs::write(&path, "Name,Score,Pass\nAlice,92.5,TRUE\nBob,58,FALSE\n").unwrap();
 
-    let result = import_csv_core(path).unwrap();
+    let result = import_csv_core(path, None).unwrap();
     let snapshot_str = result.handle.snapshot_json.clone().unwrap();
     let snapshot: serde_json::Value = serde_json::from_str(&snapshot_str).unwrap();
 
@@ -52,7 +52,7 @@ fn bom_stripped() {
     let path = path_in(&dir, "bom.csv");
     fs::write(&path, [0xEF, 0xBB, 0xBF, b'a', b',', b'b', b'\n']).unwrap();
 
-    let result = import_csv_core(path).unwrap();
+    let result = import_csv_core(path, None).unwrap();
     let snapshot: serde_json::Value =
         serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
     let cell_data = &snapshot["sheets"]["sheet-1"]["cellData"];
@@ -67,7 +67,7 @@ fn injection_guard_unescape() {
     let path = path_in(&dir, "injection.csv");
     fs::write(&path, "'=cmd(),'+ATTACK,'-DROP,'@HOST,'plain\n").unwrap();
 
-    let result = import_csv_core(path).unwrap();
+    let result = import_csv_core(path, None).unwrap();
     let snapshot: serde_json::Value =
         serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
     let cell_data = &snapshot["sheets"]["sheet-1"]["cellData"];
@@ -85,7 +85,7 @@ fn empty_cells_are_sparse() {
     let path = path_in(&dir, "sparse.csv");
     fs::write(&path, "a,,c\n,,\n,e,\n").unwrap();
 
-    let result = import_csv_core(path).unwrap();
+    let result = import_csv_core(path, None).unwrap();
     let snapshot: serde_json::Value =
         serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
     let cell_data = &snapshot["sheets"]["sheet-1"]["cellData"];
@@ -109,7 +109,7 @@ fn numbers_prefer_integer_over_float() {
     let path = path_in(&dir, "numbers.csv");
     fs::write(&path, "42\n42.0\n-7\n3.14\n1e5\n").unwrap();
 
-    let result = import_csv_core(path).unwrap();
+    let result = import_csv_core(path, None).unwrap();
     let snapshot: serde_json::Value =
         serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
     let cell_data = &snapshot["sheets"]["sheet-1"]["cellData"];
@@ -130,7 +130,7 @@ fn case_insensitive_bool() {
     let path = path_in(&dir, "bools.csv");
     fs::write(&path, "true,TRUE,True,false,False,FALSE\n").unwrap();
 
-    let result = import_csv_core(path).unwrap();
+    let result = import_csv_core(path, None).unwrap();
     let snapshot: serde_json::Value =
         serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
     let cell_data = &snapshot["sheets"]["sheet-1"]["cellData"];
@@ -149,7 +149,7 @@ fn default_dimensions_minimum() {
     let path = path_in(&dir, "small.csv");
     fs::write(&path, "a,b\nc,d\ne,f\n").unwrap();
 
-    let result = import_csv_core(path).unwrap();
+    let result = import_csv_core(path, None).unwrap();
     let snapshot: serde_json::Value =
         serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
     let sheet = &snapshot["sheets"]["sheet-1"];
@@ -159,7 +159,125 @@ fn default_dimensions_minimum() {
 }
 
 #[test]
+fn shift_jis_csv_decoded_and_warned() {
+    let tmp = TempDir::new().expect("tempdir");
+    let path = tmp.path().join("sjis.csv");
+    // "名前,得点" + CRLF + "山田,90" in Shift_JIS bytes.
+    let sjis_bytes: Vec<u8> = vec![
+        0x96, 0xBC, 0x91, 0x4F, // 名前
+        0x2C,                   // ,
+        0x93, 0xBE, 0x93, 0x5F, // 得点
+        0x0D, 0x0A,             // CRLF
+        0x8E, 0x52, 0x93, 0x63, // 山田
+        0x2C,                   // ,
+        0x39, 0x30,             // 90
+        0x0D, 0x0A,             // CRLF
+    ];
+    std::fs::write(&path, &sjis_bytes).expect("write sjis file");
+
+    let result = import_csv_core(path.to_string_lossy().into_owned(), None).expect("import sjis");
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+
+    assert_eq!(snap["sheets"]["sheet-1"]["cellData"]["0"]["0"]["v"], "名前");
+    assert_eq!(snap["sheets"]["sheet-1"]["cellData"]["0"]["1"]["v"], "得点");
+    assert_eq!(snap["sheets"]["sheet-1"]["cellData"]["1"]["0"]["v"], "山田");
+    assert_eq!(snap["sheets"]["sheet-1"]["cellData"]["1"]["1"]["v"], 90);
+
+    let enc_warn = result
+        .warnings
+        .iter()
+        .find(|w| w.code == "CSV_ENCODING_DETECTED")
+        .expect("expected CSV_ENCODING_DETECTED");
+    assert!(enc_warn.message.contains("Shift_JIS"));
+    assert_eq!(enc_warn.severity, "warning");
+}
+
+#[test]
+fn utf8_csv_warned_as_info_severity() {
+    let tmp = TempDir::new().expect("tempdir");
+    let path = tmp.path().join("utf8.csv");
+    std::fs::write(&path, "名前,得点\n山田,90\n").expect("write utf8 file");
+
+    let result = import_csv_core(path.to_string_lossy().into_owned(), None).expect("import");
+    let enc_warn = result
+        .warnings
+        .iter()
+        .find(|w| w.code == "CSV_ENCODING_DETECTED")
+        .expect("expected CSV_ENCODING_DETECTED");
+    assert!(enc_warn.message.contains("UTF-8"));
+    assert!(!enc_warn.message.contains("lossy"));
+    assert_eq!(enc_warn.severity, "info");
+}
+
+#[test]
+fn explicit_shift_jis_override_decodes_correctly() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("override.csv");
+    let sjis_bytes: Vec<u8> = vec![0x96, 0xBC, 0x91, 0x4F, 0x0D, 0x0A]; // "名前\r\n"
+    std::fs::write(&path, &sjis_bytes).unwrap();
+
+    let result = import_csv_core(
+        path.to_string_lossy().into_owned(),
+        Some("shift_jis".to_string()),
+    )
+    .unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    assert_eq!(snap["sheets"]["sheet-1"]["cellData"]["0"]["0"]["v"], "名前");
+
+    let enc = result
+        .warnings
+        .iter()
+        .find(|w| w.code == "CSV_ENCODING_DETECTED")
+        .unwrap();
+    assert!(enc.message.contains("Shift_JIS (forced)"));
+}
+
+#[test]
+fn explicit_utf8_override_strips_bom() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("forced_utf8.csv");
+    let mut bytes: Vec<u8> = vec![0xEF, 0xBB, 0xBF];
+    bytes.extend_from_slice("a,b\n".as_bytes());
+    std::fs::write(&path, &bytes).unwrap();
+
+    let result = import_csv_core(
+        path.to_string_lossy().into_owned(),
+        Some("utf8".to_string()),
+    )
+    .unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    assert_eq!(snap["sheets"]["sheet-1"]["cellData"]["0"]["0"]["v"], "a");
+
+    let enc = result
+        .warnings
+        .iter()
+        .find(|w| w.code == "CSV_ENCODING_DETECTED")
+        .unwrap();
+    assert!(enc.message.contains("forced"));
+}
+
+#[test]
+fn unknown_encoding_override_falls_back_to_auto() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("unknown.csv");
+    std::fs::write(&path, "a,b\n").unwrap();
+
+    // "klingon" isn't recognized — should fall back to auto-detect (UTF-8).
+    let result = import_csv_core(
+        path.to_string_lossy().into_owned(),
+        Some("klingon".to_string()),
+    )
+    .unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    assert_eq!(snap["sheets"]["sheet-1"]["cellData"]["0"]["0"]["v"], "a");
+}
+
+#[test]
 fn nonexistent_file_returns_err() {
-    let result = import_csv_core("/does/not/exist.csv".to_string());
+    let result = import_csv_core("/does/not/exist.csv".to_string(), None);
     assert!(result.is_err());
 }

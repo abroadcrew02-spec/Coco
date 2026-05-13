@@ -35,6 +35,14 @@ const PREFIX_FRIENDLY: Array<[string, (rest: string) => string]> = [
   ["security scan failed:", (rest) => `セキュリティ検査に失敗しました（${rest.trim()}）`],
   // "backup rotation failed: <detail>"
   ["backup rotation failed:", (rest) => `バックアップのローテーションに失敗しました（${rest.trim()}）`],
+  // "File not found: <path>" — open_coco_core when the .coco path is missing
+  ["File not found:", (rest) => `ファイルが見つかりません（${rest.trim()}）`],
+  // "Recovery file is missing: <path>" — restore_backup_core when the temp .coco was wiped
+  ["Recovery file is missing:", (rest) => `復元ファイルが見つかりません（${rest.trim()}）。候補一覧から自動的に取り除きました。`],
+  // "Recovery candidate not found: <id>" — restore_backup_core when DB row missing
+  ["Recovery candidate not found:", (rest) => `復元候補が見つかりません（${rest.trim()}）`],
+  // "Invalid xlsx (zip): <detail>" — security_scan when ZipArchive fails
+  ["Invalid xlsx (zip):", (rest) => `xlsx として開けません。ZIP 構造が不正です（${rest.trim()}）`],
 ];
 
 export function friendlyError(raw: string | null | undefined): string | null {

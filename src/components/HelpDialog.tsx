@@ -105,7 +105,10 @@ export default function HelpDialog({ onClose }: Props) {
             <ul className="help-list">
               <li><b>.xlsx</b> — Excel ワークブック（既定の保存形式）</li>
               <li><b>.xlsm</b> — マクロ付き Excel ワークブック（読み込みのみ、マクロは破棄）</li>
-              <li><b>.csv</b> — UTF-8 BOM 付き CSV（入出力対応）</li>
+              <li>
+                <b>.csv</b> — UTF-8 BOM / UTF-8 / Shift_JIS を入出力で対応。
+                インポートは自動検出、エクスポートの既定は設定から変更可能
+              </li>
               <li><b>.coco</b> — SQLite ベース、原子的保存・履歴対応（オプション）</li>
             </ul>
           </section>

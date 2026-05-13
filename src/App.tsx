@@ -32,6 +32,8 @@ export default function App() {
     loadRecentFiles,
     loadRecoveryCandidates,
     loadAutoSaveInterval,
+    loadCsvExportEncoding,
+    loadCsvImportEncoding,
     dismissBlockingImport,
   } = useWorkbookStore();
 
@@ -62,7 +64,15 @@ export default function App() {
     loadRecentFiles();
     loadRecoveryCandidates();
     loadAutoSaveInterval();
-  }, [loadRecentFiles, loadRecoveryCandidates, loadAutoSaveInterval]);
+    loadCsvExportEncoding();
+    loadCsvImportEncoding();
+  }, [
+    loadRecentFiles,
+    loadRecoveryCandidates,
+    loadAutoSaveInterval,
+    loadCsvExportEncoding,
+    loadCsvImportEncoding,
+  ]);
 
   const closeFileName = currentHandle?.path
     ? currentHandle.path.split(/[\\/]/).pop() ?? "Untitled"

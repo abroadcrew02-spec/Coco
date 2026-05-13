@@ -40,6 +40,8 @@ beforeEach(() => {
     blockingImport: null,
     lastError: null,
     lastSavedAt: null,
+    csvExportEncoding: "utf8-bom",
+    csvImportEncoding: "auto",
   });
 });
 
@@ -469,10 +471,50 @@ describe("importCsv", () => {
     });
     await useWorkbookStore.getState().importCsv("/tmp/data.csv");
     const s = useWorkbookStore.getState();
-    expect(invokeMock).toHaveBeenCalledWith("workbook_import_csv", { path: "/tmp/data.csv" });
+    // "auto" → encoding is omitted (undefined) so Rust runs auto-detect.
+    expect(invokeMock).toHaveBeenCalledWith("workbook_import_csv", {
+      path: "/tmp/data.csv",
+      encoding: undefined,
+    });
     expect(s.screen).toBe("editor");
     expect(s.saveStatus).toBe("unsaved");
     expect(s.importWarnings).toHaveLength(1);
+  });
+
+  it("passes explicit shift_jis override to Rust", async () => {
+    useWorkbookStore.setState({ csvImportEncoding: "shift_jis" });
+    invokeMock.mockResolvedValue({
+      handle: {
+        workbookId: "wb-csv",
+        path: "/tmp/sjis.csv",
+        sourceType: "xlsx",
+        snapshotJson: "{}",
+      },
+      warnings: [],
+    });
+    await useWorkbookStore.getState().importCsv("/tmp/sjis.csv");
+    expect(invokeMock).toHaveBeenCalledWith("workbook_import_csv", {
+      path: "/tmp/sjis.csv",
+      encoding: "shift_jis",
+    });
+  });
+
+  it("passes explicit utf8 override to Rust", async () => {
+    useWorkbookStore.setState({ csvImportEncoding: "utf8" });
+    invokeMock.mockResolvedValue({
+      handle: {
+        workbookId: "wb-csv",
+        path: "/tmp/utf8.csv",
+        sourceType: "xlsx",
+        snapshotJson: "{}",
+      },
+      warnings: [],
+    });
+    await useWorkbookStore.getState().importCsv("/tmp/utf8.csv");
+    expect(invokeMock).toHaveBeenCalledWith("workbook_import_csv", {
+      path: "/tmp/utf8.csv",
+      encoding: "utf8",
+    });
   });
 
   it("sets friendly error on rejection", async () => {
@@ -695,6 +737,111 @@ describe("promptSaveAs", () => {
       currentSnapshotJson: "{}",
     });
     await useWorkbookStore.getState().promptSaveAs();
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("csvExportEncoding", () => {
+  it("defaults to utf8-bom", () => {
+    expect(useWorkbookStore.getState().csvExportEncoding).toBe("utf8-bom");
+  });
+
+  it("loadCsvExportEncoding accepts a valid persisted value", async () => {
+    invokeMock.mockResolvedValue("shift_jis");
+    await useWorkbookStore.getState().loadCsvExportEncoding();
+    expect(useWorkbookStore.getState().csvExportEncoding).toBe("shift_jis");
+  });
+
+  it("loadCsvExportEncoding ignores an invalid persisted value", async () => {
+    const before = useWorkbookStore.getState().csvExportEncoding;
+    invokeMock.mockResolvedValue("klingon");
+    await useWorkbookStore.getState().loadCsvExportEncoding();
+    expect(useWorkbookStore.getState().csvExportEncoding).toBe(before);
+  });
+
+  it("loadCsvExportEncoding keeps default on null result", async () => {
+    const before = useWorkbookStore.getState().csvExportEncoding;
+    invokeMock.mockResolvedValue(null);
+    await useWorkbookStore.getState().loadCsvExportEncoding();
+    expect(useWorkbookStore.getState().csvExportEncoding).toBe(before);
+  });
+
+  it("setCsvExportEncoding updates state and persists", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await useWorkbookStore.getState().setCsvExportEncoding("utf8");
+    expect(useWorkbookStore.getState().csvExportEncoding).toBe("utf8");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "set_setting",
+      expect.objectContaining({ key: "csv.export_encoding", value: "utf8" })
+    );
+  });
+
+  it("setCsvExportEncoding rejects unknown values", async () => {
+    const before = useWorkbookStore.getState().csvExportEncoding;
+    // @ts-expect-error - intentionally bad value to verify guard
+    await useWorkbookStore.getState().setCsvExportEncoding("invalid");
+    expect(useWorkbookStore.getState().csvExportEncoding).toBe(before);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("exportCsvToPath forwards the current encoding to invoke", async () => {
+    useWorkbookStore.setState({
+      currentSnapshotJson: "{}",
+      csvExportEncoding: "shift_jis",
+    });
+    invokeMock.mockResolvedValue({
+      success: true,
+      path: "/tmp/out.csv",
+      warnings: [],
+    });
+    await useWorkbookStore.getState().exportCsvToPath("/tmp/out.csv", "sheet-1");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_export_csv",
+      expect.objectContaining({ encoding: "shift_jis", path: "/tmp/out.csv", sheetId: "sheet-1" })
+    );
+  });
+});
+
+describe("csvImportEncoding", () => {
+  it("defaults to auto", () => {
+    expect(useWorkbookStore.getState().csvImportEncoding).toBe("auto");
+  });
+
+  it("loadCsvImportEncoding accepts a valid persisted value", async () => {
+    invokeMock.mockResolvedValue("shift_jis");
+    await useWorkbookStore.getState().loadCsvImportEncoding();
+    expect(useWorkbookStore.getState().csvImportEncoding).toBe("shift_jis");
+  });
+
+  it("loadCsvImportEncoding ignores an invalid persisted value", async () => {
+    const before = useWorkbookStore.getState().csvImportEncoding;
+    invokeMock.mockResolvedValue("utf-16");
+    await useWorkbookStore.getState().loadCsvImportEncoding();
+    expect(useWorkbookStore.getState().csvImportEncoding).toBe(before);
+  });
+
+  it("loadCsvImportEncoding keeps default on null result", async () => {
+    const before = useWorkbookStore.getState().csvImportEncoding;
+    invokeMock.mockResolvedValue(null);
+    await useWorkbookStore.getState().loadCsvImportEncoding();
+    expect(useWorkbookStore.getState().csvImportEncoding).toBe(before);
+  });
+
+  it("setCsvImportEncoding updates state and persists", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await useWorkbookStore.getState().setCsvImportEncoding("utf8");
+    expect(useWorkbookStore.getState().csvImportEncoding).toBe("utf8");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "set_setting",
+      expect.objectContaining({ key: "csv.import_encoding", value: "utf8" })
+    );
+  });
+
+  it("setCsvImportEncoding rejects unknown values", async () => {
+    const before = useWorkbookStore.getState().csvImportEncoding;
+    // @ts-expect-error - intentionally bad value to verify guard
+    await useWorkbookStore.getState().setCsvImportEncoding("klingon");
+    expect(useWorkbookStore.getState().csvImportEncoding).toBe(before);
     expect(invokeMock).not.toHaveBeenCalled();
   });
 });

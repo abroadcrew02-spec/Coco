@@ -64,6 +64,27 @@ describe("friendlyError", () => {
         "バックアップのローテーションに失敗しました（disk full）"
       );
     });
+    it("formats File not found", () => {
+      expect(friendlyError("File not found: /tmp/missing.coco")).toBe(
+        "ファイルが見つかりません（/tmp/missing.coco）"
+      );
+    });
+    it("formats Recovery file is missing with candidate-cleanup hint", () => {
+      const result = friendlyError("Recovery file is missing: /tmp/recovery/wb.coco");
+      expect(result).toContain("復元ファイルが見つかりません");
+      expect(result).toContain("/tmp/recovery/wb.coco");
+      expect(result).toContain("候補一覧から自動的に取り除きました");
+    });
+    it("formats Recovery candidate not found", () => {
+      expect(friendlyError("Recovery candidate not found: wb-123")).toBe(
+        "復元候補が見つかりません（wb-123）"
+      );
+    });
+    it("formats Invalid xlsx (zip)", () => {
+      expect(friendlyError("Invalid xlsx (zip): unexpected EOF")).toBe(
+        "xlsx として開けません。ZIP 構造が不正です（unexpected EOF）"
+      );
+    });
     it("trims whitespace in the detail tail", () => {
       expect(friendlyError("Sheet not found:    sheet-1   ")).toBe(
         "指定されたシートが見つかりません（sheet-1）"

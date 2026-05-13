@@ -425,14 +425,14 @@ fn csv_import_50k() {
     let path = fixture.to_string_lossy().into_owned();
 
     // Warmup
-    let warm = import_csv_core(path.clone()).expect("warmup csv import");
+    let warm = import_csv_core(path.clone(), None).expect("warmup csv import");
     assert!(warm.handle.snapshot_json.is_some());
 
     // Measure
     let mut samples: Vec<Duration> = Vec::with_capacity(ITERATIONS);
     for _ in 0..ITERATIONS {
         let t = Instant::now();
-        let r = import_csv_core(path.clone()).expect("csv import ok");
+        let r = import_csv_core(path.clone(), None).expect("csv import ok");
         let elapsed = t.elapsed();
         assert!(r.handle.snapshot_json.is_some());
         samples.push(elapsed);

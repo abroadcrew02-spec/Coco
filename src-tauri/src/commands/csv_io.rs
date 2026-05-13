@@ -1,6 +1,6 @@
 use serde_json::{json, Map, Value};
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufWriter, Write};
 
 use crate::commands::workbook::{CompatibilityWarning, ImportWorkbookResult, WorkbookHandle};
 
@@ -77,12 +77,35 @@ pub fn list_sheet_names(snapshot_json: String) -> Result<Vec<SheetInfo>, String>
     Ok(result)
 }
 
+/// CSV export encoding selection. "utf8-bom" is the default (Excel/Sheets
+/// friendly). "utf8" skips the BOM. "shift_jis" encodes to Shift_JIS for legacy
+/// Japanese tools — characters outside the SJIS repertoire become `?`, and a
+/// warning is emitted listing how many characters were replaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CsvEncoding {
+    Utf8Bom,
+    Utf8,
+    ShiftJis,
+}
+
+impl CsvEncoding {
+    fn parse(s: Option<&str>) -> Self {
+        match s.unwrap_or("utf8-bom").to_ascii_lowercase().as_str() {
+            "utf8" => CsvEncoding::Utf8,
+            "shift_jis" | "shift-jis" | "sjis" => CsvEncoding::ShiftJis,
+            _ => CsvEncoding::Utf8Bom,
+        }
+    }
+}
+
 #[tauri::command]
 pub fn workbook_export_csv(
     path: String,
     snapshot_json: String,
     sheet_id: Option<String>,
+    encoding: Option<String>,
 ) -> Result<CsvExportResult, String> {
+    let encoding = CsvEncoding::parse(encoding.as_deref());
     if !path.to_lowercase().ends_with(".csv") {
         return Ok(CsvExportResult {
             success: false,
@@ -243,14 +266,40 @@ pub fn workbook_export_csv(
     let file = File::create(&path).map_err(|e| e.to_string())?;
     let mut writer = BufWriter::new(file);
 
-    writer.write_all(&[0xEF, 0xBB, 0xBF]).map_err(|e| e.to_string())?;
+    if encoding == CsvEncoding::Utf8Bom {
+        writer.write_all(&[0xEF, 0xBB, 0xBF]).map_err(|e| e.to_string())?;
+    }
 
+    // Build the entire CSV body as UTF-8 first, then transcode to the chosen
+    // encoding on write. Keeps the escaping/newline logic in one place.
+    let mut body = String::new();
     for row in rows.iter() {
         let line: Vec<String> = row.iter().map(|s| escape_csv_field(s)).collect();
-        writer
-            .write_all(line.join(",").as_bytes())
-            .map_err(|e| e.to_string())?;
-        writer.write_all(b"\r\n").map_err(|e| e.to_string())?;
+        body.push_str(&line.join(","));
+        body.push_str("\r\n");
+    }
+
+    match encoding {
+        CsvEncoding::Utf8 | CsvEncoding::Utf8Bom => {
+            writer.write_all(body.as_bytes()).map_err(|e| e.to_string())?;
+        }
+        CsvEncoding::ShiftJis => {
+            // encoding_rs replaces un-encodable chars with the encoder's
+            // fallback (usually "?"). had_errors == true tells us at least
+            // one char was lossy.
+            let (encoded, _enc, had_errors) = encoding_rs::SHIFT_JIS.encode(&body);
+            writer.write_all(&encoded).map_err(|e| e.to_string())?;
+            if had_errors {
+                warnings.push(CompatibilityWarning {
+                    severity: "warning".to_string(),
+                    code: "CSV_SJIS_LOSSY".to_string(),
+                    message:
+                        "Shift_JIS で表現できない文字が含まれていたため、一部が置換されました（通常 ? 等）。データ保全のためには UTF-8 BOM を推奨します。"
+                            .to_string(),
+                    affected_sheets: None,
+                });
+            }
+        }
     }
 
     writer.flush().map_err(|e| e.to_string())?;
@@ -303,29 +352,76 @@ fn infer_csv_cell(raw: &str) -> Option<Value> {
     Some(json!({ "v": unescaped }))
 }
 
-/// Pure-Rust CSV import. Directly callable from tests.
-pub fn import_csv_core(path: String) -> Result<ImportWorkbookResult, String> {
+/// Detect the CSV file's encoding. Returns (decoded_text, encoding_name).
+/// Strategy (auto):
+///   1. UTF-8 BOM → UTF-8 (BOM stripped).
+///   2. Valid UTF-8 from raw bytes → UTF-8.
+///   3. Else try Shift_JIS (very common for Japanese business CSVs).
+///   4. Else decode as UTF-8 with replacement chars (lossy).
+///
+/// When `override_enc` is Some, skip detection and force the given encoding:
+///   - "utf8" / "utf-8" → UTF-8 (BOM stripped if present)
+///   - "shift_jis" / "shift-jis" / "sjis" → Shift_JIS (lossy if not valid)
+fn detect_and_decode(bytes: &[u8], override_enc: Option<&str>) -> (String, &'static str) {
+    if let Some(raw) = override_enc {
+        let normalized = raw.to_ascii_lowercase();
+        match normalized.as_str() {
+            "utf8" | "utf-8" => {
+                let body = if bytes.len() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF {
+                    &bytes[3..]
+                } else {
+                    bytes
+                };
+                return (
+                    String::from_utf8_lossy(body).into_owned(),
+                    "UTF-8 (forced)",
+                );
+            }
+            "shift_jis" | "shift-jis" | "sjis" => {
+                let (cow, _enc, _) = encoding_rs::SHIFT_JIS.decode(bytes);
+                return (cow.into_owned(), "Shift_JIS (forced)");
+            }
+            _ => {
+                // Unknown override — fall through to auto-detect.
+            }
+        }
+    }
+    if bytes.len() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF {
+        if let Ok(s) = std::str::from_utf8(&bytes[3..]) {
+            return (s.to_string(), "UTF-8 (BOM)");
+        }
+    }
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return (s.to_string(), "UTF-8");
+    }
+    // Try Shift_JIS — if the result has zero replacement chars, accept it.
+    let (cow, _enc, had_errors) = encoding_rs::SHIFT_JIS.decode(bytes);
+    if !had_errors {
+        return (cow.into_owned(), "Shift_JIS");
+    }
+    // Fallback: UTF-8 lossy. Replacement chars will appear as U+FFFD.
+    (
+        String::from_utf8_lossy(bytes).into_owned(),
+        "UTF-8 (lossy fallback)",
+    )
+}
+
+/// Pure-Rust CSV import. `encoding_override` is None for auto-detect.
+pub fn import_csv_core(path: String, encoding_override: Option<String>) -> Result<ImportWorkbookResult, String> {
     if !path.to_lowercase().ends_with(".csv") {
         return Err("CSV_INVALID_EXTENSION".into());
     }
 
     let workbook_id = uuid::Uuid::new_v4().to_string();
 
-    let file = File::open(&path).map_err(|e| e.to_string())?;
-    let mut buf_reader = BufReader::new(file);
-
-    // Manual BOM strip: peek first 3 bytes; consume them only if they are the UTF-8 BOM.
-    {
-        let buf = buf_reader.fill_buf().map_err(|e| e.to_string())?;
-        if buf.len() >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF {
-            buf_reader.consume(3);
-        }
-    }
+    // Read the whole file (CSV size capped at ~5M cells later anyway).
+    let raw = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let (text, encoding_name) = detect_and_decode(&raw, encoding_override.as_deref());
 
     let mut rdr = csv::ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
-        .from_reader(buf_reader);
+        .from_reader(text.as_bytes());
 
     let mut cell_data: Map<String, Value> = Map::new();
     let mut max_row: usize = 0;
@@ -401,7 +497,7 @@ pub fn import_csv_core(path: String) -> Result<ImportWorkbookResult, String> {
 
     let snapshot_json = serde_json::to_string(&snapshot).map_err(|e| e.to_string())?;
 
-    let warnings = vec![CompatibilityWarning {
+    let mut warnings = vec![CompatibilityWarning {
         severity: "info".to_string(),
         code: "CSV_POC_IMPORT".to_string(),
         message:
@@ -409,6 +505,20 @@ pub fn import_csv_core(path: String) -> Result<ImportWorkbookResult, String> {
                 .to_string(),
         affected_sheets: None,
     }];
+
+    // Surface the detected encoding so the user knows what we did. Promote to
+    // "warning" severity for non-UTF-8 paths so it's not just a passing note.
+    let enc_severity = if encoding_name.starts_with("UTF-8") && !encoding_name.contains("lossy") {
+        "info"
+    } else {
+        "warning"
+    };
+    warnings.push(CompatibilityWarning {
+        severity: enc_severity.to_string(),
+        code: "CSV_ENCODING_DETECTED".to_string(),
+        message: format!("文字コード判定: {}", encoding_name),
+        affected_sheets: None,
+    });
 
     Ok(ImportWorkbookResult {
         handle: WorkbookHandle {
@@ -426,8 +536,9 @@ pub fn import_csv_core(path: String) -> Result<ImportWorkbookResult, String> {
 pub fn workbook_import_csv(
     app: tauri::AppHandle,
     path: String,
+    encoding: Option<String>,
 ) -> Result<ImportWorkbookResult, String> {
-    let result = import_csv_core(path.clone())?;
+    let result = import_csv_core(path.clone(), encoding)?;
     let recent_name = std::path::Path::new(&path)
         .file_name()
         .and_then(|n| n.to_str())

@@ -31,7 +31,7 @@ fn bom_and_crlf_format() {
         }
     }"#;
 
-    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None).unwrap();
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
     assert!(result.success, "export failed: {:?}", result.error);
     assert_eq!(result.rows_written, 1);
 
@@ -64,7 +64,7 @@ fn csv_injection_escape() {
         }
     }"#;
 
-    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None).unwrap();
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
     assert!(result.success);
 
     let bytes = fs::read(&path).unwrap();
@@ -95,7 +95,7 @@ fn rfc4180_escaping() {
         }
     }"#;
 
-    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None).unwrap();
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
     assert!(result.success, "export failed: {:?}", result.error);
 
     let bytes = fs::read(&path).unwrap();
@@ -127,7 +127,7 @@ fn integer_vs_float_format() {
         }
     }"#;
 
-    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None).unwrap();
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
     assert!(result.success);
 
     let bytes = fs::read(&path).unwrap();
@@ -155,7 +155,7 @@ fn boolean_format() {
         }
     }"#;
 
-    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None).unwrap();
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
     assert!(result.success);
 
     let bytes = fs::read(&path).unwrap();
@@ -182,7 +182,7 @@ fn formula_fallback_warning() {
         }
     }"#;
 
-    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None).unwrap();
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
     assert!(result.success);
     assert!(!result.warnings.is_empty(), "expected formula warning");
     assert!(
@@ -221,7 +221,7 @@ fn multi_sheet_select() {
 
     let p1 = path_in(&dir, "second.csv");
     let result =
-        workbook_export_csv(p1.clone(), snapshot.to_string(), Some("sheet-2".to_string())).unwrap();
+        workbook_export_csv(p1.clone(), snapshot.to_string(), Some("sheet-2".to_string()), None).unwrap();
     assert!(result.success, "export failed: {:?}", result.error);
     let bytes = fs::read(&p1).unwrap();
     let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
@@ -233,6 +233,7 @@ fn multi_sheet_select() {
         p2.clone(),
         snapshot.to_string(),
         Some("does-not-exist".to_string()),
+        None,
     )
     .unwrap();
     assert!(!result.success);
@@ -246,8 +247,98 @@ fn multi_sheet_select() {
 
 #[test]
 fn bad_extension_rejected() {
-    let result = workbook_export_csv("output.xlsx".to_string(), "{}".to_string(), None).unwrap();
+    let result = workbook_export_csv("output.xlsx".to_string(), "{}".to_string(), None, None).unwrap();
     assert!(!result.success);
     assert_eq!(result.error, Some("CSV_INVALID_EXTENSION".to_string()));
     assert!(!std::path::Path::new("output.xlsx").exists(), "file should not be created");
+}
+
+#[test]
+fn shift_jis_export_writes_sjis_bytes() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "sjis.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": { "0": { "v": "名前" }, "1": { "v": "得点" } },
+                    "1": { "0": { "v": "山田" }, "1": { "v": 90 } }
+                }
+            }
+        }
+    }"#;
+
+    let result = workbook_export_csv(
+        path.clone(),
+        snapshot.to_string(),
+        None,
+        Some("shift_jis".to_string()),
+    )
+    .unwrap();
+    assert!(result.success, "export failed: {:?}", result.error);
+
+    let bytes = fs::read(&path).unwrap();
+    // No BOM in SJIS output.
+    assert_ne!(&bytes[..3.min(bytes.len())], &[0xEF, 0xBB, 0xBF]);
+    // "名前" in SJIS = 0x96 0xBC 0x91 0x4F. Verify a known prefix.
+    assert!(bytes.starts_with(&[0x96, 0xBC, 0x91, 0x4F]),
+        "expected SJIS '名前' prefix, got first bytes {:?}",
+        &bytes[..bytes.len().min(8)]
+    );
+    // Decoding back with encoding_rs should round-trip the values.
+    let (decoded, _, had_errors) = encoding_rs::SHIFT_JIS.decode(&bytes);
+    assert!(!had_errors);
+    assert!(decoded.contains("名前"));
+    assert!(decoded.contains("山田"));
+    assert!(decoded.contains("90"));
+}
+
+#[test]
+fn utf8_no_bom_export_skips_bom() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "utf8.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": { "s1": { "name": "S", "cellData": { "0": { "0": { "v": "hello" } } } } }
+    }"#;
+
+    let result = workbook_export_csv(
+        path.clone(),
+        snapshot.to_string(),
+        None,
+        Some("utf8".to_string()),
+    )
+    .unwrap();
+    assert!(result.success);
+
+    let bytes = fs::read(&path).unwrap();
+    assert_ne!(&bytes[..3.min(bytes.len())], &[0xEF, 0xBB, 0xBF], "should not have BOM");
+    assert!(bytes.starts_with(b"hello"));
+}
+
+#[test]
+fn shift_jis_export_warns_on_unrepresentable_chars() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "emoji.csv");
+    // 🍣 is outside the SJIS repertoire.
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": { "s1": { "name": "S", "cellData": { "0": { "0": { "v": "🍣" } } } } }
+    }"#;
+
+    let result = workbook_export_csv(
+        path.clone(),
+        snapshot.to_string(),
+        None,
+        Some("shift_jis".to_string()),
+    )
+    .unwrap();
+    assert!(result.success);
+    assert!(
+        result.warnings.iter().any(|w| w.code == "CSV_SJIS_LOSSY"),
+        "expected CSV_SJIS_LOSSY warning, got {:?}",
+        result.warnings.iter().map(|w| &w.code).collect::<Vec<_>>()
+    );
 }

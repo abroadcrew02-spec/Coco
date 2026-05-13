@@ -233,6 +233,18 @@ describe("HomeScreen", () => {
         expect(screen.getByText("該当するファイルがありません")).toBeTruthy();
       });
 
+      it("shows match count when filter has matches", async () => {
+        const user = userEvent.setup();
+        render(<HomeScreen />);
+        await user.type(screen.getByLabelText("最近使ったファイルを絞り込む"), "csv");
+        expect(screen.getByText("4 / 7 件一致")).toBeTruthy();
+      });
+
+      it("does not show match count when no filter is active", () => {
+        const { container } = render(<HomeScreen />);
+        expect(container.querySelector(".recent-filter-count")).toBeNull();
+      });
+
       it("clearing the input restores the full list", async () => {
         const user = userEvent.setup();
         const { container } = render(<HomeScreen />);

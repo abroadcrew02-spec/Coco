@@ -303,6 +303,11 @@ export default function HomeScreen() {
           {filterQuery.trim() && filteredRecents.length === 0 && (
             <p className="recent-empty-filter">該当するファイルがありません</p>
           )}
+          {filterQuery.trim() && filteredRecents.length > 0 && (
+            <p className="recent-filter-count" aria-live="polite">
+              {filteredRecents.length} / {recentFiles.length} 件一致
+            </p>
+          )}
           <ul className="recent-list">
             {filteredRecents.map((f: RecentFile, idx: number) => {
               const opened = Date.parse(f.lastOpened);

@@ -140,6 +140,7 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
         <div className="snapshot-body">
           <p className="snapshot-hint">
             過去 5 回までの保存ポイントを表示します。選択するとそのバージョンを開きますが、現在のファイルは変更されず、Ctrl+S で別名保存となります。
+            <span className="snapshot-hint__kbd"> ↑/↓ で選択、Enter で開く</span>
           </p>
           {loading && <p className="snapshot-empty">読み込み中...</p>}
           {!loading && snapshots && snapshots.length === 0 && (

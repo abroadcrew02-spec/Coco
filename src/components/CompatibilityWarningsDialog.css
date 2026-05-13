@@ -1,0 +1,145 @@
+.compat-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 210;
+}
+
+.compat-modal {
+  background: #fff;
+  border-radius: 6px;
+  width: 560px;
+  max-width: 92vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+
+.compat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.compat-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.compat-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  color: #777;
+  cursor: pointer;
+  padding: 0 6px;
+}
+
+.compat-close:hover {
+  color: #222;
+}
+
+.compat-body {
+  padding: 12px 18px;
+  overflow-y: auto;
+}
+
+.compat-section {
+  margin-bottom: 14px;
+}
+
+.compat-section:last-child {
+  margin-bottom: 0;
+}
+
+.compat-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  padding-left: 8px;
+  border-left: 3px solid #ccc;
+}
+
+.compat-section--blocking .compat-section-title {
+  color: #c62828;
+  border-left-color: #c62828;
+}
+
+.compat-section--warning .compat-section-title {
+  color: #ef6c00;
+  border-left-color: #ef6c00;
+}
+
+.compat-section--info .compat-section-title {
+  color: #1565c0;
+  border-left-color: #1565c0;
+}
+
+.compat-count {
+  font-weight: 400;
+  color: #888;
+}
+
+.compat-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.compat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: #fafafa;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+}
+
+.compat-code {
+  font-size: 10px;
+  font-family: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+  color: #666;
+}
+
+.compat-message {
+  font-size: 12px;
+  line-height: 1.4;
+  color: #222;
+}
+
+.compat-sheets {
+  font-size: 11px;
+  color: #777;
+}
+
+.compat-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 18px;
+  border-top: 1px solid #e0e0e0;
+  background: #fafafa;
+}
+
+.compat-footer-btn {
+  background: #fff;
+  border: 1px solid #c0c0c0;
+  border-radius: 4px;
+  padding: 6px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.compat-footer-btn:hover {
+  background: #f0f0f0;
+}

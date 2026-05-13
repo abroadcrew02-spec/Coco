@@ -32,6 +32,7 @@ import SheetPickerModal from "./SheetPickerModal";
 import SaveFailureDialog from "./SaveFailureDialog";
 import BusyOverlay from "./BusyOverlay";
 import SnapshotHistoryDialog from "./SnapshotHistoryDialog";
+import CompatibilityWarningsDialog from "./CompatibilityWarningsDialog";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -87,6 +88,7 @@ export default function EditorScreen() {
 
   const [sheetPicker, setSheetPicker] = useState<{ id: string; name: string }[] | null>(null);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  const [warningsDialog, setWarningsDialog] = useState<null | "import" | "export">(null);
 
   useAutoSave();
 
@@ -344,11 +346,27 @@ export default function EditorScreen() {
       {importWarnings.length > 0 && (
         <div className="warning-banner">
           <div className="warning-banner__content">
-            {importWarnings.map((w: CompatibilityWarning, i: number) => (
+            {importWarnings.slice(0, 3).map((w: CompatibilityWarning, i: number) => (
               <span key={i} className={`warning-banner__item warning-banner__item--${w.severity}`}>
                 {w.message}
               </span>
             ))}
+            {importWarnings.length > 3 && (
+              <button
+                type="button"
+                className="warning-banner__more"
+                onClick={() => setWarningsDialog("import")}
+              >
+                + 他 {importWarnings.length - 3} 件
+              </button>
+            )}
+            <button
+              type="button"
+              className="warning-banner__more"
+              onClick={() => setWarningsDialog("import")}
+            >
+              詳細
+            </button>
           </div>
           <button type="button" className="warning-banner__dismiss" onClick={dismissWarnings}>
             ×
@@ -358,11 +376,27 @@ export default function EditorScreen() {
       {exportWarnings.length > 0 && (
         <div className="warning-banner warning-banner--export">
           <div className="warning-banner__content">
-            {exportWarnings.map((w: CompatibilityWarning, i: number) => (
+            {exportWarnings.slice(0, 3).map((w: CompatibilityWarning, i: number) => (
               <span key={i} className={`warning-banner__item warning-banner__item--${w.severity}`}>
                 {w.message}
               </span>
             ))}
+            {exportWarnings.length > 3 && (
+              <button
+                type="button"
+                className="warning-banner__more"
+                onClick={() => setWarningsDialog("export")}
+              >
+                + 他 {exportWarnings.length - 3} 件
+              </button>
+            )}
+            <button
+              type="button"
+              className="warning-banner__more"
+              onClick={() => setWarningsDialog("export")}
+            >
+              詳細
+            </button>
           </div>
           <button type="button" className="warning-banner__dismiss" onClick={dismissExportWarnings}>
             ×
@@ -403,6 +437,20 @@ export default function EditorScreen() {
         />
       )}
       {snapshotsOpen && <SnapshotHistoryDialog onClose={() => setSnapshotsOpen(false)} />}
+      {warningsDialog === "import" && (
+        <CompatibilityWarningsDialog
+          warnings={importWarnings}
+          title="インポート時の警告"
+          onClose={() => setWarningsDialog(null)}
+        />
+      )}
+      {warningsDialog === "export" && (
+        <CompatibilityWarningsDialog
+          warnings={exportWarnings}
+          title="エクスポート時の警告"
+          onClose={() => setWarningsDialog(null)}
+        />
+      )}
     </div>
   );
 }

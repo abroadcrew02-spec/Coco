@@ -250,6 +250,17 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     let mut wb: Xlsx<_> =
         open_workbook(&path).map_err(|e| format!("Failed to open xlsx: {e}"))?;
 
+    // Capture workbook-level named ranges. calamine's defined_names() returns a
+    // flat [(name, formula)] slice — sheet-scope (localSheetId) is not exposed,
+    // so we treat every entry as workbook-scoped (scope omitted). Names with an
+    // empty name or formula are skipped defensively.
+    let named_ranges: Vec<Value> = wb
+        .defined_names()
+        .iter()
+        .filter(|(n, f)| !n.trim().is_empty() && !f.trim().is_empty())
+        .map(|(n, f)| json!({ "name": n, "formula": f }))
+        .collect();
+
     let sheet_names = wb.sheet_names().to_vec();
     let mut sheet_order: Vec<String> = Vec::new();
     let mut sheets_map: Map<String, Value> = Map::new();
@@ -350,6 +361,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         "styles": {},
         "sheetOrder": sheet_order,
         "sheets": Value::Object(sheets_map),
+        "namedRanges": named_ranges,
     });
 
     let snapshot_json = serde_json::to_string(&snapshot).map_err(|e| e.to_string())?;
@@ -360,7 +372,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         severity: "info".to_string(),
         code: "XLSX_POC_IMPORT".to_string(),
         message:
-            "xlsx PoC import: styles, merges, and named ranges are not yet preserved"
+            "xlsx PoC import: styles and merges are not yet preserved (named ranges are preserved)"
                 .to_string(),
         affected_sheets: None,
     });
@@ -535,6 +547,8 @@ pub fn export_xlsx_core(
     let mut formula_count: usize = 0;
     let mut sanitized_names: Vec<String> = Vec::new();
     let mut format_cache: HashMap<String, Format> = HashMap::new();
+    let mut named_range_failures: Vec<String> = Vec::new();
+    let mut scoped_names_downgraded: Vec<String> = Vec::new();
 
     let build_result: Result<(), String> = (|| -> Result<(), String> {
         for (i, sheet_id_val) in sheet_order.iter().enumerate() {
@@ -652,6 +666,52 @@ pub fn export_xlsx_core(
 
             sheet_count += 1;
         }
+
+        // Emit workbook-level named ranges. rust_xlsxwriter supports both
+        // workbook-scoped (just `Name`) and sheet-scoped (`SheetName!Name`)
+        // names through the same define_name(name, formula) entry point, so
+        // when an entry carries a `scope` field we prefix the name accordingly.
+        if let Some(ranges) = snapshot.get("namedRanges").and_then(|v| v.as_array()) {
+            for entry in ranges {
+                let name = match entry.get("name").and_then(|v| v.as_str()) {
+                    Some(s) if !s.trim().is_empty() => s,
+                    _ => continue,
+                };
+                let formula = match entry.get("formula").and_then(|v| v.as_str()) {
+                    Some(s) if !s.trim().is_empty() => s,
+                    _ => continue,
+                };
+                let scope = entry
+                    .get("scope")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.trim().is_empty());
+
+                let qualified = if let Some(sheet) = scope {
+                    // rust_xlsxwriter accepts "SheetName!Name" for local scope.
+                    // If the sheet name needs single-quoting, the caller is
+                    // expected to have already done so on import; otherwise
+                    // pass through as-is.
+                    format!("{sheet}!{name}")
+                } else {
+                    name.to_string()
+                };
+
+                if let Err(e) = workbook.define_name(&qualified, formula) {
+                    if scope.is_some() {
+                        // Sheet-scoped names can fail if the referenced sheet
+                        // doesn't exist or the name doesn't survive Excel's
+                        // validation rules. Retry as workbook-scope so the
+                        // value is at least preserved instead of dropped.
+                        if workbook.define_name(name, formula).is_ok() {
+                            scoped_names_downgraded.push(name.to_string());
+                            continue;
+                        }
+                    }
+                    named_range_failures.push(format!("{name}: {e}"));
+                }
+            }
+        }
+
         Ok(())
     })();
 
@@ -727,7 +787,7 @@ pub fn export_xlsx_core(
         severity: "info".to_string(),
         code: "XLSX_POC_EXPORT".to_string(),
         message: format!(
-            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Styles, merges, column widths, named ranges, and rich text are not yet preserved."
+            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Styles, merges, column widths, and rich text are not yet preserved (named ranges are preserved)."
         ),
         affected_sheets: None,
     });
@@ -738,6 +798,31 @@ pub fn export_xlsx_core(
             code: "XLSX_SHEET_NAME_SANITIZED".to_string(),
             message: "One or more sheet names contained illegal characters or exceeded 31 chars; they were sanitized.".to_string(),
             affected_sheets: Some(sanitized_names),
+        });
+    }
+
+    if !scoped_names_downgraded.is_empty() {
+        warnings.push(CompatibilityWarning {
+            severity: "warning".to_string(),
+            code: "XLSX_NAMED_RANGE_SCOPE_DOWNGRADED".to_string(),
+            message: format!(
+                "{} sheet-scoped named range(s) could not be emitted with their original scope and were re-emitted as workbook-scoped.",
+                scoped_names_downgraded.len()
+            ),
+            affected_sheets: None,
+        });
+    }
+
+    if !named_range_failures.is_empty() {
+        warnings.push(CompatibilityWarning {
+            severity: "warning".to_string(),
+            code: "XLSX_NAMED_RANGE_DROPPED".to_string(),
+            message: format!(
+                "{} named range(s) could not be exported and were dropped: {}",
+                named_range_failures.len(),
+                named_range_failures.join("; ")
+            ),
+            affected_sheets: None,
         });
     }
 

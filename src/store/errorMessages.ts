@@ -44,6 +44,8 @@ const PREFIX_FRIENDLY: Array<[string, (rest: string) => string]> = [
   ["Recovery file is missing:", (rest) => `復元ファイルが見つかりません（${rest.trim()}）。候補一覧から自動的に取り除きました。`],
   // "Recovery candidate not found: <id>" — restore_backup_core when DB row missing
   ["Recovery candidate not found:", (rest) => `復元候補が見つかりません（${rest.trim()}）`],
+  // "Snapshot not found: <id>" — open_snapshot_core when the snapshot row was pruned
+  ["Snapshot not found:", (rest) => `スナップショットが見つかりません（${rest.trim()}）。最新版に戻されている可能性があります。`],
   // "Invalid xlsx (zip): <detail>" — security_scan when ZipArchive fails
   ["Invalid xlsx (zip):", (rest) => `xlsx として開けません。ZIP 構造が不正です（${rest.trim()}）`],
   // "REVEAL_SPAWN_FAILED: <io error>" — reveal_in_file_manager couldn't spawn explorer/open/xdg-open

@@ -56,6 +56,7 @@ pub fn run() {
             commands::workbook::workbook_list_recovery,
             commands::workbook::workbook_restore_backup,
             commands::workbook::workbook_list_snapshots,
+            commands::workbook::workbook_open_snapshot,
             commands::recovery::workbook_autosave_temp,
             commands::recovery::workbook_clear_recovery,
             commands::security::security_scan_xlsx,

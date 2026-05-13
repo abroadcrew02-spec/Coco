@@ -582,3 +582,46 @@ pub fn workbook_list_snapshots(path: String) -> Result<Vec<SnapshotMeta>, String
     list_snapshots_core(&path)
 }
 
+/// Loads a specific snapshot back into a workbook handle without modifying the
+/// .coco file. The caller is responsible for any subsequent save — this is
+/// only a one-way "open an older version" trip, leaving the on-disk DB intact
+/// so the user can compare and roll back without losing the latest state.
+pub fn open_snapshot_core(path: &str, snapshot_id: i64) -> Result<OpenWorkbookResult, String> {
+    if path.is_empty() {
+        return Err("NEEDS_PATH".to_string());
+    }
+    if !std::path::Path::new(path).exists() {
+        return Err(format!("File not found: {path}"));
+    }
+    let conn = open_workbook_db(path)?;
+    let row: Result<(String, String), rusqlite::Error> = conn.query_row(
+        "SELECT workbook_id, snapshot_json FROM workbook_snapshots WHERE snapshot_id = ?1",
+        rusqlite::params![snapshot_id],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    );
+    let (workbook_id, snapshot_json) =
+        row.map_err(|_| format!("Snapshot not found: {snapshot_id}"))?;
+
+    Ok(OpenWorkbookResult {
+        handle: WorkbookHandle {
+            workbook_id,
+            // Intentionally None: opening a historical snapshot detaches it
+            // from the on-disk file so Ctrl+S prompts Save As. This protects
+            // the user from accidentally overwriting current state with an
+            // older version.
+            path: None,
+            source_type: "coco".to_string(),
+            snapshot_json: Some(snapshot_json),
+        },
+        warnings: vec![],
+    })
+}
+
+#[tauri::command]
+pub fn workbook_open_snapshot(
+    path: String,
+    snapshot_id: i64,
+) -> Result<OpenWorkbookResult, String> {
+    open_snapshot_core(&path, snapshot_id)
+}
+

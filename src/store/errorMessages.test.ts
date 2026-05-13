@@ -81,6 +81,11 @@ describe("friendlyError", () => {
         "復元候補が見つかりません（wb-123）"
       );
     });
+    it("formats Snapshot not found", () => {
+      const result = friendlyError("Snapshot not found: 42");
+      expect(result).toContain("スナップショットが見つかりません");
+      expect(result).toContain("42");
+    });
     it("formats Invalid xlsx (zip)", () => {
       expect(friendlyError("Invalid xlsx (zip): unexpected EOF")).toBe(
         "xlsx として開けません。ZIP 構造が不正です（unexpected EOF）"

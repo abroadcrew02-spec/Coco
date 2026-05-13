@@ -1,3 +1,4 @@
+use chrono::Timelike;
 use serde_json::{json, Map, Value};
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -256,10 +257,18 @@ pub fn workbook_export_csv(
                         ),
                         Value::Number(n) => {
                             let serial = n.as_f64();
-                            // Date-formatted numeric cell → render as YYYY-MM-DD
-                            // so round-tripping through CSV preserves the date.
+                            // Date/datetime-formatted numeric cell → render
+                            // the corresponding calendar string so round-tripping
+                            // through CSV preserves the type. Datetime is
+                            // checked first because a datetime _fmt also
+                            // matches the date predicate.
                             let s = if let (Some(f), Some(fmt)) = (serial, fmt_field) {
-                                if is_date_only_format(fmt) {
+                                if is_datetime_format(fmt) {
+                                    match excel_serial_to_datetime(f) {
+                                        Some(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
+                                        None => format_number(f),
+                                    }
+                                } else if is_date_only_format(fmt) {
                                     match excel_serial_to_date(f) {
                                         Some(d) => d.format("%Y-%m-%d").to_string(),
                                         None => format_number(f),
@@ -389,6 +398,58 @@ fn parse_csv_date(s: &str) -> Option<chrono::NaiveDate> {
     None
 }
 
+/// Same idea as parse_csv_date but for datetime strings:
+///   - YYYY-MM-DDTHH:MM:SS (ISO 8601)
+///   - YYYY-MM-DD HH:MM:SS (ISO with space separator)
+///   - YYYY/MM/DD HH:MM:SS (Japanese-style)
+/// Sub-second precision is not preserved (Excel serials only carry seconds).
+fn parse_csv_datetime(s: &str) -> Option<chrono::NaiveDateTime> {
+    for fmt in &[
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y/%m/%d %H:%M:%S",
+    ] {
+        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, fmt) {
+            return Some(dt);
+        }
+    }
+    None
+}
+
+/// Convert a NaiveDateTime to Excel's fractional-day serial. Time portion is
+/// hours/86400 + minutes/1440 + seconds/86400.
+fn excel_serial_from_datetime(dt: chrono::NaiveDateTime) -> f64 {
+    let date_serial = excel_serial_from_date(dt.date());
+    let time = dt.time();
+    let seconds = time.hour() as i64 * 3600 + time.minute() as i64 * 60 + time.second() as i64;
+    date_serial + (seconds as f64) / 86400.0
+}
+
+/// Inverse of excel_serial_from_datetime. Returns None for serials outside
+/// chrono's range.
+fn excel_serial_to_datetime(serial: f64) -> Option<chrono::NaiveDateTime> {
+    let whole_days = serial.floor();
+    let fractional = serial - whole_days;
+    let date = excel_serial_to_date(whole_days)?;
+    // Round to nearest second to avoid drift from floating-point error.
+    let total_seconds = (fractional * 86400.0).round() as i64;
+    let hours = (total_seconds / 3600) as u32;
+    let minutes = ((total_seconds % 3600) / 60) as u32;
+    let seconds = (total_seconds % 60) as u32;
+    let time = chrono::NaiveTime::from_hms_opt(hours, minutes, seconds)?;
+    Some(date.and_time(time))
+}
+
+/// Returns true if the cell's `_fmt` includes hours — used to distinguish
+/// datetime from date-only formats on export.
+fn is_datetime_format(fmt: &str) -> bool {
+    let lower = fmt.to_ascii_lowercase();
+    lower.contains('y')
+        && lower.contains('m')
+        && lower.contains('d')
+        && lower.contains('h')
+}
+
 fn infer_csv_cell(raw: &str) -> Option<Value> {
     if raw.is_empty() {
         return None;
@@ -413,6 +474,15 @@ fn infer_csv_cell(raw: &str) -> Option<Value> {
         if f.is_finite() {
             return Some(json!({ "v": f }));
         }
+    }
+    // Datetime is more specific than date — try it first to capture the
+    // time portion. Strict parsing (full-string match) means a date-only
+    // string won't accidentally hit this branch.
+    if let Some(dt) = parse_csv_datetime(&unescaped) {
+        return Some(json!({
+            "v": excel_serial_from_datetime(dt),
+            "_fmt": "yyyy-mm-dd hh:mm:ss",
+        }));
     }
     // Date detection before boolean / string fallthrough so YYYY-MM-DD doesn't
     // get stuck as a plain string. Matches xlsx_io's DateTime cell shape so

@@ -404,11 +404,12 @@ fn non_date_format_strings_export_as_numbers() {
 }
 
 #[test]
-fn datetime_format_falls_through_to_serial() {
-    // _fmt that contains an hour ('h') is NOT a date-only format and stays
-    // as a raw serial — datetime export is a follow-up iteration.
+fn datetime_cells_export_as_yyyy_mm_dd_hh_mm_ss() {
+    // Cells whose _fmt mentions both date and hour render as the full
+    // YYYY-MM-DD HH:MM:SS string so CSV round-trip preserves both halves.
     let dir = TempDir::new().unwrap();
     let path = path_in(&dir, "dt.csv");
+    // 46155.5 = 2026-05-13 12:00:00 (half a day past midnight on 2026-05-13).
     let snapshot = r#"{
         "sheetOrder": ["s1"],
         "sheets": {
@@ -426,5 +427,6 @@ fn datetime_format_falls_through_to_serial() {
     let bytes = fs::read(&path).unwrap();
     let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
     let first_line = s.split("\r\n").next().unwrap();
-    assert_eq!(first_line, "46155.5");
+    // CSV escapes any field containing a comma; spaces are fine.
+    assert_eq!(first_line, "2026-05-13 12:00:00");
 }

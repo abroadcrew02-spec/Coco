@@ -371,3 +371,41 @@ fn numeric_strings_that_look_like_dates_still_parse_as_numbers_when_unambiguous(
         serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
     assert_eq!(snap["sheets"]["sheet-1"]["cellData"]["0"]["0"]["v"], 20260513);
 }
+
+#[test]
+fn iso_datetime_strings_become_fractional_serial_with_datetime_format() {
+    // "2026-05-13 12:00:00" → 46155.5 (half a day past midnight on 2026-05-13).
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "dt.csv");
+    fs::write(&path, "2026-05-13 12:00:00\n2026-05-13T06:00:00\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cell_data = &snap["sheets"]["sheet-1"]["cellData"];
+
+    let c0 = &cell_data["0"]["0"];
+    assert!((c0["v"].as_f64().unwrap() - 46155.5).abs() < 1e-9);
+    assert_eq!(c0["_fmt"], "yyyy-mm-dd hh:mm:ss");
+
+    // T separator (ISO 8601) at 06:00 → 0.25 fraction.
+    let c1 = &cell_data["1"]["0"];
+    assert!((c1["v"].as_f64().unwrap() - 46155.25).abs() < 1e-9);
+    assert_eq!(c1["_fmt"], "yyyy-mm-dd hh:mm:ss");
+}
+
+#[test]
+fn date_only_strings_do_not_match_the_datetime_branch() {
+    // Regression: an empty time portion should still go through the
+    // date-only branch (yyyy-mm-dd format), not the datetime branch.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "d.csv");
+    fs::write(&path, "2026-05-13\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let c = &snap["sheets"]["sheet-1"]["cellData"]["0"]["0"];
+    assert_eq!(c["_fmt"], "yyyy-mm-dd");
+    assert_eq!(c["v"].as_f64(), Some(46155.0));
+}

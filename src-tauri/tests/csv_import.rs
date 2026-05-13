@@ -281,3 +281,93 @@ fn nonexistent_file_returns_err() {
     let result = import_csv_core("/does/not/exist.csv".to_string(), None);
     assert!(result.is_err());
 }
+
+#[test]
+fn iso_dates_become_serial_with_yyyy_mm_dd_format() {
+    // Recognize unambiguous ISO YYYY-MM-DD and emit a date cell whose v is
+    // the Excel serial — matches the xlsx_io DateTime cell shape so Univer
+    // treats the value as a real date.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "dates.csv");
+    fs::write(&path, "2026-05-13\n1900-03-01\nnot a date\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cell_data = &snap["sheets"]["sheet-1"]["cellData"];
+
+    // 2026-05-13: 46155 (verified against Excel)
+    let c0 = &cell_data["0"]["0"];
+    assert!(c0["v"].is_f64(), "expected f64 serial, got {:?}", c0);
+    assert_eq!(c0["v"].as_f64(), Some(46155.0));
+    assert_eq!(c0["_fmt"], "yyyy-mm-dd");
+
+    // 1900-03-01 is the first post-leap-bug date; Excel says serial 61.
+    let c1 = &cell_data["1"]["0"];
+    assert_eq!(c1["v"].as_f64(), Some(61.0));
+    assert_eq!(c1["_fmt"], "yyyy-mm-dd");
+
+    // "not a date" stays as a string and has no _fmt attribute.
+    let c2 = &cell_data["2"]["0"];
+    assert_eq!(c2["v"], "not a date");
+    assert!(c2.get("_fmt").is_none());
+}
+
+#[test]
+fn slash_separated_dates_also_detected() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "jp_dates.csv");
+    fs::write(&path, "2026/05/13\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let v = &snap["sheets"]["sheet-1"]["cellData"]["0"]["0"];
+    assert_eq!(v["v"].as_f64(), Some(46155.0));
+    assert_eq!(v["_fmt"], "yyyy-mm-dd");
+}
+
+#[test]
+fn ambiguous_date_formats_stay_as_strings() {
+    // MM/DD/YYYY and DD/MM/YYYY are regionally ambiguous; we don't guess.
+    // The values fall through to the string branch.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "ambig.csv");
+    fs::write(&path, "5/13/2026\n13/5/2026\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cell_data = &snap["sheets"]["sheet-1"]["cellData"];
+    assert_eq!(cell_data["0"]["0"]["v"], "5/13/2026");
+    assert_eq!(cell_data["1"]["0"]["v"], "13/5/2026");
+    assert!(cell_data["0"]["0"].get("_fmt").is_none());
+}
+
+#[test]
+fn invalid_date_strings_stay_as_strings() {
+    // 2026-02-30 is not a real date; chrono rejects it so the cell stays a string.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "bad.csv");
+    fs::write(&path, "2026-02-30\n2026-13-01\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cell_data = &snap["sheets"]["sheet-1"]["cellData"];
+    assert_eq!(cell_data["0"]["0"]["v"], "2026-02-30");
+    assert_eq!(cell_data["1"]["0"]["v"], "2026-13-01");
+}
+
+#[test]
+fn numeric_strings_that_look_like_dates_still_parse_as_numbers_when_unambiguous() {
+    // "20260513" parses as an integer (not a date — there's no separator).
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "num.csv");
+    fs::write(&path, "20260513\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    assert_eq!(snap["sheets"]["sheet-1"]["cellData"]["0"]["0"]["v"], 20260513);
+}

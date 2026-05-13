@@ -317,6 +317,34 @@ const CSV_MIN_ROWS: usize = 1000;
 const CSV_MIN_COLS: usize = 100;
 const CSV_MAX_CELLS: usize = 5_000_000;
 
+/// Convert a calendar date to Excel's serial-date number system. Excel
+/// historically treats 1900 as a leap year (it isn't), so dates on or after
+/// 1900-03-01 need a +1 adjustment. This matches the format produced by
+/// xlsx_io's calamine Data::DateTime branch, so round-tripping through CSV
+/// and xlsx stays consistent.
+fn excel_serial_from_date(date: chrono::NaiveDate) -> f64 {
+    let epoch = chrono::NaiveDate::from_ymd_opt(1899, 12, 31).unwrap();
+    let days = (date - epoch).num_days();
+    let leap_bug_threshold = chrono::NaiveDate::from_ymd_opt(1900, 3, 1).unwrap();
+    let adjusted = if date >= leap_bug_threshold { days + 1 } else { days };
+    adjusted as f64
+}
+
+/// Best-effort parse of a CSV cell string as a calendar date. Accepts only
+/// unambiguous formats:
+///   - YYYY-MM-DD (ISO 8601)
+///   - YYYY/MM/DD (common in Japanese CSVs)
+/// Region-dependent formats like MM/DD/YYYY or DD/MM/YYYY are NOT recognized
+/// — too risky to guess. Validates the date so 2026-02-30 etc. fall through.
+fn parse_csv_date(s: &str) -> Option<chrono::NaiveDate> {
+    for fmt in &["%Y-%m-%d", "%Y/%m/%d"] {
+        if let Ok(d) = chrono::NaiveDate::parse_from_str(s, fmt) {
+            return Some(d);
+        }
+    }
+    None
+}
+
 fn infer_csv_cell(raw: &str) -> Option<Value> {
     if raw.is_empty() {
         return None;
@@ -341,6 +369,12 @@ fn infer_csv_cell(raw: &str) -> Option<Value> {
         if f.is_finite() {
             return Some(json!({ "v": f }));
         }
+    }
+    // Date detection before boolean / string fallthrough so YYYY-MM-DD doesn't
+    // get stuck as a plain string. Matches xlsx_io's DateTime cell shape so
+    // Univer treats it as a real date for arithmetic + formula purposes.
+    if let Some(date) = parse_csv_date(&unescaped) {
+        return Some(json!({ "v": excel_serial_from_date(date), "_fmt": "yyyy-mm-dd" }));
     }
     let lower = unescaped.to_ascii_lowercase();
     if lower == "true" {

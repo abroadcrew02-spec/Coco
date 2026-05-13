@@ -70,6 +70,7 @@ interface WorkbookState {
   listSnapshots: () => Promise<SnapshotMeta[]>;
   openSnapshot: (snapshotId: number) => Promise<void>;
   vacuumWorkbook: () => Promise<VacuumResult | null>;
+  checkIntegrity: () => Promise<IntegrityCheckResult | null>;
 }
 
 export interface SnapshotMeta {
@@ -81,6 +82,11 @@ export interface SnapshotMeta {
 export interface VacuumResult {
   beforeBytes: number;
   afterBytes: number;
+}
+
+export interface IntegrityCheckResult {
+  ok: boolean;
+  issues: string[];
 }
 
 const AUTOSAVE_KEY = "autosave.interval_ms";
@@ -679,6 +685,19 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     if (!currentHandle?.path) return null;
     try {
       return await invoke<VacuumResult>("workbook_vacuum", { path: currentHandle.path });
+    } catch (e) {
+      set({ lastError: friendlyError(String(e)) });
+      return null;
+    }
+  },
+
+  checkIntegrity: async () => {
+    const { currentHandle } = get();
+    if (!currentHandle?.path) return null;
+    try {
+      return await invoke<IntegrityCheckResult>("workbook_check_integrity", {
+        path: currentHandle.path,
+      });
     } catch (e) {
       set({ lastError: friendlyError(String(e)) });
       return null;

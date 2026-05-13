@@ -21,11 +21,14 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
   const listSnapshots = useWorkbookStore((s) => s.listSnapshots);
   const openSnapshot = useWorkbookStore((s) => s.openSnapshot);
   const vacuumWorkbook = useWorkbookStore((s) => s.vacuumWorkbook);
+  const checkIntegrity = useWorkbookStore((s) => s.checkIntegrity);
   const [snapshots, setSnapshots] = useState<SnapshotMeta[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [vacuumStatus, setVacuumStatus] = useState<string | null>(null);
   const [vacuumRunning, setVacuumRunning] = useState(false);
+  const [integrityStatus, setIntegrityStatus] = useState<string | null>(null);
+  const [integrityRunning, setIntegrityRunning] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,6 +59,7 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
   const handleVacuum = async () => {
     setVacuumRunning(true);
     setVacuumStatus(null);
+    setIntegrityStatus(null);
     const result = await vacuumWorkbook();
     setVacuumRunning(false);
     if (result) {
@@ -67,6 +71,23 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
       );
     } else {
       setVacuumStatus("最適化に失敗しました。エラーバナーをご確認ください。");
+    }
+  };
+
+  const handleIntegrity = async () => {
+    setIntegrityRunning(true);
+    setIntegrityStatus(null);
+    setVacuumStatus(null);
+    const result = await checkIntegrity();
+    setIntegrityRunning(false);
+    if (result === null) {
+      setIntegrityStatus("整合性チェックに失敗しました。エラーバナーをご確認ください。");
+    } else if (result.ok) {
+      setIntegrityStatus("整合性チェック: 問題ありません ✓");
+    } else {
+      const head = result.issues.slice(0, 2).join(" / ");
+      const more = result.issues.length > 2 ? `（他 ${result.issues.length - 2} 件）` : "";
+      setIntegrityStatus(`整合性に問題が検出されました: ${head}${more}`);
     }
   };
 
@@ -166,12 +187,25 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
             type="button"
             className="snapshot-footer-btn"
             onClick={handleVacuum}
-            disabled={vacuumRunning}
+            disabled={vacuumRunning || integrityRunning}
             title="不要領域を解放してファイルサイズを縮小"
           >
             {vacuumRunning ? "最適化中..." : "ファイルを最適化"}
           </button>
-          {vacuumStatus && <span className="snapshot-footer-status">{vacuumStatus}</span>}
+          <button
+            type="button"
+            className="snapshot-footer-btn"
+            onClick={handleIntegrity}
+            disabled={vacuumRunning || integrityRunning}
+            title="SQLite の整合性チェックを実行"
+          >
+            {integrityRunning ? "確認中..." : "整合性チェック"}
+          </button>
+          {(vacuumStatus || integrityStatus) && (
+            <span className="snapshot-footer-status">
+              {vacuumStatus ?? integrityStatus}
+            </span>
+          )}
         </footer>
       </div>
     </div>

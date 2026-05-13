@@ -258,4 +258,65 @@ describe("SnapshotHistoryDialog", () => {
       });
     });
   });
+
+  describe("integrity check", () => {
+    it("clicking 整合性チェック invokes workbook_check_integrity and shows OK", async () => {
+      const user = userEvent.setup();
+      invokeMock.mockResolvedValueOnce([]); // listSnapshots
+      invokeMock.mockResolvedValueOnce({ ok: true, issues: [] }); // check
+      render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => screen.getByText("整合性チェック"));
+      await user.click(screen.getByText("整合性チェック"));
+      const call = invokeMock.mock.calls.find((c) => c[0] === "workbook_check_integrity");
+      expect(call?.[1]).toEqual({ path: "/tmp/wb.coco" });
+      await waitFor(() => {
+        expect(screen.getByText(/問題ありません/)).toBeTruthy();
+      });
+    });
+
+    it("shows the issue list when ok=false", async () => {
+      const user = userEvent.setup();
+      invokeMock.mockResolvedValueOnce([]);
+      invokeMock.mockResolvedValueOnce({
+        ok: false,
+        issues: ["page 5 corrupt", "missing index", "row size mismatch"],
+      });
+      render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => screen.getByText("整合性チェック"));
+      await user.click(screen.getByText("整合性チェック"));
+      await waitFor(() => {
+        const status = screen.getByText(/問題が検出されました/);
+        expect(status.textContent).toContain("page 5 corrupt");
+        expect(status.textContent).toContain("missing index");
+        // Third issue is folded into "他 1 件".
+        expect(status.textContent).toContain("他 1 件");
+      });
+    });
+
+    it("integrity-check failure shows the failure hint", async () => {
+      const user = userEvent.setup();
+      invokeMock.mockResolvedValueOnce([]);
+      invokeMock.mockRejectedValueOnce("File not found: /tmp/wb.coco");
+      render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => screen.getByText("整合性チェック"));
+      await user.click(screen.getByText("整合性チェック"));
+      await waitFor(() => {
+        expect(screen.getByText(/整合性チェックに失敗しました/)).toBeTruthy();
+      });
+    });
+
+    it("vacuum status is cleared when integrity check runs", async () => {
+      const user = userEvent.setup();
+      invokeMock.mockResolvedValueOnce([]);
+      invokeMock.mockResolvedValueOnce({ beforeBytes: 10000, afterBytes: 5000 }); // vacuum
+      invokeMock.mockResolvedValueOnce({ ok: true, issues: [] }); // integrity
+      render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => screen.getByText("ファイルを最適化"));
+      await user.click(screen.getByText("ファイルを最適化"));
+      await waitFor(() => screen.getByText(/解放しました/));
+      await user.click(screen.getByText("整合性チェック"));
+      await waitFor(() => screen.getByText(/問題ありません/));
+      expect(screen.queryByText(/解放しました/)).toBeNull();
+    });
+  });
 });

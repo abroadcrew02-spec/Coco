@@ -666,3 +666,49 @@ pub fn workbook_vacuum(path: String) -> Result<VacuumResult, String> {
     vacuum_core(&path)
 }
 
+/// Result of `PRAGMA integrity_check`. SQLite returns "ok" on success or a
+/// list of failure descriptions; we model that as `ok: bool` + the raw lines
+/// so the UI can surface a count of issues without parsing free-form text.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrityCheckResult {
+    pub ok: bool,
+    pub issues: Vec<String>,
+}
+
+/// Runs `PRAGMA integrity_check` on the given .coco file. Useful for
+/// diagnosing corruption that survived the per-save check in `do_save`.
+/// Returns Err for missing files; SQL errors are surfaced as a result with
+/// ok=false rather than Err so the UI can still show the diagnostic.
+pub fn check_integrity_core(path: &str) -> Result<IntegrityCheckResult, String> {
+    if path.is_empty() {
+        return Err("NEEDS_PATH".to_string());
+    }
+    if !std::path::Path::new(path).exists() {
+        return Err(format!("File not found: {path}"));
+    }
+    let conn = Connection::open(path).map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("PRAGMA integrity_check")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    let mut lines: Vec<String> = Vec::new();
+    for row in rows {
+        lines.push(row.map_err(|e| e.to_string())?);
+    }
+    // SQLite returns exactly one row "ok" when the database is healthy;
+    // anything else is a list of issue descriptions.
+    let ok = lines.len() == 1 && lines[0] == "ok";
+    Ok(IntegrityCheckResult {
+        ok,
+        issues: if ok { Vec::new() } else { lines },
+    })
+}
+
+#[tauri::command]
+pub fn workbook_check_integrity(path: String) -> Result<IntegrityCheckResult, String> {
+    check_integrity_core(&path)
+}
+

@@ -1,5 +1,5 @@
 use calamine::{open_workbook, Reader, Xlsx};
-use coco_lib::commands::xlsx_io::{import_xlsx_core, workbook_export_xlsx};
+use coco_lib::commands::xlsx_io::{import_xlsx_core, export_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -49,7 +49,7 @@ fn workbook_scoped_named_range_round_trips() {
     );
 
     // Export
-    let export = workbook_export_xlsx(path_str(&exported), snapshot_json).expect("export ok");
+    let export = export_xlsx_core(path_str(&exported), snapshot_json).expect("export ok");
     assert!(export.success, "export should succeed: {:?}", export.error);
 
     // Re-open exported xlsx with calamine and confirm the name is present.
@@ -91,7 +91,7 @@ fn multiple_named_ranges_round_trip() {
         );
     }
 
-    let export = workbook_export_xlsx(path_str(&exported), snapshot_json).expect("export");
+    let export = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
     assert!(export.success, "export ok");
 
     let wb: Xlsx<_> = open_workbook(&exported).expect("re-open");
@@ -163,7 +163,7 @@ fn malformed_named_range_entries_are_ignored() {
     });
 
     let snapshot_json = serde_json::to_string(&snapshot).expect("serialize");
-    let export = workbook_export_xlsx(path_str(&exported), snapshot_json).expect("export call");
+    let export = export_xlsx_core(path_str(&exported), snapshot_json).expect("export call");
     assert!(
         export.success,
         "export should still succeed despite malformed entries: {:?}",

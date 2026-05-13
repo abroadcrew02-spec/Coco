@@ -41,6 +41,7 @@ fn data_to_cell(d: &Data) -> Option<Value> {
 /// save-back. Pure-Rust: takes the path so it's testable from cargo test.
 pub fn detect_unsupported_features(path: &str) -> Result<Vec<CompatibilityWarning>, String> {
     use std::fs::File;
+    use std::io::Read;
     use zip::ZipArchive;
 
     let file = File::open(path).map_err(|e| e.to_string())?;
@@ -52,6 +53,10 @@ pub fn detect_unsupported_features(path: &str) -> Result<Vec<CompatibilityWarnin
     let mut has_vba = false;
     let mut has_embeddings = false;
     let mut has_drawings = false;
+    // Collect worksheet entry indices first; conditional-formatting needs to read
+    // their content, but reading requires a mutable borrow of the archive that
+    // can't coexist with the iteration borrow.
+    let mut worksheet_indices: Vec<usize> = Vec::new();
 
     for i in 0..archive.len() {
         let entry = archive.by_index(i).map_err(|e| e.to_string())?;
@@ -74,6 +79,24 @@ pub fn detect_unsupported_features(path: &str) -> Result<Vec<CompatibilityWarnin
         }
         if name.starts_with("xl/drawings/") || name.starts_with("xl/media/") {
             has_drawings = true;
+        }
+        if name.starts_with("xl/worksheets/sheet") && name.ends_with(".xml") {
+            worksheet_indices.push(i);
+        }
+    }
+
+    // Conditional formatting lives inside each worksheet XML body — scan only
+    // until the first hit. We do not parse workbook.xml to map sheet ids back
+    // to display names; affected_sheets stays None per spec (keep it simple).
+    let mut has_conditional_formatting = false;
+    for i in worksheet_indices {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        let mut content = String::new();
+        if entry.read_to_string(&mut content).is_ok()
+            && content.contains("<conditionalFormatting")
+        {
+            has_conditional_formatting = true;
+            break;
         }
     }
 
@@ -124,6 +147,14 @@ pub fn detect_unsupported_features(path: &str) -> Result<Vec<CompatibilityWarnin
             severity: "warning".to_string(),
             code: "XLSX_DRAWINGS_DISCARDED".to_string(),
             message: "図形・画像が含まれていますが、Coco では保持されません。保存時に失われます。".to_string(),
+            affected_sheets: None,
+        });
+    }
+    if has_conditional_formatting {
+        warnings.push(CompatibilityWarning {
+            severity: "warning".to_string(),
+            code: "XLSX_CONDITIONAL_FORMATTING".to_string(),
+            message: "条件付き書式が検出されました。Coco では編集できず、保存時に失われます。".to_string(),
             affected_sheets: None,
         });
     }

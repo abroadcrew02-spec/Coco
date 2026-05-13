@@ -20,6 +20,23 @@ fn build_zip_with_entries(tmp: &TempDir, name: &str, entries: &[&str]) -> std::p
     path
 }
 
+fn build_zip_with_contents(
+    tmp: &TempDir,
+    name: &str,
+    entries: &[(&str, &[u8])],
+) -> std::path::PathBuf {
+    let path = tmp.path().join(name);
+    let file = std::fs::File::create(&path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    let opts: FileOptions = FileOptions::default();
+    for (entry, body) in entries {
+        zip.start_file(*entry, opts).unwrap();
+        zip.write_all(body).unwrap();
+    }
+    zip.finish().unwrap();
+    path
+}
+
 #[test]
 fn no_unsupported_features_in_plain_xlsx() {
     let tmp = TempDir::new().unwrap();
@@ -152,6 +169,87 @@ fn multiple_features_detected_independently() {
     assert!(codes.contains(&"XLSX_PIVOT_DISCARDED"));
     assert!(codes.contains(&"XLSX_EXTERNAL_LINKS_DISCARDED"));
     assert!(codes.contains(&"XLSX_VBA_DISCARDED"));
+}
+
+#[test]
+fn conditional_formatting_detected_in_worksheet_xml() {
+    let tmp = TempDir::new().unwrap();
+    let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData/>
+<conditionalFormatting sqref="A1:A10">
+  <cfRule type="cellIs" dxfId="0" priority="1" operator="greaterThan">
+    <formula>5</formula>
+  </cfRule>
+</conditionalFormatting>
+</worksheet>"#;
+    let path = build_zip_with_contents(
+        &tmp,
+        "with_cf.xlsx",
+        &[
+            ("xl/workbook.xml", b"<xml/>"),
+            ("xl/worksheets/sheet1.xml", sheet_xml),
+        ],
+    );
+    let result = detect_unsupported_features(&path_str(&path)).unwrap();
+    let cf = result
+        .iter()
+        .find(|w| w.code == "XLSX_CONDITIONAL_FORMATTING")
+        .unwrap_or_else(|| panic!("expected XLSX_CONDITIONAL_FORMATTING, got {:?}", result));
+    assert_eq!(cf.severity, "warning");
+    assert!(
+        cf.message.contains("条件付き書式"),
+        "message should mention conditional formatting in Japanese: {}",
+        cf.message
+    );
+}
+
+#[test]
+fn conditional_formatting_not_emitted_when_absent() {
+    let tmp = TempDir::new().unwrap();
+    let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData>
+  <row r="1"><c r="A1"><v>1</v></c></row>
+</sheetData>
+</worksheet>"#;
+    let path = build_zip_with_contents(
+        &tmp,
+        "no_cf.xlsx",
+        &[
+            ("xl/workbook.xml", b"<xml/>"),
+            ("xl/worksheets/sheet1.xml", sheet_xml),
+        ],
+    );
+    let result = detect_unsupported_features(&path_str(&path)).unwrap();
+    assert!(
+        !result.iter().any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
+        "should NOT emit conditional-formatting warning, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn conditional_formatting_detected_only_in_second_sheet() {
+    let tmp = TempDir::new().unwrap();
+    let plain = br#"<?xml version="1.0"?><worksheet><sheetData/></worksheet>"#;
+    let with_cf = br#"<?xml version="1.0"?>
+<worksheet><sheetData/><conditionalFormatting sqref="B1:B5"><cfRule type="containsText"/></conditionalFormatting></worksheet>"#;
+    let path = build_zip_with_contents(
+        &tmp,
+        "cf_in_second.xlsx",
+        &[
+            ("xl/workbook.xml", b"<xml/>"),
+            ("xl/worksheets/sheet1.xml", plain.as_slice()),
+            ("xl/worksheets/sheet2.xml", with_cf.as_slice()),
+        ],
+    );
+    let result = detect_unsupported_features(&path_str(&path)).unwrap();
+    assert!(
+        result.iter().any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
+        "expected detection across multiple worksheet entries, got {:?}",
+        result
+    );
 }
 
 #[test]

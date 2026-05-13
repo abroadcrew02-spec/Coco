@@ -100,6 +100,13 @@ export default function HomeScreen() {
         e.preventDefault();
         const target = filteredRecents[focusedRecentIdx];
         if (target) void handleRecentFile(target);
+      } else if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        focusedRecentIdx >= 0
+      ) {
+        e.preventDefault();
+        const target = filteredRecents[focusedRecentIdx];
+        if (target) void removeRecent(target.path);
       } else if (e.key === "Escape" && focusedRecentIdx >= 0) {
         e.preventDefault();
         setFocusedRecentIdx(-1);

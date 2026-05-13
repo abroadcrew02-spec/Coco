@@ -294,6 +294,38 @@ describe("HomeScreen", () => {
         expect(call?.[1]).toEqual({ path: "/tmp/a.xlsx" });
       });
 
+      it("Delete on a focused row removes that recent without opening it", () => {
+        // a.xlsx is the first row, c.coco the third (missing).
+        const { container } = render(<HomeScreen />);
+        // Move focus to row 1 (b.csv).
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        fireEvent.keyDown(window, { key: "Delete" });
+        expect(invokeMock).toHaveBeenCalledWith("workbook_remove_recent", {
+          path: "/tmp/b.csv",
+        });
+        // Should not have triggered an open.
+        const opens = invokeMock.mock.calls.filter((c) =>
+          [
+            "workbook_import_xlsx",
+            "workbook_import_csv",
+            "workbook_open_coco",
+          ].includes(c[0] as string)
+        );
+        expect(opens).toHaveLength(0);
+        // Sanity: nothing thrown.
+        expect(container).toBeTruthy();
+      });
+
+      it("Backspace works the same as Delete", () => {
+        render(<HomeScreen />);
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        fireEvent.keyDown(window, { key: "Backspace" });
+        expect(invokeMock).toHaveBeenCalledWith("workbook_remove_recent", {
+          path: "/tmp/a.xlsx",
+        });
+      });
+
       it("Escape clears the row focus", () => {
         const { container } = render(<HomeScreen />);
         fireEvent.keyDown(window, { key: "ArrowDown" });

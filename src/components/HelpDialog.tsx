@@ -19,6 +19,7 @@ const APP_SHORTCUTS: Shortcut[] = [
   { keys: ["Ctrl", "F"], description: "ホーム画面: 最近使ったファイルを絞り込み" },
   { keys: ["↑/↓"], description: "ホーム画面: 最近使ったファイルを上下で選択" },
   { keys: ["Enter"], description: "ホーム画面: 選択中のファイルを開く" },
+  { keys: ["Delete"], description: "ホーム画面: 選択中のファイルを一覧から削除" },
   { keys: ["Ctrl", ","], description: "設定を開く" },
   { keys: ["Ctrl", "/"], description: "このヘルプを表示" },
   { keys: ["F1"], description: "このヘルプを表示（同上）" },

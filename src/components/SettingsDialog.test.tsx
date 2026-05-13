@@ -29,6 +29,8 @@ function resetStore() {
     lastSavedAt: null,
     csvExportEncoding: "utf8-bom",
     csvImportEncoding: "auto",
+    pinnedPaths: [],
+    suppressCsvPocWarning: false,
   });
 }
 
@@ -43,11 +45,12 @@ afterEach(() => cleanup());
 
 describe("SettingsDialog", () => {
   describe("initial state", () => {
-    it("renders all three sections", () => {
+    it("renders all major sections", () => {
       render(<SettingsDialog onClose={onClose} />);
       expect(screen.getByText("自動保存の頻度")).toBeTruthy();
       expect(screen.getByText("CSV エクスポートの文字コード")).toBeTruthy();
       expect(screen.getByText("CSV インポートの文字コード")).toBeTruthy();
+      expect(screen.getByText("CSV インポートの通知")).toBeTruthy();
     });
 
     it("checks the current store value for each radio group", () => {

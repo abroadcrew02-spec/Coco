@@ -39,6 +39,7 @@ function resetStore() {
     csvExportEncoding: "utf8-bom",
     csvImportEncoding: "auto",
     pinnedPaths: [],
+    suppressCsvPocWarning: false,
   });
 }
 

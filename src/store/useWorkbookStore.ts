@@ -32,6 +32,7 @@ interface WorkbookState {
   csvExportEncoding: "utf8-bom" | "utf8" | "shift_jis";
   csvImportEncoding: "auto" | "utf8" | "shift_jis";
   pinnedPaths: string[]; // recent files the user has pinned; sorts to top of home list
+  suppressCsvPocWarning: boolean; // hide the always-fires "CSV PoC" info banner
 
   // Actions
   newWorkbook: () => Promise<void>;
@@ -67,6 +68,8 @@ interface WorkbookState {
   setCsvImportEncoding: (enc: "auto" | "utf8" | "shift_jis") => Promise<void>;
   loadPinnedPaths: () => Promise<void>;
   togglePinned: (path: string) => Promise<void>;
+  loadSuppressCsvPocWarning: () => Promise<void>;
+  setSuppressCsvPocWarning: (v: boolean) => Promise<void>;
   listSnapshots: () => Promise<SnapshotMeta[]>;
   openSnapshot: (snapshotId: number) => Promise<void>;
   vacuumWorkbook: () => Promise<VacuumResult | null>;
@@ -111,6 +114,7 @@ const DEFAULT_CSV_IMPORT_ENCODING: CsvImportEncoding = "auto";
 const VALID_CSV_IMPORT_ENCODINGS: CsvImportEncoding[] = ["auto", "utf8", "shift_jis"];
 
 const PINNED_PATHS_KEY = "recents.pinned_paths";
+const SUPPRESS_CSV_POC_KEY = "csv.suppress_poc_warning";
 
 export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   screen: "home",
@@ -129,6 +133,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   csvExportEncoding: DEFAULT_CSV_ENCODING,
   csvImportEncoding: DEFAULT_CSV_IMPORT_ENCODING,
   pinnedPaths: [],
+  suppressCsvPocWarning: false,
 
   newWorkbook: async () => {
     try {
@@ -210,11 +215,16 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       const enc = get().csvImportEncoding;
       const encoding = enc === "auto" ? undefined : enc;
       const result = await invoke<ImportWorkbookResult>("workbook_import_csv", { path, encoding });
+      // Optionally hide the always-fires "CSV PoC" info banner — power users
+      // already know our type-detection scope and don't need the reminder.
+      const filteredWarnings = get().suppressCsvPocWarning
+        ? result.warnings.filter((w) => w.code !== "CSV_POC_IMPORT")
+        : result.warnings;
       set({
         screen: "editor",
         currentHandle: result.handle,
         saveStatus: "unsaved",
-        importWarnings: result.warnings,
+        importWarnings: filteredWarnings,
         exportWarnings: [],
         blockingImport: null,
         currentSnapshotJson: result.handle.snapshotJson,
@@ -646,6 +656,25 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     set({ pinnedPaths: next });
     try {
       await invoke("set_setting", { key: PINNED_PATHS_KEY, value: JSON.stringify(next) });
+    } catch {
+      // best-effort persistence
+    }
+  },
+
+  loadSuppressCsvPocWarning: async () => {
+    try {
+      const raw = await invoke<string | null>("get_setting", { key: SUPPRESS_CSV_POC_KEY });
+      if (raw === "true" || raw === "1") set({ suppressCsvPocWarning: true });
+      // Any other value (null, "false", "0", malformed) leaves the default off.
+    } catch {
+      // non-critical
+    }
+  },
+
+  setSuppressCsvPocWarning: async (v: boolean) => {
+    set({ suppressCsvPocWarning: v });
+    try {
+      await invoke("set_setting", { key: SUPPRESS_CSV_POC_KEY, value: v ? "true" : "false" });
     } catch {
       // best-effort persistence
     }

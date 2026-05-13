@@ -43,6 +43,7 @@ beforeEach(() => {
     csvExportEncoding: "utf8-bom",
     csvImportEncoding: "auto",
     pinnedPaths: [],
+    suppressCsvPocWarning: false,
   });
 });
 
@@ -900,6 +901,62 @@ describe("pinnedPaths", () => {
     invokeMock.mockRejectedValue("db locked");
     await useWorkbookStore.getState().togglePinned("/tmp/a.xlsx");
     expect(useWorkbookStore.getState().pinnedPaths).toEqual(["/tmp/a.xlsx"]);
+  });
+});
+
+describe("suppressCsvPocWarning", () => {
+  it("defaults to false", () => {
+    expect(useWorkbookStore.getState().suppressCsvPocWarning).toBe(false);
+  });
+
+  it("loadSuppressCsvPocWarning accepts 'true'", async () => {
+    invokeMock.mockResolvedValue("true");
+    await useWorkbookStore.getState().loadSuppressCsvPocWarning();
+    expect(useWorkbookStore.getState().suppressCsvPocWarning).toBe(true);
+  });
+
+  it("loadSuppressCsvPocWarning ignores other values", async () => {
+    invokeMock.mockResolvedValue("yes");
+    await useWorkbookStore.getState().loadSuppressCsvPocWarning();
+    expect(useWorkbookStore.getState().suppressCsvPocWarning).toBe(false);
+  });
+
+  it("setSuppressCsvPocWarning persists 'true' / 'false'", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await useWorkbookStore.getState().setSuppressCsvPocWarning(true);
+    expect(useWorkbookStore.getState().suppressCsvPocWarning).toBe(true);
+    expect(invokeMock).toHaveBeenCalledWith(
+      "set_setting",
+      expect.objectContaining({ key: "csv.suppress_poc_warning", value: "true" })
+    );
+    await useWorkbookStore.getState().setSuppressCsvPocWarning(false);
+    expect(useWorkbookStore.getState().suppressCsvPocWarning).toBe(false);
+  });
+
+  it("importCsv filters out CSV_POC_IMPORT when the suppress flag is on", async () => {
+    useWorkbookStore.setState({ suppressCsvPocWarning: true });
+    invokeMock.mockResolvedValue({
+      handle: { workbookId: "wb", path: "/tmp/x.csv", sourceType: "xlsx", snapshotJson: "{}" },
+      warnings: [
+        { severity: "info", code: "CSV_POC_IMPORT", message: "PoC" },
+        { severity: "info", code: "CSV_ENCODING_DETECTED", message: "UTF-8" },
+      ],
+    });
+    await useWorkbookStore.getState().importCsv("/tmp/x.csv");
+    const warnings = useWorkbookStore.getState().importWarnings;
+    expect(warnings.find((w) => w.code === "CSV_POC_IMPORT")).toBeUndefined();
+    // Other warnings preserved.
+    expect(warnings.find((w) => w.code === "CSV_ENCODING_DETECTED")).toBeTruthy();
+  });
+
+  it("importCsv keeps CSV_POC_IMPORT when the suppress flag is off (default)", async () => {
+    invokeMock.mockResolvedValue({
+      handle: { workbookId: "wb", path: "/tmp/x.csv", sourceType: "xlsx", snapshotJson: "{}" },
+      warnings: [{ severity: "info", code: "CSV_POC_IMPORT", message: "PoC" }],
+    });
+    await useWorkbookStore.getState().importCsv("/tmp/x.csv");
+    const warnings = useWorkbookStore.getState().importWarnings;
+    expect(warnings.find((w) => w.code === "CSV_POC_IMPORT")).toBeTruthy();
   });
 });
 

@@ -36,11 +36,15 @@ export default function SettingsDialog({ onClose }: Props) {
   const setCsvExportEncoding = useWorkbookStore((s) => s.setCsvExportEncoding);
   const csvImportEncoding = useWorkbookStore((s) => s.csvImportEncoding);
   const setCsvImportEncoding = useWorkbookStore((s) => s.setCsvImportEncoding);
+  const suppressCsvPocWarning = useWorkbookStore((s) => s.suppressCsvPocWarning);
+  const setSuppressCsvPocWarning = useWorkbookStore((s) => s.setSuppressCsvPocWarning);
 
   const [pendingInterval, setPendingInterval] = useState<number>(intervalMs);
   const [pendingEncoding, setPendingEncoding] = useState<CsvEncoding>(csvEncoding);
   const [pendingImportEncoding, setPendingImportEncoding] =
     useState<CsvImportEncoding>(csvImportEncoding);
+  const [pendingSuppressPoc, setPendingSuppressPoc] =
+    useState<boolean>(suppressCsvPocWarning);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -63,13 +67,17 @@ export default function SettingsDialog({ onClose }: Props) {
     if (pendingImportEncoding !== csvImportEncoding) {
       await setCsvImportEncoding(pendingImportEncoding);
     }
+    if (pendingSuppressPoc !== suppressCsvPocWarning) {
+      await setSuppressCsvPocWarning(pendingSuppressPoc);
+    }
     onClose();
   };
 
   const isDirty =
     pendingInterval !== intervalMs ||
     pendingEncoding !== csvEncoding ||
-    pendingImportEncoding !== csvImportEncoding;
+    pendingImportEncoding !== csvImportEncoding ||
+    pendingSuppressPoc !== suppressCsvPocWarning;
 
   return (
     <div className="settings-backdrop" onClick={onClose}>
@@ -143,6 +151,20 @@ export default function SettingsDialog({ onClose }: Props) {
                 </label>
               ))}
             </div>
+          </section>
+          <section className="settings-section">
+            <h3>CSV インポートの通知</h3>
+            <p className="settings-hint">
+              毎回表示される「CSV PoC インポート」情報バナーを抑制します。エンコーディング判定や上限超過などの警告は引き続き表示されます。
+            </p>
+            <label className="settings-radio">
+              <input
+                type="checkbox"
+                checked={pendingSuppressPoc}
+                onChange={(e) => setPendingSuppressPoc(e.target.checked)}
+              />
+              <span>「CSV PoC インポート」バナーを表示しない</span>
+            </label>
           </section>
         </div>
         <footer className="settings-footer">

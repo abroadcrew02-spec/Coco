@@ -35,6 +35,7 @@ export default function App() {
     loadCsvExportEncoding,
     loadCsvImportEncoding,
     loadPinnedPaths,
+    loadSuppressCsvPocWarning,
     dismissBlockingImport,
   } = useWorkbookStore();
 
@@ -68,6 +69,7 @@ export default function App() {
     loadCsvExportEncoding();
     loadCsvImportEncoding();
     loadPinnedPaths();
+    loadSuppressCsvPocWarning();
   }, [
     loadRecentFiles,
     loadRecoveryCandidates,
@@ -75,6 +77,7 @@ export default function App() {
     loadCsvExportEncoding,
     loadCsvImportEncoding,
     loadPinnedPaths,
+    loadSuppressCsvPocWarning,
   ]);
 
   const closeFileName = currentHandle?.path

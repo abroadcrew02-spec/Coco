@@ -17,6 +17,8 @@ const APP_SHORTCUTS: Shortcut[] = [
   { keys: ["Ctrl", "S"], description: "保存（既定パスへ上書き）" },
   { keys: ["Ctrl", "Shift", "S"], description: "名前を付けて保存" },
   { keys: ["Ctrl", "F"], description: "ホーム画面: 最近使ったファイルを絞り込み" },
+  { keys: ["↑/↓"], description: "ホーム画面: 最近使ったファイルを上下で選択" },
+  { keys: ["Enter"], description: "ホーム画面: 選択中のファイルを開く" },
   { keys: ["Ctrl", ","], description: "設定を開く" },
   { keys: ["Ctrl", "/"], description: "このヘルプを表示" },
   { keys: ["F1"], description: "このヘルプを表示（同上）" },

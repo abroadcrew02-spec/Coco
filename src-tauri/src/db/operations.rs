@@ -1,26 +1,31 @@
 use rusqlite::Connection;
 use crate::error::Result;
 
-// Record a file open in recent files (keep last 10)
+/// Cap on how many recent entries are persisted in the recent_files table.
+/// With the inline filter on the HomeScreen, a higher cap is now useful:
+/// power users juggle 20–30 working files and benefit from a stable history.
+/// Older entries can still be cleared via "すべて削除".
+pub const RECENT_FILES_LIMIT: usize = 30;
+
+// Record a file open in recent files (keep last RECENT_FILES_LIMIT)
 pub fn record_recent_file(conn: &Connection, path: &str, name: &str) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "INSERT OR REPLACE INTO recent_files (path, name, last_opened) VALUES (?1, ?2, ?3)",
         rusqlite::params![path, name, now],
     )?;
-    // Keep only 10 most recent
     conn.execute(
-        "DELETE FROM recent_files WHERE path NOT IN (SELECT path FROM recent_files ORDER BY last_opened DESC LIMIT 10)",
-        [],
+        "DELETE FROM recent_files WHERE path NOT IN (SELECT path FROM recent_files ORDER BY last_opened DESC LIMIT ?1)",
+        rusqlite::params![RECENT_FILES_LIMIT as i64],
     )?;
     Ok(())
 }
 
 pub fn list_recent_files(conn: &Connection) -> Result<Vec<(String, String, String)>> {
     let mut stmt = conn.prepare(
-        "SELECT path, name, last_opened FROM recent_files ORDER BY last_opened DESC LIMIT 10",
+        "SELECT path, name, last_opened FROM recent_files ORDER BY last_opened DESC LIMIT ?1",
     )?;
-    let rows = stmt.query_map([], |row| {
+    let rows = stmt.query_map(rusqlite::params![RECENT_FILES_LIMIT as i64], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,

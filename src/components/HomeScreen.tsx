@@ -2,6 +2,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { useEditorPreload } from "../hooks/useEditorPreload";
+import { routeOpenPath } from "../store/pathRouter";
+import { recoveryReasonLabel } from "../store/recoveryLabels";
 import type { RecentFile, RecoveryCandidate } from "../types/workbook";
 import "./HomeScreen.css";
 
@@ -37,26 +39,21 @@ export default function HomeScreen() {
     });
     if (!selected) return;
     const path = typeof selected === "string" ? selected : selected[0];
-    const lower = path.toLowerCase();
-    if (lower.endsWith(".coco")) {
-      await openCoco(path);
-    } else if (lower.endsWith(".csv")) {
-      await importCsv(path);
-    } else if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) {
-      await importXlsx(path);
-    }
+    const route = routeOpenPath(path);
+    if (route.kind === "coco") await openCoco(route.path);
+    else if (route.kind === "csv") await importCsv(route.path);
+    else if (route.kind === "xlsx") await importXlsx(route.path);
   };
 
   const handleRecentFile = async (file: RecentFile) => {
     if (!file.exists) return;
-    const lower = file.path.toLowerCase();
-    if (lower.endsWith(".csv")) {
-      await importCsv(file.path);
-    } else if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) {
-      await importXlsx(file.path);
-    } else {
-      await openCoco(file.path);
-    }
+    const route = routeOpenPath(file.path);
+    // Recent files are filtered server-side to known kinds, but treat
+    // anything unrecognized (legacy entries, dotted names) as .coco —
+    // that matches the prior fallback behavior.
+    if (route.kind === "csv") await importCsv(file.path);
+    else if (route.kind === "xlsx") await importXlsx(file.path);
+    else await openCoco(file.path);
   };
 
   return (
@@ -145,7 +142,7 @@ export default function HomeScreen() {
                 <div className="recovery-item__main">
                   <span className="recovery-item__title">{c.originalPath ?? "無題のワークブック"}</span>
                   <span className="recovery-date">
-                    {new Date(c.savedAt).toLocaleString("ja-JP")} · {c.reason}
+                    {new Date(c.savedAt).toLocaleString("ja-JP")} · {recoveryReasonLabel(c.reason)}
                   </span>
                 </div>
                 <div className="recovery-item__actions">

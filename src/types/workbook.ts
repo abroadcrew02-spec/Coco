@@ -31,12 +31,15 @@ export interface RecentFile {
   exists: boolean;
 }
 
-// A recovery candidate (auto-save or backup)
+// A recovery candidate (auto-save or backup). Rust may emit reasons we don't
+// yet know about (future migrations); use `string` so the UI's translator
+// gets a chance to fall through to pass-through instead of TS rejecting the
+// payload at the boundary.
 export interface RecoveryCandidate {
   candidateId: string;
   originalPath: string | null;
   savedAt: string; // ISO datetime
-  reason: "auto_save" | "backup" | "crash";
+  reason: string;
 }
 
 // Result of opening/creating a workbook

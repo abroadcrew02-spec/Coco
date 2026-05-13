@@ -283,6 +283,51 @@ fn nonexistent_file_returns_err() {
 }
 
 #[test]
+#[ignore = "slow: writes a ~80MB CSV to disk to exercise the near-cap branch"]
+fn near_cap_warning_fires_above_4m_cells() {
+    // Generating a 4M+ cell CSV at runtime is slow. The test is marked
+    // #[ignore] but kept callable via `cargo test -- --ignored` for ad-hoc
+    // verification. It exercises the CSV_NEAR_CAP warning path that fires
+    // when total_cells > 80% of the 5M cap.
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("big.csv");
+    // 20 cols × 220,000 rows = 4.4M cells (well past the 4M warning threshold).
+    let mut file = fs::File::create(&path).unwrap();
+    use std::io::Write;
+    let cols = 20usize;
+    let rows = 220_000usize;
+    let line: String = (0..cols)
+        .map(|i| format!("{}", i))
+        .collect::<Vec<_>>()
+        .join(",");
+    for _ in 0..rows {
+        writeln!(file, "{}", line).unwrap();
+    }
+    drop(file);
+
+    let result =
+        import_csv_core(path.to_string_lossy().into_owned(), None).unwrap();
+    assert!(
+        result.warnings.iter().any(|w| w.code == "CSV_NEAR_CAP"),
+        "expected CSV_NEAR_CAP warning, got: {:?}",
+        result.warnings.iter().map(|w| &w.code).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn small_file_does_not_emit_near_cap_warning() {
+    // Regression: typical-size CSVs shouldn't show the warning.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "small.csv");
+    fs::write(&path, "a,b,c\n1,2,3\n").unwrap();
+    let result = import_csv_core(path, None).unwrap();
+    assert!(
+        !result.warnings.iter().any(|w| w.code == "CSV_NEAR_CAP"),
+        "small file should not trigger near-cap warning"
+    );
+}
+
+#[test]
 fn iso_dates_become_serial_with_yyyy_mm_dd_format() {
     // Recognize unambiguous ISO YYYY-MM-DD and emit a date cell whose v is
     // the Excel serial — matches the xlsx_io DateTime cell shape so Univer

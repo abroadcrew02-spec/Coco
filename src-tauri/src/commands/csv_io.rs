@@ -799,6 +799,23 @@ pub fn import_csv_core(path: String, encoding_override: Option<String>) -> Resul
         affected_sheets: None,
     }];
 
+    // Warn when the imported workbook is approaching the 5M cell cap so the
+    // user knows the file is large and might bump into the hard limit on a
+    // future edit. 80% threshold = 4M cells.
+    let near_cap_threshold = CSV_MAX_CELLS * 4 / 5;
+    if total_cells > near_cap_threshold {
+        let percent = (total_cells * 100) / CSV_MAX_CELLS;
+        warnings.push(CompatibilityWarning {
+            severity: "warning".to_string(),
+            code: "CSV_NEAR_CAP".to_string(),
+            message: format!(
+                "セル数が上限の {}% ({}/{} セル) に達しています。これ以上行を増やすと上限超過でインポートが失敗します。",
+                percent, total_cells, CSV_MAX_CELLS
+            ),
+            affected_sheets: None,
+        });
+    }
+
     // Surface the detected encoding so the user knows what we did. Promote to
     // "warning" severity for non-UTF-8 paths so it's not just a passing note.
     let enc_severity = if encoding_name.starts_with("UTF-8") && !encoding_name.contains("lossy") {

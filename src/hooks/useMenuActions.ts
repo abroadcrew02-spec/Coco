@@ -3,6 +3,7 @@ import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { confirmDiscardIfUnsaved } from "../store/dirtyGuard";
+import { routeOpenPath } from "../store/pathRouter";
 import { requestHelp, requestSettings } from "./useGlobalShortcuts";
 
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route
@@ -34,10 +35,10 @@ export function useMenuActions() {
       });
       if (!selected) return;
       const path = typeof selected === "string" ? selected : selected[0];
-      const lower = path.toLowerCase();
-      if (lower.endsWith(".coco")) await openCoco(path);
-      else if (lower.endsWith(".csv")) await importCsv(path);
-      else if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) await importXlsx(path);
+      const route = routeOpenPath(path);
+      if (route.kind === "coco") await openCoco(route.path);
+      else if (route.kind === "csv") await importCsv(route.path);
+      else if (route.kind === "xlsx") await importXlsx(route.path);
     };
 
     const handleCsvExport = async () => {

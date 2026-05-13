@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { confirmDiscardIfUnsaved } from "../store/dirtyGuard";
+import { routeOpenPath } from "../store/pathRouter";
 
 // Drag-and-drop file open. Excel parity. Drops outside the editor (e.g. on the
 // home screen) open just the same way as clicking "ファイルを開く".
@@ -21,7 +22,8 @@ export function useFileDrop(): { isHovering: boolean } {
     let cancelled = false;
 
     const dispatch = async (path: string) => {
-      const lower = path.toLowerCase();
+      const route = routeOpenPath(path);
+      if (route.kind === "unsupported") return; // silently ignore (e.g. .png drop)
       if (
         !confirmDiscardIfUnsaved(
           "未保存の変更があります。破棄してドロップしたファイルを開きますか？"
@@ -29,14 +31,9 @@ export function useFileDrop(): { isHovering: boolean } {
       ) {
         return;
       }
-      if (lower.endsWith(".coco")) {
-        await openCoco(path);
-      } else if (lower.endsWith(".csv")) {
-        await importCsv(path);
-      } else if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) {
-        await importXlsx(path);
-      }
-      // Unknown extension: silently ignore.
+      if (route.kind === "coco") await openCoco(route.path);
+      else if (route.kind === "csv") await importCsv(route.path);
+      else if (route.kind === "xlsx") await importXlsx(route.path);
     };
 
     getCurrentWindow()

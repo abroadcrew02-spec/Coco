@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { confirmDiscardIfUnsaved } from "../store/dirtyGuard";
+import { routeOpenPath } from "../store/pathRouter";
 
 /** Module-level emitter for non-store UI events (e.g. help dialog). Keeps the
  *  store free of pure-UI flags. App-level listeners subscribe. */
@@ -71,10 +72,10 @@ export function useGlobalShortcuts() {
         });
         if (!selected) return;
         const path = typeof selected === "string" ? selected : selected[0];
-        const lower = path.toLowerCase();
-        if (lower.endsWith(".coco")) await openCoco(path);
-        else if (lower.endsWith(".csv")) await importCsv(path);
-        else if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) await importXlsx(path);
+        const route = routeOpenPath(path);
+        if (route.kind === "coco") await openCoco(route.path);
+        else if (route.kind === "csv") await importCsv(route.path);
+        else if (route.kind === "xlsx") await importXlsx(route.path);
       }
     };
 

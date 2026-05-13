@@ -52,6 +52,21 @@ export function useGlobalShortcuts() {
 
       const mod = e.ctrlKey || e.metaKey;
       if (!mod || e.shiftKey || e.altKey) return;
+
+      // Ctrl/Cmd+, opens Settings (macOS convention extended cross-platform).
+      // Univer doesn't claim this combo, so it's safe on the editor too.
+      if (e.key === ",") {
+        e.preventDefault();
+        settingsListeners.forEach((fn) => fn());
+        return;
+      }
+      // Ctrl/Cmd+/ opens Help — easier than F1 on laptops that overlay F-keys.
+      if (e.key === "/") {
+        e.preventDefault();
+        helpListeners.forEach((fn) => fn());
+        return;
+      }
+
       const key = e.key.toLowerCase();
 
       if (key === "n") {

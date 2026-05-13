@@ -59,6 +59,7 @@ pub fn run() {
             commands::workbook::workbook_open_snapshot,
             commands::workbook::workbook_vacuum,
             commands::workbook::workbook_check_integrity,
+            commands::workbook::workbook_diagnostic_info,
             commands::recovery::workbook_autosave_temp,
             commands::recovery::workbook_clear_recovery,
             commands::security::security_scan_xlsx,

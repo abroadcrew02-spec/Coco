@@ -712,3 +712,56 @@ pub fn workbook_check_integrity(path: String) -> Result<IntegrityCheckResult, St
     check_integrity_core(&path)
 }
 
+/// Diagnostic snapshot for support requests: lets a user copy a single
+/// summary into a bug report so we don't have to ask piecemeal questions.
+/// Numbers are best-effort — any sub-query that fails contributes the
+/// corresponding default (0 / "unknown").
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticInfo {
+    pub path: String,
+    pub size_bytes: u64,
+    pub snapshot_count: i64,
+    pub schema_version: Option<i64>,
+    pub last_saved_at: Option<String>,
+}
+
+pub fn diagnostic_info_core(path: &str) -> Result<DiagnosticInfo, String> {
+    if path.is_empty() {
+        return Err("NEEDS_PATH".to_string());
+    }
+    let p = std::path::Path::new(path);
+    if !p.exists() {
+        return Err(format!("File not found: {path}"));
+    }
+    let size_bytes = std::fs::metadata(p).map_err(|e| e.to_string())?.len();
+    let conn = Connection::open(path).map_err(|e| e.to_string())?;
+    let snapshot_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM workbook_snapshots", [], |row| {
+            row.get(0)
+        })
+        .unwrap_or(0);
+    let schema_version = crate::db::schema::current_schema_version(&conn)
+        .ok()
+        .flatten();
+    let last_saved_at: Option<String> = conn
+        .query_row(
+            "SELECT created_at FROM workbook_snapshots ORDER BY snapshot_id DESC LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok();
+    Ok(DiagnosticInfo {
+        path: path.to_string(),
+        size_bytes,
+        snapshot_count,
+        schema_version,
+        last_saved_at,
+    })
+}
+
+#[tauri::command]
+pub fn workbook_diagnostic_info(path: String) -> Result<DiagnosticInfo, String> {
+    diagnostic_info_core(&path)
+}
+

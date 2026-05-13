@@ -467,6 +467,62 @@ fn percent_with_embedded_garbage_stays_string() {
 }
 
 #[test]
+fn tsv_extension_uses_tab_delimiter() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "data.tsv");
+    // Three columns separated by tabs; a comma inside a cell must survive intact.
+    fs::write(&path, "a\tb,c\td\n1\t2\t3\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cell_data = &snap["sheets"]["sheet-1"]["cellData"];
+
+    assert_eq!(cell_data["0"]["0"]["v"], "a");
+    // Comma is part of the cell value, not a separator.
+    assert_eq!(cell_data["0"]["1"]["v"], "b,c");
+    assert_eq!(cell_data["0"]["2"]["v"], "d");
+    assert_eq!(cell_data["1"]["0"]["v"], 1);
+    assert_eq!(cell_data["1"]["1"]["v"], 2);
+    assert_eq!(cell_data["1"]["2"]["v"], 3);
+}
+
+#[test]
+fn csv_with_mostly_tabs_falls_back_to_tab_delimiter() {
+    // User saved a TSV with the wrong extension. We detect by counting
+    // tabs vs commas on the first non-empty line; if tabs dominate AND
+    // there are at least 2, we switch.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "mislabeled.csv");
+    fs::write(&path, "a\tb\tc\n1\t2\t3\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cell_data = &snap["sheets"]["sheet-1"]["cellData"];
+    assert_eq!(cell_data["0"]["0"]["v"], "a");
+    assert_eq!(cell_data["0"]["1"]["v"], "b");
+    assert_eq!(cell_data["0"]["2"]["v"], "c");
+}
+
+#[test]
+fn csv_with_single_tab_still_uses_comma_delimiter() {
+    // One tab in a field shouldn't trigger TSV fallback — legit comma data
+    // with a stray tab character must continue to parse as CSV.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "single_tab.csv");
+    fs::write(&path, "a,b\tcontains tab,c\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cell_data = &snap["sheets"]["sheet-1"]["cellData"];
+    assert_eq!(cell_data["0"]["0"]["v"], "a");
+    assert_eq!(cell_data["0"]["1"]["v"], "b\tcontains tab");
+    assert_eq!(cell_data["0"]["2"]["v"], "c");
+}
+
+#[test]
 fn time_only_strings_become_fractional_value_with_time_format() {
     // "12:00" → 0.5, "00:00:00" → 0.0, "06:30" → 0.27083... etc.
     let dir = TempDir::new().unwrap();

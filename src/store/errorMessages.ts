@@ -14,7 +14,7 @@ const FRIENDLY: Record<string, string> = {
   XLSX_SECURITY_BLOCKED: "セキュリティ上の制限を超えているため、ファイルを開けません。",
 
   // csv import/export
-  CSV_INVALID_EXTENSION: "拡張子が .csv ではありません。",
+  CSV_INVALID_EXTENSION: "拡張子が .csv / .tsv ではありません。",
   CSV_EMPTY_WORKBOOK: "エクスポートできるシートが見つかりませんでした。",
   CSV_TOO_LARGE: "CSV のセル数が上限（500万）を超えています。",
 

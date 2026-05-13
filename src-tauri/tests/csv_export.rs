@@ -404,6 +404,62 @@ fn unrecognized_format_strings_fall_through_to_plain_number() {
 }
 
 #[test]
+fn tsv_extension_writes_tab_separated_output() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "out.tsv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": {
+                        "0": { "v": "a" },
+                        "1": { "v": "b,c" },
+                        "2": { "v": "d" }
+                    }
+                }
+            }
+        }
+    }"#;
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    assert!(result.success, "expected success: {:?}", result.error);
+
+    let bytes = fs::read(&path).unwrap();
+    let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
+    let first_line = s.split("\r\n").next().unwrap();
+    // Comma inside a cell does NOT need quoting in TSV (the delimiter is tab).
+    assert_eq!(first_line, "a\tb,c\td");
+}
+
+#[test]
+fn tsv_extension_quotes_fields_containing_tabs() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "out.tsv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": {
+                        "0": { "v": "has\ttab" },
+                        "1": { "v": "plain" }
+                    }
+                }
+            }
+        }
+    }"#;
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    assert!(result.success);
+    let bytes = fs::read(&path).unwrap();
+    let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
+    let first_line = s.split("\r\n").next().unwrap();
+    // Tab-containing field is wrapped in double quotes.
+    assert_eq!(first_line, "\"has\ttab\"\tplain");
+}
+
+#[test]
 fn time_only_cells_export_as_hh_mm_ss() {
     let dir = TempDir::new().unwrap();
     let path = path_in(&dir, "t.csv");

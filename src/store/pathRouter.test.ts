@@ -22,6 +22,11 @@ describe("routeOpenPath", () => {
       const r = routeOpenPath("/tmp/data.csv");
       expect(r).toEqual({ kind: "csv", path: "/tmp/data.csv" });
     });
+
+    it("routes .tsv to csv (same import path, different delimiter)", () => {
+      const r = routeOpenPath("/tmp/data.tsv");
+      expect(r).toEqual({ kind: "csv", path: "/tmp/data.tsv" });
+    });
   });
 
   describe("case insensitivity", () => {

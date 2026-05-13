@@ -22,8 +22,8 @@ pub struct SheetInfo {
     pub name: String,
 }
 
-fn escape_csv_field(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
+fn escape_csv_field(s: &str, delimiter: char) -> String {
+    if s.contains(delimiter) || s.contains('"') || s.contains('\n') || s.contains('\r') {
         let escaped = s.replace('"', "\"\"");
         format!("\"{escaped}\"")
     } else {
@@ -138,7 +138,9 @@ pub fn workbook_export_csv(
     encoding: Option<String>,
 ) -> Result<CsvExportResult, String> {
     let encoding = CsvEncoding::parse(encoding.as_deref());
-    if !path.to_lowercase().ends_with(".csv") {
+    let path_lower = path.to_lowercase();
+    let is_tsv = path_lower.ends_with(".tsv");
+    if !path_lower.ends_with(".csv") && !is_tsv {
         return Ok(CsvExportResult {
             success: false,
             path,
@@ -147,6 +149,7 @@ pub fn workbook_export_csv(
             error: Some("CSV_INVALID_EXTENSION".into()),
         });
     }
+    let field_separator = if is_tsv { "\t" } else { "," };
 
     let root: Value = serde_json::from_str(&snapshot_json).map_err(|e| e.to_string())?;
 
@@ -328,10 +331,11 @@ pub fn workbook_export_csv(
 
     // Build the entire CSV body as UTF-8 first, then transcode to the chosen
     // encoding on write. Keeps the escaping/newline logic in one place.
+    let delim_char = field_separator.chars().next().unwrap_or(',');
     let mut body = String::new();
     for row in rows.iter() {
-        let line: Vec<String> = row.iter().map(|s| escape_csv_field(s)).collect();
-        body.push_str(&line.join(","));
+        let line: Vec<String> = row.iter().map(|s| escape_csv_field(s, delim_char)).collect();
+        body.push_str(&line.join(field_separator));
         body.push_str("\r\n");
     }
 
@@ -670,9 +674,32 @@ fn detect_and_decode(bytes: &[u8], override_enc: Option<&str>) -> (String, &'sta
     )
 }
 
+/// Pick the field delimiter from the file's extension and a quick scan of the
+/// first non-empty line. `.tsv` always means tab; `.csv` defaults to comma
+/// but will switch to tab if the first non-empty line has noticeably more
+/// tabs than commas (common when users mislabel exports).
+fn infer_delimiter(path_lower: &str, text: &str) -> u8 {
+    if path_lower.ends_with(".tsv") {
+        return b'\t';
+    }
+    let first_line = text.lines().find(|l| !l.is_empty()).unwrap_or("");
+    let commas = first_line.matches(',').count();
+    let tabs = first_line.matches('\t').count();
+    // Tabs win only when they're a clear majority — otherwise stick with the
+    // CSV-standard comma so legit comma data isn't reinterpreted.
+    if tabs > commas && tabs >= 2 {
+        b'\t'
+    } else {
+        b','
+    }
+}
+
 /// Pure-Rust CSV import. `encoding_override` is None for auto-detect.
+/// Accepts `.csv` and `.tsv` extensions; the delimiter is inferred from the
+/// extension first, then from the content as a fallback.
 pub fn import_csv_core(path: String, encoding_override: Option<String>) -> Result<ImportWorkbookResult, String> {
-    if !path.to_lowercase().ends_with(".csv") {
+    let lower = path.to_lowercase();
+    if !lower.ends_with(".csv") && !lower.ends_with(".tsv") {
         return Err("CSV_INVALID_EXTENSION".into());
     }
 
@@ -682,9 +709,11 @@ pub fn import_csv_core(path: String, encoding_override: Option<String>) -> Resul
     let raw = std::fs::read(&path).map_err(|e| e.to_string())?;
     let (text, encoding_name) = detect_and_decode(&raw, encoding_override.as_deref());
 
+    let delimiter = infer_delimiter(&lower, &text);
     let mut rdr = csv::ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
+        .delimiter(delimiter)
         .from_reader(text.as_bytes());
 
     let mut cell_data: Map<String, Value> = Map::new();

@@ -10,7 +10,9 @@ export type PathRoute =
 
 const COCO_EXT = [".coco"];
 const XLSX_EXT = [".xlsx", ".xlsm"];
-const CSV_EXT = [".csv"];
+// .tsv routes through the same import path as .csv — the Rust side picks the
+// right delimiter from the extension.
+const CSV_EXT = [".csv", ".tsv"];
 
 function endsWithAny(lower: string, exts: string[]): boolean {
   return exts.some((e) => lower.endsWith(e));

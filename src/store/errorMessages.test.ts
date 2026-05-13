@@ -22,7 +22,7 @@ describe("friendlyError", () => {
       ["XLSX_BUILD_FAILED", "xlsx の構築中にエラーが発生しました。"],
       ["XLSX_WRITE_FAILED", "xlsx の書き込みに失敗しました。ディスク容量や権限を確認してください。"],
       ["XLSX_SECURITY_BLOCKED", "セキュリティ上の制限を超えているため、ファイルを開けません。"],
-      ["CSV_INVALID_EXTENSION", "拡張子が .csv ではありません。"],
+      ["CSV_INVALID_EXTENSION", "拡張子が .csv / .tsv ではありません。"],
       ["CSV_EMPTY_WORKBOOK", "エクスポートできるシートが見つかりませんでした。"],
       ["CSV_TOO_LARGE", "CSV のセル数が上限（500万）を超えています。"],
       ["REVEAL_EMPTY_PATH", "ファイルパスが指定されていません。"],

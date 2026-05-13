@@ -386,5 +386,33 @@ describe("SnapshotHistoryDialog", () => {
       await new Promise((r) => setTimeout(r, 10));
       expect(container.querySelector(".snapshot-diag")).toBeNull();
     });
+
+    it("クリップボードにコピーボタンが診断情報を書き込む", async () => {
+      const user = userEvent.setup();
+      const writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: writeTextMock },
+        configurable: true,
+      });
+      setInvokeRouter({
+        workbook_diagnostic_info: {
+          path: "/tmp/wb.coco",
+          sizeBytes: 2048,
+          snapshotCount: 4,
+          schemaVersion: 1,
+          lastSavedAt: "2026-05-13T10:00:00Z",
+        },
+      });
+      render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => screen.getByLabelText("診断情報をコピー"));
+      await user.click(screen.getByLabelText("診断情報をコピー"));
+      expect(writeTextMock).toHaveBeenCalledTimes(1);
+      const payload = writeTextMock.mock.calls[0][0] as string;
+      expect(payload).toContain("/tmp/wb.coco");
+      expect(payload).toContain("2048");
+      expect(payload).toContain("snapshots: 4");
+      expect(payload).toContain("v1");
+      expect(payload).toContain("2026-05-13T10:00:00Z");
+    });
   });
 });

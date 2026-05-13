@@ -201,6 +201,28 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
             {diagInfo.schemaVersion !== null && (
               <span>· スキーマ v{diagInfo.schemaVersion}</span>
             )}
+            <button
+              type="button"
+              className="snapshot-diag-copy"
+              onClick={() => {
+                const text = [
+                  `path: ${diagInfo.path}`,
+                  `size: ${formatBytes(diagInfo.sizeBytes)} (${diagInfo.sizeBytes} bytes)`,
+                  `snapshots: ${diagInfo.snapshotCount}`,
+                  diagInfo.schemaVersion !== null ? `schema: v${diagInfo.schemaVersion}` : "schema: unknown",
+                  `lastSavedAt: ${diagInfo.lastSavedAt ?? "(none)"}`,
+                ].join("\n");
+                // navigator.clipboard.writeText is the supported web API; Tauri
+                // routes it to the OS clipboard automatically. Failure is
+                // non-critical (no clipboard permission, e.g.) — silently
+                // ignore.
+                navigator.clipboard?.writeText(text).catch(() => undefined);
+              }}
+              aria-label="診断情報をコピー"
+              title="診断情報をコピー（サポート問い合わせ時にお使いください）"
+            >
+              コピー
+            </button>
           </div>
         )}
         <footer className="snapshot-footer">

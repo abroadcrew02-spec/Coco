@@ -159,4 +159,65 @@ describe("App", () => {
       });
     });
   });
+
+  describe("close-request emitter", () => {
+    it("CloseConfirmDialog appears when a close listener resolves with the resolver", async () => {
+      // Capture the close-handler the useCloseGuard hook registers, so we can
+      // drive an exit attempt from the test.
+      let onCloseHandler:
+        | ((event: { preventDefault: () => void }) => void | Promise<void>)
+        | null = null;
+      onCloseRequestedMock.mockImplementation((fn) => {
+        onCloseHandler = fn;
+        return Promise.resolve(() => undefined);
+      });
+
+      useWorkbookStore.setState({ screen: "editor", saveStatus: "unsaved" });
+      render(<App />);
+      await waitFor(() => expect(onCloseHandler).not.toBeNull());
+      // Fire the close — App's listener will mount CloseConfirmDialog.
+      void onCloseHandler!({ preventDefault: () => undefined });
+      await waitFor(() => {
+        expect(screen.getByText("未保存の変更があります")).toBeTruthy();
+      });
+    });
+  });
+
+  describe("drop overlay", () => {
+    it("DropOverlay renders when the drag-drop event fires 'enter'", async () => {
+      let dragHandler: ((event: { payload: unknown }) => void) | null = null;
+      onDragDropEventMock.mockImplementation((fn) => {
+        dragHandler = fn;
+        return Promise.resolve(() => undefined);
+      });
+      render(<App />);
+      await waitFor(() => expect(dragHandler).not.toBeNull());
+      dragHandler!({ payload: { type: "enter", paths: [] } });
+      await waitFor(() => {
+        expect(screen.getByText("ここにファイルをドロップして開く")).toBeTruthy();
+      });
+    });
+  });
+
+  describe("screen transitions", () => {
+    it("re-renders HomeScreen when goHome is invoked from the editor", async () => {
+      useWorkbookStore.setState({
+        screen: "editor",
+        currentHandle: {
+          workbookId: "wb",
+          path: "/tmp/wb.coco",
+          sourceType: "coco",
+          snapshotJson: "{}",
+        },
+        currentSnapshotJson: "{}",
+      });
+      render(<App />);
+      await waitFor(() => screen.getByTestId("editor-screen-stub"));
+      useWorkbookStore.getState().goHome();
+      await waitFor(() => {
+        expect(screen.queryByTestId("editor-screen-stub")).toBeNull();
+        expect(screen.getByText("新規ワークブック")).toBeTruthy();
+      });
+    });
+  });
 });

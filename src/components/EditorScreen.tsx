@@ -31,6 +31,7 @@ import type { CompatibilityWarning } from "../types/workbook";
 import SheetPickerModal from "./SheetPickerModal";
 import SaveFailureDialog from "./SaveFailureDialog";
 import BusyOverlay from "./BusyOverlay";
+import SnapshotHistoryDialog from "./SnapshotHistoryDialog";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -85,6 +86,7 @@ export default function EditorScreen() {
   } = useWorkbookStore();
 
   const [sheetPicker, setSheetPicker] = useState<{ id: string; name: string }[] | null>(null);
+  const [snapshotsOpen, setSnapshotsOpen] = useState(false);
 
   useAutoSave();
 
@@ -244,6 +246,7 @@ export default function EditorScreen() {
     : "無題のワークブック";
   const isDirty = saveStatus === "unsaved";
   const fileLabel = isDirty ? `${fileName} •` : fileName;
+  const isCocoFile = (currentHandle?.path ?? "").toLowerCase().endsWith(".coco");
 
   return (
     <div className="editor-screen">
@@ -296,6 +299,17 @@ export default function EditorScreen() {
           >
             {isExporting ? "出力中..." : "CSV エクスポート"}
           </button>
+          {isCocoFile && (
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={() => setSnapshotsOpen(true)}
+              title="保存履歴（.coco の過去 5 世代）"
+              aria-label="スナップショット履歴"
+            >
+              履歴
+            </button>
+          )}
           <button
             type="button"
             className="toolbar-btn"
@@ -388,6 +402,7 @@ export default function EditorScreen() {
           onClose={dismissSaveError}
         />
       )}
+      {snapshotsOpen && <SnapshotHistoryDialog onClose={() => setSnapshotsOpen(false)} />}
     </div>
   );
 }

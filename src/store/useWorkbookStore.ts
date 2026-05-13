@@ -67,6 +67,14 @@ interface WorkbookState {
   setCsvImportEncoding: (enc: "auto" | "utf8" | "shift_jis") => Promise<void>;
   loadPinnedPaths: () => Promise<void>;
   togglePinned: (path: string) => Promise<void>;
+  listSnapshots: () => Promise<SnapshotMeta[]>;
+  openSnapshot: (snapshotId: number) => Promise<void>;
+}
+
+export interface SnapshotMeta {
+  snapshotId: number;
+  createdAt: string;
+  reason: string;
 }
 
 const AUTOSAVE_KEY = "autosave.interval_ms";
@@ -619,6 +627,44 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       await invoke("set_setting", { key: PINNED_PATHS_KEY, value: JSON.stringify(next) });
     } catch {
       // best-effort persistence
+    }
+  },
+
+  listSnapshots: async () => {
+    const { currentHandle } = get();
+    if (!currentHandle?.path) return [];
+    try {
+      return await invoke<SnapshotMeta[]>("workbook_list_snapshots", {
+        path: currentHandle.path,
+      });
+    } catch (e) {
+      set({ lastError: friendlyError(String(e)) });
+      return [];
+    }
+  },
+
+  openSnapshot: async (snapshotId: number) => {
+    const { currentHandle } = get();
+    if (!currentHandle?.path) return;
+    try {
+      set({ saveStatus: "loading" });
+      const result = await invoke<OpenWorkbookResult>("workbook_open_snapshot", {
+        path: currentHandle.path,
+        snapshotId,
+      });
+      // The Rust side returns path=null so the next Ctrl+S goes through
+      // Save As (req-style protection: don't let the user overwrite the
+      // current file with an older version by accident).
+      set({
+        screen: "editor",
+        currentHandle: { ...result.handle, path: null },
+        saveStatus: "unsaved",
+        importWarnings: result.warnings,
+        currentSnapshotJson: result.handle.snapshotJson,
+        lastError: null,
+      });
+    } catch (e) {
+      set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
     }
   },
 }));

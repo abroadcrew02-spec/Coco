@@ -35,6 +35,7 @@ export default function HomeScreen() {
   // scanning awkward. Below the threshold, an input would just be noise.
   const FILTER_THRESHOLD = 6;
   const [filterQuery, setFilterQuery] = useState("");
+  const [focusedRecentIdx, setFocusedRecentIdx] = useState(-1);
   const filterInputRef = useRef<HTMLInputElement | null>(null);
   // Sort pinned entries to the top; otherwise preserve the backend's
   // last_opened DESC order. Stable sort ensures non-pinned items keep their
@@ -51,9 +52,21 @@ export default function HomeScreen() {
       )
     : sortedRecents;
 
+  // Clamp focused index when the list shrinks (e.g. user types a filter that
+  // excludes the focused row). -1 if no rows match.
+  useEffect(() => {
+    setFocusedRecentIdx((i) => {
+      if (filteredRecents.length === 0) return -1;
+      return Math.min(i, filteredRecents.length - 1);
+    });
+  }, [filteredRecents.length]);
+
   // Ctrl/Cmd+F focuses the recents filter (when present). Escape inside the
   // input clears the query without losing focus. The home screen is the only
   // place this shortcut routes — the editor delegates Ctrl+F to Univer.
+  // Arrow keys move the recent-list focus, Enter opens the focused row. We
+  // ignore Arrow events that come from inside an input/textarea so the filter
+  // input retains its native caret behavior.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -63,11 +76,34 @@ export default function HomeScreen() {
           filterInputRef.current.focus();
           filterInputRef.current.select();
         }
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      const isInInput =
+        target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+      if (isInInput) return;
+      if (filteredRecents.length === 0) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setFocusedRecentIdx((i) => Math.min(i + 1, filteredRecents.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setFocusedRecentIdx((i) => Math.max(i < 0 ? 0 : i - 1, 0));
+      } else if (e.key === "Enter" && focusedRecentIdx >= 0) {
+        e.preventDefault();
+        const target = filteredRecents[focusedRecentIdx];
+        if (target) void handleRecentFile(target);
+      } else if (e.key === "Escape" && focusedRecentIdx >= 0) {
+        e.preventDefault();
+        setFocusedRecentIdx(-1);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+    // filteredRecents is recomputed every render (new array ref), so this
+    // effect re-binds on every render. Acceptable: keydown re-registration
+    // is cheap relative to the cost of stale closures.
+  });
 
   useEditorPreload();
 
@@ -254,18 +290,20 @@ export default function HomeScreen() {
             <p className="recent-empty-filter">該当するファイルがありません</p>
           )}
           <ul className="recent-list">
-            {filteredRecents.map((f: RecentFile) => {
+            {filteredRecents.map((f: RecentFile, idx: number) => {
               const opened = Date.parse(f.lastOpened);
               const ageLabel = Number.isFinite(opened) ? timeAgoJa(opened) : null;
               const fullDate = Number.isFinite(opened)
                 ? new Date(opened).toLocaleString("ja-JP")
                 : f.lastOpened;
               const isPinned = pinnedPaths.includes(f.path);
+              const isFocused = idx === focusedRecentIdx;
               return (
               <li
                 key={f.path}
-                className={`recent-item ${!f.exists ? "recent-item--missing" : ""} ${isPinned ? "recent-item--pinned" : ""}`}
+                className={`recent-item ${!f.exists ? "recent-item--missing" : ""} ${isPinned ? "recent-item--pinned" : ""} ${isFocused ? "recent-item--focused" : ""}`}
                 onClick={() => handleRecentFile(f)}
+                onMouseEnter={() => setFocusedRecentIdx(idx)}
               >
                 <span className="recent-name">
                   {isPinned && <span className="recent-pin-indicator" aria-hidden="true">📌</span>}

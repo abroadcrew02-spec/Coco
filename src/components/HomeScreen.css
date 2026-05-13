@@ -258,6 +258,11 @@
   border-color: #b2dfca;
 }
 
+.recent-item--focused {
+  border-color: #4a90e2;
+  background-color: #f0f6ff;
+}
+
 .recent-item--missing {
   opacity: 0.55;
   cursor: default;

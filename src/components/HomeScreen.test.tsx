@@ -261,6 +261,65 @@ describe("HomeScreen", () => {
       });
     });
 
+    describe("keyboard navigation", () => {
+      it("ArrowDown moves focus to the first row, then second", () => {
+        const { container } = render(<HomeScreen />);
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        const items = container.querySelectorAll(".recent-list .recent-item");
+        expect(items[0].className).toContain("recent-item--focused");
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        expect(items[1].className).toContain("recent-item--focused");
+        expect(items[0].className).not.toContain("recent-item--focused");
+      });
+
+      it("ArrowUp from the first row stays at row 0 (no underflow)", () => {
+        const { container } = render(<HomeScreen />);
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        fireEvent.keyDown(window, { key: "ArrowUp" });
+        const items = container.querySelectorAll(".recent-list .recent-item");
+        expect(items[0].className).toContain("recent-item--focused");
+      });
+
+      it("Enter on a focused row opens that file", async () => {
+        invokeMock.mockResolvedValue({
+          handle: { workbookId: "wb", path: "/tmp/a.xlsx", sourceType: "xlsx", snapshotJson: "{}" },
+          warnings: [],
+        });
+        render(<HomeScreen />);
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        fireEvent.keyDown(window, { key: "Enter" });
+        // a.xlsx is row 0.
+        const call = invokeMock.mock.calls.find((c) => c[0] === "workbook_import_xlsx");
+        expect(call?.[1]).toEqual({ path: "/tmp/a.xlsx" });
+      });
+
+      it("Escape clears the row focus", () => {
+        const { container } = render(<HomeScreen />);
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        const items = container.querySelectorAll(".recent-list .recent-item");
+        expect(items[0].className).toContain("recent-item--focused");
+        fireEvent.keyDown(window, { key: "Escape" });
+        expect(container.querySelector(".recent-item--focused")).toBeNull();
+      });
+
+      it("Arrow keys are ignored when focus is inside an input (filter caret behavior)", () => {
+        useWorkbookStore.setState({
+          recentFiles: [
+            { path: "/tmp/a.xlsx", name: "a.xlsx", lastOpened: "2026-05-13T10:00:00Z", exists: true },
+            { path: "/tmp/b.csv", name: "b.csv", lastOpened: "2026-05-12T10:00:00Z", exists: true },
+            { path: "/tmp/c.xlsx", name: "c.xlsx", lastOpened: "2026-05-11T10:00:00Z", exists: true },
+            { path: "/tmp/d.xlsx", name: "d.xlsx", lastOpened: "2026-05-10T10:00:00Z", exists: true },
+            { path: "/tmp/e.xlsx", name: "e.xlsx", lastOpened: "2026-05-09T10:00:00Z", exists: true },
+            { path: "/tmp/f.xlsx", name: "f.xlsx", lastOpened: "2026-05-08T10:00:00Z", exists: true },
+          ],
+        });
+        const { container } = render(<HomeScreen />);
+        const input = screen.getByLabelText("最近使ったファイルを絞り込む");
+        fireEvent.keyDown(input, { key: "ArrowDown" });
+        expect(container.querySelector(".recent-item--focused")).toBeNull();
+      });
+    });
+
     it("does not render the filter input below the threshold", () => {
       // Default beforeEach above seeds 3 recents — below the threshold (6).
       render(<HomeScreen />);

@@ -17,6 +17,9 @@ const FRIENDLY: Record<string, string> = {
   CSV_INVALID_EXTENSION: "拡張子が .csv ではありません。",
   CSV_EMPTY_WORKBOOK: "エクスポートできるシートが見つかりませんでした。",
   CSV_TOO_LARGE: "CSV のセル数が上限（500万）を超えています。",
+
+  // reveal-in-file-manager (commands/shell.rs)
+  REVEAL_EMPTY_PATH: "ファイルパスが指定されていません。",
 };
 
 const PREFIX_FRIENDLY: Array<[string, (rest: string) => string]> = [
@@ -43,6 +46,8 @@ const PREFIX_FRIENDLY: Array<[string, (rest: string) => string]> = [
   ["Recovery candidate not found:", (rest) => `復元候補が見つかりません（${rest.trim()}）`],
   // "Invalid xlsx (zip): <detail>" — security_scan when ZipArchive fails
   ["Invalid xlsx (zip):", (rest) => `xlsx として開けません。ZIP 構造が不正です（${rest.trim()}）`],
+  // "REVEAL_SPAWN_FAILED: <io error>" — reveal_in_file_manager couldn't spawn explorer/open/xdg-open
+  ["REVEAL_SPAWN_FAILED:", (rest) => `ファイルマネージャを起動できませんでした（${rest.trim()}）`],
 ];
 
 export function friendlyError(raw: string | null | undefined): string | null {

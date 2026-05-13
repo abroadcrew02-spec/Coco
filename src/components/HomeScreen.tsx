@@ -6,6 +6,7 @@ import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { useEditorPreload } from "../hooks/useEditorPreload";
 import { routeOpenPath } from "../store/pathRouter";
 import { recoveryReasonLabel } from "../store/recoveryLabels";
+import { friendlyError } from "../store/errorMessages";
 import { timeAgoJa } from "./timeAgo";
 import type { RecentFile, RecoveryCandidate } from "../types/workbook";
 import "./HomeScreen.css";
@@ -261,7 +262,9 @@ export default function HomeScreen() {
                   className="recent-reveal"
                   onClick={(e) => {
                     e.stopPropagation();
-                    invoke("reveal_in_file_manager", { path: f.path }).catch(() => undefined);
+                    invoke("reveal_in_file_manager", { path: f.path }).catch((err) => {
+                      useWorkbookStore.setState({ lastError: friendlyError(String(err)) });
+                    });
                   }}
                   aria-label="ファイルの場所を開く"
                   title="ファイルの場所を開く"

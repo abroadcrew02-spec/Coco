@@ -25,6 +25,7 @@ describe("friendlyError", () => {
       ["CSV_INVALID_EXTENSION", "拡張子が .csv ではありません。"],
       ["CSV_EMPTY_WORKBOOK", "エクスポートできるシートが見つかりませんでした。"],
       ["CSV_TOO_LARGE", "CSV のセル数が上限（500万）を超えています。"],
+      ["REVEAL_EMPTY_PATH", "ファイルパスが指定されていません。"],
     ];
     for (const [code, expected] of cases) {
       it(`maps ${code} → human message`, () => {
@@ -83,6 +84,11 @@ describe("friendlyError", () => {
     it("formats Invalid xlsx (zip)", () => {
       expect(friendlyError("Invalid xlsx (zip): unexpected EOF")).toBe(
         "xlsx として開けません。ZIP 構造が不正です（unexpected EOF）"
+      );
+    });
+    it("formats REVEAL_SPAWN_FAILED", () => {
+      expect(friendlyError("REVEAL_SPAWN_FAILED: No such file (os error 2)")).toBe(
+        "ファイルマネージャを起動できませんでした（No such file (os error 2)）"
       );
     });
     it("trims whitespace in the detail tail", () => {

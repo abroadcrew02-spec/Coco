@@ -158,6 +158,24 @@ describe("HomeScreen", () => {
       expect(screen.getByText("見つかりません")).toBeTruthy();
     });
 
+    it("renders a relative-time label for each existing recent (via .recent-when)", () => {
+      const { container } = render(<HomeScreen />);
+      // Both a.xlsx and b.csv exist; c.coco is missing and shows the badge instead.
+      const whens = container.querySelectorAll(".recent-when");
+      expect(whens.length).toBeGreaterThanOrEqual(2);
+      // Each label should be non-empty (the exact value depends on system clock).
+      whens.forEach((el) => expect(el.textContent?.trim().length).toBeGreaterThan(0));
+    });
+
+    it("does not crash on an unparseable lastOpened value (defensive)", () => {
+      useWorkbookStore.setState({
+        recentFiles: [
+          { path: "/tmp/odd.xlsx", name: "odd.xlsx", lastOpened: "not-a-date", exists: true },
+        ],
+      });
+      expect(() => render(<HomeScreen />)).not.toThrow();
+    });
+
     it("shows 前回のファイルを続ける when the first recent exists", () => {
       render(<HomeScreen />);
       expect(screen.getByText("前回のファイルを続ける")).toBeTruthy();

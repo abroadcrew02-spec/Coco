@@ -4,6 +4,7 @@ import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { useEditorPreload } from "../hooks/useEditorPreload";
 import { routeOpenPath } from "../store/pathRouter";
 import { recoveryReasonLabel } from "../store/recoveryLabels";
+import { timeAgoJa } from "./timeAgo";
 import type { RecentFile, RecoveryCandidate } from "../types/workbook";
 import "./HomeScreen.css";
 
@@ -183,7 +184,13 @@ export default function HomeScreen() {
             </button>
           </div>
           <ul className="recent-list">
-            {recentFiles.map((f: RecentFile) => (
+            {recentFiles.map((f: RecentFile) => {
+              const opened = Date.parse(f.lastOpened);
+              const ageLabel = Number.isFinite(opened) ? timeAgoJa(opened) : null;
+              const fullDate = Number.isFinite(opened)
+                ? new Date(opened).toLocaleString("ja-JP")
+                : f.lastOpened;
+              return (
               <li
                 key={f.path}
                 className={`recent-item ${!f.exists ? "recent-item--missing" : ""}`}
@@ -191,6 +198,11 @@ export default function HomeScreen() {
               >
                 <span className="recent-name">{f.name}</span>
                 <span className="recent-path">{f.path}</span>
+                {ageLabel && (
+                  <span className="recent-when" title={`最終アクセス: ${fullDate}`}>
+                    {ageLabel}
+                  </span>
+                )}
                 {!f.exists && <span className="recent-badge">見つかりません</span>}
                 <button
                   type="button"
@@ -205,7 +217,8 @@ export default function HomeScreen() {
                   ×
                 </button>
               </li>
-            ))}
+              );
+            })}
           </ul>
         </div>
       )}

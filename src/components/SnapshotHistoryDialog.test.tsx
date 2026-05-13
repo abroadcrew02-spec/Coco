@@ -40,7 +40,22 @@ function resetStore() {
 
 beforeEach(() => {
   invokeMock.mockReset();
-  invokeMock.mockResolvedValue([]);
+  // Default for unmatched calls: resolve to []. Specific tests use
+  // mockResolvedValueOnce to override per-call ordering. The dialog calls
+  // both workbook_list_snapshots and workbook_diagnostic_info on mount, so
+  // tests that mock specific responses need to account for both.
+  invokeMock.mockImplementation((cmd: string) => {
+    if (cmd === "workbook_diagnostic_info") {
+      return Promise.resolve({
+        path: "/tmp/wb.coco",
+        sizeBytes: 4096,
+        snapshotCount: 0,
+        schemaVersion: 1,
+        lastSavedAt: null,
+      });
+    }
+    return Promise.resolve([]);
+  });
   resetStore();
   onClose = vi.fn<() => void>();
 });
@@ -218,11 +233,37 @@ describe("SnapshotHistoryDialog", () => {
     });
   });
 
+  // Helper for vacuum / integrity tests: switch invokeMock to a command-aware
+  // dispatcher so test order doesn't depend on the dialog's effect call order.
+  function setInvokeRouter(routes: Record<string, unknown>) {
+    invokeMock.mockReset();
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd in routes) {
+        const v = routes[cmd];
+        if (v && typeof v === "object" && "__reject" in (v as object)) {
+          return Promise.reject((v as { __reject: unknown }).__reject);
+        }
+        return Promise.resolve(v);
+      }
+      // Default: empty snapshot list, harmless diag info.
+      if (cmd === "workbook_list_snapshots") return Promise.resolve([]);
+      if (cmd === "workbook_diagnostic_info") {
+        return Promise.resolve({
+          path: "/tmp/wb.coco",
+          sizeBytes: 4096,
+          snapshotCount: 0,
+          schemaVersion: 1,
+          lastSavedAt: null,
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+  }
+
   describe("vacuum", () => {
     it("clicking ファイルを最適化 invokes workbook_vacuum and shows the byte savings", async () => {
       const user = userEvent.setup();
-      invokeMock.mockResolvedValueOnce([]); // listSnapshots
-      invokeMock.mockResolvedValueOnce({ beforeBytes: 10240, afterBytes: 6144 }); // vacuum
+      setInvokeRouter({ workbook_vacuum: { beforeBytes: 10240, afterBytes: 6144 } });
       render(<SnapshotHistoryDialog onClose={onClose} />);
       await waitFor(() => screen.getByText("ファイルを最適化"));
       await user.click(screen.getByText("ファイルを最適化"));
@@ -236,8 +277,7 @@ describe("SnapshotHistoryDialog", () => {
 
     it("vacuum on an already-compact file shows the 'already optimized' message", async () => {
       const user = userEvent.setup();
-      invokeMock.mockResolvedValueOnce([]); // listSnapshots
-      invokeMock.mockResolvedValueOnce({ beforeBytes: 4096, afterBytes: 4096 }); // vacuum
+      setInvokeRouter({ workbook_vacuum: { beforeBytes: 4096, afterBytes: 4096 } });
       render(<SnapshotHistoryDialog onClose={onClose} />);
       await waitFor(() => screen.getByText("ファイルを最適化"));
       await user.click(screen.getByText("ファイルを最適化"));
@@ -248,8 +288,7 @@ describe("SnapshotHistoryDialog", () => {
 
     it("vacuum failure shows the 'optimization failed' message", async () => {
       const user = userEvent.setup();
-      invokeMock.mockResolvedValueOnce([]); // listSnapshots
-      invokeMock.mockRejectedValueOnce("disk full"); // vacuum
+      setInvokeRouter({ workbook_vacuum: { __reject: "disk full" } });
       render(<SnapshotHistoryDialog onClose={onClose} />);
       await waitFor(() => screen.getByText("ファイルを最適化"));
       await user.click(screen.getByText("ファイルを最適化"));
@@ -262,8 +301,7 @@ describe("SnapshotHistoryDialog", () => {
   describe("integrity check", () => {
     it("clicking 整合性チェック invokes workbook_check_integrity and shows OK", async () => {
       const user = userEvent.setup();
-      invokeMock.mockResolvedValueOnce([]); // listSnapshots
-      invokeMock.mockResolvedValueOnce({ ok: true, issues: [] }); // check
+      setInvokeRouter({ workbook_check_integrity: { ok: true, issues: [] } });
       render(<SnapshotHistoryDialog onClose={onClose} />);
       await waitFor(() => screen.getByText("整合性チェック"));
       await user.click(screen.getByText("整合性チェック"));
@@ -276,10 +314,11 @@ describe("SnapshotHistoryDialog", () => {
 
     it("shows the issue list when ok=false", async () => {
       const user = userEvent.setup();
-      invokeMock.mockResolvedValueOnce([]);
-      invokeMock.mockResolvedValueOnce({
-        ok: false,
-        issues: ["page 5 corrupt", "missing index", "row size mismatch"],
+      setInvokeRouter({
+        workbook_check_integrity: {
+          ok: false,
+          issues: ["page 5 corrupt", "missing index", "row size mismatch"],
+        },
       });
       render(<SnapshotHistoryDialog onClose={onClose} />);
       await waitFor(() => screen.getByText("整合性チェック"));
@@ -295,8 +334,7 @@ describe("SnapshotHistoryDialog", () => {
 
     it("integrity-check failure shows the failure hint", async () => {
       const user = userEvent.setup();
-      invokeMock.mockResolvedValueOnce([]);
-      invokeMock.mockRejectedValueOnce("File not found: /tmp/wb.coco");
+      setInvokeRouter({ workbook_check_integrity: { __reject: "File not found: /tmp/wb.coco" } });
       render(<SnapshotHistoryDialog onClose={onClose} />);
       await waitFor(() => screen.getByText("整合性チェック"));
       await user.click(screen.getByText("整合性チェック"));
@@ -307,9 +345,10 @@ describe("SnapshotHistoryDialog", () => {
 
     it("vacuum status is cleared when integrity check runs", async () => {
       const user = userEvent.setup();
-      invokeMock.mockResolvedValueOnce([]);
-      invokeMock.mockResolvedValueOnce({ beforeBytes: 10000, afterBytes: 5000 }); // vacuum
-      invokeMock.mockResolvedValueOnce({ ok: true, issues: [] }); // integrity
+      setInvokeRouter({
+        workbook_vacuum: { beforeBytes: 10000, afterBytes: 5000 },
+        workbook_check_integrity: { ok: true, issues: [] },
+      });
       render(<SnapshotHistoryDialog onClose={onClose} />);
       await waitFor(() => screen.getByText("ファイルを最適化"));
       await user.click(screen.getByText("ファイルを最適化"));
@@ -317,6 +356,35 @@ describe("SnapshotHistoryDialog", () => {
       await user.click(screen.getByText("整合性チェック"));
       await waitFor(() => screen.getByText(/問題ありません/));
       expect(screen.queryByText(/解放しました/)).toBeNull();
+    });
+  });
+
+  describe("diagnostic info", () => {
+    it("renders file size + snapshot count when diagnostic call resolves", async () => {
+      setInvokeRouter({
+        workbook_diagnostic_info: {
+          path: "/tmp/wb.coco",
+          sizeBytes: 1_048_576,
+          snapshotCount: 3,
+          schemaVersion: 1,
+          lastSavedAt: "2026-05-13T10:00:00Z",
+        },
+      });
+      render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => {
+        const node = screen.getByText(/サイズ:/);
+        expect(node.textContent).toContain("1.00 MB");
+      });
+      expect(screen.getByText(/スナップショット: 3 件/)).toBeTruthy();
+      expect(screen.getByText(/スキーマ v1/)).toBeTruthy();
+    });
+
+    it("omits the diagnostic line when the command rejects", async () => {
+      setInvokeRouter({ workbook_diagnostic_info: { __reject: "broken" } });
+      const { container } = render(<SnapshotHistoryDialog onClose={onClose} />);
+      // Give the effect a tick to settle.
+      await new Promise((r) => setTimeout(r, 10));
+      expect(container.querySelector(".snapshot-diag")).toBeNull();
     });
   });
 });

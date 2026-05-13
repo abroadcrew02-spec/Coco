@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import { useWorkbookStore, type SnapshotMeta } from "../store/useWorkbookStore";
+import {
+  useWorkbookStore,
+  type SnapshotMeta,
+  type DiagnosticInfo,
+} from "../store/useWorkbookStore";
 import { recoveryReasonLabel } from "../store/recoveryLabels";
 import { timeAgoJa } from "./timeAgo";
 import "./SnapshotHistoryDialog.css";
@@ -22,6 +26,7 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
   const openSnapshot = useWorkbookStore((s) => s.openSnapshot);
   const vacuumWorkbook = useWorkbookStore((s) => s.vacuumWorkbook);
   const checkIntegrity = useWorkbookStore((s) => s.checkIntegrity);
+  const workbookDiagnosticInfo = useWorkbookStore((s) => s.workbookDiagnosticInfo);
   const [snapshots, setSnapshots] = useState<SnapshotMeta[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -29,6 +34,7 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
   const [vacuumRunning, setVacuumRunning] = useState(false);
   const [integrityStatus, setIntegrityStatus] = useState<string | null>(null);
   const [integrityRunning, setIntegrityRunning] = useState(false);
+  const [diagInfo, setDiagInfo] = useState<DiagnosticInfo | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,10 +52,15 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
           setLoading(false);
         }
       });
+    // Fetch diagnostic info in parallel; failure is non-critical so it just
+    // leaves the diag line blank.
+    workbookDiagnosticInfo().then((info) => {
+      if (!cancelled) setDiagInfo(info);
+    });
     return () => {
       cancelled = true;
     };
-  }, [listSnapshots]);
+  }, [listSnapshots, workbookDiagnosticInfo]);
 
   const handleOpen = async (snapshotId: number) => {
     await openSnapshot(snapshotId);
@@ -183,6 +194,15 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
             </ul>
           )}
         </div>
+        {diagInfo && (
+          <div className="snapshot-diag">
+            <span>サイズ: {formatBytes(diagInfo.sizeBytes)}</span>
+            <span>· スナップショット: {diagInfo.snapshotCount} 件</span>
+            {diagInfo.schemaVersion !== null && (
+              <span>· スキーマ v{diagInfo.schemaVersion}</span>
+            )}
+          </div>
+        )}
         <footer className="snapshot-footer">
           <button
             type="button"

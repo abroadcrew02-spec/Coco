@@ -71,6 +71,15 @@ interface WorkbookState {
   openSnapshot: (snapshotId: number) => Promise<void>;
   vacuumWorkbook: () => Promise<VacuumResult | null>;
   checkIntegrity: () => Promise<IntegrityCheckResult | null>;
+  workbookDiagnosticInfo: () => Promise<DiagnosticInfo | null>;
+}
+
+export interface DiagnosticInfo {
+  path: string;
+  sizeBytes: number;
+  snapshotCount: number;
+  schemaVersion: number | null;
+  lastSavedAt: string | null;
 }
 
 export interface SnapshotMeta {
@@ -700,6 +709,19 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       });
     } catch (e) {
       set({ lastError: friendlyError(String(e)) });
+      return null;
+    }
+  },
+
+  workbookDiagnosticInfo: async () => {
+    const { currentHandle } = get();
+    if (!currentHandle?.path) return null;
+    try {
+      return await invoke<DiagnosticInfo>("workbook_diagnostic_info", {
+        path: currentHandle.path,
+      });
+    } catch {
+      // non-critical: dialog can render without it
       return null;
     }
   },

@@ -116,7 +116,10 @@ export default function EditorScreen() {
       const chosen = await saveDialog({
         title: `CSV としてエクスポート — ${sheet.name}`,
         defaultPath: baseName,
-        filters: [{ name: "CSV (UTF-8)", extensions: ["csv"] }],
+        filters: [
+          { name: "CSV (カンマ区切り)", extensions: ["csv"] },
+          { name: "TSV (タブ区切り)", extensions: ["tsv"] },
+        ],
       });
       if (!chosen) return;
       await exportCsvToPath(chosen, sheet.id);

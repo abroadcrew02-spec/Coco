@@ -111,10 +111,10 @@ export default function HomeScreen() {
     const selected = await open({
       multiple: false,
       filters: [
-        { name: "Excel / Coco / CSV", extensions: ["xlsx", "xlsm", "coco", "csv"] },
+        { name: "Excel / Coco / CSV / TSV", extensions: ["xlsx", "xlsm", "coco", "csv", "tsv"] },
         { name: "Excel Files", extensions: ["xlsx", "xlsm"] },
         { name: "Coco Files", extensions: ["coco"] },
-        { name: "CSV Files", extensions: ["csv"] },
+        { name: "CSV / TSV Files", extensions: ["csv", "tsv"] },
       ],
     });
     if (!selected) return;

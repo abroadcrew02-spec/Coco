@@ -300,7 +300,20 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                     } else {
                         format!("={f}")
                     };
-                    row_map.insert(c.to_string(), json!({ "f": f }));
+                    // Preserve the calamine-cached display value alongside the
+                    // formula. Univer will recalc when it can, but if it can't
+                    // (unsupported function, missing dependency) the user still
+                    // sees the value Excel computed instead of an empty cell.
+                    let mut cell_obj = json!({ "f": f });
+                    if let Some(cached) = data_to_cell(cell) {
+                        if let Value::Object(ref cached_map) = cached {
+                            let target = cell_obj.as_object_mut().unwrap();
+                            for (k, v) in cached_map.iter() {
+                                target.insert(k.clone(), v.clone());
+                            }
+                        }
+                    }
+                    row_map.insert(c.to_string(), cell_obj);
                     non_empty_cells += 1;
                     continue;
                 }

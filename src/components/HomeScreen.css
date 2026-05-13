@@ -424,6 +424,26 @@
   font-size: 11px;
 }
 
+.recent-kind {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 5px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 3px;
+  background: #eee;
+  color: #555;
+  vertical-align: 1px;
+}
+
+.recent-kind--xlsx { background: #e8f5e9; color: #2e7d32; }
+.recent-kind--xlsm { background: #fff3e0; color: #ef6c00; }
+.recent-kind--csv  { background: #fff8e1; color: #f57f17; }
+.recent-kind--tsv  { background: #fff8e1; color: #f57f17; }
+.recent-kind--coco { background: #f3e5f5; color: #6a1b9a; }
+
 .recent-remove:hover {
   color: #b71c1c;
   background-color: #ffebee;

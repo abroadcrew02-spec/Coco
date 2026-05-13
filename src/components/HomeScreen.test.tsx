@@ -155,6 +155,16 @@ describe("HomeScreen", () => {
       expect(screen.getByText("/tmp/c.coco")).toBeTruthy();
     });
 
+    it("renders a kind badge per file (xlsx / csv / coco)", () => {
+      const { container } = render(<HomeScreen />);
+      // Three recents seeded in beforeEach: a.xlsx, b.csv, c.coco (missing)
+      const badges = container.querySelectorAll(".recent-kind");
+      expect(badges).toHaveLength(3);
+      expect(badges[0].textContent).toBe("xlsx");
+      expect(badges[1].textContent).toBe("csv");
+      expect(badges[2].textContent).toBe("coco");
+    });
+
     it("flags missing files with 見つかりません badge", () => {
       render(<HomeScreen />);
       expect(screen.getByText("見つかりません")).toBeTruthy();

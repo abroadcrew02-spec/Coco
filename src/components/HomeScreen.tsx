@@ -313,6 +313,21 @@ export default function HomeScreen() {
               const isPinned = pinnedPaths.includes(f.path);
               const isFocused = idx === focusedRecentIdx;
               const separatorBefore = showSeparator && idx === firstUnpinnedIdx;
+              // Type badge — derived from extension via routeOpenPath so it
+              // stays consistent with how the file would be opened.
+              const route = routeOpenPath(f.path);
+              const kindLabel =
+                route.kind === "xlsx"
+                  ? f.path.toLowerCase().endsWith(".xlsm")
+                    ? "xlsm"
+                    : "xlsx"
+                  : route.kind === "csv"
+                  ? f.path.toLowerCase().endsWith(".tsv")
+                    ? "tsv"
+                    : "csv"
+                  : route.kind === "coco"
+                  ? "coco"
+                  : "?";
               return [
                 separatorBefore && (
                   <li
@@ -339,6 +354,7 @@ export default function HomeScreen() {
               >
                 <span className="recent-name">
                   {isPinned && <span className="recent-pin-indicator" aria-hidden="true">📌</span>}
+                  <span className={`recent-kind recent-kind--${kindLabel}`}>{kindLabel}</span>
                   {f.name}
                 </span>
                 <span className="recent-path">{f.path}</span>

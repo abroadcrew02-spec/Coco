@@ -20,12 +20,13 @@ afterEach(() => cleanup());
 
 describe("HelpDialog", () => {
   describe("rendering", () => {
-    it("renders the title and three sections", () => {
+    it("renders the title and core sections", () => {
       render(<HelpDialog onClose={onClose} />);
       expect(screen.getByText("Coco — ヘルプ")).toBeTruthy();
       expect(screen.getByText("キーボードショートカット（Coco）")).toBeTruthy();
       expect(screen.getByText("編集ショートカット（Univer 標準）")).toBeTruthy();
       expect(screen.getByText("対応ファイル形式")).toBeTruthy();
+      expect(screen.getByText(".coco のバージョン履歴")).toBeTruthy();
       expect(screen.getByText("このアプリについて")).toBeTruthy();
     });
 

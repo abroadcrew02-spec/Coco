@@ -114,6 +114,15 @@ export default function HelpDialog({ onClose }: Props) {
             </ul>
           </section>
           <section className="help-section">
+            <h3>.coco のバージョン履歴</h3>
+            <p className="help-about">
+              .coco ファイルでは過去 5 回までの保存ポイントが保持されます。
+              エディタ画面の「履歴」ボタンから一覧を開き、過去のバージョンを
+              閲覧できます（編集後の Ctrl+S は別名保存となり、現在のファイルは
+              上書きされません）。
+            </p>
+          </section>
+          <section className="help-section">
             <h3>このアプリについて</h3>
             <p className="help-about">
               Coco{version ? ` v${version}` : ""} · ローカルファースト表計算<br />

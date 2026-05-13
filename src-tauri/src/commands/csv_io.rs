@@ -42,6 +42,37 @@ fn format_number(n: f64) -> String {
     }
 }
 
+/// Inverse of excel_serial_from_date: convert a date serial back to a
+/// chrono::NaiveDate, handling the 1900-leap-year quirk. Returns None for
+/// values outside chrono's representable range (negative or extremely large
+/// serials, which shouldn't appear in real workbooks).
+fn excel_serial_to_date(serial: f64) -> Option<chrono::NaiveDate> {
+    // Reverse the adjustment used on import. Dates >= 1900-03-01 had +1 added
+    // to skip the bogus 1900-02-29.
+    let leap_bug_serial = 61.0;
+    let days = if serial >= leap_bug_serial {
+        serial as i64 - 1
+    } else {
+        serial as i64
+    };
+    let epoch = chrono::NaiveDate::from_ymd_opt(1899, 12, 31)?;
+    epoch.checked_add_signed(chrono::Duration::days(days))
+}
+
+/// Returns true if the cell's `_fmt` looks like a date-only format we should
+/// stringify as YYYY-MM-DD on export. Datetime / time-only formats aren't
+/// recognized yet — those round-trip as raw serials.
+fn is_date_only_format(fmt: &str) -> bool {
+    let lower = fmt.to_ascii_lowercase();
+    // Common date-only formats: "yyyy-mm-dd", "yyyy/mm/dd", "yyyy年m月d日".
+    // Match any format that mentions year + month + day without hours.
+    let has_year = lower.contains('y');
+    let has_month = lower.contains('m');
+    let has_day = lower.contains('d');
+    let has_time = lower.contains('h') || lower.contains('s');
+    has_year && has_month && has_day && !has_time
+}
+
 #[tauri::command]
 pub fn list_sheet_names(snapshot_json: String) -> Result<Vec<SheetInfo>, String> {
     let root: Value = serde_json::from_str(&snapshot_json).map_err(|e| e.to_string())?;
@@ -214,6 +245,7 @@ pub fn workbook_export_csv(
 
                 let v_field = cell.get("v");
                 let f_field = cell.get("f").and_then(|f| f.as_str());
+                let fmt_field = cell.get("_fmt").and_then(|f| f.as_str());
 
                 let (raw, is_string_kind) = if let Some(v) = v_field {
                     match v {
@@ -223,7 +255,19 @@ pub fn workbook_export_csv(
                             false,
                         ),
                         Value::Number(n) => {
-                            let s = if let Some(f) = n.as_f64() {
+                            let serial = n.as_f64();
+                            // Date-formatted numeric cell → render as YYYY-MM-DD
+                            // so round-tripping through CSV preserves the date.
+                            let s = if let (Some(f), Some(fmt)) = (serial, fmt_field) {
+                                if is_date_only_format(fmt) {
+                                    match excel_serial_to_date(f) {
+                                        Some(d) => d.format("%Y-%m-%d").to_string(),
+                                        None => format_number(f),
+                                    }
+                                } else {
+                                    format_number(f)
+                                }
+                            } else if let Some(f) = serial {
                                 format_number(f)
                             } else {
                                 n.to_string()

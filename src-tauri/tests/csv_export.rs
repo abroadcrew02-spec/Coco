@@ -342,3 +342,89 @@ fn shift_jis_export_warns_on_unrepresentable_chars() {
         result.warnings.iter().map(|w| &w.code).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn date_cells_export_as_yyyy_mm_dd() {
+    // Cells whose _fmt looks like a date should render as YYYY-MM-DD on
+    // export so that an import → export round-trip preserves the date.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "dates.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": {
+                        "0": { "v": 46155.0, "_fmt": "yyyy-mm-dd" },
+                        "1": { "v": 61.0, "_fmt": "yyyy-mm-dd" },
+                        "2": { "v": 12345.0 }
+                    }
+                }
+            }
+        }
+    }"#;
+    let result =
+        workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    assert!(result.success, "export failed: {:?}", result.error);
+
+    let bytes = fs::read(&path).unwrap();
+    let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
+    let first_line = s.split("\r\n").next().unwrap();
+    let cells: Vec<&str> = first_line.split(',').collect();
+    // 46155 → 2026-05-13, 61 → 1900-03-01, untagged 12345 stays numeric.
+    assert_eq!(cells, vec!["2026-05-13", "1900-03-01", "12345"]);
+}
+
+#[test]
+fn non_date_format_strings_export_as_numbers() {
+    // Numeric cell with a non-date _fmt (currency, percent, etc.) should
+    // still be exported as a number string, not interpreted as a date.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "fmt.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": {
+                        "0": { "v": 0.5, "_fmt": "0.00%" },
+                        "1": { "v": 1000.0, "_fmt": "¥#,##0" }
+                    }
+                }
+            }
+        }
+    }"#;
+    let _ = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    let bytes = fs::read(&path).unwrap();
+    let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
+    let first_line = s.split("\r\n").next().unwrap();
+    assert_eq!(first_line, "0.5,1000");
+}
+
+#[test]
+fn datetime_format_falls_through_to_serial() {
+    // _fmt that contains an hour ('h') is NOT a date-only format and stays
+    // as a raw serial — datetime export is a follow-up iteration.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "dt.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": {
+                        "0": { "v": 46155.5, "_fmt": "yyyy-mm-dd hh:mm:ss" }
+                    }
+                }
+            }
+        }
+    }"#;
+    let _ = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    let bytes = fs::read(&path).unwrap();
+    let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
+    let first_line = s.split("\r\n").next().unwrap();
+    assert_eq!(first_line, "46155.5");
+}

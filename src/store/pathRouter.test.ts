@@ -123,4 +123,55 @@ describe("routeOpenPath", () => {
       expect(routeOpenPath("/tmp/data.2026.csv").kind).toBe("csv");
     });
   });
+
+  // --- Audit findings (T2) — item 18 ---------------------------------------
+
+  describe("audit item 18: multi-dot filenames", () => {
+    it("routes my..weird..name.xlsx to xlsx (consecutive dots in basename)", () => {
+      const r = routeOpenPath("/tmp/my..weird..name.xlsx");
+      expect(r).toEqual({ kind: "xlsx", path: "/tmp/my..weird..name.xlsx" });
+    });
+
+    it("routes report.2026.05.13.xlsx to xlsx (date-style multi-dot)", () => {
+      const r = routeOpenPath("/tmp/report.2026.05.13.xlsx");
+      expect(r).toEqual({ kind: "xlsx", path: "/tmp/report.2026.05.13.xlsx" });
+    });
+
+    it("routes ...xlsx to xlsx (leading-dots filename — confirms current behavior)", () => {
+      // Lower-case ends with ".xlsx", so endsWithAny matches.
+      const r = routeOpenPath("/tmp/...xlsx");
+      expect(r.kind).toBe("xlsx");
+    });
+  });
+
+  // --- Audit findings (T2) — item 19 ---------------------------------------
+
+  describe("audit item 19: CJK / emoji filenames", () => {
+    it("routes a CJK basename ending in .xlsx to xlsx", () => {
+      // toLowerCase must not mangle the Japanese characters; only the ASCII
+      // ".xlsx" suffix participates in the match.
+      const r = routeOpenPath("/tmp/売上データ.xlsx");
+      expect(r).toEqual({ kind: "xlsx", path: "/tmp/売上データ.xlsx" });
+    });
+
+    it("routes an emoji-prefixed basename ending in .csv to csv", () => {
+      const r = routeOpenPath("/tmp/📊_2026.csv");
+      expect(r).toEqual({ kind: "csv", path: "/tmp/📊_2026.csv" });
+    });
+
+    it("routes a Chinese basename ending in .coco to coco", () => {
+      // Defense-in-depth: confirms lowercasing of mixed-script paths still
+      // preserves the path payload exactly as input.
+      const r = routeOpenPath("/tmp/工作簿.coco");
+      expect(r).toEqual({ kind: "coco", path: "/tmp/工作簿.coco" });
+    });
+
+    it("returns the correct non-ASCII extension when unsupported", () => {
+      // Sanity check: extractExtension walks the lower-cased basename but
+      // returns a slice of it — so the returned extension is also lower-case
+      // ASCII when the original was ASCII.
+      const r = routeOpenPath("/tmp/写真.png");
+      expect(r).toEqual({ kind: "unsupported", path: "/tmp/写真.png", extension: ".png" });
+    });
+  });
 });

@@ -1,5 +1,5 @@
 pub mod commands;
-mod db;
+pub mod db;
 mod error;
 
 use tauri::menu::{MenuBuilder, SubmenuBuilder};

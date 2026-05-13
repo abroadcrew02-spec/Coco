@@ -2,6 +2,7 @@ use rusqlite::Connection;
 use crate::error::Result;
 
 pub const CURRENT_SCHEMA_VERSION: i64 = 1;
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch("PRAGMA journal_mode = WAL;")?;
@@ -152,5 +153,30 @@ pub fn initialize(conn: &Connection) -> Result<()> {
         );
     ")?;
 
+    // Record the schema version once per database. The PRIMARY KEY on `version`
+    // makes this idempotent: re-opening a v1 database is a no-op. A future
+    // migration will compare the latest recorded version to CURRENT and run
+    // upgrade SQL as needed.
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, applied_at, app_version) VALUES (?1, ?2, ?3)",
+        rusqlite::params![CURRENT_SCHEMA_VERSION, now, APP_VERSION],
+    )?;
+
     Ok(())
+}
+
+/// Returns the highest schema version recorded in this database, or None if
+/// `initialize` hasn't been run yet. Useful for future migration logic and
+/// for tests that need to assert the database has been stamped.
+pub fn current_schema_version(conn: &Connection) -> Result<Option<i64>> {
+    let v: Option<i64> = conn
+        .query_row(
+            "SELECT MAX(version) FROM schema_version",
+            [],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .ok()
+        .flatten();
+    Ok(v)
 }

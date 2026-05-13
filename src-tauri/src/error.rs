@@ -8,8 +8,6 @@ pub enum CocoError {
     Io(#[from] std::io::Error),
     #[error("Serialization error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("{0}")]
-    Other(String),
 }
 
 // Tauri commands must return serializable errors

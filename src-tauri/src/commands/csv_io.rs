@@ -257,11 +257,10 @@ pub fn workbook_export_csv(
                         ),
                         Value::Number(n) => {
                             let serial = n.as_f64();
-                            // Date/datetime-formatted numeric cell → render
-                            // the corresponding calendar string so round-tripping
-                            // through CSV preserves the type. Datetime is
-                            // checked first because a datetime _fmt also
-                            // matches the date predicate.
+                            // Format-aware rendering for known _fmt families
+                            // so import → export preserves the cell's meaning.
+                            // Checked in specificity order: datetime > date >
+                            // percent > plain numeric.
                             let s = if let (Some(f), Some(fmt)) = (serial, fmt_field) {
                                 if is_datetime_format(fmt) {
                                     match excel_serial_to_datetime(f) {
@@ -273,6 +272,8 @@ pub fn workbook_export_csv(
                                         Some(d) => d.format("%Y-%m-%d").to_string(),
                                         None => format_number(f),
                                     }
+                                } else if is_percent_format(fmt) {
+                                    format_percent(f, fmt)
                                 } else {
                                     format_number(f)
                                 }
@@ -450,6 +451,57 @@ fn is_datetime_format(fmt: &str) -> bool {
         && lower.contains('h')
 }
 
+/// Parses a percentage string like "50%" or "-3.5%" → (0.5, fmt).
+/// Returns None for malformed input (multiple %, embedded spaces, etc.).
+fn parse_csv_percent(s: &str) -> Option<(f64, &'static str)> {
+    let trimmed = s.trim();
+    let rest = trimmed.strip_suffix('%')?;
+    // No second % allowed.
+    if rest.contains('%') {
+        return None;
+    }
+    let n: f64 = rest.parse().ok()?;
+    if !n.is_finite() {
+        return None;
+    }
+    // Choose 0% vs 0.00% based on whether the source had a decimal point.
+    let fmt = if rest.contains('.') { "0.00%" } else { "0%" };
+    Some((n / 100.0, fmt))
+}
+
+/// Returns true if the cell's `_fmt` is a percent format ("0%", "0.00%", ...).
+fn is_percent_format(fmt: &str) -> bool {
+    fmt.contains('%')
+}
+
+/// Render an Excel-style percent value back as a CSV-friendly string.
+/// Preserves the precision implied by the format string: "0%" rounds to int,
+/// "0.00%" keeps two decimals.
+fn format_percent(value: f64, fmt: &str) -> String {
+    let pct = value * 100.0;
+    let lower = fmt.to_ascii_lowercase();
+    // Count fractional zeroes in patterns like "0.00%". Cap at 6 to avoid
+    // pathological format strings.
+    let mut decimals = 0usize;
+    if let Some(dot_idx) = lower.find('.') {
+        for c in lower[dot_idx + 1..].chars() {
+            if c == '0' {
+                decimals += 1;
+                if decimals >= 6 {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+    if decimals == 0 {
+        format!("{}%", pct.round() as i64)
+    } else {
+        format!("{:.*}%", decimals, pct)
+    }
+}
+
 fn infer_csv_cell(raw: &str) -> Option<Value> {
     if raw.is_empty() {
         return None;
@@ -474,6 +526,12 @@ fn infer_csv_cell(raw: &str) -> Option<Value> {
         if f.is_finite() {
             return Some(json!({ "v": f }));
         }
+    }
+    // Percent strings — "50%" → 0.5 stored with a percent _fmt so that
+    // export round-trips back to "50%" and Excel/Univer treat it as a real
+    // percentage (multiplied by 100 for display, halves arithmetically).
+    if let Some((value, fmt)) = parse_csv_percent(&unescaped) {
+        return Some(json!({ "v": value, "_fmt": fmt }));
     }
     // Datetime is more specific than date — try it first to capture the
     // time portion. Strict parsing (full-string match) means a date-only

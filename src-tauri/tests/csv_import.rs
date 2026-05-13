@@ -395,6 +395,41 @@ fn iso_datetime_strings_become_fractional_serial_with_datetime_format() {
 }
 
 #[test]
+fn percent_strings_become_fractional_value_with_percent_format() {
+    // "50%" → 0.5 with "0%" fmt. "12.5%" → 0.125 with "0.00%" fmt.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "pct.csv");
+    fs::write(&path, "50%\n12.5%\n-3%\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cell_data = &snap["sheets"]["sheet-1"]["cellData"];
+
+    assert_eq!(cell_data["0"]["0"]["v"].as_f64(), Some(0.5));
+    assert_eq!(cell_data["0"]["0"]["_fmt"], "0%");
+    assert_eq!(cell_data["1"]["0"]["v"].as_f64(), Some(0.125));
+    assert_eq!(cell_data["1"]["0"]["_fmt"], "0.00%");
+    assert_eq!(cell_data["2"]["0"]["v"].as_f64(), Some(-0.03));
+}
+
+#[test]
+fn percent_with_embedded_garbage_stays_string() {
+    // "50% off" is not a clean percent — stays as a plain string.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "bad_pct.csv");
+    fs::write(&path, "50% off\nnot%anumber%\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cell_data = &snap["sheets"]["sheet-1"]["cellData"];
+
+    assert_eq!(cell_data["0"]["0"]["v"], "50% off");
+    assert_eq!(cell_data["1"]["0"]["v"], "not%anumber%");
+}
+
+#[test]
 fn date_only_strings_do_not_match_the_datetime_branch() {
     // Regression: an empty time portion should still go through the
     // date-only branch (yyyy-mm-dd format), not the datetime branch.

@@ -377,9 +377,9 @@ fn date_cells_export_as_yyyy_mm_dd() {
 }
 
 #[test]
-fn non_date_format_strings_export_as_numbers() {
-    // Numeric cell with a non-date _fmt (currency, percent, etc.) should
-    // still be exported as a number string, not interpreted as a date.
+fn unrecognized_format_strings_fall_through_to_plain_number() {
+    // Currency / arbitrary _fmt that don't match date / datetime / percent
+    // patterns still render as plain numbers.
     let dir = TempDir::new().unwrap();
     let path = path_in(&dir, "fmt.csv");
     let snapshot = r#"{
@@ -389,8 +389,8 @@ fn non_date_format_strings_export_as_numbers() {
                 "name": "S",
                 "cellData": {
                     "0": {
-                        "0": { "v": 0.5, "_fmt": "0.00%" },
-                        "1": { "v": 1000.0, "_fmt": "¥#,##0" }
+                        "0": { "v": 1000.0, "_fmt": "¥#,##0" },
+                        "1": { "v": 1.5, "_fmt": "0.00" }
                     }
                 }
             }
@@ -400,7 +400,33 @@ fn non_date_format_strings_export_as_numbers() {
     let bytes = fs::read(&path).unwrap();
     let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
     let first_line = s.split("\r\n").next().unwrap();
-    assert_eq!(first_line, "0.5,1000");
+    assert_eq!(first_line, "1000,1.5");
+}
+
+#[test]
+fn percent_cells_export_with_percent_sign() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "pct.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": {
+                        "0": { "v": 0.5, "_fmt": "0%" },
+                        "1": { "v": 0.125, "_fmt": "0.00%" },
+                        "2": { "v": -0.03, "_fmt": "0%" }
+                    }
+                }
+            }
+        }
+    }"#;
+    let _ = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    let bytes = fs::read(&path).unwrap();
+    let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
+    let first_line = s.split("\r\n").next().unwrap();
+    assert_eq!(first_line, "50%,12.50%,-3%");
 }
 
 #[test]

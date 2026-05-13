@@ -128,6 +128,17 @@ export default function HelpDialog({ onClose }: Props) {
             </p>
           </section>
           <section className="help-section">
+            <h3>CSV / TSV インポート時の自動型変換</h3>
+            <ul className="help-list">
+              <li><b>日付</b> — <code>2026-05-13</code> / <code>2026/05/13</code> は日付セルになります</li>
+              <li><b>日時</b> — <code>2026-05-13 12:00:00</code> や ISO <code>T</code> 区切りも対応</li>
+              <li><b>時刻</b> — <code>10:30</code> / <code>10:30:00</code> は時刻セルになります</li>
+              <li><b>パーセント</b> — <code>50%</code> は 0.5 として読み込み、表示は <code>50%</code></li>
+              <li><b>先頭ゼロ保持</b> — <code>0001234</code> や郵便番号は数値化されず文字列のまま</li>
+              <li><b>区切り文字判定</b> — <code>.tsv</code> はタブ区切り、<code>.csv</code> でもタブが多い場合は自動でタブ扱い</li>
+            </ul>
+          </section>
+          <section className="help-section">
             <h3>このアプリについて</h3>
             <p className="help-about">
               Coco{version ? ` v${version}` : ""} · ローカルファースト表計算<br />

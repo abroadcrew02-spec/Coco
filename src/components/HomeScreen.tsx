@@ -181,12 +181,18 @@ export default function HomeScreen() {
         <div className="home-section">
           <h2>復元候補</h2>
           <ul className="recovery-list">
-            {recoveryCandidates.map((c: RecoveryCandidate) => (
+            {recoveryCandidates.map((c: RecoveryCandidate) => {
+              const saved = Date.parse(c.savedAt);
+              const ageLabel = Number.isFinite(saved) ? timeAgoJa(saved) : null;
+              const fullDate = Number.isFinite(saved)
+                ? new Date(saved).toLocaleString("ja-JP")
+                : c.savedAt;
+              return (
               <li key={c.candidateId} className="recovery-item">
                 <div className="recovery-item__main">
                   <span className="recovery-item__title">{c.originalPath ?? "無題のワークブック"}</span>
-                  <span className="recovery-date">
-                    {new Date(c.savedAt).toLocaleString("ja-JP")} · {recoveryReasonLabel(c.reason)}
+                  <span className="recovery-date" title={fullDate}>
+                    {ageLabel ?? fullDate} · {recoveryReasonLabel(c.reason)}
                   </span>
                 </div>
                 <div className="recovery-item__actions">
@@ -206,7 +212,8 @@ export default function HomeScreen() {
                   </button>
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         </div>
       )}

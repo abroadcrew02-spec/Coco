@@ -33,6 +33,7 @@ import SaveFailureDialog from "./SaveFailureDialog";
 import BusyOverlay from "./BusyOverlay";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
+import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
 import "./EditorScreen.css";
 
 // req 5.4.1: "loading" blocks editing (snapshot is being replaced); "saving"
@@ -234,6 +235,7 @@ export default function EditorScreen() {
 
   const statusLabel = SAVE_STATUS_LABELS[saveStatus] ?? saveStatus;
   const statusClass = `status-bar__status status-bar__status--${saveStatus}`;
+  const statsLabel = formatSnapshotStats(computeSnapshotStats(currentSnapshotJson));
 
   const fileName = currentHandle?.path
     ? currentHandle.path.split(/[\\/]/).pop()
@@ -372,6 +374,9 @@ export default function EditorScreen() {
           >
             · 最終保存 {timeAgoJa(lastSavedAt)}
           </span>
+        )}
+        {statsLabel && (
+          <span className="status-bar__stats">· {statsLabel}</span>
         )}
       </div>
       {saveStatus === "save_failed" && (

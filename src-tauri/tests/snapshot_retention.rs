@@ -1,4 +1,4 @@
-use coco_lib::commands::workbook::{workbook_autosave_coco, workbook_save, MAX_SNAPSHOTS_PER_WORKBOOK};
+use coco_lib::commands::workbook::{workbook_autosave_coco, save_core, MAX_SNAPSHOTS_PER_WORKBOOK};
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -30,7 +30,7 @@ fn manual_save_records_manual_save_reason() {
     let path = tmp.path().join("data.coco");
     let wb_id = "test-wb-1";
 
-    let result = workbook_save(wb_id.into(), Some(path_str(&path)), "{\"x\":1}".into()).unwrap();
+    let result = save_core(wb_id.into(), Some(path_str(&path)), "{\"x\":1}".into()).unwrap();
     assert!(result.success);
     assert_eq!(count_with_reason(&path, wb_id, "manual_save"), 1);
     assert_eq!(count_with_reason(&path, wb_id, "auto_save"), 0);
@@ -57,7 +57,7 @@ fn snapshots_capped_to_max_per_workbook() {
     // Do 7 saves; the cap should hold the total at MAX_SNAPSHOTS_PER_WORKBOOK.
     for i in 0..7 {
         let snap = format!("{{\"v\":{i}}}");
-        let result = workbook_save(wb_id.into(), Some(path_str(&path)), snap).unwrap();
+        let result = save_core(wb_id.into(), Some(path_str(&path)), snap).unwrap();
         assert!(result.success, "save {i} should succeed");
     }
 
@@ -77,7 +77,7 @@ fn retention_keeps_most_recent() {
 
     for i in 0..7 {
         let snap = format!("{{\"i\":{i}}}");
-        workbook_save(wb_id.into(), Some(path_str(&path)), snap).unwrap();
+        save_core(wb_id.into(), Some(path_str(&path)), snap).unwrap();
     }
 
     // After cap, the oldest surviving snapshot should be from iteration (7 - 5) = 2.
@@ -104,8 +104,8 @@ fn retention_is_per_workbook_not_global() {
 
     // Save 7 snapshots for wb-A and 7 for wb-B in the same file.
     for i in 0..7 {
-        workbook_save("wb-A".into(), Some(path_str(&path)), format!("{{\"a\":{i}}}")).unwrap();
-        workbook_save("wb-B".into(), Some(path_str(&path)), format!("{{\"b\":{i}}}")).unwrap();
+        save_core("wb-A".into(), Some(path_str(&path)), format!("{{\"a\":{i}}}")).unwrap();
+        save_core("wb-B".into(), Some(path_str(&path)), format!("{{\"b\":{i}}}")).unwrap();
     }
 
     // Each workbook should independently have exactly MAX_SNAPSHOTS_PER_WORKBOOK rows.

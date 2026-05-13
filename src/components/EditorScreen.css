@@ -130,6 +130,17 @@
   color: #333;
 }
 
+/* Wrapper that hosts the Univer grid and the busy overlay (which is absolutely
+   positioned inside it so the toolbar stays clickable). */
+.univer-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
 /* Univer container — must fill all remaining space */
 .univer-container {
   flex: 1;
@@ -200,4 +211,10 @@
 
 .status-bar__retry:hover {
   background-color: rgba(255, 255, 255, 0.25);
+}
+
+.status-bar__last-saved {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: help;
 }

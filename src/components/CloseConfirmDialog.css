@@ -1,0 +1,88 @@
+.close-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1400;
+}
+
+.close-confirm-modal {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+  width: 100%;
+  max-width: 440px;
+  padding: 22px 24px;
+}
+
+.close-confirm-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #b71c1c;
+  margin: 0 0 8px;
+}
+
+.close-confirm-file {
+  font-size: 12px;
+  color: #424242;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background-color: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 3px;
+  padding: 4px 8px;
+  margin: 0 0 10px;
+  word-break: break-all;
+}
+
+.close-confirm-hint {
+  font-size: 13px;
+  color: #424242;
+  margin: 0 0 18px;
+}
+
+.close-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.close-confirm-btn {
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #424242;
+  background-color: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.close-confirm-btn:hover {
+  background-color: #f0f0f0;
+  border-color: #b0b0b0;
+}
+
+.close-confirm-btn--danger {
+  color: #b71c1c;
+  border-color: #ef9a9a;
+}
+
+.close-confirm-btn--danger:hover {
+  background-color: #ffebee;
+  border-color: #c62828;
+}
+
+.close-confirm-btn--primary {
+  background-color: #217346;
+  color: #fff;
+  border-color: #217346;
+}
+
+.close-confirm-btn--primary:hover {
+  background-color: #1a5c38;
+  border-color: #1a5c38;
+}

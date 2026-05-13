@@ -1,5 +1,5 @@
 use calamine::{open_workbook, Data, Reader, Xlsx};
-use coco_lib::commands::xlsx_io::{import_xlsx_core, workbook_export_xlsx};
+use coco_lib::commands::xlsx_io::{import_xlsx_core, export_xlsx_core};
 use rust_xlsxwriter::{Format, Workbook};
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -52,7 +52,7 @@ fn date_round_trip_preserves_visual_format() {
     let imported = import_xlsx_core(path_str(&fixture)).unwrap();
     let snapshot_json = imported.handle.snapshot_json.unwrap();
 
-    let export_result = workbook_export_xlsx(path_str(&exported), snapshot_json).unwrap();
+    let export_result = export_xlsx_core(path_str(&exported), snapshot_json).unwrap();
     assert!(
         export_result.success,
         "export failed: {:?}",

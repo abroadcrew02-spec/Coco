@@ -1,0 +1,71 @@
+.busy-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 800;
+  /* Brief operations (~100ms) don't deserve a flash — fade in after a short delay. */
+  animation: busy-overlay-fade-in 0.16s ease-out 0.18s backwards;
+}
+
+/* "loading" — snapshot is being wholesale replaced, block edits. */
+.busy-overlay--blocking {
+  background-color: rgba(255, 255, 255, 0.7);
+  -webkit-backdrop-filter: blur(1px);
+  backdrop-filter: blur(1px);
+}
+
+/* "saving"/"exporting" — edits continue racing the operation; just show a hint. */
+.busy-overlay--passthrough {
+  pointer-events: none;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 14px;
+}
+
+.busy-overlay--passthrough .busy-overlay__panel {
+  background-color: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.busy-overlay__panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 22px;
+  background-color: #fff;
+  border: 1px solid #c8e6c9;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.busy-overlay__spinner {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid #c8e6c9;
+  border-top-color: #217346;
+  border-radius: 50%;
+  animation: busy-overlay-spin 0.8s linear infinite;
+}
+
+.busy-overlay__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #217346;
+}
+
+@keyframes busy-overlay-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes busy-overlay-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

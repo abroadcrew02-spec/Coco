@@ -30,7 +30,18 @@ import { useAutoSave } from "../hooks/useAutoSave";
 import type { CompatibilityWarning } from "../types/workbook";
 import SheetPickerModal from "./SheetPickerModal";
 import SaveFailureDialog from "./SaveFailureDialog";
+import BusyOverlay from "./BusyOverlay";
+import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
+import { timeAgoJa } from "./timeAgo";
 import "./EditorScreen.css";
+
+// req 5.4.1: "loading" blocks editing (snapshot is being replaced); "saving"
+// and "exporting" let the user keep working since edits race the operation.
+const BUSY_LABELS: Partial<Record<string, { label: string; blocking: boolean }>> = {
+  loading: { label: "読み込み中...", blocking: true },
+  saving: { label: "保存中...", blocking: false },
+  exporting: { label: "エクスポート中...", blocking: false },
+};
 
 const SAVE_STATUS_LABELS: Record<string, string> = {
   loading: "読み込み中...",
@@ -59,6 +70,7 @@ export default function EditorScreen() {
     currentHandle,
     currentSnapshotJson,
     lastError,
+    lastSavedAt,
     save,
     promptSaveAs,
     dismissSaveError,
@@ -116,6 +128,16 @@ export default function EditorScreen() {
     }
     setSheetPicker(sheets);
   }, [listSheetNames, runCsvExport]);
+
+  // Listen for the menu-driven CSV export request (App-level menu can't reach
+  // the sheet picker state here directly, so the menu hook fires a window event).
+  useEffect(() => {
+    const onMenuCsvExport = () => {
+      void handleCsvExport();
+    };
+    window.addEventListener("coco:menu-csv-export", onMenuCsvExport);
+    return () => window.removeEventListener("coco:menu-csv-export", onMenuCsvExport);
+  }, [handleCsvExport]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
@@ -213,11 +235,13 @@ export default function EditorScreen() {
   const statusLabel = SAVE_STATUS_LABELS[saveStatus] ?? saveStatus;
   const statusClass = `status-bar__status status-bar__status--${saveStatus}`;
 
-  const fileLabel = currentHandle?.path
+  const fileName = currentHandle?.path
     ? currentHandle.path.split(/[\\/]/).pop()
     : currentHandle?.sourceType === "xlsx"
     ? "xlsx 由来（未保存）"
     : "無題のワークブック";
+  const isDirty = saveStatus === "unsaved";
+  const fileLabel = isDirty ? `${fileName} •` : fileName;
 
   return (
     <div className="editor-screen">
@@ -226,7 +250,12 @@ export default function EditorScreen() {
           <button type="button" className="toolbar-btn" onClick={goHome} title="ホームへ戻る">
             ← ホーム
           </button>
-          <span className="editor-toolbar__filename">{fileLabel}</span>
+          <span
+            className="editor-toolbar__filename"
+            title={currentHandle?.path ?? undefined}
+          >
+            {fileLabel}
+          </span>
         </div>
         <div className="editor-toolbar__right">
           <button
@@ -243,7 +272,7 @@ export default function EditorScreen() {
             className="toolbar-btn"
             onClick={promptSaveAs}
             disabled={saveStatus === "saving"}
-            title="保存先と形式（xlsx / .coco）を選んで保存"
+            title="保存先と形式（xlsx / .coco）を選んで保存 (Ctrl+Shift+S)"
           >
             別名保存
           </button>
@@ -264,6 +293,24 @@ export default function EditorScreen() {
             title="シートを選んで CSV (UTF-8 BOM) として書き出す"
           >
             {isExporting ? "出力中..." : "CSV エクスポート"}
+          </button>
+          <button
+            type="button"
+            className="toolbar-btn"
+            onClick={requestSettings}
+            title="設定（自動保存間隔など）"
+            aria-label="設定"
+          >
+            ⚙
+          </button>
+          <button
+            type="button"
+            className="toolbar-btn"
+            onClick={requestHelp}
+            title="ヘルプとキーボードショートカット (F1)"
+            aria-label="ヘルプ"
+          >
+            ?
           </button>
         </div>
       </div>
@@ -306,10 +353,26 @@ export default function EditorScreen() {
           </button>
         </div>
       )}
-      <div id="univer-container" ref={containerRef} className="univer-container" />
+      <div className="univer-wrap">
+        <div id="univer-container" ref={containerRef} className="univer-container" />
+        {BUSY_LABELS[saveStatus] && (
+          <BusyOverlay
+            label={BUSY_LABELS[saveStatus]!.label}
+            blocking={BUSY_LABELS[saveStatus]!.blocking}
+          />
+        )}
+      </div>
       <div className="status-bar">
         {/* React key forces re-mount on status change so the CSS fade animation restarts. */}
         <span key={saveStatus} className={statusClass}>{statusLabel}</span>
+        {lastSavedAt !== null && (
+          <span
+            className="status-bar__last-saved"
+            title={`最終保存: ${new Date(lastSavedAt).toLocaleString("ja-JP")}`}
+          >
+            · 最終保存 {timeAgoJa(lastSavedAt)}
+          </span>
+        )}
       </div>
       {saveStatus === "save_failed" && (
         <SaveFailureDialog

@@ -1,5 +1,5 @@
 use calamine::{open_workbook, Data, Reader, Xlsx};
-use coco_lib::commands::xlsx_io::workbook_export_xlsx;
+use coco_lib::commands::xlsx_io::export_xlsx_core;
 use serde_json::json;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -45,7 +45,7 @@ fn first_export_creates_no_bak() {
     let target = tmp.path().join("out.xlsx");
     let snap = snapshot_with_a1("first");
 
-    let result = workbook_export_xlsx(path_str(&target), snap).expect("export ok");
+    let result = export_xlsx_core(path_str(&target), snap).expect("export ok");
     assert!(result.success, "export should succeed; error={:?}", result.error);
 
     assert!(target.exists(), "out.xlsx should exist");
@@ -59,10 +59,10 @@ fn second_export_creates_bak_1_with_old_content() {
     let tmp = TempDir::new().expect("tempdir");
     let target = tmp.path().join("data.xlsx");
 
-    let r1 = workbook_export_xlsx(path_str(&target), snapshot_with_a1("v1")).expect("export 1 ok");
+    let r1 = export_xlsx_core(path_str(&target), snapshot_with_a1("v1")).expect("export 1 ok");
     assert!(r1.success, "first export should succeed; error={:?}", r1.error);
 
-    let r2 = workbook_export_xlsx(path_str(&target), snapshot_with_a1("v2")).expect("export 2 ok");
+    let r2 = export_xlsx_core(path_str(&target), snapshot_with_a1("v2")).expect("export 2 ok");
     assert!(r2.success, "second export should succeed; error={:?}", r2.error);
 
     assert!(target.exists(), "data.xlsx should exist");
@@ -83,7 +83,7 @@ fn seven_exports_keep_only_five_baks() {
 
     for i in 1..=7 {
         let snap = snapshot_with_a1(&format!("v{i}"));
-        let r = workbook_export_xlsx(path_str(&target), snap)
+        let r = export_xlsx_core(path_str(&target), snap)
             .unwrap_or_else(|e| panic!("export {i} failed: {e}"));
         assert!(r.success, "export {i} should succeed; error={:?}", r.error);
     }
@@ -114,7 +114,7 @@ fn no_leftover_tmp_files_after_success() {
     let tmp = TempDir::new().expect("tempdir");
     let target = tmp.path().join("clean.xlsx");
 
-    let result = workbook_export_xlsx(path_str(&target), snapshot_with_a1("hi")).expect("export ok");
+    let result = export_xlsx_core(path_str(&target), snapshot_with_a1("hi")).expect("export ok");
     assert!(result.success, "export should succeed; error={:?}", result.error);
 
     let entries: Vec<String> = std::fs::read_dir(tmp.path())
@@ -139,7 +139,7 @@ fn bad_extension_returns_failure_without_touching_disk() {
     let target = tmp.path().join("wrong.txt");
 
     let result =
-        workbook_export_xlsx(path_str(&target), snapshot_with_a1("x")).expect("call returns Ok");
+        export_xlsx_core(path_str(&target), snapshot_with_a1("x")).expect("call returns Ok");
     assert!(!result.success, "export should fail for bad extension");
     let err = result.error.unwrap_or_default();
     assert!(

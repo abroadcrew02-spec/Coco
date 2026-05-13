@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 
 pub const MAX_BACKUPS: u32 = 5;
 pub const MAX_SNAPSHOTS_PER_WORKBOOK: i64 = 5;
+/// req 5.4.3: total size of .bak.1..N must stay under this cap. Older generations
+/// are evicted until the total falls below.
+pub const MAX_TOTAL_BACKUP_BYTES: u64 = 1024 * 1024 * 1024; // 1 GB
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -110,7 +113,49 @@ pub fn rotate_backups(target: &Path) -> io::Result<()> {
     }
 
     std::fs::copy(target, bak_path(target, 1))?;
+
+    // req 5.4.3: enforce total-size cap by evicting oldest generations.
+    enforce_backup_size_cap(target, MAX_TOTAL_BACKUP_BYTES)?;
     Ok(())
+}
+
+/// Sum of all existing .bak.* file sizes for the given target. Missing files
+/// contribute zero.
+pub fn total_backup_size(target: &Path) -> u64 {
+    let mut total: u64 = 0;
+    for n in 1..=MAX_BACKUPS {
+        if let Ok(meta) = std::fs::metadata(bak_path(target, n)) {
+            total = total.saturating_add(meta.len());
+        }
+    }
+    total
+}
+
+/// Evict from the highest existing .bak.N (oldest) downward until the total
+/// .bak.* size is at or under `max_total_bytes`. Idempotent; no-op when already
+/// under cap or when no .bak files exist.
+pub fn enforce_backup_size_cap(target: &Path, max_total_bytes: u64) -> io::Result<()> {
+    loop {
+        let total = total_backup_size(target);
+        if total <= max_total_bytes {
+            return Ok(());
+        }
+        // Find the highest-N (oldest) existing .bak file and remove it.
+        let mut evicted = false;
+        for n in (1..=MAX_BACKUPS).rev() {
+            let p = bak_path(target, n);
+            if p.exists() {
+                std::fs::remove_file(&p)?;
+                evicted = true;
+                break;
+            }
+        }
+        if !evicted {
+            // No more files to evict — total can't shrink further; bail out to
+            // avoid an infinite loop in pathological situations.
+            return Ok(());
+        }
+    }
 }
 
 pub fn temp_save_path(target: &Path) -> PathBuf {
@@ -245,6 +290,12 @@ pub fn open_coco_core(
     data_dir: &std::path::Path,
     path: &str,
 ) -> Result<OpenWorkbookResult, String> {
+    // SQLite's open() silently creates the file if missing — that would leave a
+    // bogus empty .coco where the user thought their workbook used to live.
+    // Reject missing paths explicitly so the user sees a clear error.
+    if !std::path::Path::new(path).exists() {
+        return Err(format!("File not found: {path}"));
+    }
     let conn = open_workbook_db(path)?;
 
     let result: Result<(String, String), rusqlite::Error> = conn.query_row(
@@ -285,8 +336,22 @@ pub fn workbook_open_coco(app: tauri::AppHandle, path: String) -> Result<OpenWor
     open_coco_core(&data_dir, &path)
 }
 
-#[tauri::command]
-pub fn workbook_save(
+/// Best-effort: after a successful save, record the file in recent_files so
+/// the user sees it on next Home visit without needing to re-open.
+fn record_saved_path(app: &tauri::AppHandle, path: &str) {
+    let name = std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(path)
+        .to_string();
+    if let Ok(conn) = crate::db::app_db::open_app_db(app) {
+        let _ = crate::db::operations::record_recent_file(&conn, path, &name);
+    }
+}
+
+/// Pure-Rust save core (callable from tests; identical body to the Tauri
+/// command minus the recent-files side effect).
+pub fn save_core(
     workbook_id: String,
     path: Option<String>,
     snapshot_json: String,
@@ -302,12 +367,40 @@ pub fn workbook_save(
 }
 
 #[tauri::command]
-pub fn workbook_save_as(
+pub fn workbook_save(
+    app: tauri::AppHandle,
+    workbook_id: String,
+    path: Option<String>,
+    snapshot_json: String,
+) -> Result<SaveResult, String> {
+    let result = save_core(workbook_id, path, snapshot_json)?;
+    if result.success {
+        record_saved_path(&app, &result.path);
+    }
+    Ok(result)
+}
+
+/// Pure-Rust save-as core.
+pub fn save_as_core(
     workbook_id: String,
     path: String,
     snapshot_json: String,
 ) -> Result<SaveResult, String> {
     do_save(&workbook_id, &path, &snapshot_json, "manual_save")
+}
+
+#[tauri::command]
+pub fn workbook_save_as(
+    app: tauri::AppHandle,
+    workbook_id: String,
+    path: String,
+    snapshot_json: String,
+) -> Result<SaveResult, String> {
+    let result = save_as_core(workbook_id, path, snapshot_json)?;
+    if result.success {
+        record_saved_path(&app, &result.path);
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -337,6 +430,30 @@ pub fn workbook_list_recent(app: tauri::AppHandle) -> Result<Vec<RecentFile>, St
     use tauri::Manager;
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     list_recent_core(&data_dir)
+}
+
+pub fn remove_recent_core(data_dir: &std::path::Path, path: &str) -> Result<(), String> {
+    let conn = crate::db::app_db::open_app_db_at(data_dir)?;
+    crate::db::operations::remove_recent_file(&conn, path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workbook_remove_recent(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri::Manager;
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    remove_recent_core(&data_dir, &path)
+}
+
+pub fn clear_recent_core(data_dir: &std::path::Path) -> Result<(), String> {
+    let conn = crate::db::app_db::open_app_db_at(data_dir)?;
+    crate::db::operations::clear_recent_files(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workbook_clear_recent(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    clear_recent_core(&data_dir)
 }
 
 pub fn list_recovery_core(data_dir: &std::path::Path) -> Result<Vec<RecoveryCandidate>, String> {
@@ -376,6 +493,14 @@ pub fn restore_backup_core(
         .ok_or_else(|| format!("Recovery candidate not found: {}", candidate_id))?;
 
     let (_id, _original_path, _saved_at, _reason, temp_path) = entry;
+
+    // Defensive: if the recovery temp file has been wiped (user cleared app data,
+    // or the .coco was deleted manually), don't let SQLite re-create an empty one.
+    if !std::path::Path::new(&temp_path).exists() {
+        // Drop the stale candidate row so it stops haunting the home screen.
+        let _ = crate::db::operations::delete_recovery_candidate(&conn, candidate_id);
+        return Err(format!("Recovery file is missing: {temp_path}"));
+    }
 
     let wb_conn = open_workbook_db(&temp_path)?;
     let result: Result<(String, String), rusqlite::Error> = wb_conn.query_row(

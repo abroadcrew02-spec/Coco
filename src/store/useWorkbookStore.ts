@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { friendlyError } from "./errorMessages";
 import type {
   AppScreen,
   SaveStatus,
@@ -24,7 +25,10 @@ interface WorkbookState {
   currentSnapshotJson: string | null;
   isExporting: boolean;
   exportWarnings: CompatibilityWarning[];
+  blockingImport: CompatibilityWarning[] | null;
   lastError: string | null;
+  autoSaveIntervalMs: number; // 0 = disabled
+  lastSavedAt: number | null; // epoch ms — manual or auto save success
 
   // Actions
   newWorkbook: () => Promise<void>;
@@ -44,12 +48,20 @@ interface WorkbookState {
   dismissCandidate: (candidateId: string) => Promise<void>;
   updateSnapshot: (snapshotJson: string) => void;
   loadRecentFiles: () => Promise<void>;
+  removeRecent: (path: string) => Promise<void>;
+  clearRecents: () => Promise<void>;
   loadRecoveryCandidates: () => Promise<void>;
   dismissWarnings: () => void;
+  dismissBlockingImport: () => void;
   clearError: () => void;
   goHome: () => void;
   setSaveStatus: (status: SaveStatus) => void;
+  loadAutoSaveInterval: () => Promise<void>;
+  setAutoSaveInterval: (ms: number) => Promise<void>;
 }
+
+const AUTOSAVE_KEY = "autosave.interval_ms";
+const DEFAULT_AUTOSAVE_MS = 30_000;
 
 export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   screen: "home",
@@ -61,7 +73,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   currentSnapshotJson: null,
   isExporting: false,
   exportWarnings: [],
+  blockingImport: null,
   lastError: null,
+  autoSaveIntervalMs: DEFAULT_AUTOSAVE_MS,
+  lastSavedAt: null,
 
   newWorkbook: async () => {
     try {
@@ -71,11 +86,13 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: handle,
         saveStatus: "unsaved",
         importWarnings: [],
+        exportWarnings: [],
+        blockingImport: null,
         currentSnapshotJson: handle.snapshotJson,
         lastError: null,
       });
     } catch (e) {
-      set({ lastError: String(e) });
+      set({ lastError: friendlyError(String(e)) });
     }
   },
 
@@ -88,11 +105,13 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: result.handle,
         saveStatus: "saved",
         importWarnings: result.warnings,
+        exportWarnings: [],
+        blockingImport: null,
         currentSnapshotJson: result.handle.snapshotJson,
         lastError: null,
       });
     } catch (e) {
-      set({ saveStatus: "saved", lastError: String(e) });
+      set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
     }
   },
 
@@ -105,10 +124,14 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       // (we never reached the editor in that case — keep screen at "home").
       const hasBlocking = result.warnings.some((w) => w.severity === "blocking");
       if (hasBlocking) {
+        // req 7.3: dedicated modal for malicious-file rejection rather than an
+        // inline banner. The dialog displays both blocking issues and the
+        // companion non-blocking warnings.
         set({
           saveStatus: "saved",
-          importWarnings: result.warnings,
-          lastError: "セキュリティ上の理由でファイルを開けません",
+          blockingImport: result.warnings,
+          importWarnings: [],
+          lastError: null,
         });
         return;
       }
@@ -117,11 +140,13 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: result.handle,
         saveStatus: "unsaved",
         importWarnings: result.warnings,
+        exportWarnings: [],
+        blockingImport: null,
         currentSnapshotJson: result.handle.snapshotJson,
         lastError: null,
       });
     } catch (e) {
-      set({ saveStatus: "saved", lastError: String(e) });
+      set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
     }
   },
 
@@ -134,11 +159,13 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: result.handle,
         saveStatus: "unsaved",
         importWarnings: result.warnings,
+        exportWarnings: [],
+        blockingImport: null,
         currentSnapshotJson: result.handle.snapshotJson,
         lastError: null,
       });
     } catch (e) {
-      set({ saveStatus: "saved", lastError: String(e) });
+      set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
     }
   },
 
@@ -175,7 +202,8 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         });
         set({
           saveStatus: result.success ? "saved" : "save_failed",
-          lastError: result.success ? null : result.error ?? "保存に失敗しました",
+          lastError: result.success ? null : friendlyError(result.error) ?? "保存に失敗しました",
+          lastSavedAt: result.success ? Date.now() : get().lastSavedAt,
         });
         return;
       }
@@ -190,12 +218,13 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
           saveStatus: "saved",
           currentHandle: { ...currentHandle, path: result.path },
           lastError: null,
+          lastSavedAt: Date.now(),
         });
       } else {
-        set({ saveStatus: "save_failed", lastError: result.error });
+        set({ saveStatus: "save_failed", lastError: friendlyError(result.error) });
       }
     } catch (e) {
-      set({ saveStatus: "save_failed", lastError: String(e) });
+      set({ saveStatus: "save_failed", lastError: friendlyError(String(e)) });
     }
   },
 
@@ -228,6 +257,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
           saveStatus: "saved",
           currentHandle: { ...currentHandle, path: result.path },
           lastError: null,
+          lastSavedAt: Date.now(),
         });
         if (wasUnsaved) {
           invoke("workbook_clear_recovery", { candidateId: currentHandle.workbookId }).catch(
@@ -235,10 +265,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
           );
         }
       } else {
-        set({ saveStatus: "save_failed", lastError: result.error });
+        set({ saveStatus: "save_failed", lastError: friendlyError(result.error) });
       }
     } catch (e) {
-      set({ saveStatus: "save_failed", lastError: String(e) });
+      set({ saveStatus: "save_failed", lastError: friendlyError(String(e)) });
     }
   },
 
@@ -268,8 +298,13 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   },
 
   autoSave: async () => {
-    const { currentHandle, currentSnapshotJson } = get();
+    const { currentHandle, currentSnapshotJson, saveStatus } = get();
     if (!currentHandle) return;
+    // Don't race a manual save / export in flight — both would call rotate_backups
+    // on the same path. The next tick will pick up any dirt that accumulated.
+    if (saveStatus === "saving" || saveStatus === "exporting" || saveStatus === "loading") {
+      return;
+    }
 
     const path = currentHandle.path;
     const isCoco = path ? path.toLowerCase().endsWith(".coco") : false;
@@ -282,7 +317,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
           path,
           snapshotJson: currentSnapshotJson ?? "{}",
         });
-        if (result.success) set({ saveStatus: "auto_saved", lastError: null });
+        if (result.success) set({ saveStatus: "auto_saved", lastError: null, lastSavedAt: Date.now() });
       } else {
         // xlsx path or unsaved → write a hidden temp .coco for crash recovery only.
         // The user's xlsx file is NEVER touched by autosave (xlsx re-zip is slow + risks
@@ -291,7 +326,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
           workbookId: currentHandle.workbookId,
           snapshotJson: currentSnapshotJson ?? "{}",
         });
-        if (result.success) set({ saveStatus: "auto_saved", lastError: null });
+        if (result.success) set({ saveStatus: "auto_saved", lastError: null, lastSavedAt: Date.now() });
       }
     } catch {
       // Auto-save failures shouldn't disrupt the user; explicit Ctrl+S will surface real errors.
@@ -324,10 +359,14 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         isExporting: false,
         saveStatus: result.success ? "export_done" : "export_failed",
         exportWarnings: result.warnings,
-        lastError: result.success ? null : result.error ?? "Export failed",
+        lastError: result.success ? null : friendlyError(result.error) ?? "エクスポートに失敗しました",
       });
     } catch (e) {
-      set({ isExporting: false, saveStatus: "export_failed", lastError: String(e) });
+      set({
+        isExporting: false,
+        saveStatus: "export_failed",
+        lastError: friendlyError(String(e)),
+      });
     }
   },
 
@@ -340,7 +379,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         snapshotJson: currentSnapshotJson ?? "{}",
       });
     } catch (e) {
-      set({ lastError: String(e) });
+      set({ lastError: friendlyError(String(e)) });
       return [];
     }
   },
@@ -363,10 +402,14 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         isExporting: false,
         saveStatus: result.success ? "export_done" : "export_failed",
         exportWarnings: result.warnings,
-        lastError: result.success ? null : result.error ?? "CSV export failed",
+        lastError: result.success ? null : friendlyError(result.error) ?? "CSV エクスポートに失敗しました",
       });
     } catch (e) {
-      set({ isExporting: false, saveStatus: "export_failed", lastError: String(e) });
+      set({
+        isExporting: false,
+        saveStatus: "export_failed",
+        lastError: friendlyError(String(e)),
+      });
     }
   },
 
@@ -380,6 +423,24 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       set({ recentFiles: files });
     } catch {
       // non-critical
+    }
+  },
+
+  removeRecent: async (path: string) => {
+    try {
+      await invoke("workbook_remove_recent", { path });
+      set((s) => ({ recentFiles: s.recentFiles.filter((f) => f.path !== path) }));
+    } catch (e) {
+      set({ lastError: friendlyError(String(e)) });
+    }
+  },
+
+  clearRecents: async () => {
+    try {
+      await invoke("workbook_clear_recent");
+      set({ recentFiles: [] });
+    } catch (e) {
+      set({ lastError: friendlyError(String(e)) });
     }
   },
 
@@ -406,7 +467,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         lastError: null,
       });
     } catch (e) {
-      set({ saveStatus: "saved", lastError: String(e) });
+      set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
     }
   },
 
@@ -423,9 +484,45 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
 
   dismissWarnings: () => set({ importWarnings: [] }),
 
+  dismissBlockingImport: () => set({ blockingImport: null }),
+
   clearError: () => set({ lastError: null }),
 
-  goHome: () => set({ screen: "home", currentHandle: null }),
+  goHome: () =>
+    set({
+      screen: "home",
+      currentHandle: null,
+      currentSnapshotJson: null,
+      saveStatus: "saved",
+      importWarnings: [],
+      exportWarnings: [],
+      blockingImport: null,
+      lastError: null,
+      lastSavedAt: null,
+    }),
 
   setSaveStatus: (status) => set({ saveStatus: status }),
+
+  loadAutoSaveInterval: async () => {
+    try {
+      const raw = await invoke<string | null>("get_setting", { key: AUTOSAVE_KEY });
+      if (raw === null) return;
+      const ms = Number.parseInt(raw, 10);
+      if (Number.isFinite(ms) && ms >= 0) {
+        set({ autoSaveIntervalMs: ms });
+      }
+    } catch {
+      // non-critical: default stays in effect
+    }
+  },
+
+  setAutoSaveInterval: async (ms: number) => {
+    if (!Number.isFinite(ms) || ms < 0) return;
+    set({ autoSaveIntervalMs: ms });
+    try {
+      await invoke("set_setting", { key: AUTOSAVE_KEY, value: String(ms) });
+    } catch {
+      // best-effort persistence; in-memory value stays
+    }
+  },
 }));

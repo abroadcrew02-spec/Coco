@@ -1,11 +1,13 @@
 use coco_lib::commands::recovery::autosave_temp_core;
 use coco_lib::commands::workbook::{
+    clear_recent_core,
     list_recent_core,
     list_recovery_core,
     open_coco_core,
+    remove_recent_core,
     restore_backup_core,
     workbook_new,
-    workbook_save,
+    save_core,
 };
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -16,6 +18,38 @@ fn coco_path(dir: &TempDir, name: &str) -> std::path::PathBuf {
 
 fn path_str(p: &std::path::Path) -> String {
     p.to_string_lossy().into_owned()
+}
+
+#[test]
+fn open_coco_missing_path_returns_err() {
+    let app_dir = TempDir::new().unwrap();
+    let result = open_coco_core(app_dir.path(), "/does/not/exist.coco");
+    assert!(result.is_err());
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("File not found") || msg.to_lowercase().contains("not found"),
+        "expected 'file not found' message, got: {msg}"
+    );
+}
+
+#[test]
+fn restore_backup_missing_temp_file_clears_candidate() {
+    let app_dir = TempDir::new().unwrap();
+    autosave_temp_core(app_dir.path(), "wb-missing", "{}").unwrap();
+    // Delete the temp .coco out-of-band (simulates user clearing app data partially).
+    let coco_path = app_dir.path().join("recovery").join("wb-missing.coco");
+    std::fs::remove_file(&coco_path).unwrap();
+
+    // Restore should fail with a clear error AND drop the stale row.
+    let result = restore_backup_core(app_dir.path(), "wb-missing");
+    assert!(result.is_err());
+
+    // The stale candidate row should be gone now, so list returns empty.
+    let candidates = list_recovery_core(app_dir.path()).unwrap();
+    assert!(
+        candidates.iter().all(|c| c.candidate_id != "wb-missing"),
+        "stale candidate should be cleared after failed restore"
+    );
 }
 
 #[test]
@@ -36,13 +70,13 @@ fn open_coco_reads_latest_snapshot() {
     let wb_dir = TempDir::new().unwrap();
     let wb_path = coco_path(&wb_dir, "data.coco");
 
-    workbook_save(
+    save_core(
         "wb-test".into(),
         Some(path_str(&wb_path)),
         "{\"v\":1}".into(),
     )
     .unwrap();
-    workbook_save(
+    save_core(
         "wb-test".into(),
         Some(path_str(&wb_path)),
         "{\"v\":2}".into(),
@@ -66,7 +100,7 @@ fn open_coco_records_recent_file() {
     let app_dir = TempDir::new().unwrap();
     let wb_dir = TempDir::new().unwrap();
     let wb_path = coco_path(&wb_dir, "alpha.coco");
-    workbook_save("wb".into(), Some(path_str(&wb_path)), "{}".into()).unwrap();
+    save_core("wb".into(), Some(path_str(&wb_path)), "{}".into()).unwrap();
 
     open_coco_core(app_dir.path(), &path_str(&wb_path)).unwrap();
 
@@ -88,8 +122,8 @@ fn list_recent_returns_recorded_files_with_existence_flags() {
     let alive = coco_path(&wb_dir, "alive.coco");
     let dead = coco_path(&wb_dir, "dead.coco");
 
-    workbook_save("wb-a".into(), Some(path_str(&alive)), "{}".into()).unwrap();
-    workbook_save("wb-d".into(), Some(path_str(&dead)), "{}".into()).unwrap();
+    save_core("wb-a".into(), Some(path_str(&alive)), "{}".into()).unwrap();
+    save_core("wb-d".into(), Some(path_str(&dead)), "{}".into()).unwrap();
 
     open_coco_core(app_dir.path(), &path_str(&alive)).unwrap();
     open_coco_core(app_dir.path(), &path_str(&dead)).unwrap();
@@ -160,4 +194,45 @@ fn restore_backup_errors_on_missing_candidate() {
         "error message should mention the missing candidate, got: {}",
         msg
     );
+}
+
+#[test]
+fn remove_recent_drops_single_path() {
+    let app_dir = TempDir::new().unwrap();
+    let wb_dir = TempDir::new().unwrap();
+    let a = coco_path(&wb_dir, "a.coco");
+    let b = coco_path(&wb_dir, "b.coco");
+
+    save_core("wb-a".into(), Some(path_str(&a)), "{}".into()).unwrap();
+    save_core("wb-b".into(), Some(path_str(&b)), "{}".into()).unwrap();
+    open_coco_core(app_dir.path(), &path_str(&a)).unwrap();
+    open_coco_core(app_dir.path(), &path_str(&b)).unwrap();
+    assert_eq!(list_recent_core(app_dir.path()).unwrap().len(), 2);
+
+    remove_recent_core(app_dir.path(), &path_str(&a)).unwrap();
+    let remaining = list_recent_core(app_dir.path()).unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].path, path_str(&b));
+}
+
+#[test]
+fn remove_recent_missing_path_is_noop() {
+    let app_dir = TempDir::new().unwrap();
+    // No recent files yet — removing a path that was never recorded shouldn't error.
+    remove_recent_core(app_dir.path(), "/never/seen.coco").unwrap();
+}
+
+#[test]
+fn clear_recent_drops_all() {
+    let app_dir = TempDir::new().unwrap();
+    let wb_dir = TempDir::new().unwrap();
+    for i in 0..3 {
+        let p = coco_path(&wb_dir, &format!("f{i}.coco"));
+        save_core(format!("wb-{i}"), Some(path_str(&p)), "{}".into()).unwrap();
+        open_coco_core(app_dir.path(), &path_str(&p)).unwrap();
+    }
+    assert_eq!(list_recent_core(app_dir.path()).unwrap().len(), 3);
+
+    clear_recent_core(app_dir.path()).unwrap();
+    assert!(list_recent_core(app_dir.path()).unwrap().is_empty());
 }

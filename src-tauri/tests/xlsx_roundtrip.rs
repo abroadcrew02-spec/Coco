@@ -1,5 +1,5 @@
 use calamine::{open_workbook, Data, Reader, Xlsx};
-use coco_lib::commands::xlsx_io::{import_xlsx_core, workbook_export_xlsx};
+use coco_lib::commands::xlsx_io::{import_xlsx_core, export_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -68,7 +68,7 @@ fn simple_values_roundtrip() {
 
     // Export
     let export_result =
-        workbook_export_xlsx(path_str(&exported_path), snapshot_json).expect("export ok");
+        export_xlsx_core(path_str(&exported_path), snapshot_json).expect("export ok");
     assert!(
         export_result.success,
         "export should succeed; error={:?}",
@@ -127,7 +127,7 @@ fn formula_preserved_through_roundtrip() {
     );
 
     let export_result =
-        workbook_export_xlsx(path_str(&exported_path), snapshot_json).expect("export ok");
+        export_xlsx_core(path_str(&exported_path), snapshot_json).expect("export ok");
     assert!(
         export_result.success,
         "export should succeed; error={:?}",
@@ -191,7 +191,7 @@ fn multi_sheet_order_preserved() {
     );
 
     let export_result =
-        workbook_export_xlsx(path_str(&exported_path), snapshot_json).expect("export ok");
+        export_xlsx_core(path_str(&exported_path), snapshot_json).expect("export ok");
     assert!(
         export_result.success,
         "export should succeed; error={:?}",

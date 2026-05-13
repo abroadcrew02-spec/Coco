@@ -1,4 +1,7 @@
-use coco_lib::commands::workbook::{bak_path, rotate_backups, temp_save_path, MAX_BACKUPS};
+use coco_lib::commands::workbook::{
+    bak_path, enforce_backup_size_cap, rotate_backups, temp_save_path, total_backup_size,
+    MAX_BACKUPS,
+};
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
@@ -114,4 +117,86 @@ fn test_temp_save_path_is_in_same_dir_with_dot_prefix() {
 
     let t2 = temp_save_path(&target);
     assert_ne!(t, t2, "two tmp paths should have unique uuids");
+}
+
+#[test]
+fn total_backup_size_sums_existing_baks() {
+    let tmp = TempDir::new().expect("tempdir");
+    let target = tmp.path().join("data.coco");
+
+    // No .bak files → 0
+    assert_eq!(total_backup_size(&target), 0);
+
+    // Write .bak.1 and .bak.3 (skip .bak.2 to test missing-file tolerance)
+    fs::write(bak_path(&target, 1), vec![0u8; 100]).unwrap();
+    fs::write(bak_path(&target, 3), vec![0u8; 50]).unwrap();
+    assert_eq!(total_backup_size(&target), 150);
+}
+
+#[test]
+fn enforce_cap_noop_when_under_limit() {
+    let tmp = TempDir::new().expect("tempdir");
+    let target = tmp.path().join("data.coco");
+    fs::write(bak_path(&target, 1), vec![0u8; 100]).unwrap();
+    fs::write(bak_path(&target, 2), vec![0u8; 100]).unwrap();
+
+    // Cap is 1000 bytes; total is 200 — should be a no-op.
+    enforce_backup_size_cap(&target, 1000).unwrap();
+
+    assert!(bak_path(&target, 1).exists());
+    assert!(bak_path(&target, 2).exists());
+}
+
+#[test]
+fn enforce_cap_evicts_oldest_first() {
+    let tmp = TempDir::new().expect("tempdir");
+    let target = tmp.path().join("data.coco");
+    // Each .bak is 100 bytes; total 500.
+    for n in 1..=5 {
+        fs::write(bak_path(&target, n), vec![0u8; 100]).unwrap();
+    }
+
+    // Cap at 250 bytes — should keep .bak.1 and .bak.2 (200 bytes), evict .bak.3..5.
+    enforce_backup_size_cap(&target, 250).unwrap();
+
+    assert!(bak_path(&target, 1).exists(), ".bak.1 (newest) should survive");
+    assert!(bak_path(&target, 2).exists(), ".bak.2 should survive");
+    assert!(!bak_path(&target, 3).exists(), ".bak.3 should be evicted");
+    assert!(!bak_path(&target, 4).exists(), ".bak.4 should be evicted");
+    assert!(!bak_path(&target, 5).exists(), ".bak.5 (oldest) should be evicted");
+}
+
+#[test]
+fn enforce_cap_at_zero_evicts_everything() {
+    let tmp = TempDir::new().expect("tempdir");
+    let target = tmp.path().join("data.coco");
+    for n in 1..=3 {
+        fs::write(bak_path(&target, n), vec![0u8; 50]).unwrap();
+    }
+
+    enforce_backup_size_cap(&target, 0).unwrap();
+    for n in 1..=5 {
+        assert!(!bak_path(&target, n).exists(), ".bak.{n} should be evicted");
+    }
+}
+
+#[test]
+fn rotate_backups_applies_size_cap_after_shift() {
+    // Use rotate_backups (which uses production 1GB const) plus a manually
+    // tightened scenario: pre-seed huge .bak files, then rotate, then check
+    // total cap is respected. We can't actually hit 1GB in a test, so we
+    // verify the *interaction* by directly calling enforce_backup_size_cap
+    // after rotate.
+    let tmp = TempDir::new().expect("tempdir");
+    let target = tmp.path().join("data.coco");
+    fs::write(&target, b"current").unwrap();
+
+    rotate_backups(&target).unwrap();
+    // After rotation, .bak.1 holds the previous target's content.
+    assert!(bak_path(&target, 1).exists());
+
+    // Manually enforce a tight cap to verify the cap function works in
+    // conjunction with rotate's output.
+    enforce_backup_size_cap(&target, 3).unwrap(); // 3 bytes < "current" length 7
+    assert!(!bak_path(&target, 1).exists(), ".bak.1 should be evicted under tight cap");
 }

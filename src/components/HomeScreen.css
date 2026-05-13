@@ -10,8 +10,38 @@
 }
 
 .home-header {
+  position: relative;
   text-align: center;
   margin-bottom: 40px;
+}
+
+.home-header-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  gap: 4px;
+}
+
+.home-icon-btn {
+  font-size: 16px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid transparent;
+  color: #888;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.home-icon-btn:hover {
+  background-color: #eaf4ee;
+  color: #217346;
+  border-color: #b2dfca;
 }
 
 .home-title {
@@ -30,7 +60,44 @@
 .home-actions {
   display: flex;
   gap: 12px;
-  margin-bottom: 40px;
+  margin-bottom: 20px;
+}
+
+.home-continue {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 18px;
+  margin-bottom: 20px;
+  background-color: #eaf4ee;
+  color: #1b5e20;
+  border: 1px solid #b2dfca;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+  max-width: 360px;
+}
+
+.home-continue:hover {
+  background-color: #c8e6c9;
+  border-color: #81c784;
+}
+
+.home-continue__label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.home-continue__name {
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #2e7d32;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .btn-primary {
@@ -234,6 +301,72 @@
   border-radius: 4px;
   padding: 2px 7px;
   white-space: nowrap;
+}
+
+.recent-item {
+  position: relative;
+  padding-right: 36px; /* room for the remove button */
+}
+
+.recent-remove {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: #999;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+}
+
+.recent-item:hover .recent-remove {
+  opacity: 1;
+}
+
+.recent-remove:hover {
+  color: #b71c1c;
+  background-color: #ffebee;
+  border-color: #ef9a9a;
+}
+
+.home-section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.home-section-header h2 {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: #757575;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.link-btn:hover {
+  color: #b71c1c;
+  background-color: #ffebee;
 }
 
 .home-empty {

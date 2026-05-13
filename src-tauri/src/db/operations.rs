@@ -34,6 +34,19 @@ pub fn list_recent_files(conn: &Connection) -> Result<Vec<(String, String, Strin
     Ok(result)
 }
 
+pub fn remove_recent_file(conn: &Connection, path: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM recent_files WHERE path = ?1",
+        rusqlite::params![path],
+    )?;
+    Ok(())
+}
+
+pub fn clear_recent_files(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM recent_files", [])?;
+    Ok(())
+}
+
 pub fn save_recovery_candidate(
     conn: &Connection,
     candidate_id: &str,
@@ -76,5 +89,45 @@ pub fn delete_recovery_candidate(conn: &Connection, candidate_id: &str) -> Resul
         "DELETE FROM recovery_candidates WHERE candidate_id = ?1",
         rusqlite::params![candidate_id],
     )?;
+    Ok(())
+}
+
+pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>> {
+    let row: std::result::Result<String, rusqlite::Error> = conn.query_row(
+        "SELECT value FROM app_settings WHERE key = ?1",
+        rusqlite::params![key],
+        |row| row.get(0),
+    );
+    match row {
+        Ok(v) => Ok(Some(v)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        rusqlite::params![key, value, now],
+    )?;
+    Ok(())
+}
+
+pub fn list_settings(conn: &Connection) -> Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare("SELECT key, value FROM app_settings ORDER BY key")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+pub fn delete_setting(conn: &Connection, key: &str) -> Result<()> {
+    conn.execute("DELETE FROM app_settings WHERE key = ?1", rusqlite::params![key])?;
     Ok(())
 }

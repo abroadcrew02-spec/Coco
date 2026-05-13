@@ -427,8 +427,30 @@ fn sanitize_sheet_name(raw: &str) -> String {
     truncated
 }
 
+/// Tauri command wrapper: delegates to export_xlsx_core, then on success records
+/// the saved path in recent_files so the Home screen lists it.
 #[tauri::command]
 pub fn workbook_export_xlsx(
+    app: tauri::AppHandle,
+    path: String,
+    snapshot_json: String,
+) -> Result<ExportResult, String> {
+    let result = export_xlsx_core(path.clone(), snapshot_json)?;
+    if result.success {
+        let name = std::path::Path::new(&result.path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&result.path)
+            .to_string();
+        if let Ok(conn) = crate::db::app_db::open_app_db(&app) {
+            let _ = crate::db::operations::record_recent_file(&conn, &result.path, &name);
+        }
+    }
+    Ok(result)
+}
+
+/// Pure-Rust export core. Directly callable from cargo tests.
+pub fn export_xlsx_core(
     path: String,
     snapshot_json: String,
 ) -> Result<ExportResult, String> {

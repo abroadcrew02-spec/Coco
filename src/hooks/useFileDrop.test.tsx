@@ -112,13 +112,24 @@ describe("useFileDrop", () => {
       });
     });
 
-    it("silently ignores unsupported extensions (.png)", async () => {
+    it("does not import unsupported extensions but surfaces a hint to the user", async () => {
       render(<Probe />);
       await fireDrop("/tmp/photo.png");
       const importCalls = invokeMock.mock.calls.filter((c) =>
         ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(c[0] as string)
       );
       expect(importCalls).toHaveLength(0);
+      // Hint references the extension so the user can identify why nothing happened.
+      const err = useWorkbookStore.getState().lastError ?? "";
+      expect(err).toContain(".png");
+      expect(err).toContain("対応していない");
+    });
+
+    it("hint also fires when the unsupported file has no extension", async () => {
+      render(<Probe />);
+      await fireDrop("/tmp/README");
+      const err = useWorkbookStore.getState().lastError ?? "";
+      expect(err).toContain("対応していない");
     });
   });
 

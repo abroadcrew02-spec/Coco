@@ -23,7 +23,15 @@ export function useFileDrop(): { isHovering: boolean } {
 
     const dispatch = async (path: string) => {
       const route = routeOpenPath(path);
-      if (route.kind === "unsupported") return; // silently ignore (e.g. .png drop)
+      if (route.kind === "unsupported") {
+        // Show a short hint instead of silently swallowing the drop — without
+        // it the user can't tell whether the app received the file at all.
+        const ext = route.extension ?? "（拡張子なし）";
+        useWorkbookStore.setState({
+          lastError: `対応していない形式です（${ext}）。.xlsx / .xlsm / .csv / .coco のみ受け付けます。`,
+        });
+        return;
+      }
       if (
         !confirmDiscardIfUnsaved(
           "未保存の変更があります。破棄してドロップしたファイルを開きますか？"

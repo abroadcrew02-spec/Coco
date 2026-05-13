@@ -136,6 +136,78 @@ describe("SnapshotHistoryDialog", () => {
     });
   });
 
+  describe("keyboard navigation", () => {
+    beforeEach(() => {
+      invokeMock.mockResolvedValueOnce([
+        { snapshotId: 3, createdAt: "2026-05-13T10:00:00Z", reason: "manual_save" },
+        { snapshotId: 2, createdAt: "2026-05-13T09:00:00Z", reason: "auto_save" },
+        { snapshotId: 1, createdAt: "2026-05-12T10:00:00Z", reason: "manual_save" },
+      ]);
+    });
+
+    it("first row is selected by default", async () => {
+      const { container } = render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => screen.getAllByText("このバージョンを開く"));
+      const selected = container.querySelector(".snapshot-item--selected");
+      expect(selected).toBeTruthy();
+      expect(selected?.textContent).toContain("最新");
+    });
+
+    it("ArrowDown moves selection to the next row", async () => {
+      const { container } = render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => screen.getAllByText("このバージョンを開く"));
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+      const selected = container.querySelectorAll(".snapshot-item--selected");
+      expect(selected.length).toBe(1);
+      // Index 1 should now be selected; check it's NOT the first row.
+      const items = container.querySelectorAll(".snapshot-item");
+      expect(items[1].className).toContain("snapshot-item--selected");
+      expect(items[0].className).not.toContain("snapshot-item--selected");
+    });
+
+    it("ArrowUp from the first row is a no-op (no underflow)", async () => {
+      const { container } = render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => screen.getAllByText("このバージョンを開く"));
+      fireEvent.keyDown(window, { key: "ArrowUp" });
+      const items = container.querySelectorAll(".snapshot-item");
+      expect(items[0].className).toContain("snapshot-item--selected");
+    });
+
+    it("ArrowDown past the last row stays at the last (no overflow)", async () => {
+      const { container } = render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => screen.getAllByText("このバージョンを開く"));
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+      fireEvent.keyDown(window, { key: "ArrowDown" }); // attempt overflow
+      const items = container.querySelectorAll(".snapshot-item");
+      expect(items[2].className).toContain("snapshot-item--selected");
+    });
+
+    it("Enter opens the currently-selected snapshot", async () => {
+      invokeMock.mockResolvedValueOnce({
+        handle: { workbookId: "wb", path: "/tmp/wb.coco", sourceType: "coco", snapshotJson: "{}" },
+        warnings: [],
+      });
+      render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => screen.getAllByText("このバージョンを開く"));
+      // Move selection to index 1 (snapshotId=2) then press Enter.
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+      fireEvent.keyDown(window, { key: "Enter" });
+      await waitFor(() => {
+        const call = invokeMock.mock.calls.find((c) => c[0] === "workbook_open_snapshot");
+        expect(call?.[1]).toEqual({ path: "/tmp/wb.coco", snapshotId: 2 });
+      });
+    });
+
+    it("hovering an item updates the selection (mouse follows keyboard)", async () => {
+      const { container } = render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() => screen.getAllByText("このバージョンを開く"));
+      const items = container.querySelectorAll(".snapshot-item");
+      fireEvent.mouseEnter(items[2]);
+      expect(items[2].className).toContain("snapshot-item--selected");
+    });
+  });
+
   describe("error handling", () => {
     it("renders empty state when listSnapshots rejects (covers connection failure)", async () => {
       invokeMock.mockRejectedValue("File not found: /tmp/wb.coco");

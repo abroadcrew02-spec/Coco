@@ -16,6 +16,7 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
   const openSnapshot = useWorkbookStore((s) => s.openSnapshot);
   const [snapshots, setSnapshots] = useState<SnapshotMeta[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedIdx, setSelectedIdx] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,21 +39,36 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
     };
   }, [listSnapshots]);
 
+  const handleOpen = async (snapshotId: number) => {
+    await openSnapshot(snapshotId);
+    onClose();
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
+        return;
+      }
+      // Arrow nav + Enter only meaningful while snapshots are loaded.
+      const rows = snapshots ?? [];
+      if (rows.length === 0) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedIdx((i) => Math.min(i + 1, rows.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedIdx((i) => Math.max(i - 1, 0));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const target = rows[selectedIdx];
+        if (target) void handleOpen(target.snapshotId);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const handleOpen = async (snapshotId: number) => {
-    await openSnapshot(snapshotId);
-    onClose();
-  };
+  }, [onClose, snapshots, selectedIdx]);
 
   return (
     <div className="snapshot-backdrop" onClick={onClose}>
@@ -90,8 +106,13 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
                 const fullDate = Number.isFinite(created)
                   ? new Date(created).toLocaleString("ja-JP")
                   : s.createdAt;
+                const isSelected = idx === selectedIdx;
                 return (
-                  <li key={s.snapshotId} className="snapshot-item">
+                  <li
+                    key={s.snapshotId}
+                    className={`snapshot-item ${isSelected ? "snapshot-item--selected" : ""}`}
+                    onMouseEnter={() => setSelectedIdx(idx)}
+                  >
                     <div className="snapshot-item__meta">
                       <span className="snapshot-item__when" title={fullDate}>
                         {ageLabel}

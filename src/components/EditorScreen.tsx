@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Univer, UniverInstanceType, LocaleType, CommandType, type IWorkbookData } from "@univerjs/core";
 import { defaultTheme } from "@univerjs/design";
 import { UniverRenderEnginePlugin } from "@univerjs/engine-render";
@@ -136,6 +136,31 @@ export default function EditorScreen() {
     }
     setSheetPicker(sheets);
   }, [listSheetNames, runCsvExport]);
+
+  // Export every sheet in the workbook as a separate <sheetName>.csv file
+  // inside a user-chosen directory. Multi-sheet workbooks only — the single
+  // -sheet case routes through runCsvExport which already prompts for a path.
+  const runBulkCsvExport = useCallback(
+    async (sheets: { id: string; name: string }[]) => {
+      const chosenDir = await openDialog({ directory: true, multiple: false });
+      if (!chosenDir) return;
+      const dir = typeof chosenDir === "string" ? chosenDir : chosenDir[0];
+      // Sanitize sheet names that contain path-illegal characters before
+      // joining onto the directory; replace with "_" rather than reject so a
+      // sheet named "Q1/2026" still produces a file.
+      const sanitize = (n: string) => n.replace(/[\\/:*?"<>|]/g, "_");
+      for (const sheet of sheets) {
+        const fileName = `${sanitize(sheet.name)}.csv`;
+        // Cross-platform path join: use forward slash; both Windows and Unix
+        // accept it in Tauri command paths.
+        const path = `${dir}/${fileName}`;
+        // Sequential — parallel writes would race on the rotate-backups
+        // logic and confuse error reporting.
+        await exportCsvToPath(path, sheet.id);
+      }
+    },
+    [exportCsvToPath]
+  );
 
   // Listen for the menu-driven CSV export request (App-level menu can't reach
   // the sheet picker state here directly, so the menu hook fires a window event).
@@ -343,6 +368,11 @@ export default function EditorScreen() {
             const target = sheetPicker[idx];
             setSheetPicker(null);
             if (target) runCsvExport(target);
+          }}
+          onExportAll={() => {
+            const all = sheetPicker;
+            setSheetPicker(null);
+            void runBulkCsvExport(all);
           }}
         />
       )}

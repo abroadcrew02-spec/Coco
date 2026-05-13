@@ -5,9 +5,12 @@ interface Props {
   sheets: string[];
   onConfirm: (index: number) => void;
   onCancel: () => void;
+  /** Optional handler for "export every sheet at once" — when provided
+   *  the picker renders an extra primary button. Multi-sheet workbooks only. */
+  onExportAll?: () => void;
 }
 
-export default function SheetPickerModal({ sheets, onConfirm, onCancel }: Props) {
+export default function SheetPickerModal({ sheets, onConfirm, onCancel, onExportAll }: Props) {
   const [selected, setSelected] = useState(0);
 
   useEffect(() => {
@@ -37,7 +40,7 @@ export default function SheetPickerModal({ sheets, onConfirm, onCancel }: Props)
           CSV に出力するシートを選択
         </h2>
         <p className="sheet-picker-hint">
-          CSV は単一シートのみ書き出します。複数シートを出力する場合は個別に実行してください。
+          CSV は 1 シートを 1 ファイルに書き出します。複数シートをまとめて出力するには「全シートを出力」をご利用ください。
         </p>
         <ul className="sheet-picker-list">
           {sheets.map((name, i) => (
@@ -58,6 +61,17 @@ export default function SheetPickerModal({ sheets, onConfirm, onCancel }: Props)
           <button type="button" className="sheet-picker-btn" onClick={onCancel}>
             キャンセル
           </button>
+          {onExportAll && (
+            <button
+              type="button"
+              className="sheet-picker-btn"
+              onClick={onExportAll}
+              disabled={sheets.length === 0}
+              title="フォルダを選んで全シートを個別の CSV として出力"
+            >
+              全シートを出力
+            </button>
+          )}
           <button
             type="button"
             className="sheet-picker-btn sheet-picker-btn--primary"

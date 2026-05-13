@@ -101,6 +101,29 @@ describe("SheetPickerModal", () => {
     expect(onConfirm).toHaveBeenCalledExactlyOnceWith(2);
   });
 
+  it("does not render 全シートを出力 unless onExportAll is provided", () => {
+    render(<SheetPickerModal sheets={["A", "B"]} onConfirm={onConfirm} onCancel={onCancel} />);
+    expect(screen.queryByText("全シートを出力")).toBeNull();
+  });
+
+  it("renders 全シートを出力 when onExportAll is provided and forwards the click", async () => {
+    const user = userEvent.setup();
+    const onExportAll = vi.fn<() => void>();
+    render(
+      <SheetPickerModal
+        sheets={["A", "B"]}
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+        onExportAll={onExportAll}
+      />
+    );
+    const btn = screen.getByText("全シートを出力");
+    expect(btn).toBeTruthy();
+    await user.click(btn);
+    expect(onExportAll).toHaveBeenCalledTimes(1);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
   it("選択 is disabled when sheets is empty (edge case)", () => {
     renderPicker([]);
     const confirmBtn = screen.getByRole("button", { name: "選択" }) as HTMLButtonElement;

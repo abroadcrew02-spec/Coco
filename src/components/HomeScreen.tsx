@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { useEditorPreload } from "../hooks/useEditorPreload";
@@ -255,6 +256,19 @@ export default function HomeScreen() {
                   </span>
                 )}
                 {!f.exists && <span className="recent-badge">見つかりません</span>}
+                <button
+                  type="button"
+                  className="recent-reveal"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    invoke("reveal_in_file_manager", { path: f.path }).catch(() => undefined);
+                  }}
+                  aria-label="ファイルの場所を開く"
+                  title="ファイルの場所を開く"
+                  disabled={!f.exists}
+                >
+                  📁
+                </button>
                 <button
                   type="button"
                   className="recent-remove"

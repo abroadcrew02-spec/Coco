@@ -343,12 +343,12 @@
 
 .recent-item {
   position: relative;
-  padding-right: 36px; /* room for the remove button */
+  padding-right: 68px; /* room for reveal + remove buttons */
 }
 
+.recent-reveal,
 .recent-remove {
   position: absolute;
-  right: 8px;
   top: 50%;
   transform: translateY(-50%);
   width: 22px;
@@ -360,15 +360,34 @@
   border: 1px solid transparent;
   border-radius: 3px;
   color: #999;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1;
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.12s ease, background-color 0.12s ease, color 0.12s ease;
 }
 
+.recent-reveal {
+  right: 34px;
+}
+
+.recent-remove {
+  right: 8px;
+  font-size: 16px;
+}
+
+.recent-reveal:disabled {
+  cursor: not-allowed;
+  opacity: 0;
+}
+
+.recent-item:hover .recent-reveal,
 .recent-item:hover .recent-remove {
   opacity: 1;
+}
+
+.recent-item:hover .recent-reveal:disabled {
+  opacity: 0.3;
 }
 
 .recent-remove:hover {

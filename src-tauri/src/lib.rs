@@ -67,6 +67,7 @@ pub fn run() {
             commands::settings::set_setting,
             commands::settings::list_settings,
             commands::settings::delete_setting,
+            commands::shell::reveal_in_file_manager,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

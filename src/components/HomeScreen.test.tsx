@@ -329,6 +329,25 @@ describe("HomeScreen", () => {
       expect(importCalls).toHaveLength(0);
     });
 
+    it("clicking ファイルの場所を開く invokes reveal_in_file_manager without opening the file", async () => {
+      const user = userEvent.setup();
+      render(<HomeScreen />);
+      const reveal = screen.getAllByLabelText("ファイルの場所を開く")[0];
+      await user.click(reveal);
+      expect(invokeMock).toHaveBeenCalledWith("reveal_in_file_manager", { path: "/tmp/a.xlsx" });
+      const importCalls = invokeMock.mock.calls.filter((c) =>
+        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(c[0] as string)
+      );
+      expect(importCalls).toHaveLength(0);
+    });
+
+    it("the reveal button is disabled for missing files", () => {
+      render(<HomeScreen />);
+      const reveals = screen.getAllByLabelText("ファイルの場所を開く") as HTMLButtonElement[];
+      // 3rd item is c.coco with exists=false.
+      expect(reveals[2].disabled).toBe(true);
+    });
+
     it("the × remove button calls workbook_remove_recent without opening the file", async () => {
       const user = userEvent.setup();
       render(<HomeScreen />);

@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy, Suspense } from "react";
+import { useEffect, useRef, useState, lazy, Suspense } from "react";
 import { useWorkbookStore } from "./store/useWorkbookStore";
 import {
   useGlobalShortcuts,
@@ -15,6 +15,7 @@ import HelpDialog from "./components/HelpDialog";
 import DropOverlay from "./components/DropOverlay";
 import SettingsDialog from "./components/SettingsDialog";
 import CloseConfirmDialog from "./components/CloseConfirmDialog";
+import XlsmMacroLossDialog from "./components/XlsmMacroLossDialog";
 
 // EditorScreen pulls in the ~10MB Univer bundle. Lazy-load it so the Home
 // screen renders instantly without waiting for Univer to parse.
@@ -29,6 +30,7 @@ export default function App() {
     screen,
     currentHandle,
     blockingImport,
+    importWarnings,
     loadRecentFiles,
     loadRecoveryCandidates,
     loadAutoSaveInterval,
@@ -44,6 +46,11 @@ export default function App() {
   const [closeResolve, setCloseResolve] = useState<
     ((choice: "save" | "discard" | "cancel") => void) | null
   >(null);
+  const [xlsmMacroLossOpen, setXlsmMacroLossOpen] = useState(false);
+  // Tracks which workbookIds have already had their macro-loss dialog
+  // dismissed. Without this, re-renders that re-evaluate importWarnings
+  // would reopen the modal repeatedly for the same import.
+  const xlsmMacroLossHandledRef = useRef<Set<string>>(new Set());
 
   useGlobalShortcuts();
   useWindowTitle();
@@ -80,6 +87,19 @@ export default function App() {
     loadSuppressCsvPocWarning,
   ]);
 
+  // Auto-show the xlsm macro-loss modal once per workbookId. Skip while a
+  // blocking-import dialog is already up (don't stack two alerts).
+  useEffect(() => {
+    if (blockingImport) return;
+    const workbookId = currentHandle?.workbookId;
+    if (!workbookId) return;
+    const hasMacroLoss = importWarnings.some((w) => w.code === "XLSM_MACROS_DISCARDED");
+    if (!hasMacroLoss) return;
+    if (xlsmMacroLossHandledRef.current.has(workbookId)) return;
+    xlsmMacroLossHandledRef.current.add(workbookId);
+    setXlsmMacroLossOpen(true);
+  }, [importWarnings, currentHandle, blockingImport]);
+
   const closeFileName = currentHandle?.path
     ? currentHandle.path.split(/[\\/]/).pop() ?? "Untitled"
     : "無題のワークブック";
@@ -109,6 +129,9 @@ export default function App() {
             setCloseResolve(null);
           }}
         />
+      )}
+      {xlsmMacroLossOpen && (
+        <XlsmMacroLossDialog onClose={() => setXlsmMacroLossOpen(false)} />
       )}
       {isDropHovering && <DropOverlay />}
     </div>

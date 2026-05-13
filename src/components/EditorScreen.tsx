@@ -416,12 +416,23 @@ export default function EditorScreen() {
         {/* React key forces re-mount on status change so the CSS fade animation restarts. */}
         <span key={saveStatus} className={statusClass}>{statusLabel}</span>
         {lastSavedAt !== null && (
-          <span
-            className="status-bar__last-saved"
-            title={`最終保存: ${new Date(lastSavedAt).toLocaleString("ja-JP")}`}
-          >
-            · 最終保存 {timeAgoJa(lastSavedAt)}
-          </span>
+          isCocoFile ? (
+            <button
+              type="button"
+              className="status-bar__last-saved status-bar__last-saved--clickable"
+              title={`最終保存: ${new Date(lastSavedAt).toLocaleString("ja-JP")}（クリックで履歴を開く）`}
+              onClick={() => setSnapshotsOpen(true)}
+            >
+              · 最終保存 {timeAgoJa(lastSavedAt)}
+            </button>
+          ) : (
+            <span
+              className="status-bar__last-saved"
+              title={`最終保存: ${new Date(lastSavedAt).toLocaleString("ja-JP")}`}
+            >
+              · 最終保存 {timeAgoJa(lastSavedAt)}
+            </span>
+          )
         )}
         {statsLabel && (
           <span className="status-bar__stats">· {statsLabel}</span>

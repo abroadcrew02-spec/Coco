@@ -235,6 +235,20 @@
   font-size: 11px;
   color: rgba(255, 255, 255, 0.6);
   cursor: help;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+}
+
+.status-bar__last-saved--clickable {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.status-bar__last-saved--clickable:hover {
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .status-bar__stats {

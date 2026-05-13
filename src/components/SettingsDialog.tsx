@@ -95,8 +95,10 @@ export default function SettingsDialog({ onClose }: Props) {
           </button>
         </header>
         <div className="settings-body">
-          <section className="settings-section">
-            <h3>自動保存の頻度</h3>
+          <details className="settings-section" open>
+            <summary className="settings-section-summary">
+              <h3>自動保存の頻度</h3>
+            </summary>
             <p className="settings-hint">
               編集後この間隔で自動保存します。`.coco` は同一ファイルへ、xlsx は背後の一時 `.coco` へ書き出します（ユーザーの xlsx は明示保存時のみ更新）。
             </p>
@@ -113,9 +115,11 @@ export default function SettingsDialog({ onClose }: Props) {
                 </label>
               ))}
             </div>
-          </section>
-          <section className="settings-section">
-            <h3>CSV エクスポートの文字コード</h3>
+          </details>
+          <details className="settings-section">
+            <summary className="settings-section-summary">
+              <h3>CSV エクスポートの文字コード</h3>
+            </summary>
             <p className="settings-hint">
               CSV エクスポート時の文字コード既定値。Excel および Google Sheets は UTF-8 BOM 付きを推奨します。レガシーツールに渡す場合は Shift_JIS を選択できます。
             </p>
@@ -132,9 +136,11 @@ export default function SettingsDialog({ onClose }: Props) {
                 </label>
               ))}
             </div>
-          </section>
-          <section className="settings-section">
-            <h3>CSV インポートの文字コード</h3>
+          </details>
+          <details className="settings-section">
+            <summary className="settings-section-summary">
+              <h3>CSV インポートの文字コード</h3>
+            </summary>
             <p className="settings-hint">
               通常は自動判定で問題ありません。判定が外れた場合や、社内ツールが特定の文字コードを使う場合は固定指定に切り替えてください。
             </p>
@@ -151,9 +157,11 @@ export default function SettingsDialog({ onClose }: Props) {
                 </label>
               ))}
             </div>
-          </section>
-          <section className="settings-section">
-            <h3>CSV インポートの通知</h3>
+          </details>
+          <details className="settings-section">
+            <summary className="settings-section-summary">
+              <h3>CSV インポートの通知</h3>
+            </summary>
             <p className="settings-hint">
               毎回表示される「CSV PoC インポート」情報バナーを抑制します。エンコーディング判定や上限超過などの警告は引き続き表示されます。
             </p>
@@ -165,7 +173,7 @@ export default function SettingsDialog({ onClose }: Props) {
               />
               <span>「CSV PoC インポート」バナーを表示しない</span>
             </label>
-          </section>
+          </details>
         </div>
         <footer className="settings-footer">
           <button type="button" className="settings-btn" onClick={onClose}>

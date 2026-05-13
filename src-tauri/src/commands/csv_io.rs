@@ -519,12 +519,23 @@ fn infer_csv_cell(raw: &str) -> Option<Value> {
             raw.to_string()
         };
 
-    if let Ok(n) = unescaped.parse::<i64>() {
-        return Some(json!({ "v": n }));
-    }
-    if let Ok(f) = unescaped.parse::<f64>() {
-        if f.is_finite() {
-            return Some(json!({ "v": f }));
+    // Preserve leading-zero strings as strings rather than parsing as ints:
+    // account numbers, postal codes, phone numbers like "0001234" lose
+    // meaning if "0001234" becomes 1234. Skip only when the value is a clear
+    // decimal ("0.5") or scientific ("0e10").
+    let looks_like_id_with_leading_zero = unescaped.len() > 1
+        && unescaped.starts_with('0')
+        && !unescaped.starts_with("0.")
+        && !unescaped.starts_with("0e")
+        && !unescaped.starts_with("0E");
+    if !looks_like_id_with_leading_zero {
+        if let Ok(n) = unescaped.parse::<i64>() {
+            return Some(json!({ "v": n }));
+        }
+        if let Ok(f) = unescaped.parse::<f64>() {
+            if f.is_finite() {
+                return Some(json!({ "v": f }));
+            }
         }
     }
     // Percent strings — "50%" → 0.5 stored with a percent _fmt so that

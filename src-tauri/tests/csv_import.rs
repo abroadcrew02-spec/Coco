@@ -277,6 +277,27 @@ fn unknown_encoding_override_falls_back_to_auto() {
 }
 
 #[test]
+fn trailing_empty_rows_do_not_extend_used_dimensions() {
+    // Many real CSVs end with a couple of blank lines. They should not
+    // inflate the used row count.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "trailing.csv");
+    fs::write(&path, "a,b,c\n1,2,3\n\n\n\n").unwrap();
+
+    let result = import_csv_core(path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let sheet = &snap["sheets"]["sheet-1"];
+    let cell_data = sheet["cellData"].as_object().unwrap();
+    // Only rows 0 and 1 have any cells; the empty trailing rows are sparse.
+    assert!(cell_data.contains_key("0"));
+    assert!(cell_data.contains_key("1"));
+    assert!(!cell_data.contains_key("2"));
+    assert!(!cell_data.contains_key("3"));
+    assert!(!cell_data.contains_key("4"));
+}
+
+#[test]
 fn nonexistent_file_returns_err() {
     let result = import_csv_core("/does/not/exist.csv".to_string(), None);
     assert!(result.is_err());

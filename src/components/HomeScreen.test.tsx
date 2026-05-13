@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const { invokeMock, openMock } = vi.hoisted(() => ({
@@ -229,6 +229,34 @@ describe("HomeScreen", () => {
         await user.clear(input);
         const visible = container.querySelectorAll(".recent-list .recent-item");
         expect(visible).toHaveLength(7);
+      });
+
+      it("Ctrl+F focuses the filter input", () => {
+        render(<HomeScreen />);
+        const input = screen.getByLabelText("最近使ったファイルを絞り込む") as HTMLInputElement;
+        // Make sure we start from a known not-focused state.
+        (document.activeElement as HTMLElement | null)?.blur?.();
+        expect(document.activeElement).not.toBe(input);
+        fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+        expect(document.activeElement).toBe(input);
+      });
+
+      it("Cmd+F also focuses the filter (macOS)", () => {
+        render(<HomeScreen />);
+        const input = screen.getByLabelText("最近使ったファイルを絞り込む") as HTMLInputElement;
+        (document.activeElement as HTMLElement | null)?.blur?.();
+        fireEvent.keyDown(window, { key: "f", metaKey: true });
+        expect(document.activeElement).toBe(input);
+      });
+
+      it("Escape inside the filter clears the query", () => {
+        render(<HomeScreen />);
+        const input = screen.getByLabelText("最近使ったファイルを絞り込む") as HTMLInputElement;
+        // Use fireEvent.change so the controlled value lands synchronously.
+        fireEvent.change(input, { target: { value: "budget" } });
+        expect(input.value).toBe("budget");
+        fireEvent.keyDown(input, { key: "Escape" });
+        expect(input.value).toBe("");
       });
     });
 

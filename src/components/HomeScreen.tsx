@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
@@ -31,12 +31,31 @@ export default function HomeScreen() {
   // scanning awkward. Below the threshold, an input would just be noise.
   const FILTER_THRESHOLD = 6;
   const [filterQuery, setFilterQuery] = useState("");
+  const filterInputRef = useRef<HTMLInputElement | null>(null);
   const filteredRecents = filterQuery.trim()
     ? recentFiles.filter((f) =>
         f.name.toLowerCase().includes(filterQuery.trim().toLowerCase()) ||
         f.path.toLowerCase().includes(filterQuery.trim().toLowerCase())
       )
     : recentFiles;
+
+  // Ctrl/Cmd+F focuses the recents filter (when present). Escape inside the
+  // input clears the query without losing focus. The home screen is the only
+  // place this shortcut routes — the editor delegates Ctrl+F to Univer.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
+        if (filterInputRef.current) {
+          e.preventDefault();
+          filterInputRef.current.focus();
+          filterInputRef.current.select();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEditorPreload();
 
@@ -197,11 +216,18 @@ export default function HomeScreen() {
           </div>
           {recentFiles.length >= FILTER_THRESHOLD && (
             <input
+              ref={filterInputRef}
               type="search"
               className="recent-filter"
-              placeholder="ファイル名 / パスで絞り込み..."
+              placeholder="ファイル名 / パスで絞り込み... (Ctrl+F)"
               value={filterQuery}
               onChange={(e) => setFilterQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && filterQuery) {
+                  e.preventDefault();
+                  setFilterQuery("");
+                }
+              }}
               aria-label="最近使ったファイルを絞り込む"
             />
           )}

@@ -34,6 +34,15 @@ describe("EditorScreen Univer plugin wiring", () => {
     );
   });
 
+  it("imports and registers the sheets-filter plugin (FR-009)", () => {
+    expect(editorSource).toMatch(
+      /from "@univerjs\/sheets-filter"/,
+    );
+    expect(editorSource).toMatch(
+      /univer\.registerPlugin\(UniverSheetsFilterPlugin\)/,
+    );
+  });
+
   it("renders the sheet-protection toggle button and wires its handler", () => {
     // The toolbar button must be present with the testid and onClick handler
     // so toggling sheet protection routes through `toggleSheetProtection`.

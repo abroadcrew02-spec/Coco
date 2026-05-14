@@ -1735,6 +1735,214 @@ pub(crate) fn parse_xlsx_dimensions(path: &str) -> HashMap<String, SheetDimensio
     out
 }
 
+/// Per-sheet print / page-setup metadata parsed from the worksheet XML. Each
+/// field is optional so the snapshot can omit them entirely when the source
+/// file declared no non-default values. See OOXML's `<pageSetup>`,
+/// `<pageMargins>`, `<printOptions>`, `<headerFooter>`, and `<sheetView>`.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct SheetPageSetup {
+    pub orientation: Option<String>, // "portrait" | "landscape"
+    pub paper_size: Option<u8>,
+    pub scale: Option<u32>,
+    pub fit_to_width: Option<u32>,
+    pub fit_to_height: Option<u32>,
+    pub margin_left: Option<f64>,
+    pub margin_right: Option<f64>,
+    pub margin_top: Option<f64>,
+    pub margin_bottom: Option<f64>,
+    pub margin_header: Option<f64>,
+    pub margin_footer: Option<f64>,
+    pub print_gridlines: Option<bool>,
+    pub print_headings: Option<bool>,
+    pub header: Option<String>,
+    pub footer: Option<String>,
+    pub show_gridlines: Option<bool>,
+    pub zoom_scale: Option<u32>,
+}
+
+impl SheetPageSetup {
+    fn is_empty(&self) -> bool {
+        self.orientation.is_none()
+            && self.paper_size.is_none()
+            && self.scale.is_none()
+            && self.fit_to_width.is_none()
+            && self.fit_to_height.is_none()
+            && self.margin_left.is_none()
+            && self.margin_right.is_none()
+            && self.margin_top.is_none()
+            && self.margin_bottom.is_none()
+            && self.margin_header.is_none()
+            && self.margin_footer.is_none()
+            && self.print_gridlines.is_none()
+            && self.print_headings.is_none()
+            && self.header.is_none()
+            && self.footer.is_none()
+            && self.show_gridlines.is_none()
+            && self.zoom_scale.is_none()
+    }
+}
+
+/// Find the opening tag for `name` in `xml` (e.g. `<pageSetup ... />` or
+/// `<pageSetup ...>`) and return its attribute substring as `&str`. Returns
+/// `None` when the tag is absent. Tolerates both self-closing and paired forms.
+fn find_opening_tag<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
+    let needle = format!("<{name}");
+    let start = xml.find(&needle)?;
+    // The char immediately after the name must be whitespace, '/', or '>'.
+    // This rejects e.g. `<pageSetupPr` when searching for `<pageSetup`.
+    let after = xml.as_bytes().get(start + needle.len()).copied()?;
+    if !(after == b' ' || after == b'\t' || after == b'\r' || after == b'\n'
+        || after == b'/' || after == b'>')
+    {
+        // Probe further along the string for a non-prefix match.
+        let mut cursor = start + needle.len();
+        loop {
+            let rest = xml.get(cursor..)?;
+            let rel = rest.find(&needle)?;
+            let abs = cursor + rel;
+            let after2 = xml.as_bytes().get(abs + needle.len()).copied()?;
+            if after2 == b' ' || after2 == b'\t' || after2 == b'\r' || after2 == b'\n'
+                || after2 == b'/' || after2 == b'>'
+            {
+                let end = xml[abs..].find('>')? + abs;
+                return Some(&xml[abs..=end]);
+            }
+            cursor = abs + needle.len();
+        }
+    }
+    let end = xml[start..].find('>')? + start;
+    Some(&xml[start..=end])
+}
+
+/// Extract the text content of a `<headerFooter><oddHeader>...</oddHeader>...`
+/// child. Tolerates the OOXML CDATA wrapper used for header/footer strings.
+fn extract_hf_child(block: &str, child: &str) -> Option<String> {
+    let open = format!("<{child}");
+    let close = format!("</{child}>");
+    let start = block.find(&open)?;
+    let body_start = block[start..].find('>')? + start + 1;
+    let body_end = block[body_start..].find(&close)? + body_start;
+    let body = &block[body_start..body_end];
+    // Strip optional CDATA wrapper.
+    let trimmed = body.trim();
+    let unwrapped = if trimmed.starts_with("<![CDATA[") && trimmed.ends_with("]]>") {
+        &trimmed[9..trimmed.len() - 3]
+    } else {
+        trimmed
+    };
+    if unwrapped.is_empty() {
+        None
+    } else {
+        Some(decode_xml_entities(unwrapped))
+    }
+}
+
+/// Parse the print / page-setup fields out of one sheet's XML.
+fn parse_sheet_page_setup_xml(xml: &str) -> SheetPageSetup {
+    let mut ps = SheetPageSetup::default();
+
+    // --- <sheetView showGridLines="0" zoomScale="125" .../> ---
+    if let Some(tag) = find_opening_tag(xml, "sheetView") {
+        if let Some(v) = extract_attr(tag, "showGridLines") {
+            // OOXML default is true; only record explicit "0".
+            if v == "0" {
+                ps.show_gridlines = Some(false);
+            } else if v == "1" {
+                ps.show_gridlines = Some(true);
+            }
+        }
+        if let Some(z) = extract_attr(tag, "zoomScale").and_then(|s| s.parse::<u32>().ok()) {
+            if z != 100 {
+                ps.zoom_scale = Some(z);
+            }
+        }
+    }
+
+    // --- <pageSetup orientation="landscape" paperSize="9" scale="80"
+    //                fitToWidth="1" fitToHeight="0" .../> ---
+    if let Some(tag) = find_opening_tag(xml, "pageSetup") {
+        if let Some(o) = extract_attr(tag, "orientation") {
+            if o == "portrait" || o == "landscape" {
+                ps.orientation = Some(o);
+            }
+        }
+        ps.paper_size = extract_attr(tag, "paperSize").and_then(|s| s.parse::<u8>().ok());
+        ps.scale = extract_attr(tag, "scale").and_then(|s| s.parse::<u32>().ok());
+        ps.fit_to_width = extract_attr(tag, "fitToWidth").and_then(|s| s.parse::<u32>().ok());
+        ps.fit_to_height = extract_attr(tag, "fitToHeight").and_then(|s| s.parse::<u32>().ok());
+    }
+
+    // --- <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/> ---
+    if let Some(tag) = find_opening_tag(xml, "pageMargins") {
+        ps.margin_left = extract_attr(tag, "left").and_then(|s| s.parse::<f64>().ok());
+        ps.margin_right = extract_attr(tag, "right").and_then(|s| s.parse::<f64>().ok());
+        ps.margin_top = extract_attr(tag, "top").and_then(|s| s.parse::<f64>().ok());
+        ps.margin_bottom = extract_attr(tag, "bottom").and_then(|s| s.parse::<f64>().ok());
+        ps.margin_header = extract_attr(tag, "header").and_then(|s| s.parse::<f64>().ok());
+        ps.margin_footer = extract_attr(tag, "footer").and_then(|s| s.parse::<f64>().ok());
+    }
+
+    // --- <printOptions gridLines="1" headings="1"/> ---
+    if let Some(tag) = find_opening_tag(xml, "printOptions") {
+        if let Some(v) = extract_attr(tag, "gridLines") {
+            ps.print_gridlines = Some(v == "1" || v == "true");
+        }
+        if let Some(v) = extract_attr(tag, "headings") {
+            ps.print_headings = Some(v == "1" || v == "true");
+        }
+    }
+
+    // --- <headerFooter><oddHeader>...</oddHeader><oddFooter>...</oddFooter></headerFooter> ---
+    if let (Some(s), Some(e)) = (xml.find("<headerFooter"), xml.find("</headerFooter>")) {
+        if e > s {
+            let block = &xml[s..e];
+            ps.header = extract_hf_child(block, "oddHeader");
+            ps.footer = extract_hf_child(block, "oddFooter");
+        }
+    }
+
+    ps
+}
+
+/// Parse per-sheet print / page-setup metadata out of an xlsx. Returns a map
+/// keyed by sheet name. Returns an empty map on I/O or parse errors — page
+/// setup is best-effort decoration, not load-bearing.
+pub(crate) fn parse_xlsx_page_setup(path: &str) -> HashMap<String, SheetPageSetup> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return HashMap::new(),
+    };
+
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    if sheet_paths.is_empty() {
+        return HashMap::new();
+    }
+
+    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
+        Ok(a) => a,
+        Err(_) => return HashMap::new(),
+    };
+
+    let mut out: HashMap<String, SheetPageSetup> = HashMap::new();
+    for (sheet_name, entry_path) in sheet_paths {
+        let mut xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&entry_path) {
+            if entry.read_to_string(&mut xml).is_ok() {
+                let ps = parse_sheet_page_setup_xml(&xml);
+                if !ps.is_empty() {
+                    out.insert(sheet_name, ps);
+                }
+            }
+        }
+    }
+
+    out
+}
+
 /// Parse an A1-style range reference like `"B3:D5"` or `"A1"` into 0-based
 /// `(start_row, start_col, end_row, end_col)`. A single cell ref expands to a
 /// range where start == end. Returns `None` for malformed input.
@@ -3383,6 +3591,10 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     // Pre-parse rich-text runs from sharedStrings.xml + inline `<is>` strings.
     // calamine flattens rich strings to plain — we re-attach the runs here.
     let rich_text = parse_xlsx_rich_text(&path).ok();
+    // Pre-parse per-sheet print / page-setup metadata (orientation, margins,
+    // headers/footers, gridline display, zoom...). Best-effort: missing or
+    // unparseable values just degrade to "no page setup recorded".
+    let page_setup_by_sheet = parse_xlsx_page_setup(&path);
 
     let mut wb: Xlsx<_> =
         open_workbook(&path).map_err(|e| format!("Failed to open xlsx: {e}"))?;
@@ -3774,6 +3986,77 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             sheet_obj["_sheetState"] = Value::String(state.clone());
         }
 
+        // Per-sheet print / page-setup. Opt-in: only emit `_pageSetup` when at
+        // least one non-default field was captured, so a workbook that never
+        // customized page setup doesn't acquire a stray object on round-trip.
+        if let Some(ps) = page_setup_by_sheet.get(name) {
+            let mut obj = Map::new();
+            if let Some(o) = &ps.orientation {
+                obj.insert("orientation".into(), Value::String(o.clone()));
+            }
+            if let Some(p) = ps.paper_size {
+                obj.insert("paperSize".into(), Value::from(p));
+            }
+            if let Some(s) = ps.scale {
+                obj.insert("scale".into(), Value::from(s));
+            }
+            if let Some(w) = ps.fit_to_width {
+                obj.insert("fitToWidth".into(), Value::from(w));
+            }
+            if let Some(h) = ps.fit_to_height {
+                obj.insert("fitToHeight".into(), Value::from(h));
+            }
+            let any_margin = ps.margin_left.is_some()
+                || ps.margin_right.is_some()
+                || ps.margin_top.is_some()
+                || ps.margin_bottom.is_some()
+                || ps.margin_header.is_some()
+                || ps.margin_footer.is_some();
+            if any_margin {
+                let mut m = Map::new();
+                if let Some(v) = ps.margin_left {
+                    m.insert("left".into(), Value::from(v));
+                }
+                if let Some(v) = ps.margin_right {
+                    m.insert("right".into(), Value::from(v));
+                }
+                if let Some(v) = ps.margin_top {
+                    m.insert("top".into(), Value::from(v));
+                }
+                if let Some(v) = ps.margin_bottom {
+                    m.insert("bottom".into(), Value::from(v));
+                }
+                if let Some(v) = ps.margin_header {
+                    m.insert("header".into(), Value::from(v));
+                }
+                if let Some(v) = ps.margin_footer {
+                    m.insert("footer".into(), Value::from(v));
+                }
+                obj.insert("margins".into(), Value::Object(m));
+            }
+            if let Some(b) = ps.print_gridlines {
+                obj.insert("printGridLines".into(), Value::Bool(b));
+            }
+            if let Some(b) = ps.print_headings {
+                obj.insert("printHeadings".into(), Value::Bool(b));
+            }
+            if let Some(s) = &ps.header {
+                obj.insert("header".into(), Value::String(s.clone()));
+            }
+            if let Some(s) = &ps.footer {
+                obj.insert("footer".into(), Value::String(s.clone()));
+            }
+            if let Some(b) = ps.show_gridlines {
+                obj.insert("showGridLines".into(), Value::Bool(b));
+            }
+            if let Some(z) = ps.zoom_scale {
+                obj.insert("zoomScale".into(), Value::from(z));
+            }
+            if !obj.is_empty() {
+                sheet_obj["_pageSetup"] = Value::Object(obj);
+            }
+        }
+
         sheets_map.insert(sheet_id, sheet_obj);
     }
 
@@ -4131,6 +4414,85 @@ pub fn export_xlsx_core(
                     worksheet
                         .set_row_height(row_idx, h)
                         .map_err(|e| e.to_string())?;
+                }
+            }
+
+            // Apply per-sheet print / page-setup from `_pageSetup`. All fields
+            // are individually optional and each maps to a single
+            // rust_xlsxwriter setter — missing fields leave the underlying
+            // default in place. Setters that reject out-of-range values (e.g.
+            // print scale must be 10..=400) silently no-op, matching the
+            // best-effort policy for the other preserved metadata.
+            if let Some(ps) = sheet_obj
+                .and_then(|s| s.get("_pageSetup"))
+                .and_then(|v| v.as_object())
+            {
+                if let Some(o) = ps.get("orientation").and_then(|v| v.as_str()) {
+                    match o {
+                        "landscape" => {
+                            worksheet.set_landscape();
+                        }
+                        "portrait" => {
+                            worksheet.set_portrait();
+                        }
+                        _ => {}
+                    }
+                }
+                if let Some(p) = ps.get("paperSize").and_then(|v| v.as_u64()) {
+                    if let Ok(p8) = u8::try_from(p) {
+                        worksheet.set_paper_size(p8);
+                    }
+                }
+                if let Some(s) = ps.get("scale").and_then(|v| v.as_u64()) {
+                    if let Ok(s16) = u16::try_from(s) {
+                        worksheet.set_print_scale(s16);
+                    }
+                }
+                // fit-to-pages is set together; rust_xlsxwriter requires both.
+                let ftw = ps.get("fitToWidth").and_then(|v| v.as_u64());
+                let fth = ps.get("fitToHeight").and_then(|v| v.as_u64());
+                if ftw.is_some() || fth.is_some() {
+                    let w = ftw.and_then(|v| u16::try_from(v).ok()).unwrap_or(1);
+                    let h = fth.and_then(|v| u16::try_from(v).ok()).unwrap_or(1);
+                    worksheet.set_print_fit_to_pages(w, h);
+                }
+                if let Some(margins) = ps.get("margins").and_then(|v| v.as_object()) {
+                    // -1.0 signals "use Excel default" for each axis in
+                    // rust_xlsxwriter, so missing fields are skipped that way.
+                    let g = |k: &str| -> f64 {
+                        margins
+                            .get(k)
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(-1.0)
+                    };
+                    worksheet.set_margins(
+                        g("left"),
+                        g("right"),
+                        g("top"),
+                        g("bottom"),
+                        g("header"),
+                        g("footer"),
+                    );
+                }
+                if let Some(b) = ps.get("printGridLines").and_then(|v| v.as_bool()) {
+                    worksheet.set_print_gridlines(b);
+                }
+                if let Some(b) = ps.get("printHeadings").and_then(|v| v.as_bool()) {
+                    worksheet.set_print_headings(b);
+                }
+                if let Some(s) = ps.get("header").and_then(|v| v.as_str()) {
+                    worksheet.set_header(s);
+                }
+                if let Some(s) = ps.get("footer").and_then(|v| v.as_str()) {
+                    worksheet.set_footer(s);
+                }
+                if let Some(b) = ps.get("showGridLines").and_then(|v| v.as_bool()) {
+                    worksheet.set_screen_gridlines(b);
+                }
+                if let Some(z) = ps.get("zoomScale").and_then(|v| v.as_u64()) {
+                    if let Ok(z16) = u16::try_from(z) {
+                        worksheet.set_zoom(z16);
+                    }
                 }
             }
 

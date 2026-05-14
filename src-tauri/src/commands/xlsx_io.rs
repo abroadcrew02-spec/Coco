@@ -3,7 +3,7 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use calamine::{open_workbook, Data, Reader, Xlsx};
-use rust_xlsxwriter::{Color, Format, FormatAlign, FormatPattern, Workbook};
+use rust_xlsxwriter::{Color, Format, FormatAlign, FormatBorder, FormatPattern, Workbook};
 use serde_json::{json, Map, Value};
 
 use crate::commands::workbook::{
@@ -16,8 +16,8 @@ const MIN_COLS: usize = 100;
 const LARGE_SHEET_THRESHOLD: usize = 100_000;
 
 /// Normalized cell style extracted from xl/styles.xml + per-sheet `<c s="..."/>` refs.
-/// Scope: font (bold/italic/color) + fill (color) + alignment (horizontal/vertical).
-/// Borders, number formats, and rich text are intentionally out of scope.
+/// Scope: font (bold/italic/color) + fill (color) + alignment (horizontal/vertical)
+/// + borders (per-side style/color). Number formats and rich text remain out of scope.
 #[derive(Default, Clone, PartialEq, Eq, Hash)]
 struct CellStyle {
     bold: bool,
@@ -26,6 +26,30 @@ struct CellStyle {
     fill_color: Option<String>,    // "#RRGGBB"
     h_align: Option<String>,       // "left" | "center" | "right" | "fill" | "justify"
     v_align: Option<String>,       // "top" | "middle" | "bottom"
+    borders: Option<CellBorders>,
+}
+
+#[derive(Default, Clone, PartialEq, Eq, Hash)]
+struct CellBorders {
+    top: Option<BorderSide>,
+    bottom: Option<BorderSide>,
+    left: Option<BorderSide>,
+    right: Option<BorderSide>,
+}
+
+impl CellBorders {
+    fn is_empty(&self) -> bool {
+        self.top.is_none()
+            && self.bottom.is_none()
+            && self.left.is_none()
+            && self.right.is_none()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct BorderSide {
+    style: String,           // "thin" | "medium" | "thick" | "double" | "dotted" | "dashed"
+    color: Option<String>,   // "#RRGGBB"
 }
 
 impl CellStyle {
@@ -36,6 +60,7 @@ impl CellStyle {
             && self.fill_color.is_none()
             && self.h_align.is_none()
             && self.v_align.is_none()
+            && self.borders.is_none()
     }
 
     fn to_json(&self) -> Value {
@@ -68,6 +93,25 @@ impl CellStyle {
             }
             obj.insert("alignment".into(), Value::Object(a));
         }
+        if let Some(b) = &self.borders {
+            let mut bobj = Map::new();
+            for (key, side) in [
+                ("top", &b.top),
+                ("bottom", &b.bottom),
+                ("left", &b.left),
+                ("right", &b.right),
+            ] {
+                if let Some(s) = side {
+                    let mut sobj = Map::new();
+                    sobj.insert("style".into(), Value::String(s.style.clone()));
+                    if let Some(c) = &s.color {
+                        sobj.insert("color".into(), Value::String(c.clone()));
+                    }
+                    bobj.insert(key.into(), Value::Object(sobj));
+                }
+            }
+            obj.insert("borders".into(), Value::Object(bobj));
+        }
         Value::Object(obj)
     }
 
@@ -85,6 +129,26 @@ impl CellStyle {
         if let Some(a) = obj.get("alignment").and_then(|x| x.as_object()) {
             s.h_align = a.get("horizontal").and_then(|x| x.as_str()).map(|s| s.to_string());
             s.v_align = a.get("vertical").and_then(|x| x.as_str()).map(|s| s.to_string());
+        }
+        if let Some(b) = obj.get("borders").and_then(|x| x.as_object()) {
+            let read_side = |key: &str| -> Option<BorderSide> {
+                let side_obj = b.get(key)?.as_object()?;
+                let style = side_obj.get("style").and_then(|v| v.as_str())?.to_string();
+                let color = side_obj
+                    .get("color")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                Some(BorderSide { style, color })
+            };
+            let borders = CellBorders {
+                top: read_side("top"),
+                bottom: read_side("bottom"),
+                left: read_side("left"),
+                right: read_side("right"),
+            };
+            if !borders.is_empty() {
+                s.borders = Some(borders);
+            }
         }
         Some(s)
     }
@@ -134,12 +198,12 @@ fn parse_xlsx_styles(path: &str) -> Result<ParsedStyles, String> {
     if let Ok(mut entry) = archive.by_name("xl/styles.xml") {
         entry.read_to_string(&mut styles_xml).map_err(|e| e.to_string())?;
     }
-    let (fonts, fills, cell_xfs_raw, custom_num_fmts) = parse_styles_xml(&styles_xml);
+    let (fonts, fills, borders, cell_xfs_raw, custom_num_fmts) = parse_styles_xml(&styles_xml);
 
     // 2. resolve each cellXf to a normalized CellStyle + number format
     let cell_xfs: Vec<CellStyle> = cell_xfs_raw
         .iter()
-        .map(|x| resolve_xf(x, &fonts, &fills))
+        .map(|x| resolve_xf(x, &fonts, &fills, &borders))
         .collect();
     let cell_num_formats: Vec<Option<String>> = cell_xfs_raw
         .iter()
@@ -194,14 +258,15 @@ fn parse_xlsx_styles(path: &str) -> Result<ParsedStyles, String> {
     })
 }
 
-/// Returns (fonts, fills, raw_xfs, custom_num_fmts). Each font/fill is a
-/// (bold,italic,color)/(color) tuple. `custom_num_fmts` is a map of
+/// Returns (fonts, fills, borders, raw_xfs, custom_num_fmts). Each font/fill
+/// is a (bold,italic,color)/(color) tuple. `custom_num_fmts` is a map of
 /// `numFmtId -> formatCode` for `<numFmt>` entries (typically id >= 164).
 fn parse_styles_xml(
     xml: &str,
-) -> (Vec<RawFont>, Vec<RawFill>, Vec<RawXf>, HashMap<u32, String>) {
+) -> (Vec<RawFont>, Vec<RawFill>, Vec<RawBorder>, Vec<RawXf>, HashMap<u32, String>) {
     let mut fonts: Vec<RawFont> = Vec::new();
     let mut fills: Vec<RawFill> = Vec::new();
+    let mut borders: Vec<RawBorder> = Vec::new();
     let mut xfs: Vec<RawXf> = Vec::new();
     let mut custom_num_fmts: HashMap<u32, String> = HashMap::new();
 
@@ -248,15 +313,29 @@ fn parse_styles_xml(
         }
     }
 
+    // Borders: <borders> ... <border><top style="thin"><color rgb="FF000000"/></top> ... </border> ...
+    if let Some(borders_block) = extract_block(xml, "<borders", "</borders>") {
+        for border_el in extract_elements(&borders_block, "<border", "</border>") {
+            let mut b = RawBorder::default();
+            b.top = parse_border_side(&border_el, "<top");
+            b.bottom = parse_border_side(&border_el, "<bottom");
+            b.left = parse_border_side(&border_el, "<left");
+            b.right = parse_border_side(&border_el, "<right");
+            borders.push(b);
+        }
+    }
+
     // cellXfs: <cellXfs ...> <xf ...><alignment .../></xf> ... </cellXfs>
     if let Some(xfs_block) = extract_block(xml, "<cellXfs", "</cellXfs>") {
         for xf_el in extract_elements(&xfs_block, "<xf", "</xf>") {
             let mut x = RawXf::default();
             x.font_id = parse_attr(&xf_el, "fontId").and_then(|s| s.parse().ok());
             x.fill_id = parse_attr(&xf_el, "fillId").and_then(|s| s.parse().ok());
+            x.border_id = parse_attr(&xf_el, "borderId").and_then(|s| s.parse().ok());
             x.num_fmt_id = parse_attr(&xf_el, "numFmtId").and_then(|s| s.parse().ok());
             x.apply_font = parse_attr(&xf_el, "applyFont").as_deref() == Some("1");
             x.apply_fill = parse_attr(&xf_el, "applyFill").as_deref() == Some("1");
+            x.apply_border = parse_attr(&xf_el, "applyBorder").as_deref() == Some("1");
             x.apply_number_format =
                 parse_attr(&xf_el, "applyNumberFormat").as_deref() == Some("1");
             x.apply_alignment = parse_attr(&xf_el, "applyAlignment").as_deref() == Some("1");
@@ -273,9 +352,11 @@ fn parse_styles_xml(
                 let mut x = RawXf::default();
                 x.font_id = parse_attr(&xf_el, "fontId").and_then(|s| s.parse().ok());
                 x.fill_id = parse_attr(&xf_el, "fillId").and_then(|s| s.parse().ok());
+                x.border_id = parse_attr(&xf_el, "borderId").and_then(|s| s.parse().ok());
                 x.num_fmt_id = parse_attr(&xf_el, "numFmtId").and_then(|s| s.parse().ok());
                 x.apply_font = parse_attr(&xf_el, "applyFont").as_deref() == Some("1");
                 x.apply_fill = parse_attr(&xf_el, "applyFill").as_deref() == Some("1");
+                x.apply_border = parse_attr(&xf_el, "applyBorder").as_deref() == Some("1");
                 x.apply_number_format =
                     parse_attr(&xf_el, "applyNumberFormat").as_deref() == Some("1");
                 x.apply_alignment = parse_attr(&xf_el, "applyAlignment").as_deref() == Some("1");
@@ -288,7 +369,7 @@ fn parse_styles_xml(
         }
     }
 
-    (fonts, fills, xfs, custom_num_fmts)
+    (fonts, fills, borders, xfs, custom_num_fmts)
 }
 
 /// Decode the small set of XML entities that may appear inside `formatCode`
@@ -299,6 +380,23 @@ fn decode_xml_entities(s: &str) -> String {
         .replace("&gt;", ">")
         .replace("&quot;", "\"")
         .replace("&apos;", "'")
+}
+
+/// Parse a `<top style="thin"><color rgb="FF000000"/></top>` (or similar side
+/// tag) into a BorderSide. Returns None if the tag is absent, the `style`
+/// attribute is missing/empty, or the style is "none".
+fn parse_border_side(border_xml: &str, side_open: &str) -> Option<BorderSide> {
+    let tag_open = find_tag(border_xml, side_open)?;
+    let style = parse_attr(&tag_open, "style")?;
+    if style.is_empty() || style == "none" {
+        return None;
+    }
+    // The element may be self-closing (just attrs) or paired with an inner
+    // `<color .../>`. Extract the full element body so we can look for color.
+    let elements = extract_elements(border_xml, side_open, &format!("</{}>", &side_open[1..]));
+    let body = elements.into_iter().next().unwrap_or(tag_open);
+    let color = find_tag(&body, "<color").and_then(|c| parse_attr(&c, "rgb").map(normalize_argb));
+    Some(BorderSide { style, color })
 }
 
 #[derive(Default, Clone)]
@@ -314,12 +412,31 @@ struct RawFill {
 }
 
 #[derive(Default, Clone)]
+struct RawBorder {
+    top: Option<BorderSide>,
+    bottom: Option<BorderSide>,
+    left: Option<BorderSide>,
+    right: Option<BorderSide>,
+}
+
+impl RawBorder {
+    fn is_empty(&self) -> bool {
+        self.top.is_none()
+            && self.bottom.is_none()
+            && self.left.is_none()
+            && self.right.is_none()
+    }
+}
+
+#[derive(Default, Clone)]
 struct RawXf {
     font_id: Option<usize>,
     fill_id: Option<usize>,
+    border_id: Option<usize>,
     num_fmt_id: Option<u32>,
     apply_font: bool,
     apply_fill: bool,
+    apply_border: bool,
     apply_number_format: bool,
     apply_alignment: bool,
     h_align: Option<String>,
@@ -342,7 +459,7 @@ fn resolve_num_format(xf: &RawXf, custom: &HashMap<u32, String>) -> Option<Strin
     builtin_num_format(id).map(|s| s.to_string())
 }
 
-fn resolve_xf(xf: &RawXf, fonts: &[RawFont], fills: &[RawFill]) -> CellStyle {
+fn resolve_xf(xf: &RawXf, fonts: &[RawFont], fills: &[RawFill], borders: &[RawBorder]) -> CellStyle {
     let mut s = CellStyle::default();
     // Font: honor regardless of applyFont — many writers omit the apply* flag.
     if let Some(idx) = xf.font_id {
@@ -357,6 +474,19 @@ fn resolve_xf(xf: &RawXf, fonts: &[RawFont], fills: &[RawFill]) -> CellStyle {
         if idx >= 2 {
             if let Some(f) = fills.get(idx) {
                 s.fill_color = f.color.clone();
+            }
+        }
+    }
+    // Border: like font, honor regardless of applyBorder. Skip if no sides are set.
+    if let Some(idx) = xf.border_id {
+        if let Some(rb) = borders.get(idx) {
+            if !rb.is_empty() {
+                s.borders = Some(CellBorders {
+                    top: rb.top.clone(),
+                    bottom: rb.bottom.clone(),
+                    left: rb.left.clone(),
+                    right: rb.right.clone(),
+                });
             }
         }
     }
@@ -662,10 +792,50 @@ fn build_format(style: &CellStyle, num_format: Option<&str>) -> Format {
             fmt = fmt.set_align(a);
         }
     }
+    if let Some(b) = &style.borders {
+        if let Some(side) = &b.top {
+            fmt = fmt.set_border_top(border_style_for(&side.style));
+            if let Some(c) = side.color.as_deref().and_then(parse_color) {
+                fmt = fmt.set_border_top_color(c);
+            }
+        }
+        if let Some(side) = &b.bottom {
+            fmt = fmt.set_border_bottom(border_style_for(&side.style));
+            if let Some(c) = side.color.as_deref().and_then(parse_color) {
+                fmt = fmt.set_border_bottom_color(c);
+            }
+        }
+        if let Some(side) = &b.left {
+            fmt = fmt.set_border_left(border_style_for(&side.style));
+            if let Some(c) = side.color.as_deref().and_then(parse_color) {
+                fmt = fmt.set_border_left_color(c);
+            }
+        }
+        if let Some(side) = &b.right {
+            fmt = fmt.set_border_right(border_style_for(&side.style));
+            if let Some(c) = side.color.as_deref().and_then(parse_color) {
+                fmt = fmt.set_border_right_color(c);
+            }
+        }
+    }
     if let Some(nf) = num_format {
         fmt = fmt.set_num_format(nf);
     }
     fmt
+}
+
+/// Map a stored OOXML border style string to a rust_xlsxwriter FormatBorder.
+/// Unknown styles fall back to Thin so the visual border isn't lost entirely.
+fn border_style_for(s: &str) -> FormatBorder {
+    match s {
+        "thin" => FormatBorder::Thin,
+        "medium" => FormatBorder::Medium,
+        "thick" => FormatBorder::Thick,
+        "double" => FormatBorder::Double,
+        "dotted" => FormatBorder::Dotted,
+        "dashed" => FormatBorder::Dashed,
+        _ => FormatBorder::Thin,
+    }
 }
 
 fn data_to_cell(d: &Data, num_format_override: Option<&str>) -> Option<Value> {
@@ -1557,7 +1727,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         severity: "info".to_string(),
         code: "XLSX_POC_IMPORT".to_string(),
         message:
-            "xlsx PoC import: borders are not yet preserved (named ranges + font/fill/alignment styles + merged cells + number formats + column widths + row heights are preserved)"
+            "xlsx PoC import: rich text and conditional formatting are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights are preserved)"
                 .to_string(),
         affected_sheets: None,
     });
@@ -2118,7 +2288,7 @@ pub fn export_xlsx_core(
         severity: "info".to_string(),
         code: "XLSX_POC_EXPORT".to_string(),
         message: format!(
-            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Borders and rich text are not yet preserved (named ranges + font/fill/alignment styles + column widths + row heights + merged cells + number formats are preserved)."
+            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Rich text and conditional formatting are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats are preserved)."
         ),
         affected_sheets: None,
     });

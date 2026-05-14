@@ -73,6 +73,7 @@ import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
 import { isSheetProtectedInSnapshot } from "../store/sheetProtection";
+import { extractCellStyle, applyCellStyle } from "../store/formatPainter";
 import {
   computeCommentIndicators,
   type CommentIndicator,
@@ -208,6 +209,21 @@ export default function EditorScreen() {
     sheetName: string;
     initialColor: string | null;
   } | null>(null);
+  // Format Painter (書式コピー) state. Excel's paintbrush:
+  //   - "idle"   : tool is off.
+  //   - "single" : armed for one paste; next selection-change applies + deactivates.
+  //   - "sticky" : applies on every selection-change until ESC (or another single click on the button).
+  // `pendingFormat` holds the style payload captured at activation time. We
+  // capture once when the tool is armed so that user-driven selection changes
+  // after activation don't reset the source.
+  const [formatPainterMode, setFormatPainterMode] = useState<
+    "idle" | "single" | "sticky"
+  >("idle");
+  const pendingFormatRef = useRef<Record<string, unknown> | null>(null);
+  // Latches the selection range that was active *at activation time* so the
+  // selection-change listener can ignore the initial fire if Univer happens to
+  // emit one synchronously when the user clicks the button.
+  const formatPainterArmedAtRef = useRef<number>(0);
 
   // Read all named ranges from the live Univer workbook via the facade
   // (FWorkbook.getDefinedNames). Falls back to an empty list if the facade
@@ -1249,6 +1265,159 @@ export default function EditorScreen() {
     [sortDialog, updateSnapshot],
   );
 
+  // Format Painter: capture the anchor cell's style from the live workbook
+  // snapshot and arm the tool. `mode` distinguishes single-shot vs sticky;
+  // a fresh activation while already armed cycles through (single → sticky → idle).
+  const activateFormatPainter = useCallback(
+    (mode: "single" | "sticky") => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const sheet = workbook.getActiveSheet();
+      if (!sheet) return;
+      const sheetId = sheet.getSheetId();
+      let row = 0;
+      let col = 0;
+      try {
+        const sel = sheet.getSelection();
+        const range = sel?.getActiveRange();
+        if (range) {
+          row = range.getRow();
+          col = range.getColumn();
+        }
+      } catch {
+        // Best-effort: fall back to A1.
+      }
+      // Re-derive snapshot from Univer so we see the latest style edits that
+      // might not have made it into currentSnapshotJson yet (300ms debounce).
+      let style: Record<string, unknown> | null = null;
+      try {
+        const snap = JSON.stringify(workbook.save());
+        style = extractCellStyle(snap, sheetId, row, col);
+      } catch {
+        style = null;
+      }
+      // Even when the anchor cell has no style we still arm the tool — the
+      // user can pick up a "no style" eraser semantic, but for the MVP we
+      // just no-op in that case to avoid surprising the user.
+      if (!style) {
+        // eslint-disable-next-line no-console
+        console.warn("書式コピー: コピー元のセルに書式がありません");
+        return;
+      }
+      pendingFormatRef.current = style;
+      formatPainterArmedAtRef.current = Date.now();
+      setFormatPainterMode(mode);
+    },
+    [],
+  );
+
+  const deactivateFormatPainter = useCallback(() => {
+    pendingFormatRef.current = null;
+    setFormatPainterMode("idle");
+  }, []);
+
+  // Toolbar button click handler. Tracks single vs double click so we can
+  // distinguish "apply once" (single click) from "stay active" (double click).
+  // We use a short timer to defer the single-click action so a follow-up click
+  // can promote it into a double-click — matches the canonical Excel UX.
+  const formatPainterClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleFormatPainterClick = useCallback(() => {
+    // Toggle off if already active in either mode.
+    if (formatPainterMode !== "idle") {
+      if (formatPainterClickTimerRef.current) {
+        clearTimeout(formatPainterClickTimerRef.current);
+        formatPainterClickTimerRef.current = null;
+      }
+      deactivateFormatPainter();
+      return;
+    }
+    // Defer single-click activation briefly so a double-click promotes to sticky.
+    if (formatPainterClickTimerRef.current) {
+      clearTimeout(formatPainterClickTimerRef.current);
+    }
+    formatPainterClickTimerRef.current = setTimeout(() => {
+      formatPainterClickTimerRef.current = null;
+      activateFormatPainter("single");
+    }, 220);
+  }, [formatPainterMode, activateFormatPainter, deactivateFormatPainter]);
+
+  const handleFormatPainterDoubleClick = useCallback(() => {
+    // Cancel any pending single-click activation; the double click wins.
+    if (formatPainterClickTimerRef.current) {
+      clearTimeout(formatPainterClickTimerRef.current);
+      formatPainterClickTimerRef.current = null;
+    }
+    activateFormatPainter("sticky");
+  }, [activateFormatPainter]);
+
+  // Wire the format-painter "apply on next selection" listener. Subscribes to
+  // FWorkbook.onSelectionChange once the workbook is mounted; the listener
+  // pulls the pending style + active sheet + new selection ranges and writes
+  // through updateSnapshot. Single mode deactivates after the first apply;
+  // sticky mode keeps going until ESC.
+  useEffect(() => {
+    if (formatPainterMode === "idle") return;
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    const onSelectionChange = (workbook as unknown as {
+      onSelectionChange?: (cb: (ranges: Array<{ startRow: number; endRow: number; startColumn: number; endColumn: number }>) => void) => { dispose: () => void };
+    }).onSelectionChange;
+    if (typeof onSelectionChange !== "function") return;
+
+    const disposable = onSelectionChange.call(workbook, (ranges) => {
+      // Ignore the synchronous initial fire that some Univer versions emit
+      // when a listener is attached — debounce ~50ms against arm time.
+      if (Date.now() - formatPainterArmedAtRef.current < 50) return;
+      const style = pendingFormatRef.current;
+      if (!style) return;
+      if (!Array.isArray(ranges) || ranges.length === 0) return;
+      const sheet = workbook.getActiveSheet();
+      if (!sheet) return;
+      const sheetId = sheet.getSheetId();
+      // Re-derive snapshot live so we don't clobber concurrent edits.
+      let snapJson: string;
+      try {
+        snapJson = JSON.stringify(workbook.save());
+      } catch {
+        return;
+      }
+      let next = snapJson;
+      for (const r of ranges) {
+        if (
+          typeof r?.startRow !== "number" ||
+          typeof r?.endRow !== "number" ||
+          typeof r?.startColumn !== "number" ||
+          typeof r?.endColumn !== "number"
+        ) {
+          continue;
+        }
+        next = applyCellStyle(
+          next,
+          sheetId,
+          {
+            startRow: r.startRow,
+            endRow: r.endRow,
+            startCol: r.startColumn,
+            endCol: r.endColumn,
+          },
+          style,
+        );
+      }
+      if (next !== snapJson) {
+        updateSnapshot(next);
+      }
+      if (formatPainterMode === "single") {
+        deactivateFormatPainter();
+      }
+    });
+
+    return () => disposable.dispose();
+  }, [formatPainterMode, updateSnapshot, deactivateFormatPainter]);
+
   useAutoSave();
 
   // Keyboard shortcuts (req 4.6): Ctrl+S / Cmd+S = save; Ctrl+Shift+S / Cmd+Shift+S = save as.
@@ -1285,6 +1454,10 @@ export default function EditorScreen() {
         // Number Format dialog for the PoC.
         e.preventDefault();
         openNumberFormatDialog();
+      } else if (!mod && e.key === "Escape" && formatPainterMode !== "idle") {
+        // ESC exits the Format Painter tool (matches Excel's UX).
+        e.preventDefault();
+        deactivateFormatPainter();
       }
     },
     [
@@ -1295,6 +1468,8 @@ export default function EditorScreen() {
       openHyperlinkDialog,
       openCommentDialog,
       openNumberFormatDialog,
+      formatPainterMode,
+      deactivateFormatPainter,
     ]
   );
 
@@ -1740,6 +1915,27 @@ export default function EditorScreen() {
             </button>
             <button
               type="button"
+              className={
+                "toolbar-btn" +
+                (formatPainterMode !== "idle" ? " toolbar-btn--active" : "")
+              }
+              onClick={handleFormatPainterClick}
+              onDoubleClick={handleFormatPainterDoubleClick}
+              title={
+                formatPainterMode === "sticky"
+                  ? "書式コピー（連続適用中・ESCで終了）"
+                  : formatPainterMode === "single"
+                  ? "書式コピー（次の選択に1回適用・ESCで取消）"
+                  : "書式のコピー/貼り付け（ダブルクリックで連続適用）"
+              }
+              aria-label="書式コピー"
+              aria-pressed={formatPainterMode !== "idle"}
+              data-testid="format-painter"
+            >
+              🖌 書式コピー
+            </button>
+            <button
+              type="button"
               className="toolbar-btn"
               onClick={toggleSheetProtection}
               title={
@@ -1901,7 +2097,12 @@ export default function EditorScreen() {
           </button>
         </div>
       )}
-      <div className="univer-wrap">
+      <div
+        className={
+          "univer-wrap" +
+          (formatPainterMode !== "idle" ? " univer-wrap--format-painter" : "")
+        }
+      >
         <div id="univer-container" ref={containerRef} className="univer-container" />
         <CommentIndicatorsPanel
           indicators={commentIndicators}

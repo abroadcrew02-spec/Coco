@@ -58,6 +58,7 @@ import {
   lookupHyperlink,
   classifyHyperlink,
 } from "./hyperlinkRender";
+import { patchCfRenders } from "./conditionalFormatRender";
 import InsertCommentDialog, { type CommentEntry } from "./InsertCommentDialog";
 import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
 import NumberFormatDialog, { type NumberFormatValue } from "./NumberFormatDialog";
@@ -1432,7 +1433,7 @@ export default function EditorScreen() {
     // array is its source of truth for re-emitting the actual <hyperlink>
     // elements on xlsx export.
     const initialData: Partial<IWorkbookData> = currentSnapshotJson
-      ? patchHyperlinkRenders(JSON.parse(currentSnapshotJson))
+      ? patchCfRenders(patchHyperlinkRenders(JSON.parse(currentSnapshotJson)))
       : {
           id: "coco-workbook",
           name: "Coco Workbook",

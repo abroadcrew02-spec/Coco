@@ -1515,7 +1515,7 @@ pub fn detect_unsupported_features(path: &str) -> Result<Vec<CompatibilityWarnin
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
             code: "XLSX_EXTERNAL_LINKS_DISCARDED".to_string(),
-            message: "外部ブックへのリンクが含まれていますが、Coco では値のみ保持され、リンクは失われます。".to_string(),
+            message: "外部ブックへのリンクが含まれています。キャッシュ値は保持されますが、Coco では外部ブックの自動取得は行いません。".to_string(),
             affected_sheets: None,
         });
     }
@@ -5201,6 +5201,10 @@ pub fn export_xlsx_core(
 //     `<pivotCaches>` in `xl/workbook.xml`) is NOT yet rewired — the blob
 //     survives round-trip but Excel won't re-link the pivot to its cache
 //     automatically. Sheet-level rels are rewired.
+//   - External-link wiring IS rewired: workbook.xml.rels gets the externalLink
+//     `<Relationship>` entries appended, and workbook.xml has its captured
+//     `<externalReferences>` block spliced back in. Per req 5.3.2, cached
+//     values survive but Coco never auto-fetches the external workbook.
 // ============================================================================
 
 const PRESERVED_PART_SIZE_CAP: usize = 16 * 1024 * 1024;
@@ -5214,6 +5218,7 @@ const PRESERVED_PREFIXES: &[&str] = &[
     "xl/theme/",
     "xl/pivotTables/",
     "xl/pivotCache/",
+    "xl/externalLinks/",
 ];
 
 /// Minimal base64 encoder — avoids adding a crate dependency for a single
@@ -5424,11 +5429,51 @@ pub(crate) fn parse_xlsx_preserved_parts(path: &str) -> Option<Value> {
         let _ = std::io::Read::read_to_string(&mut e, &mut content_types_xml);
     }
 
-    Some(json!({
+    // Workbook-level external-link wiring: capture both the rels entries
+    // (Type ending in `/externalLink`) and the `<externalReferences>` block
+    // from workbook.xml. Required so the saved file still routes preserved
+    // `xl/externalLinks/*` blobs back into the workbook structure.
+    let mut workbook_rels_xml = String::new();
+    if let Ok(mut e) = archive.by_name("xl/_rels/workbook.xml.rels") {
+        let _ = std::io::Read::read_to_string(&mut e, &mut workbook_rels_xml);
+    }
+    let mut ext_link_rels: Vec<Value> = Vec::new();
+    for el in extract_self_closing_or_paired(&workbook_rels_xml, "Relationship") {
+        let ty = parse_attr(&el, "Type").unwrap_or_default();
+        if !ty.ends_with("/externalLink") {
+            continue;
+        }
+        let id = parse_attr(&el, "Id").unwrap_or_default();
+        let target = parse_attr(&el, "Target").unwrap_or_default();
+        if id.is_empty() || target.is_empty() {
+            continue;
+        }
+        ext_link_rels.push(json!({ "rid": id, "target": target, "type": ty }));
+    }
+
+    // Extract `<externalReferences>...</externalReferences>` verbatim from
+    // workbook.xml. rust_xlsxwriter does not emit this block on export, so we
+    // splice it back in after the saved file is written.
+    let ext_refs_block: Option<String> = workbook_xml
+        .find("<externalReferences")
+        .and_then(|s| {
+            let rest = &workbook_xml[s..];
+            rest.find("</externalReferences>")
+                .map(|e| workbook_xml[s..s + e + "</externalReferences>".len()].to_string())
+        });
+
+    let mut result = json!({
         "parts": Value::Object(parts),
         "sheetRefs": sheet_refs,
         "contentTypes": content_types_xml,
-    }))
+    });
+    if !ext_link_rels.is_empty() {
+        result["workbookExternalLinkRels"] = Value::Array(ext_link_rels);
+    }
+    if let Some(b) = ext_refs_block {
+        result["workbookExternalReferences"] = Value::String(b);
+    }
+    Some(result)
 }
 
 /// Map a worksheet entry path to its sibling `_rels` path.
@@ -5467,6 +5512,29 @@ pub(crate) fn inject_preserved_parts(
         .get("contentTypes")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    let ext_link_rels: Vec<(String, String, String)> = preserved
+        .get("workbookExternalLinkRels")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|entry| {
+                    let o = entry.as_object()?;
+                    let rid = o.get("rid").and_then(|v| v.as_str())?.to_string();
+                    let target = o.get("target").and_then(|v| v.as_str())?.to_string();
+                    let ty = o
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink")
+                        .to_string();
+                    Some((rid, target, ty))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let ext_refs_block: Option<String> = preserved
+        .get("workbookExternalReferences")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     let original_bytes = fs::read(tmp_path).map_err(|e| e.to_string())?;
     let mut src = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
@@ -5528,6 +5596,17 @@ pub(crate) fn inject_preserved_parts(
         // copy from rust_xlsxwriter (unlikely, but defensive) doesn't survive.
         for name in parts.keys() {
             skip_names.insert(name.clone());
+        }
+        // Workbook-level rewrites for external-link preservation: we splice
+        // `<externalReferences>` back into workbook.xml and append externalLink
+        // rels into workbook.xml.rels.
+        let rewrite_workbook_xml = ext_refs_block.is_some();
+        let rewrite_workbook_rels = !ext_link_rels.is_empty();
+        if rewrite_workbook_xml {
+            skip_names.insert("xl/workbook.xml".to_string());
+        }
+        if rewrite_workbook_rels {
+            skip_names.insert("xl/_rels/workbook.xml.rels".to_string());
         }
 
         // Copy all entries from rust_xlsxwriter's output, skipping ones we
@@ -5612,6 +5691,35 @@ pub(crate) fn inject_preserved_parts(
             std::io::Write::write_all(&mut out, rels.as_bytes()).map_err(|e| e.to_string())?;
         }
 
+        // Workbook.xml / workbook.xml.rels rewrites for external-link
+        // preservation. rust_xlsxwriter doesn't know about `<externalReferences>`
+        // or the externalLink rels, so we splice them back in.
+        if rewrite_workbook_xml {
+            let mut wb_xml = String::new();
+            if let Ok(mut e) = src.by_name("xl/workbook.xml") {
+                let _ = std::io::Read::read_to_string(&mut e, &mut wb_xml);
+            }
+            let new_wb_xml = if let Some(block) = &ext_refs_block {
+                splice_external_references(&wb_xml, block)
+            } else {
+                wb_xml
+            };
+            out.start_file("xl/workbook.xml", opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, new_wb_xml.as_bytes())
+                .map_err(|e| e.to_string())?;
+        }
+        if rewrite_workbook_rels {
+            let mut wb_rels_xml = String::new();
+            if let Ok(mut e) = src.by_name("xl/_rels/workbook.xml.rels") {
+                let _ = std::io::Read::read_to_string(&mut e, &mut wb_rels_xml);
+            }
+            let new_wb_rels = append_workbook_rels(&wb_rels_xml, &ext_link_rels);
+            out.start_file("xl/_rels/workbook.xml.rels", opts)
+                .map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, new_wb_rels.as_bytes())
+                .map_err(|e| e.to_string())?;
+        }
+
         // Rewrite [Content_Types].xml: pull the new (rust_xlsxwriter-emitted)
         // body, then splice in any chart/drawing Override entries from the
         // original. We don't need to dedupe perfectly — Excel is tolerant of
@@ -5673,5 +5781,58 @@ fn merge_content_type_overrides(new_ct: &str, original_ct: &str) -> String {
         out
     } else {
         new_ct.to_string()
+    }
+}
+
+/// Splice an `<externalReferences>...</externalReferences>` block into the
+/// freshly-emitted `workbook.xml`. The block is inserted just before
+/// `</workbook>`. If the new workbook.xml already carries one (defensive — it
+/// shouldn't, since rust_xlsxwriter doesn't emit them), the original is left
+/// alone.
+fn splice_external_references(new_wb: &str, block: &str) -> String {
+    if new_wb.contains("<externalReferences") {
+        return new_wb.to_string();
+    }
+    if let Some(pos) = new_wb.rfind("</workbook>") {
+        let mut s = String::with_capacity(new_wb.len() + block.len());
+        s.push_str(&new_wb[..pos]);
+        s.push_str(block);
+        s.push_str(&new_wb[pos..]);
+        s
+    } else {
+        new_wb.to_string()
+    }
+}
+
+/// Append preserved externalLink `<Relationship>` entries to the workbook
+/// rels file emitted by rust_xlsxwriter. Existing rels (sheets, styles,
+/// shared strings, etc.) are kept; we just splice the new ones before
+/// `</Relationships>`. If an rId already collides with an existing one we
+/// drop the new one — collision is unlikely since rust_xlsxwriter uses a
+/// monotonic counter and externalLink rIds typically come at the end.
+fn append_workbook_rels(new_rels: &str, ext_links: &[(String, String, String)]) -> String {
+    if ext_links.is_empty() {
+        return new_rels.to_string();
+    }
+    let mut adds = String::new();
+    for (rid, target, ty) in ext_links {
+        if new_rels.contains(&format!("Id=\"{rid}\"")) {
+            continue;
+        }
+        adds.push_str(&format!(
+            "<Relationship Id=\"{rid}\" Type=\"{ty}\" Target=\"{target}\"/>"
+        ));
+    }
+    if adds.is_empty() {
+        return new_rels.to_string();
+    }
+    if let Some(pos) = new_rels.rfind("</Relationships>") {
+        let mut s = String::with_capacity(new_rels.len() + adds.len());
+        s.push_str(&new_rels[..pos]);
+        s.push_str(&adds);
+        s.push_str(&new_rels[pos..]);
+        s
+    } else {
+        new_rels.to_string()
     }
 }

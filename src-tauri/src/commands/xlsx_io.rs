@@ -4086,7 +4086,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         severity: "info".to_string(),
         code: "XLSX_POC_IMPORT".to_string(),
         message:
-            "xlsx PoC import: pivot tables are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights + rich text + data validations + conditional formatting + charts (blob-preserved) are preserved)"
+            "xlsx PoC import: threaded comments are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights + rich text + data validations + conditional formatting + charts (blob-preserved) + pivot tables (blob-preserved) are preserved)"
                 .to_string(),
         affected_sheets: None,
     });
@@ -4954,7 +4954,7 @@ pub fn export_xlsx_core(
         severity: "info".to_string(),
         code: "XLSX_POC_EXPORT".to_string(),
         message: format!(
-            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Pivot tables are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats + rich text + data validations + conditional formatting + charts (blob-preserved) are preserved)."
+            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Threaded comments are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats + rich text + data validations + conditional formatting + charts (blob-preserved) + pivot tables (blob-preserved) are preserved)."
         ),
         affected_sheets: None,
     });
@@ -5013,31 +5013,34 @@ pub fn export_xlsx_core(
 }
 
 // ============================================================================
-// Chart preservation (blob-level).
+// Blob-level part preservation (charts, drawings, theme, pivot tables).
 //
-// Charts in xlsx are spread across several parts (`xl/charts/*`,
-// `xl/drawings/*`, their `_rels`, `xl/theme/*`) plus a per-sheet `<drawing>`
-// reference that lives inside the worksheet XML. Rendering them is out of
-// scope for the PoC — instead we preserve every related part byte-for-byte
-// in the snapshot and inject it back on export so the saved file still
-// carries its charts.
+// These features are spread across several xlsx parts plus per-sheet
+// relationship entries. Rendering them is out of scope for the PoC — instead
+// we preserve every related part byte-for-byte in the snapshot and inject
+// it back on export so the saved file still carries them.
 //
 // On import: `parse_xlsx_preserved_parts` walks the source zip, base64-encodes
 // every preserved part under a single JSON object keyed by zip entry path,
-// and records each sheet's `<drawing r:id="..."/>` element + the relationship
-// target it points at. The whole thing is stamped into the snapshot under
-// `_preservedParts`.
+// and records each sheet's `<drawing r:id="..."/>` element + every
+// pivot-table relationship pointing out of the sheet's rels. The whole
+// thing is stamped into the snapshot under `_preservedParts`.
 //
 // On export: after `rust_xlsxwriter` writes the new xlsx to `tmp_path`,
 // `inject_preserved_parts` reopens that zip and rewrites it with every
 // preserved blob added, the `[Content_Types].xml` overrides merged in, and
-// a `<drawing>` ref plus `_rels/sheetN.xml.rels` inserted into the matching
-// (by sheet-order position) worksheet.
+// a `<drawing>` ref plus a fresh `_rels/sheetN.xml.rels` (containing the
+// drawing relationship and every pivot-table relationship) inserted into
+// the matching (by sheet-order position) worksheet.
 //
 // Limits:
 //   - Per-part cap: 16 MiB.
 //   - Aggregate cap: 32 MiB (defense against a maliciously crafted file).
 //   - Only the parts listed in `PRESERVED_PREFIXES` are captured.
+//   - Workbook-level pivotCache wiring (`xl/_rels/workbook.xml.rels` +
+//     `<pivotCaches>` in `xl/workbook.xml`) is NOT yet rewired — the blob
+//     survives round-trip but Excel won't re-link the pivot to its cache
+//     automatically. Sheet-level rels are rewired.
 // ============================================================================
 
 const PRESERVED_PART_SIZE_CAP: usize = 16 * 1024 * 1024;
@@ -5049,6 +5052,8 @@ const PRESERVED_PREFIXES: &[&str] = &[
     "xl/charts/",
     "xl/drawings/",
     "xl/theme/",
+    "xl/pivotTables/",
+    "xl/pivotCache/",
 ];
 
 /// Minimal base64 encoder — avoids adding a crate dependency for a single
@@ -5222,10 +5227,30 @@ pub(crate) fn parse_xlsx_preserved_parts(path: &str) -> Option<Value> {
             .as_ref()
             .and_then(|rid| rid_to_target.get(rid).cloned());
 
-        if drawing_rid.is_some() && drawing_target.is_some() {
+        // Walk Relationship elements again to capture every pivot-table rel
+        // (Type ends in `/pivotTable`). A single worksheet can reference more
+        // than one pivot table.
+        let mut pivot_rels: Vec<Value> = Vec::new();
+        for el in extract_self_closing_or_paired(&sheet_rels_xml, "Relationship") {
+            let ty = parse_attr(&el, "Type").unwrap_or_default();
+            if !ty.ends_with("/pivotTable") {
+                continue;
+            }
+            let id = parse_attr(&el, "Id").unwrap_or_default();
+            let target = parse_attr(&el, "Target").unwrap_or_default();
+            if id.is_empty() || target.is_empty() {
+                continue;
+            }
+            pivot_rels.push(json!({ "rid": id, "target": target }));
+        }
+
+        let has_drawing = drawing_rid.is_some() && drawing_target.is_some();
+        let has_pivot = !pivot_rels.is_empty();
+        if has_drawing || has_pivot {
             sheet_refs.push(json!({
                 "drawingRid": drawing_rid,
                 "drawingTarget": drawing_target,
+                "pivotRels": pivot_rels,
             }));
         } else {
             sheet_refs.push(Value::Null);
@@ -5295,25 +5320,46 @@ pub(crate) fn inject_preserved_parts(
         // Track entries we will skip on copy because we're rewriting them.
         // Up to `sheet_order_len` sheet XMLs may need a `<drawing>` injection,
         // and a matching `_rels` file may need to be added/replaced.
-        let mut sheet_to_drawing: HashMap<usize, (String, String)> = HashMap::new(); // sheet_idx → (rId, target)
+        struct SheetRef {
+            drawing: Option<(String, String)>, // (rId, target)
+            pivots: Vec<(String, String)>,     // [(rId, target), ...]
+        }
+        let mut sheet_to_refs: HashMap<usize, SheetRef> = HashMap::new();
         for (idx, val) in sheet_refs.iter().enumerate() {
             if idx >= sheet_order_len {
                 break;
             }
             let Some(obj) = val.as_object() else { continue };
-            let Some(rid) = obj.get("drawingRid").and_then(|v| v.as_str()) else {
-                continue;
+            let drawing = match (
+                obj.get("drawingRid").and_then(|v| v.as_str()),
+                obj.get("drawingTarget").and_then(|v| v.as_str()),
+            ) {
+                (Some(rid), Some(target)) => Some((rid.to_string(), target.to_string())),
+                _ => None,
             };
-            let Some(target) = obj.get("drawingTarget").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            sheet_to_drawing.insert(idx, (rid.to_string(), target.to_string()));
+            let pivots: Vec<(String, String)> = obj
+                .get("pivotRels")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|entry| {
+                            let o = entry.as_object()?;
+                            let rid = o.get("rid").and_then(|v| v.as_str())?;
+                            let target = o.get("target").and_then(|v| v.as_str())?;
+                            Some((rid.to_string(), target.to_string()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if drawing.is_some() || !pivots.is_empty() {
+                sheet_to_refs.insert(idx, SheetRef { drawing, pivots });
+            }
         }
 
         // We rewrite [Content_Types].xml and sheet XMLs / rels we touch.
         let mut skip_names: std::collections::HashSet<String> = std::collections::HashSet::new();
         skip_names.insert("[Content_Types].xml".to_string());
-        for idx in sheet_to_drawing.keys() {
+        for idx in sheet_to_refs.keys() {
             let n = idx + 1;
             skip_names.insert(format!("xl/worksheets/sheet{n}.xml"));
             skip_names.insert(format!("xl/worksheets/_rels/sheet{n}.xml.rels"));
@@ -5347,12 +5393,14 @@ pub(crate) fn inject_preserved_parts(
         }
 
         // Rewrite each affected worksheet XML with a `<drawing r:id="..."/>`
-        // tail. Also write a fresh `_rels/sheetN.xml.rels` carrying that rId.
-        // We must reopen src fresh because we already exhausted the iterator
-        // above on the borrow that got moved into the loop. Re-create archive.
+        // tail (when a drawing was preserved). Also write a fresh
+        // `_rels/sheetN.xml.rels` carrying the drawing relationship plus any
+        // pivot-table relationships we captured. We must reopen src fresh
+        // because we already exhausted the iterator above on the borrow that
+        // got moved into the loop. Re-create archive.
         let mut src2 =
             ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
-        for (idx, (rid, target)) in &sheet_to_drawing {
+        for (idx, refs) in &sheet_to_refs {
             let n = idx + 1;
             let sheet_name = format!("xl/worksheets/sheet{n}.xml");
             let mut sheet_xml = String::new();
@@ -5362,28 +5410,43 @@ pub(crate) fn inject_preserved_parts(
             if sheet_xml.is_empty() {
                 continue;
             }
-            // Inject `<drawing r:id="..."/>` just before `</worksheet>`.
-            let injected = if let Some(pos) = sheet_xml.rfind("</worksheet>") {
-                let mut s = String::with_capacity(sheet_xml.len() + 64);
-                s.push_str(&sheet_xml[..pos]);
-                s.push_str(&format!("<drawing r:id=\"{rid}\"/>"));
-                s.push_str(&sheet_xml[pos..]);
-                s
+            // Inject `<drawing r:id="..."/>` just before `</worksheet>` when we
+            // have a drawing ref. Pivot tables are referenced only through the
+            // sheet rels, so no sheet-body element is needed for them.
+            let injected = if let Some((rid, _)) = &refs.drawing {
+                if let Some(pos) = sheet_xml.rfind("</worksheet>") {
+                    let mut s = String::with_capacity(sheet_xml.len() + 64);
+                    s.push_str(&sheet_xml[..pos]);
+                    s.push_str(&format!("<drawing r:id=\"{rid}\"/>"));
+                    s.push_str(&sheet_xml[pos..]);
+                    s
+                } else {
+                    sheet_xml
+                }
             } else {
                 sheet_xml
             };
             out.start_file(&sheet_name, opts).map_err(|e| e.to_string())?;
             std::io::Write::write_all(&mut out, injected.as_bytes()).map_err(|e| e.to_string())?;
 
-            // Compose a minimal `_rels/sheetN.xml.rels` with just the drawing
+            // Compose a minimal `_rels/sheetN.xml.rels` with the drawing
+            // relationship (if any) plus every preserved pivot-table
             // relationship. If rust_xlsxwriter wrote one with other rels
             // (hyperlinks, etc.) we lose them — acceptable for the PoC.
-            let rels = format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n\
-                 <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n\
-                 <Relationship Id=\"{rid}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"{target}\"/>\n\
-                 </Relationships>"
-            );
+            let mut rels = String::new();
+            rels.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
+            rels.push_str("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n");
+            if let Some((rid, target)) = &refs.drawing {
+                rels.push_str(&format!(
+                    "<Relationship Id=\"{rid}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"{target}\"/>\n"
+                ));
+            }
+            for (rid, target) in &refs.pivots {
+                rels.push_str(&format!(
+                    "<Relationship Id=\"{rid}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable\" Target=\"{target}\"/>\n"
+                ));
+            }
+            rels.push_str("</Relationships>");
             let rels_name = format!("xl/worksheets/_rels/sheet{n}.xml.rels");
             out.start_file(&rels_name, opts).map_err(|e| e.to_string())?;
             std::io::Write::write_all(&mut out, rels.as_bytes()).map_err(|e| e.to_string())?;

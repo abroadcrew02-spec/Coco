@@ -38,6 +38,7 @@ import SaveFailureDialog from "./SaveFailureDialog";
 import BusyOverlay from "./BusyOverlay";
 import SnapshotHistoryDialog from "./SnapshotHistoryDialog";
 import CompatibilityWarningsDialog from "./CompatibilityWarningsDialog";
+import NamedRangesDialog, { type NamedRangeEntry } from "./NamedRangesDialog";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -94,10 +95,91 @@ export default function EditorScreen() {
   const [sheetPicker, setSheetPicker] = useState<{ id: string; name: string }[] | null>(null);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
   const [warningsDialog, setWarningsDialog] = useState<null | "import" | "export">(null);
+  // Named-ranges dialog state: null while closed; once opened we snapshot the
+  // current set so the user can cancel out without mutating the workbook.
+  const [namedRanges, setNamedRanges] = useState<NamedRangeEntry[] | null>(null);
+
+  // Read all named ranges from the live Univer workbook via the facade
+  // (FWorkbook.getDefinedNames). Falls back to an empty list if the facade
+  // hasn't initialized yet or the workbook isn't available.
+  const readNamedRanges = useCallback((): NamedRangeEntry[] => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return [];
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return [];
+    try {
+      const defined = workbook.getDefinedNames();
+      return defined.map((d) => ({
+        name: d.getName(),
+        formula: d.getFormulaOrRefString(),
+      }));
+    } catch {
+      return [];
+    }
+  }, []);
+
+  // Apply a new array of named ranges back to Univer as a diff:
+  //   - delete entries no longer present (match by original name)
+  //   - insert / update remaining entries
+  // We re-insert renamed entries (delete-then-insert) because the facade's
+  // updateDefinedNameBuilder requires a builder param keyed off the existing
+  // FDefinedName, and the simpler insertDefinedName(name, formulaOrRef)
+  // entry-point already covers both add + replace via Univer's internal
+  // dedup. Sheet-scope is preserved as-is (the dialog doesn't edit scope).
+  const applyNamedRanges = useCallback(
+    (next: NamedRangeEntry[]) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const before = readNamedRanges();
+      const beforeMap = new Map(before.map((r) => [r.name, r]));
+      const afterMap = new Map(next.map((r) => [r.name, r]));
+      // Delete names that were removed entirely.
+      for (const r of before) {
+        if (!afterMap.has(r.name)) {
+          try {
+            workbook.deleteDefinedName(r.name);
+          } catch {
+            // Best-effort: a deletion failure leaves the entry in Univer,
+            // which the user will see when re-opening the dialog.
+          }
+        }
+      }
+      // Insert / replace remaining entries. insertDefinedName accepts either
+      // a bare reference ("Sheet1!$A$1") or a formula starting with "=";
+      // Univer normalizes both internally.
+      for (const r of next) {
+        const existing = beforeMap.get(r.name);
+        if (existing && existing.formula === r.formula) continue;
+        try {
+          if (existing) {
+            // Replace by delete-then-insert so the new formula takes effect
+            // without needing the FDefinedName builder dance.
+            workbook.deleteDefinedName(r.name);
+          }
+          workbook.insertDefinedName(r.name, r.formula);
+        } catch {
+          // Best-effort: swallow individual failures so one bad entry
+          // doesn't abort the whole batch.
+        }
+      }
+      // Re-snapshot — the mutation listener also fires on these commands,
+      // but kicking the snapshot here makes the change visible immediately
+      // for the Save button enablement.
+      updateSnapshot(JSON.stringify(workbook.save()));
+    },
+    [readNamedRanges, updateSnapshot],
+  );
+
+  const openNamedRangesDialog = useCallback(() => {
+    setNamedRanges(readNamedRanges());
+  }, [readNamedRanges]);
 
   useAutoSave();
 
   // Keyboard shortcuts (req 4.6): Ctrl+S / Cmd+S = save; Ctrl+Shift+S / Cmd+Shift+S = save as.
+  // Ctrl+F3 opens the named-ranges dialog — Excel's convention for "Name Manager".
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -107,9 +189,12 @@ export default function EditorScreen() {
       } else if (mod && !e.shiftKey && e.key === "s") {
         e.preventDefault();
         save();
+      } else if (mod && e.key === "F3") {
+        e.preventDefault();
+        openNamedRangesDialog();
       }
     },
-    [save, promptSaveAs]
+    [save, promptSaveAs, openNamedRangesDialog]
   );
 
   const runCsvExport = useCallback(
@@ -354,6 +439,15 @@ export default function EditorScreen() {
           <button
             type="button"
             className="toolbar-btn"
+            onClick={openNamedRangesDialog}
+            title="名前付き範囲を編集 (Ctrl+F3)"
+            aria-label="名前付き範囲"
+          >
+            名前付き範囲
+          </button>
+          <button
+            type="button"
+            className="toolbar-btn"
             onClick={requestSettings}
             title="設定（自動保存間隔など）"
             aria-label="設定"
@@ -492,6 +586,13 @@ export default function EditorScreen() {
         />
       )}
       {snapshotsOpen && <SnapshotHistoryDialog onClose={() => setSnapshotsOpen(false)} />}
+      {namedRanges !== null && (
+        <NamedRangesDialog
+          initialRanges={namedRanges}
+          onSave={applyNamedRanges}
+          onClose={() => setNamedRanges(null)}
+        />
+      )}
       {warningsDialog === "import" && (
         <CompatibilityWarningsDialog
           warnings={importWarnings}

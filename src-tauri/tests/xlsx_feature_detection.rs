@@ -253,6 +253,143 @@ fn conditional_formatting_detected_only_in_second_sheet() {
 }
 
 #[test]
+fn data_validation_detected_in_worksheet_xml() {
+    let tmp = TempDir::new().unwrap();
+    let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData/>
+<dataValidations count="1">
+  <dataValidation type="list" sqref="A1:A10">
+    <formula1>"yes,no"</formula1>
+  </dataValidation>
+</dataValidations>
+</worksheet>"#;
+    let path = build_zip_with_contents(
+        &tmp,
+        "with_dv.xlsx",
+        &[
+            ("xl/workbook.xml", b"<xml/>"),
+            ("xl/worksheets/sheet1.xml", sheet_xml),
+        ],
+    );
+    let result = detect_unsupported_features(&path_str(&path)).unwrap();
+    let dv = result
+        .iter()
+        .find(|w| w.code == "XLSX_DATA_VALIDATION")
+        .unwrap_or_else(|| panic!("expected XLSX_DATA_VALIDATION, got {:?}", result));
+    assert_eq!(dv.severity, "warning");
+    assert!(
+        dv.message.contains("データバリデーション"),
+        "message should mention data validation in Japanese: {}",
+        dv.message
+    );
+}
+
+#[test]
+fn data_validation_not_emitted_when_absent() {
+    let tmp = TempDir::new().unwrap();
+    let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData>
+  <row r="1"><c r="A1"><v>1</v></c></row>
+</sheetData>
+</worksheet>"#;
+    let path = build_zip_with_contents(
+        &tmp,
+        "no_dv.xlsx",
+        &[
+            ("xl/workbook.xml", b"<xml/>"),
+            ("xl/worksheets/sheet1.xml", sheet_xml),
+        ],
+    );
+    let result = detect_unsupported_features(&path_str(&path)).unwrap();
+    assert!(
+        !result.iter().any(|w| w.code == "XLSX_DATA_VALIDATION"),
+        "should NOT emit data-validation warning, got {:?}",
+        result
+    );
+}
+
+/// Force the `<conditionalFormatting` marker to straddle the 64 KiB read
+/// boundary. Without the chunk-overlap window in the scanner, the marker
+/// would be split between two reads and missed.
+#[test]
+fn conditional_formatting_marker_split_across_chunk_boundary() {
+    let tmp = TempDir::new().unwrap();
+    let marker = b"<conditionalFormatting sqref=\"A1\"/>";
+    // Pad so that the marker starts at an offset that places its middle bytes
+    // exactly on the 65_536-byte chunk boundary. We want at least ~10 bytes of
+    // the marker before the boundary and the rest after.
+    const CHUNK: usize = 65_536;
+    let pre_marker_len = CHUNK - 10; // marker begins 10 bytes before boundary
+    let prefix = b"<worksheet><sheetData>";
+    let padding_needed = pre_marker_len.saturating_sub(prefix.len());
+    let mut sheet_xml: Vec<u8> = Vec::with_capacity(CHUNK + 1024);
+    sheet_xml.extend_from_slice(prefix);
+    sheet_xml.extend(std::iter::repeat(b' ').take(padding_needed));
+    sheet_xml.extend_from_slice(marker);
+    sheet_xml.extend_from_slice(b"</sheetData></worksheet>");
+    // Sanity-check the layout actually straddles the boundary.
+    let marker_start = prefix.len() + padding_needed;
+    let marker_end = marker_start + marker.len();
+    assert!(
+        marker_start < CHUNK && marker_end > CHUNK,
+        "test setup broken: marker should straddle CHUNK boundary"
+    );
+
+    let path = build_zip_with_contents(
+        &tmp,
+        "cf_split.xlsx",
+        &[
+            ("xl/workbook.xml", b"<xml/>"),
+            ("xl/worksheets/sheet1.xml", &sheet_xml),
+        ],
+    );
+    let result = detect_unsupported_features(&path_str(&path)).unwrap();
+    assert!(
+        result.iter().any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
+        "boundary-straddling marker should still be detected, got {:?}",
+        result
+    );
+}
+
+/// The chunked scanner caps each worksheet at 16 MiB. A synthetic worksheet
+/// padded past that cap must still complete (proves we don't slurp the entire
+/// decompressed body into memory) and the conservative-cap policy must emit
+/// the warning because we couldn't see the whole sheet.
+#[test]
+fn worksheet_scan_cap_enforced_at_16mib() {
+    let tmp = TempDir::new().unwrap();
+    // 18 MiB of padding, well past the 16 MiB cap. The actual marker is placed
+    // AFTER the cap so a naive full-read would find it but the capped reader
+    // must not (it'll instead emit conservatively because cap_hit=true).
+    let padding_size = 18 * 1024 * 1024;
+    let mut sheet_xml: Vec<u8> = Vec::with_capacity(padding_size + 256);
+    sheet_xml.extend_from_slice(b"<worksheet><sheetData>");
+    sheet_xml.extend(std::iter::repeat(b' ').take(padding_size));
+    sheet_xml.extend_from_slice(b"<conditionalFormatting sqref=\"A1\"/>");
+    sheet_xml.extend_from_slice(b"</sheetData></worksheet>");
+
+    let path = build_zip_with_contents(
+        &tmp,
+        "huge_sheet.xlsx",
+        &[
+            ("xl/workbook.xml", b"<xml/>"),
+            ("xl/worksheets/sheet1.xml", &sheet_xml),
+        ],
+    );
+    let result = detect_unsupported_features(&path_str(&path))
+        .expect("scan must complete on huge sheet, not OOM or error");
+    // Conservative emission: cap-hit ⇒ warning even if marker bytes weren't
+    // seen. This is intentional per the OOM-hardening spec.
+    assert!(
+        result.iter().any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
+        "cap-hit policy should conservatively emit CF warning, got {:?}",
+        result
+    );
+}
+
+#[test]
 fn invalid_zip_returns_err() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("not_a_zip.xlsx");

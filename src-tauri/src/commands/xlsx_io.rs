@@ -702,12 +702,99 @@ fn data_to_cell(d: &Data, num_format_override: Option<&str>) -> Option<Value> {
     }
 }
 
+/// Hard cap on decompressed bytes scanned per worksheet by
+/// `worksheet_contains_marker`. Worksheets in legitimate files almost always
+/// fit; the cap exists so a maliciously-crafted or pathologically large sheet
+/// can't OOM the process. 16 MiB chosen as a compromise between covering real
+/// CF/dataValidation blocks (typically near the end of the sheet) and bounding
+/// memory.
+const WORKSHEET_SCAN_CAP_BYTES: u64 = 16 * 1024 * 1024;
+/// Read buffer size for the chunked worksheet scan.
+const WORKSHEET_SCAN_CHUNK: usize = 65_536;
+/// Overlap window kept between successive chunks so a marker straddling a
+/// 64 KiB boundary is still found. Must be >= max marker length.
+const WORKSHEET_SCAN_OVERLAP: usize = 32;
+
+/// Scan a single worksheet entry in the archive for the given byte marker
+/// without loading the whole decompressed XML into memory.
+///
+/// - Reads in 64 KiB chunks and keeps a 32-byte trailing window so markers
+///   spanning chunk boundaries are still detected.
+/// - Hard-caps total bytes read per sheet at `WORKSHEET_SCAN_CAP_BYTES`. The
+///   second return value is `true` iff the cap was hit (callers may want to
+///   emit a conservative warning).
+/// - Bubbles up real I/O errors instead of masking them as "marker not found".
+///
+/// Known false-positive limitation: matches the literal byte sequence
+/// anywhere, including inside XML comments. Coco's xlsx writer never emits
+/// comments around `<conditionalFormatting`/`<dataValidations`, so this only
+/// affects hand-authored or third-party files. We accept the over-warning.
+fn worksheet_contains_marker<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    idx: usize,
+    marker: &[u8],
+) -> Result<(bool, bool), String> {
+    assert!(
+        marker.len() <= WORKSHEET_SCAN_OVERLAP,
+        "marker longer than overlap window; bump WORKSHEET_SCAN_OVERLAP"
+    );
+
+    let mut entry = archive.by_index(idx).map_err(|e| e.to_string())?;
+    let mut buf = [0u8; WORKSHEET_SCAN_CHUNK];
+    // The overlap holds the tail bytes of the previous chunk so we can detect
+    // markers that span the chunk boundary. We search the concatenation of
+    // (overlap || current chunk) each iteration.
+    let mut overlap: Vec<u8> = Vec::with_capacity(WORKSHEET_SCAN_OVERLAP);
+    let mut total_read: u64 = 0;
+    let mut cap_hit = false;
+
+    loop {
+        let n = entry.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        total_read = total_read.saturating_add(n as u64);
+
+        // Build a scratch view of (overlap || new bytes) and search it whole.
+        // Allocation is bounded by 64KiB + 32B per iteration.
+        let mut window: Vec<u8> = Vec::with_capacity(overlap.len() + n);
+        window.extend_from_slice(&overlap);
+        window.extend_from_slice(&buf[..n]);
+
+        if memchr_find(&window, marker) {
+            return Ok((true, false));
+        }
+
+        // Preserve the tail of `window` as the next iteration's overlap so a
+        // marker that straddles the next chunk boundary is still detected.
+        let keep = window.len().min(WORKSHEET_SCAN_OVERLAP);
+        overlap.clear();
+        overlap.extend_from_slice(&window[window.len() - keep..]);
+
+        if total_read >= WORKSHEET_SCAN_CAP_BYTES {
+            cap_hit = true;
+            break;
+        }
+    }
+
+    Ok((false, cap_hit))
+}
+
+/// Substring search via libstd's window iteration. Pulled out to a free
+/// function so callers read cleanly; ripgrep-style `memchr` is overkill for
+/// the short ASCII markers we use.
+fn memchr_find(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return false;
+    }
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
 /// Inspects the ZIP for unsupported feature directories and returns a list of
 /// CompatibilityWarning entries describing what will be silently dropped on
 /// save-back. Pure-Rust: takes the path so it's testable from cargo test.
 pub fn detect_unsupported_features(path: &str) -> Result<Vec<CompatibilityWarning>, String> {
     use std::fs::File;
-    use std::io::Read;
     use zip::ZipArchive;
 
     let file = File::open(path).map_err(|e| e.to_string())?;
@@ -719,9 +806,8 @@ pub fn detect_unsupported_features(path: &str) -> Result<Vec<CompatibilityWarnin
     let mut has_vba = false;
     let mut has_embeddings = false;
     let mut has_drawings = false;
-    // Collect worksheet entry indices first; conditional-formatting needs to read
-    // their content, but reading requires a mutable borrow of the archive that
-    // can't coexist with the iteration borrow.
+    // Collect worksheet entry indices first; per-sheet content scans need a
+    // mutable borrow of the archive that can't coexist with the iteration borrow.
     let mut worksheet_indices: Vec<usize> = Vec::new();
 
     for i in 0..archive.len() {
@@ -751,17 +837,32 @@ pub fn detect_unsupported_features(path: &str) -> Result<Vec<CompatibilityWarnin
         }
     }
 
-    // Conditional formatting lives inside each worksheet XML body — scan only
-    // until the first hit. We do not parse workbook.xml to map sheet ids back
-    // to display names; affected_sheets stays None per spec (keep it simple).
+    // Per-sheet XML body scan: conditional formatting + data validations both
+    // live inline. Stops scanning a feature as soon as any sheet hits — we do
+    // not collect affected_sheets per spec (keep it simple). The chunked
+    // reader hard-caps memory per sheet so a 500 MB worksheet can't OOM us.
+    let cf_marker: &[u8] = b"<conditionalFormatting";
+    let dv_marker: &[u8] = b"<dataValidations";
     let mut has_conditional_formatting = false;
+    let mut has_data_validation = false;
+
     for i in worksheet_indices {
-        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
-        let mut content = String::new();
-        if entry.read_to_string(&mut content).is_ok()
-            && content.contains("<conditionalFormatting")
-        {
-            has_conditional_formatting = true;
+        if !has_conditional_formatting {
+            let (hit, cap_hit) = worksheet_contains_marker(&mut archive, i, cf_marker)?;
+            // Cap-hit ⇒ we did not see the full XML. Emit conservatively so a
+            // 500 MB sheet that legitimately contains conditional formatting
+            // past the 16 MiB mark still surfaces the warning.
+            if hit || cap_hit {
+                has_conditional_formatting = true;
+            }
+        }
+        if !has_data_validation {
+            let (hit, cap_hit) = worksheet_contains_marker(&mut archive, i, dv_marker)?;
+            if hit || cap_hit {
+                has_data_validation = true;
+            }
+        }
+        if has_conditional_formatting && has_data_validation {
             break;
         }
     }
@@ -821,6 +922,14 @@ pub fn detect_unsupported_features(path: &str) -> Result<Vec<CompatibilityWarnin
             severity: "warning".to_string(),
             code: "XLSX_CONDITIONAL_FORMATTING".to_string(),
             message: "条件付き書式が検出されました。Coco では編集できず、保存時に失われます。".to_string(),
+            affected_sheets: None,
+        });
+    }
+    if has_data_validation {
+        warnings.push(CompatibilityWarning {
+            severity: "warning".to_string(),
+            code: "XLSX_DATA_VALIDATION".to_string(),
+            message: "データバリデーション設定が検出されました。Coco では編集できず、保存時に失われます。".to_string(),
             affected_sheets: None,
         });
     }

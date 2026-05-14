@@ -14,6 +14,7 @@ import { UniverSheetsFormulaPlugin } from "@univerjs/sheets-formula";
 import { UniverSheetsFormulaUIPlugin } from "@univerjs/sheets-formula-ui";
 import { UniverFindReplacePlugin } from "@univerjs/find-replace";
 import { UniverSheetsFindReplacePlugin } from "@univerjs/sheets-find-replace";
+import { UniverSheetsFilterPlugin } from "@univerjs/sheets-filter";
 import { FUniver } from "@univerjs/facade";
 
 import SheetsEnUS from "@univerjs/sheets/locale/en-US";
@@ -1281,13 +1282,15 @@ export default function EditorScreen() {
     // the sheets adapter wires it to the active worksheet.
     univer.registerPlugin(UniverFindReplacePlugin);
     univer.registerPlugin(UniverSheetsFindReplacePlugin);
+    // FR-009: Sort + Filter.
     // Sort is wired via the SortDialog (toolbar "↕ 並べ替え") which writes
     // sorted rows back into the snapshot's cellData directly — this build
-    // doesn't include @univerjs/sheets-sort. Filter UI (FR-009 second half)
-    // is still pending: the snapshot round-trip for auto-filter is preserved
-    // (xlsx_io.rs, commit 74594d0) but @univerjs/sheets-filter isn't yet
-    // registered. Locale bundles for the filter plugin would also need to be
-    // merged into the `locales` map below when that ships.
+    // doesn't include @univerjs/sheets-sort. Filter is now provided by
+    // @univerjs/sheets-filter (registered below); the snapshot round-trip for
+    // auto-filter is preserved by xlsx_io.rs (commit 74594d0). The filter
+    // package doesn't ship a separate -ui companion or locale bundle in
+    // 0.5.x, so there's nothing extra to merge into `locales`.
+    univer.registerPlugin(UniverSheetsFilterPlugin);
 
     // Create workbook from snapshot or default empty workbook
     const initialData: Partial<IWorkbookData> = currentSnapshotJson

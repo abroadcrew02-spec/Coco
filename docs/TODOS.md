@@ -27,11 +27,10 @@ None.
 - **Why deferred**: Univer's CF plugin uses an IRange + dxf-style IStyleBase model that differs from the OOXML shape we round-trip through `_conditionalFormatting`. Authoring writes into the snapshot and survives save/reopen, but live highlight needs a bidirectional dxf adapter.
 - **Blocker for closing**: dxf table parsing in `src-tauri/src/commands/xlsx_io.rs` (see `medium-cf-dxf-emit`).
 
-### high-hyperlink-live
+### high-hyperlink-live (closed)
 - **Title**: Hyperlink in-grid live rendering after authoring (beyond `patchHyperlinkRenders` boot-time patch)
-- **Refs**: `src/components/EditorScreen.tsx:1571`, `src/components/hyperlinkRender.ts:1`
-- **Effort**: M
-- **Why deferred**: Boot-time `patchHyperlinkRenders` styles cells on snapshot load, and click-to-follow is wired via `onCellClick`, but newly inserted hyperlinks via `InsertHyperlinkDialog` don't get the underline/color until save+reopen.
+- **Refs**: `src/components/EditorScreen.tsx` (applyHyperlink), `src/components/hyperlinkRender.ts` (chooseHyperlinkRestyle)
+- **Resolution**: `applyHyperlink` now drives the Univer facade imperatively after the snapshot patch — `getRange(cell).setFontColor("#1155cc").setFontLine("underline")` plus `setValue(label)` when the cell is empty. The decision of value/color/underline is centralized in `chooseHyperlinkRestyle` so it stays in lock step with the boot-time `patchHyperlinkRenders` patch.
 
 ### high-comment-live
 - **Title**: Comment indicator + popover in-grid

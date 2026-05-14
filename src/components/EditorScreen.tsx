@@ -57,6 +57,7 @@ import {
   patchHyperlinkRenders,
   lookupHyperlink,
   classifyHyperlink,
+  chooseHyperlinkRestyle,
 } from "./hyperlinkRender";
 import { patchCfRenders } from "./conditionalFormatRender";
 import InsertCommentDialog, { type CommentEntry } from "./InsertCommentDialog";
@@ -454,6 +455,14 @@ export default function EditorScreen() {
   // doesn't expose a stable hyperlink API; the round-trip path in xlsx_io.rs
   // (parse_xlsx_hyperlinks / build_hyperlink_from_snapshot) is the source of
   // truth for the shape: { cell, target, display?, tooltip? }.
+  //
+  // Live restyle: `patchHyperlinkRenders` only fires at createUnit time, so
+  // updateSnapshot alone wouldn't repaint the cell in-session (the underline
+  // / blue would surface only after save+reopen). We therefore drive the
+  // Univer facade imperatively after the snapshot push — getRange(cell) →
+  // setFontColor + setFontLine("underline"), plus setValue(label) when the
+  // cell is currently empty. `chooseHyperlinkRestyle` centralizes that
+  // decision so it stays in lock step with the boot-time patch.
   const applyHyperlink = useCallback(
     (value: HyperlinkFormValue) => {
       if (!hyperlinkCtx) return;
@@ -480,6 +489,29 @@ export default function EditorScreen() {
       if (value.tooltip) entry.tooltip = value.tooltip;
       sheetObj._hyperlinks = [...filtered, entry];
       updateSnapshot(JSON.stringify(snapshot));
+
+      // Imperative restyle so the link appears blue+underlined immediately.
+      // Best-effort: any facade exception is swallowed (the snapshot patch
+      // will still take effect on next createUnit, matching the prior
+      // behavior).
+      try {
+        const sheet = workbook.getSheetBySheetId(hyperlinkCtx.sheetId);
+        if (!sheet) return;
+        const range = sheet.getRange(value.cell);
+        if (!range) return;
+        const currentValue = range.getValue();
+        const restyle = chooseHyperlinkRestyle(
+          { cell: value.cell, target: value.target, display: value.display },
+          currentValue,
+        );
+        if (!restyle) return;
+        if (restyle.value !== null) range.setValue(restyle.value);
+        range.setFontColor(restyle.color);
+        range.setFontLine("underline");
+      } catch {
+        // Facade rejected the call (e.g. sheet was deleted mid-session).
+        // The snapshot path already succeeded so the link is still saved.
+      }
     },
     [hyperlinkCtx, updateSnapshot],
   );

@@ -242,13 +242,11 @@ fn builtin_num_format(id: u32) -> Option<&'static str> {
     }
 }
 
-fn parse_xlsx_styles(path: &str) -> Result<ParsedStyles, String> {
-    use std::fs::File;
+fn parse_xlsx_styles(
+    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+    sheet_xmls: &HashMap<String, String>,
+) -> Result<ParsedStyles, String> {
     use std::io::Read;
-    use zip::ZipArchive;
-
-    let file = File::open(path).map_err(|e| e.to_string())?;
-    let mut archive = ZipArchive::new(file).map_err(|e| format!("Invalid xlsx (zip): {e}"))?;
 
     // 1. styles.xml: fonts, fills, cellXfs
     let mut styles_xml = String::new();
@@ -267,42 +265,10 @@ fn parse_xlsx_styles(path: &str) -> Result<ParsedStyles, String> {
         .map(|x| resolve_num_format(x, &custom_num_fmts))
         .collect();
 
-    // 3. workbook.xml: ordered list of (sheet name, r:id)
-    let mut wb_xml = String::new();
-    if let Ok(mut entry) = archive.by_name("xl/workbook.xml") {
-        entry.read_to_string(&mut wb_xml).map_err(|e| e.to_string())?;
-    }
-    let sheet_refs = parse_workbook_sheets(&wb_xml);
-
-    // 4. workbook.xml.rels: r:id → target path
-    let mut rels_xml = String::new();
-    if let Ok(mut entry) = archive.by_name("xl/_rels/workbook.xml.rels") {
-        entry.read_to_string(&mut rels_xml).map_err(|e| e.to_string())?;
-    }
-    let rels = parse_rels(&rels_xml);
-
-    // 5. for each sheet, read its xml and extract per-cell `s` attributes
+    // 3. for each sheet, extract per-cell `s` attributes from the cached XML.
     let mut per_sheet: HashMap<String, HashMap<(u32, u32), usize>> = HashMap::new();
-    for (sheet_name, rid) in &sheet_refs {
-        let target = match rels.get(rid) {
-            Some(t) => t.clone(),
-            None => continue,
-        };
-        // Target paths are usually "worksheets/sheet1.xml" (relative to xl/). Normalize.
-        let zip_path = if target.starts_with('/') {
-            target.trim_start_matches('/').to_string()
-        } else {
-            format!("xl/{}", target)
-        };
-        let mut sheet_xml = String::new();
-        if let Ok(mut entry) = archive.by_name(&zip_path) {
-            if entry.read_to_string(&mut sheet_xml).is_err() {
-                continue;
-            }
-        } else {
-            continue;
-        }
-        let cell_map = parse_sheet_cell_styles(&sheet_xml);
+    for (sheet_name, sheet_xml) in sheet_xmls {
+        let cell_map = parse_sheet_cell_styles(sheet_xml);
         if !cell_map.is_empty() {
             per_sheet.insert(sheet_name.clone(), cell_map);
         }
@@ -333,13 +299,11 @@ struct ParsedRichText {
 /// - `<si><r><rPr>...</rPr><t>...</t></r>...<si>` in sharedStrings.xml. Cells
 ///   referencing the index via `<c t="s"><v>N</v></c>` inherit the runs.
 /// - `<c t="inlineStr"><is><r>...</r>...</is></c>` directly in the sheet XML.
-fn parse_xlsx_rich_text(path: &str) -> Result<ParsedRichText, String> {
-    use std::fs::File;
+fn parse_xlsx_rich_text(
+    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+    sheet_xmls: &HashMap<String, String>,
+) -> Result<ParsedRichText, String> {
     use std::io::Read;
-    use zip::ZipArchive;
-
-    let file = File::open(path).map_err(|e| e.to_string())?;
-    let mut archive = ZipArchive::new(file).map_err(|e| format!("Invalid xlsx (zip): {e}"))?;
 
     // 1. sharedStrings.xml — optional (workbooks with only inline strings omit it)
     let mut ss_xml = String::new();
@@ -348,41 +312,11 @@ fn parse_xlsx_rich_text(path: &str) -> Result<ParsedRichText, String> {
     }
     let shared = parse_shared_strings_xml(&ss_xml);
 
-    // 2. workbook.xml + rels to enumerate sheets (mirrors parse_xlsx_styles).
-    let mut wb_xml = String::new();
-    if let Ok(mut entry) = archive.by_name("xl/workbook.xml") {
-        entry.read_to_string(&mut wb_xml).map_err(|e| e.to_string())?;
-    }
-    let sheet_refs = parse_workbook_sheets(&wb_xml);
-
-    let mut rels_xml = String::new();
-    if let Ok(mut entry) = archive.by_name("xl/_rels/workbook.xml.rels") {
-        entry.read_to_string(&mut rels_xml).map_err(|e| e.to_string())?;
-    }
-    let rels = parse_rels(&rels_xml);
-
-    // 3. Walk each sheet for shared-string refs that point to rich entries and
-    //    for inline rich strings.
+    // 2. Walk each sheet's cached XML for shared-string refs pointing to rich
+    //    entries and for inline rich strings.
     let mut per_sheet: HashMap<String, SheetRichTextMap> = HashMap::new();
-    for (sheet_name, rid) in &sheet_refs {
-        let target = match rels.get(rid) {
-            Some(t) => t.clone(),
-            None => continue,
-        };
-        let zip_path = if target.starts_with('/') {
-            target.trim_start_matches('/').to_string()
-        } else {
-            format!("xl/{}", target)
-        };
-        let mut sheet_xml = String::new();
-        if let Ok(mut entry) = archive.by_name(&zip_path) {
-            if entry.read_to_string(&mut sheet_xml).is_err() {
-                continue;
-            }
-        } else {
-            continue;
-        }
-        let map = parse_sheet_rich_text(&sheet_xml, &shared);
+    for (sheet_name, sheet_xml) in sheet_xmls {
+        let map = parse_sheet_rich_text(sheet_xml, &shared);
         if !map.is_empty() {
             per_sheet.insert(sheet_name.clone(), map);
         }
@@ -891,32 +825,13 @@ fn parse_sheet_freeze_pane(xml: &str) -> Option<FreezePaneEntry> {
 /// Walk every sheet in an xlsx and pull out its freeze-pane declaration.
 /// Returns `sheet name -> FreezePaneEntry`; sheets without a frozen pane are
 /// omitted.
-pub(crate) fn parse_xlsx_freeze_panes(path: &str) -> HashMap<String, FreezePaneEntry> {
-    use std::fs;
-    use std::io::Cursor;
-    use zip::ZipArchive;
-
-    let bytes = match fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return HashMap::new(),
-    };
-    let sheet_paths = parse_sheet_path_map(&bytes);
-    if sheet_paths.is_empty() {
-        return HashMap::new();
-    }
-    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
-        Ok(a) => a,
-        Err(_) => return HashMap::new(),
-    };
+pub(crate) fn parse_xlsx_freeze_panes(
+    sheet_xmls: &HashMap<String, String>,
+) -> HashMap<String, FreezePaneEntry> {
     let mut out: HashMap<String, FreezePaneEntry> = HashMap::new();
-    for (sheet_name, entry_path) in sheet_paths {
-        let mut xml = String::new();
-        if let Ok(mut entry) = archive.by_name(&entry_path) {
-            if entry.read_to_string(&mut xml).is_ok() {
-                if let Some(fp) = parse_sheet_freeze_pane(&xml) {
-                    out.insert(sheet_name, fp);
-                }
-            }
+    for (sheet_name, xml) in sheet_xmls {
+        if let Some(fp) = parse_sheet_freeze_pane(xml) {
+            out.insert(sheet_name.clone(), fp);
         }
     }
     out
@@ -924,19 +839,9 @@ pub(crate) fn parse_xlsx_freeze_panes(path: &str) -> HashMap<String, FreezePaneE
 
 /// Read `xl/workbook.xml` from an xlsx and return the sheet-visibility map.
 /// Best-effort: returns empty on read or parse failure.
-pub(crate) fn parse_xlsx_sheet_visibility(path: &str) -> HashMap<String, String> {
-    use std::fs;
-    use std::io::Cursor;
-    use zip::ZipArchive;
-
-    let bytes = match fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return HashMap::new(),
-    };
-    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
-        Ok(a) => a,
-        Err(_) => return HashMap::new(),
-    };
+pub(crate) fn parse_xlsx_sheet_visibility(
+    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+) -> HashMap<String, String> {
     let mut wb_xml = String::new();
     if let Ok(mut entry) = archive.by_name("xl/workbook.xml") {
         if entry.read_to_string(&mut wb_xml).is_err() {
@@ -972,32 +877,13 @@ fn parse_sheet_protection(xml: &str) -> Option<SheetProtectionEntry> {
 /// Walk every sheet in an xlsx and pull out its sheet-protection declaration.
 /// Returns `sheet name -> SheetProtectionEntry`; sheets without protection are
 /// omitted.
-pub(crate) fn parse_xlsx_sheet_protection(path: &str) -> HashMap<String, SheetProtectionEntry> {
-    use std::fs;
-    use std::io::Cursor;
-    use zip::ZipArchive;
-
-    let bytes = match fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return HashMap::new(),
-    };
-    let sheet_paths = parse_sheet_path_map(&bytes);
-    if sheet_paths.is_empty() {
-        return HashMap::new();
-    }
-    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
-        Ok(a) => a,
-        Err(_) => return HashMap::new(),
-    };
+pub(crate) fn parse_xlsx_sheet_protection(
+    sheet_xmls: &HashMap<String, String>,
+) -> HashMap<String, SheetProtectionEntry> {
     let mut out: HashMap<String, SheetProtectionEntry> = HashMap::new();
-    for (sheet_name, entry_path) in sheet_paths {
-        let mut xml = String::new();
-        if let Ok(mut entry) = archive.by_name(&entry_path) {
-            if entry.read_to_string(&mut xml).is_ok() {
-                if let Some(sp) = parse_sheet_protection(&xml) {
-                    out.insert(sheet_name, sp);
-                }
-            }
+    for (sheet_name, xml) in sheet_xmls {
+        if let Some(sp) = parse_sheet_protection(xml) {
+            out.insert(sheet_name.clone(), sp);
         }
     }
     out
@@ -1474,13 +1360,29 @@ fn memchr_find(haystack: &[u8], needle: &[u8]) -> bool {
 /// Inspects the ZIP for unsupported feature directories and returns a list of
 /// CompatibilityWarning entries describing what will be silently dropped on
 /// save-back. Pure-Rust: takes the path so it's testable from cargo test.
+/// Public wrapper: opens the file as a zip and delegates. Kept for tests and
+/// any external caller that doesn't already have a shared archive in hand.
+/// The hot import path uses `detect_unsupported_features_in` directly so it
+/// can reuse the already-open archive.
 pub fn detect_unsupported_features(path: &str) -> Result<Vec<CompatibilityWarning>, String> {
     use std::fs::File;
     use zip::ZipArchive;
-
     let file = File::open(path).map_err(|e| e.to_string())?;
-    let mut archive = ZipArchive::new(file).map_err(|e| format!("Invalid xlsx (zip): {e}"))?;
+    let bytes = {
+        use std::io::Read;
+        let mut buf = Vec::new();
+        let mut f = file;
+        f.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+        buf
+    };
+    let mut archive = ZipArchive::new(std::io::Cursor::new(bytes.as_slice()))
+        .map_err(|e| format!("Invalid xlsx (zip): {e}"))?;
+    detect_unsupported_features_in(&mut archive)
+}
 
+pub fn detect_unsupported_features_in(
+    mut archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+) -> Result<Vec<CompatibilityWarning>, String> {
     let mut has_charts = false;
     let mut has_pivot = false;
     let mut has_external_links = false;
@@ -1754,36 +1656,14 @@ fn parse_sheet_dimensions_xml(xml: &str) -> SheetDimensions {
 /// Parse per-sheet column widths and row heights out of an xlsx. Returns a map
 /// keyed by sheet name. Quietly returns an empty map if anything is malformed
 /// — dimensions are best-effort metadata, not load-bearing.
-pub(crate) fn parse_xlsx_dimensions(path: &str) -> HashMap<String, SheetDimensions> {
-    use std::fs;
-    use std::io::Cursor;
-    use zip::ZipArchive;
-
-    let bytes = match fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return HashMap::new(),
-    };
-
-    let sheet_paths = parse_sheet_path_map(&bytes);
-    if sheet_paths.is_empty() {
-        return HashMap::new();
-    }
-
-    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
-        Ok(a) => a,
-        Err(_) => return HashMap::new(),
-    };
-
+pub(crate) fn parse_xlsx_dimensions(
+    sheet_xmls: &HashMap<String, String>,
+) -> HashMap<String, SheetDimensions> {
     let mut out: HashMap<String, SheetDimensions> = HashMap::new();
-    for (sheet_name, entry_path) in sheet_paths {
-        let mut xml = String::new();
-        if let Ok(mut entry) = archive.by_name(&entry_path) {
-            if entry.read_to_string(&mut xml).is_ok() {
-                let dims = parse_sheet_dimensions_xml(&xml);
-                if !dims.columns.is_empty() || !dims.rows.is_empty() {
-                    out.insert(sheet_name, dims);
-                }
-            }
+    for (sheet_name, xml) in sheet_xmls {
+        let dims = parse_sheet_dimensions_xml(xml);
+        if !dims.columns.is_empty() || !dims.rows.is_empty() {
+            out.insert(sheet_name.clone(), dims);
         }
     }
 
@@ -1962,36 +1842,14 @@ fn parse_sheet_page_setup_xml(xml: &str) -> SheetPageSetup {
 /// Parse per-sheet print / page-setup metadata out of an xlsx. Returns a map
 /// keyed by sheet name. Returns an empty map on I/O or parse errors — page
 /// setup is best-effort decoration, not load-bearing.
-pub(crate) fn parse_xlsx_page_setup(path: &str) -> HashMap<String, SheetPageSetup> {
-    use std::fs;
-    use std::io::Cursor;
-    use zip::ZipArchive;
-
-    let bytes = match fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return HashMap::new(),
-    };
-
-    let sheet_paths = parse_sheet_path_map(&bytes);
-    if sheet_paths.is_empty() {
-        return HashMap::new();
-    }
-
-    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
-        Ok(a) => a,
-        Err(_) => return HashMap::new(),
-    };
-
+pub(crate) fn parse_xlsx_page_setup(
+    sheet_xmls: &HashMap<String, String>,
+) -> HashMap<String, SheetPageSetup> {
     let mut out: HashMap<String, SheetPageSetup> = HashMap::new();
-    for (sheet_name, entry_path) in sheet_paths {
-        let mut xml = String::new();
-        if let Ok(mut entry) = archive.by_name(&entry_path) {
-            if entry.read_to_string(&mut xml).is_ok() {
-                let ps = parse_sheet_page_setup_xml(&xml);
-                if !ps.is_empty() {
-                    out.insert(sheet_name, ps);
-                }
-            }
+    for (sheet_name, xml) in sheet_xmls {
+        let ps = parse_sheet_page_setup_xml(xml);
+        if !ps.is_empty() {
+            out.insert(sheet_name.clone(), ps);
         }
     }
 
@@ -2046,36 +1904,14 @@ fn parse_sheet_merge_cells(xml: &str) -> Vec<(u32, u32, u32, u32)> {
 /// Parse per-sheet merged-cell ranges out of an xlsx. Returns a map keyed by
 /// sheet name. Returns an empty map on any I/O / structure error — merges are
 /// best-effort metadata, not load-bearing.
-pub(crate) fn parse_xlsx_merges(path: &str) -> HashMap<String, Vec<(u32, u32, u32, u32)>> {
-    use std::fs;
-    use std::io::Cursor;
-    use zip::ZipArchive;
-
-    let bytes = match fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return HashMap::new(),
-    };
-
-    let sheet_paths = parse_sheet_path_map(&bytes);
-    if sheet_paths.is_empty() {
-        return HashMap::new();
-    }
-
-    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
-        Ok(a) => a,
-        Err(_) => return HashMap::new(),
-    };
-
+pub(crate) fn parse_xlsx_merges(
+    sheet_xmls: &HashMap<String, String>,
+) -> HashMap<String, Vec<(u32, u32, u32, u32)>> {
     let mut out: HashMap<String, Vec<(u32, u32, u32, u32)>> = HashMap::new();
-    for (sheet_name, entry_path) in sheet_paths {
-        let mut xml = String::new();
-        if let Ok(mut entry) = archive.by_name(&entry_path) {
-            if entry.read_to_string(&mut xml).is_ok() {
-                let merges = parse_sheet_merge_cells(&xml);
-                if !merges.is_empty() {
-                    out.insert(sheet_name, merges);
-                }
-            }
+    for (sheet_name, xml) in sheet_xmls {
+        let merges = parse_sheet_merge_cells(xml);
+        if !merges.is_empty() {
+            out.insert(sheet_name.clone(), merges);
         }
     }
 
@@ -2120,35 +1956,13 @@ fn parse_sheet_auto_filter(xml: &str) -> Option<String> {
 /// Parse per-sheet tab colors out of an xlsx. Returns a map keyed by sheet name
 /// — sheets without a tab color are simply absent from the map. Best-effort:
 /// returns an empty map on any I/O / structure error.
-pub(crate) fn parse_xlsx_tab_colors(path: &str) -> HashMap<String, String> {
-    use std::fs;
-    use std::io::Cursor;
-    use zip::ZipArchive;
-
-    let bytes = match fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return HashMap::new(),
-    };
-
-    let sheet_paths = parse_sheet_path_map(&bytes);
-    if sheet_paths.is_empty() {
-        return HashMap::new();
-    }
-
-    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
-        Ok(a) => a,
-        Err(_) => return HashMap::new(),
-    };
-
+pub(crate) fn parse_xlsx_tab_colors(
+    sheet_xmls: &HashMap<String, String>,
+) -> HashMap<String, String> {
     let mut out: HashMap<String, String> = HashMap::new();
-    for (sheet_name, entry_path) in sheet_paths {
-        let mut xml = String::new();
-        if let Ok(mut entry) = archive.by_name(&entry_path) {
-            if entry.read_to_string(&mut xml).is_ok() {
-                if let Some(color) = parse_sheet_tab_color(&xml) {
-                    out.insert(sheet_name, color);
-                }
-            }
+    for (sheet_name, xml) in sheet_xmls {
+        if let Some(color) = parse_sheet_tab_color(xml) {
+            out.insert(sheet_name.clone(), color);
         }
     }
 
@@ -2158,35 +1972,13 @@ pub(crate) fn parse_xlsx_tab_colors(path: &str) -> HashMap<String, String> {
 /// Parse per-sheet auto-filter ranges out of an xlsx. Returns a map keyed by
 /// sheet name — sheets without an auto-filter are simply absent. Best-effort:
 /// returns an empty map on any I/O / structure error.
-pub(crate) fn parse_xlsx_auto_filters(path: &str) -> HashMap<String, String> {
-    use std::fs;
-    use std::io::Cursor;
-    use zip::ZipArchive;
-
-    let bytes = match fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return HashMap::new(),
-    };
-
-    let sheet_paths = parse_sheet_path_map(&bytes);
-    if sheet_paths.is_empty() {
-        return HashMap::new();
-    }
-
-    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
-        Ok(a) => a,
-        Err(_) => return HashMap::new(),
-    };
-
+pub(crate) fn parse_xlsx_auto_filters(
+    sheet_xmls: &HashMap<String, String>,
+) -> HashMap<String, String> {
     let mut out: HashMap<String, String> = HashMap::new();
-    for (sheet_name, entry_path) in sheet_paths {
-        let mut xml = String::new();
-        if let Ok(mut entry) = archive.by_name(&entry_path) {
-            if entry.read_to_string(&mut xml).is_ok() {
-                if let Some(reference) = parse_sheet_auto_filter(&xml) {
-                    out.insert(sheet_name, reference);
-                }
-            }
+    for (sheet_name, xml) in sheet_xmls {
+        if let Some(reference) = parse_sheet_auto_filter(xml) {
+            out.insert(sheet_name.clone(), reference);
         }
     }
 
@@ -2314,36 +2106,14 @@ fn extract_inner_text(xml: &str, open_prefix: &str, close_tag: &str) -> Option<S
 /// Parse per-sheet `<dataValidations>` ranges out of an xlsx. Returns a map
 /// keyed by sheet name. Returns an empty map on I/O / structure error — like
 /// the other per-sheet parsers, data validations are best-effort metadata.
-pub(crate) fn parse_xlsx_data_validations(path: &str) -> HashMap<String, Vec<DataValidationEntry>> {
-    use std::fs;
-    use std::io::Cursor;
-    use zip::ZipArchive;
-
-    let bytes = match fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return HashMap::new(),
-    };
-
-    let sheet_paths = parse_sheet_path_map(&bytes);
-    if sheet_paths.is_empty() {
-        return HashMap::new();
-    }
-
-    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
-        Ok(a) => a,
-        Err(_) => return HashMap::new(),
-    };
-
+pub(crate) fn parse_xlsx_data_validations(
+    sheet_xmls: &HashMap<String, String>,
+) -> HashMap<String, Vec<DataValidationEntry>> {
     let mut out: HashMap<String, Vec<DataValidationEntry>> = HashMap::new();
-    for (sheet_name, entry_path) in sheet_paths {
-        let mut xml = String::new();
-        if let Ok(mut entry) = archive.by_name(&entry_path) {
-            if entry.read_to_string(&mut xml).is_ok() {
-                let dvs = parse_sheet_data_validations(&xml);
-                if !dvs.is_empty() {
-                    out.insert(sheet_name, dvs);
-                }
-            }
+    for (sheet_name, xml) in sheet_xmls {
+        let dvs = parse_sheet_data_validations(xml);
+        if !dvs.is_empty() {
+            out.insert(sheet_name.clone(), dvs);
         }
     }
 
@@ -2465,30 +2235,24 @@ fn sheet_rels_path(sheet_entry_path: &str) -> Option<String> {
 /// `<hyperlinks>` block with its dedicated rels file. Returns a map keyed by
 /// sheet name. Empty map on I/O / structure error — hyperlinks are best-effort
 /// metadata, same policy as merges and data validations.
-pub(crate) fn parse_xlsx_hyperlinks(path: &str) -> HashMap<String, Vec<HyperlinkEntry>> {
-    use std::fs;
-    use std::io::Cursor;
-    use zip::ZipArchive;
-
-    let bytes = match fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return HashMap::new(),
-    };
-
-    let sheet_paths = parse_sheet_path_map(&bytes);
-    if sheet_paths.is_empty() {
-        return HashMap::new();
-    }
-
-    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
-        Ok(a) => a,
-        Err(_) => return HashMap::new(),
-    };
-
+pub(crate) fn parse_xlsx_hyperlinks(
+    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+    sheet_paths: &HashMap<String, String>,
+    sheet_xmls: &HashMap<String, String>,
+) -> HashMap<String, Vec<HyperlinkEntry>> {
     let mut out: HashMap<String, Vec<HyperlinkEntry>> = HashMap::new();
     for (sheet_name, entry_path) in sheet_paths {
+        let Some(xml) = sheet_xmls.get(sheet_name) else {
+            continue;
+        };
+        // Fast path: most workbooks have no hyperlinks. Skip the rels lookup
+        // entirely when the sheet body carries no `<hyperlinks>` block — this
+        // is by far the common case and saves a per-sheet zip entry lookup.
+        if !xml.contains("<hyperlinks") {
+            continue;
+        }
         // Read the per-sheet rels file (may be absent — internal-only links).
-        let rels: HashMap<String, String> = sheet_rels_path(&entry_path)
+        let rels: HashMap<String, String> = sheet_rels_path(entry_path)
             .and_then(|rels_path| {
                 let mut s = String::new();
                 archive
@@ -2500,14 +2264,9 @@ pub(crate) fn parse_xlsx_hyperlinks(path: &str) -> HashMap<String, Vec<Hyperlink
             })
             .unwrap_or_default();
 
-        let mut xml = String::new();
-        if let Ok(mut entry) = archive.by_name(&entry_path) {
-            if entry.read_to_string(&mut xml).is_ok() {
-                let links = parse_sheet_hyperlinks(&xml, &rels);
-                if !links.is_empty() {
-                    out.insert(sheet_name, links);
-                }
-            }
+        let links = parse_sheet_hyperlinks(xml, &rels);
+        if !links.is_empty() {
+            out.insert(sheet_name.clone(), links);
         }
     }
 
@@ -2774,26 +2533,10 @@ fn rewrite_comments_in_zip(
 
 /// Parse cell comments from an xlsx ZIP, grouped by sheet name. Empty map on
 /// I/O / parse error — comments are best-effort metadata.
-pub(crate) fn parse_xlsx_comments(path: &str) -> HashMap<String, Vec<CommentEntry>> {
-    use std::fs;
-    use std::io::Cursor;
-    use zip::ZipArchive;
-
-    let bytes = match fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return HashMap::new(),
-    };
-
-    let sheet_paths = parse_sheet_path_map(&bytes);
-    if sheet_paths.is_empty() {
-        return HashMap::new();
-    }
-
-    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
-        Ok(a) => a,
-        Err(_) => return HashMap::new(),
-    };
-
+pub(crate) fn parse_xlsx_comments(
+    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+    sheet_paths: &HashMap<String, String>,
+) -> HashMap<String, Vec<CommentEntry>> {
     let mut out: HashMap<String, Vec<CommentEntry>> = HashMap::new();
     for (sheet_name, entry_path) in sheet_paths {
         let rels_path = match entry_path.rsplit_once('/') {
@@ -2838,7 +2581,7 @@ pub(crate) fn parse_xlsx_comments(path: &str) -> HashMap<String, Vec<CommentEntr
             if entry.read_to_string(&mut comments_xml).is_ok() {
                 let entries = parse_comments_xml(&comments_xml);
                 if !entries.is_empty() {
-                    out.insert(sheet_name, entries);
+                    out.insert(sheet_name.clone(), entries);
                 }
             }
         }
@@ -3171,37 +2914,13 @@ fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEnt
 /// Parse per-sheet `<conditionalFormatting>` rules out of an xlsx. Mirrors the
 /// data-validation parser: best-effort, empty map on any structural error.
 pub(crate) fn parse_xlsx_conditional_formatting(
-    path: &str,
+    sheet_xmls: &HashMap<String, String>,
 ) -> HashMap<String, Vec<ConditionalFormattingEntry>> {
-    use std::fs;
-    use std::io::Cursor;
-    use zip::ZipArchive;
-
-    let bytes = match fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return HashMap::new(),
-    };
-
-    let sheet_paths = parse_sheet_path_map(&bytes);
-    if sheet_paths.is_empty() {
-        return HashMap::new();
-    }
-
-    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
-        Ok(a) => a,
-        Err(_) => return HashMap::new(),
-    };
-
     let mut out: HashMap<String, Vec<ConditionalFormattingEntry>> = HashMap::new();
-    for (sheet_name, entry_path) in sheet_paths {
-        let mut xml = String::new();
-        if let Ok(mut entry) = archive.by_name(&entry_path) {
-            if entry.read_to_string(&mut xml).is_ok() {
-                let rules = parse_sheet_conditional_formatting(&xml);
-                if !rules.is_empty() {
-                    out.insert(sheet_name, rules);
-                }
-            }
+    for (sheet_name, xml) in sheet_xmls {
+        let rules = parse_sheet_conditional_formatting(xml);
+        if !rules.is_empty() {
+            out.insert(sheet_name.clone(), rules);
         }
     }
 
@@ -3705,16 +3424,36 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         })
         .collect();
 
+    // Read the file once into memory, open the zip once, build the sheet-path
+    // map once, and decompress every sheet XML once. All per-helper passes
+    // below share these so we don't pay 16x for the same file I/O,
+    // central-directory parse, and per-sheet XML decompression. (§5.1 perf.)
+    let archive_bytes = std::fs::read(&path)
+        .map_err(|e| format!("Failed to read xlsx: {e}"))?;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(archive_bytes.as_slice()))
+        .map_err(|e| format!("Invalid xlsx (zip): {e}"))?;
+    let sheet_paths = parse_sheet_path_map(&archive_bytes);
+    let mut sheet_xmls: HashMap<String, String> = HashMap::with_capacity(sheet_paths.len());
+    for (sheet_name, zip_path) in &sheet_paths {
+        let mut xml = String::new();
+        if let Ok(mut entry) = archive.by_name(zip_path) {
+            if entry.read_to_string(&mut xml).is_ok() {
+                sheet_xmls.insert(sheet_name.clone(), xml);
+            }
+        }
+    }
+
     // Pre-parse per-sheet data validations so they can round-trip through the
     // snapshot. calamine doesn't expose them, and rust_xlsxwriter's high-level
     // API handles re-emission on export. Must happen BEFORE feature_warnings
     // so we can suppress the generic "DV will be lost" warning once we know
     // the rules will round-trip.
-    let data_validations_by_sheet = parse_xlsx_data_validations(&path);
+    let data_validations_by_sheet = parse_xlsx_data_validations(&sheet_xmls);
     // Same pattern for conditional formatting rules.
-    let conditional_formats_by_sheet = parse_xlsx_conditional_formatting(&path);
+    let conditional_formats_by_sheet = parse_xlsx_conditional_formatting(&sheet_xmls);
 
-    let mut feature_warnings = detect_unsupported_features(&path).unwrap_or_default();
+    let mut feature_warnings =
+        detect_unsupported_features_in(&mut archive).unwrap_or_default();
     // We now preserve data validations through the snapshot, so the generic
     // "data validation will be lost on save" warning is misleading once we've
     // captured at least one rule from the source file. Drop it in that case.
@@ -3737,40 +3476,41 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
 
     // Per-cell styles: parsed straight from the xlsx ZIP (calamine 0.24 doesn't
     // expose them). Tolerant of failure — missing styles just degrade to "no styles".
-    let parsed_styles = parse_xlsx_styles(&path).ok();
+    let parsed_styles = parse_xlsx_styles(&mut archive, &sheet_xmls).ok();
     // Pre-parse per-sheet column widths and row heights (calamine doesn't
     // expose this). Best-effort: silently no-op if the structure is unusual.
-    let dimensions_by_sheet = parse_xlsx_dimensions(&path);
+    let dimensions_by_sheet = parse_xlsx_dimensions(&sheet_xmls);
     // Pre-parse per-sheet merged-cell ranges (calamine doesn't expose these).
-    let merges_by_sheet = parse_xlsx_merges(&path);
+    let merges_by_sheet = parse_xlsx_merges(&sheet_xmls);
     // Pre-parse per-sheet frozen-pane declarations (only `state="frozen"`).
-    let freeze_panes_by_sheet = parse_xlsx_freeze_panes(&path);
+    let freeze_panes_by_sheet = parse_xlsx_freeze_panes(&sheet_xmls);
     // Pre-parse workbook-level sheet visibility (`state="hidden"` / `"veryHidden"`).
-    let sheet_visibility = parse_xlsx_sheet_visibility(&path);
+    let sheet_visibility = parse_xlsx_sheet_visibility(&mut archive);
     // Pre-parse per-sheet `<sheetProtection sheet="1"/>` (read-only marker).
-    let sheet_protection_by_sheet = parse_xlsx_sheet_protection(&path);
+    let sheet_protection_by_sheet = parse_xlsx_sheet_protection(&sheet_xmls);
     // Pre-parse per-sheet tab colors (`<sheetPr><tabColor .../></sheetPr>`).
     // calamine doesn't surface these; we re-emit on export via
     // `worksheet.set_tab_color`.
-    let tab_colors_by_sheet = parse_xlsx_tab_colors(&path);
+    let tab_colors_by_sheet = parse_xlsx_tab_colors(&sheet_xmls);
     // Pre-parse per-sheet auto-filter ranges (`<autoFilter ref="..."/>`).
     // calamine doesn't surface these; we re-emit on export via
     // `worksheet.autofilter`.
-    let auto_filters_by_sheet = parse_xlsx_auto_filters(&path);
+    let auto_filters_by_sheet = parse_xlsx_auto_filters(&sheet_xmls);
     // Pre-parse per-sheet hyperlinks. Joins the `<hyperlinks>` block in
     // sheetN.xml with the per-sheet rels file so external URLs are resolved.
-    let hyperlinks_by_sheet = parse_xlsx_hyperlinks(&path);
+    let hyperlinks_by_sheet =
+        parse_xlsx_hyperlinks(&mut archive, &sheet_paths, &sheet_xmls);
     // Pre-parse per-sheet cell comments / notes. Each sheet's rels file points
     // to its `xl/commentsN.xml`; we read author + plain text and stash on the
     // snapshot for re-emission via rust_xlsxwriter's insert_note on export.
-    let comments_by_sheet = parse_xlsx_comments(&path);
+    let comments_by_sheet = parse_xlsx_comments(&mut archive, &sheet_paths);
     // Pre-parse rich-text runs from sharedStrings.xml + inline `<is>` strings.
     // calamine flattens rich strings to plain — we re-attach the runs here.
-    let rich_text = parse_xlsx_rich_text(&path).ok();
+    let rich_text = parse_xlsx_rich_text(&mut archive, &sheet_xmls).ok();
     // Pre-parse per-sheet print / page-setup metadata (orientation, margins,
     // headers/footers, gridline display, zoom...). Best-effort: missing or
     // unparseable values just degrade to "no page setup recorded".
-    let page_setup_by_sheet = parse_xlsx_page_setup(&path);
+    let page_setup_by_sheet = parse_xlsx_page_setup(&sheet_xmls);
 
     let mut wb: Xlsx<_> =
         open_workbook(&path).map_err(|e| format!("Failed to open xlsx: {e}"))?;
@@ -4268,7 +4008,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
 
     // Chart-preservation: capture chart/drawing/theme parts byte-for-byte so
     // they survive a save round-trip even though we don't render them.
-    let preserved_parts = parse_xlsx_preserved_parts(&path);
+    let preserved_parts = parse_xlsx_preserved_parts(&mut archive, &sheet_paths, &sheet_xmls);
 
     let mut snapshot = json!({
         "id": workbook_id,
@@ -5391,13 +5131,11 @@ fn b64_decode(input: &str) -> Option<Vec<u8>> {
 /// Walk the source xlsx zip and return preserved parts + per-sheet drawing
 /// refs. Returns `None` when there's nothing to preserve so callers can skip
 /// stamping an empty `_preservedParts` block into the snapshot.
-pub(crate) fn parse_xlsx_preserved_parts(path: &str) -> Option<Value> {
-    use std::fs::File;
-    use zip::ZipArchive;
-
-    let file = File::open(path).ok()?;
-    let mut archive = ZipArchive::new(file).ok()?;
-
+pub(crate) fn parse_xlsx_preserved_parts(
+    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+    sheet_paths: &HashMap<String, String>,
+    sheet_xmls: &HashMap<String, String>,
+) -> Option<Value> {
     let mut parts: Map<String, Value> = Map::new();
     let mut total_size: usize = 0;
 
@@ -5442,8 +5180,6 @@ pub(crate) fn parse_xlsx_preserved_parts(path: &str) -> Option<Value> {
     // target from its `_rels/sheetN.xml.rels`. Indexed by position in
     // `workbook.xml`'s `<sheets>` list so we can re-link on export — the
     // export side uses the snapshot's `sheetOrder` position.
-    let bytes = std::fs::read(path).ok()?;
-    let sheet_paths = parse_sheet_path_map(&bytes);
     // Reuse the canonical ordering from workbook.xml (calamine returns sheets
     // in this order too).
     let workbook_xml = {
@@ -5461,11 +5197,9 @@ pub(crate) fn parse_xlsx_preserved_parts(path: &str) -> Option<Value> {
             sheet_refs.push(Value::Null);
             continue;
         };
-        // Read the worksheet body to find a `<drawing r:id="rdN"/>` element.
-        let mut body = String::new();
-        if let Ok(mut entry) = archive.by_name(sheet_part) {
-            let _ = std::io::Read::read_to_string(&mut entry, &mut body);
-        }
+        // Find a `<drawing r:id="rdN"/>` element in the cached worksheet body.
+        let empty_body = String::new();
+        let body = sheet_xmls.get(sheet_name).unwrap_or(&empty_body);
         let drawing_rid: Option<String> = body
             .find("<drawing")
             .map(|s| &body[s..])

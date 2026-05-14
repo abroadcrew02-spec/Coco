@@ -71,6 +71,7 @@ import SheetTabColorDialog from "./SheetTabColorDialog";
 import CommentIndicatorsPanel from "./CommentIndicatorsPanel";
 import ChartPreviewPanel from "./ChartPreviewPanel";
 import { computeChartPreviews, type ChartPreview } from "./chartPreviewData";
+import ImagePreviewPanel from "./ImagePreviewPanel";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -80,6 +81,11 @@ import {
   computeCommentIndicators,
   type CommentIndicator,
 } from "../store/commentIndicators";
+import {
+  computeImagePreviews,
+  colRowToA1,
+  type ImagePreview,
+} from "../store/imagePreviews";
 import { validateMutation, extractCellWrites } from "../store/dataValidation";
 import "./EditorScreen.css";
 
@@ -751,6 +757,34 @@ export default function EditorScreen() {
       if (range) range.activate();
     } catch {
       // Best-effort: swallow facade exceptions so a bad chart entry doesn't
+      // crash the panel.
+    }
+  }, []);
+
+  // Derive the embedded-image preview list from the live snapshot so the
+  // panel updates when an image is inserted (G4) or after an xlsx is
+  // freshly loaded (E1 stamped `_preservedParts`).
+  const imagePreviews: ImagePreview[] = computeImagePreviews(currentSnapshotJson);
+
+  // Jump the Univer selection to an image's anchor cell when the user
+  // clicks a thumbnail.
+  const jumpToImageCell = useCallback((image: ImagePreview) => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    try {
+      const target = workbook.getSheetBySheetId(image.sheetId);
+      if (!target) return;
+      const active = workbook.getActiveSheet();
+      if (!active || active.getSheetId() !== image.sheetId) {
+        workbook.setActiveSheet(target);
+      }
+      const a1 = colRowToA1(image.fromCol, image.fromRow);
+      const range = target.getRange(a1);
+      if (range) range.activate();
+    } catch {
+      // Best-effort: swallow facade exceptions so a bad anchor doesn't
       // crash the panel.
     }
   }, []);
@@ -2144,6 +2178,10 @@ export default function EditorScreen() {
         <ChartPreviewPanel
           previews={chartPreviews}
           onSelect={jumpToChartRange}
+        />
+        <ImagePreviewPanel
+          images={imagePreviews}
+          onSelect={jumpToImageCell}
         />
         {BUSY_LABELS[saveStatus] && (
           <BusyOverlay

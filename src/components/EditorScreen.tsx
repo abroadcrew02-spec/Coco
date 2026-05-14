@@ -478,6 +478,63 @@ export default function EditorScreen() {
     [currentSnapshotJson, updateSnapshot],
   );
 
+  // Toggle sheet protection (read-only marker) on the active sheet. Writes
+  // into `sheets.<id>._protected = { protected: true }` (or removes the key
+  // entirely when turning protection off, mirroring the Rust "omit when
+  // empty" convention). Round-trips through xlsx via `<sheetProtection
+  // sheet="1"/>`. Password isn't surfaced in the toolbar — the snapshot
+  // schema supports `password?: string` for future expansion.
+  const toggleSheetProtection = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    const activeSheet = workbook.getActiveSheet();
+    if (!activeSheet) return;
+    const sheetId = activeSheet.getSheetId();
+
+    // Re-derive snapshot from live Univer so we don't clobber concurrent edits.
+    const fresh = workbook.save() as unknown as {
+      sheets?: Record<string, { _protected?: { protected?: boolean; password?: string } }>;
+    };
+    if (!fresh.sheets || !fresh.sheets[sheetId]) return;
+    const sheet = fresh.sheets[sheetId];
+    const currentlyProtected = sheet._protected?.protected === true;
+    if (currentlyProtected) {
+      delete sheet._protected;
+    } else {
+      sheet._protected = { protected: true };
+    }
+    updateSnapshot(JSON.stringify(fresh));
+  }, [updateSnapshot]);
+
+  // Reactive flag: is the active sheet currently protected per the snapshot?
+  // Derived from `currentSnapshotJson` so the button label flips immediately
+  // when toggleSheetProtection updates the store.
+  const activeSheetProtected = (() => {
+    if (!currentSnapshotJson) return false;
+    try {
+      const snap = JSON.parse(currentSnapshotJson) as {
+        sheetOrder?: string[];
+        sheets?: Record<string, { _protected?: { protected?: boolean } }>;
+      };
+      // We can't easily get the live active sheet id here without a render
+      // dependency on Univer, so fall back to the first sheet. The toggle
+      // button always operates on the truly-active sheet via Univer's facade;
+      // the label is just a quick hint and will be wrong for non-first sheets
+      // until the snapshot re-derives. This is acceptable for the MVP.
+      const sid = fUniverRef.current
+        ?.getActiveWorkbook()
+        ?.getActiveSheet()
+        ?.getSheetId()
+        ?? snap.sheetOrder?.[0];
+      if (!sid) return false;
+      return snap.sheets?.[sid]?._protected?.protected === true;
+    } catch {
+      return false;
+    }
+  })();
+
   // Remove the comment for a given cell from the snapshot, if present.
   // No-op when the sheet has no `_comments` array or the cell isn't in it.
   const deleteComment = useCallback(
@@ -808,6 +865,21 @@ export default function EditorScreen() {
             aria-label="条件付き書式"
           >
             条件付き書式...
+          </button>
+          <button
+            type="button"
+            className="toolbar-btn"
+            onClick={toggleSheetProtection}
+            title={
+              activeSheetProtected
+                ? "シート保護を解除（書き込み可に戻す）"
+                : "シートを保護（読み取り専用にする）"
+            }
+            aria-label="シート保護"
+            aria-pressed={activeSheetProtected}
+            data-testid="sheet-protection-toggle"
+          >
+            {activeSheetProtected ? "🔓 解除" : "🔒 保護"}
           </button>
           <button
             type="button"

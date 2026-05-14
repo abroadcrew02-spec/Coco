@@ -948,6 +948,61 @@ pub(crate) fn parse_xlsx_sheet_visibility(path: &str) -> HashMap<String, String>
     parse_workbook_sheet_visibility(&wb_xml)
 }
 
+/// One parsed sheet-protection declaration from a worksheet's
+/// `<sheetProtection .../>` element.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct SheetProtectionEntry {
+    /// True when the worksheet is marked read-only (`sheet="1"`).
+    pub protected: bool,
+}
+
+/// Parse the `<sheetProtection .../>` element of one worksheet's XML into a
+/// `SheetProtectionEntry`. Returns `None` when the element isn't present or
+/// the `sheet` attribute isn't "1" / "true".
+fn parse_sheet_protection(xml: &str) -> Option<SheetProtectionEntry> {
+    let el = find_tag(xml, "<sheetProtection")?;
+    let sheet = parse_attr(&el, "sheet").unwrap_or_default();
+    let on = matches!(sheet.as_str(), "1" | "true");
+    if !on {
+        return None;
+    }
+    Some(SheetProtectionEntry { protected: true })
+}
+
+/// Walk every sheet in an xlsx and pull out its sheet-protection declaration.
+/// Returns `sheet name -> SheetProtectionEntry`; sheets without protection are
+/// omitted.
+pub(crate) fn parse_xlsx_sheet_protection(path: &str) -> HashMap<String, SheetProtectionEntry> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return HashMap::new(),
+    };
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    if sheet_paths.is_empty() {
+        return HashMap::new();
+    }
+    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
+        Ok(a) => a,
+        Err(_) => return HashMap::new(),
+    };
+    let mut out: HashMap<String, SheetProtectionEntry> = HashMap::new();
+    for (sheet_name, entry_path) in sheet_paths {
+        let mut xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&entry_path) {
+            if entry.read_to_string(&mut xml).is_ok() {
+                if let Some(sp) = parse_sheet_protection(&xml) {
+                    out.insert(sheet_name, sp);
+                }
+            }
+        }
+    }
+    out
+}
+
 fn parse_rels(xml: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     for el in extract_self_closing_or_paired(xml, "Relationship") {
@@ -3692,6 +3747,8 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     let freeze_panes_by_sheet = parse_xlsx_freeze_panes(&path);
     // Pre-parse workbook-level sheet visibility (`state="hidden"` / `"veryHidden"`).
     let sheet_visibility = parse_xlsx_sheet_visibility(&path);
+    // Pre-parse per-sheet `<sheetProtection sheet="1"/>` (read-only marker).
+    let sheet_protection_by_sheet = parse_xlsx_sheet_protection(&path);
     // Pre-parse per-sheet tab colors (`<sheetPr><tabColor .../></sheetPr>`).
     // calamine doesn't surface these; we re-emit on export via
     // `worksheet.set_tab_color`.
@@ -4120,6 +4177,21 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             sheet_obj["_sheetState"] = Value::String(state.clone());
         }
 
+        // Per-sheet protection (read-only marker). Opt-in: omit `_protected`
+        // entirely when the sheet has no `<sheetProtection sheet="1"/>` so
+        // a clean workbook doesn't gain the field on round-trip. We only
+        // track the on/off flag here; password / fine-grained options aren't
+        // round-tripped at the snapshot level (rust_xlsxwriter's
+        // `protect_with_password` is available but the snapshot field is
+        // intentionally minimal — { protected: true, password?: string }).
+        if let Some(sp) = sheet_protection_by_sheet.get(name) {
+            if sp.protected {
+                let mut obj = Map::new();
+                obj.insert("protected".into(), Value::Bool(true));
+                sheet_obj["_protected"] = Value::Object(obj);
+            }
+        }
+
         // Per-sheet print / page-setup. Opt-in: only emit `_pageSetup` when at
         // least one non-default field was captured, so a workbook that never
         // customized page setup doesn't acquire a stray object on round-trip.
@@ -4507,6 +4579,25 @@ pub fn export_xlsx_core(
                         if let Some((tr, tc)) = parse_a1(tl) {
                             let _ = worksheet.set_freeze_panes_top_cell(tr, tc as u16);
                         }
+                    }
+                }
+            }
+
+            // Apply sheet protection from `_protected`. The snapshot shape is
+            // `{ protected: bool, password?: string }`; only `protected: true`
+            // actually emits `<sheetProtection sheet="1"/>`. `password` is
+            // optional and routed through rust_xlsxwriter's weak-hash variant.
+            if let Some(prot) = sheet_obj
+                .and_then(|s| s.get("_protected"))
+                .and_then(|v| v.as_object())
+            {
+                let on = prot.get("protected").and_then(|v| v.as_bool()).unwrap_or(false);
+                if on {
+                    let pw = prot.get("password").and_then(|v| v.as_str()).unwrap_or("");
+                    if pw.is_empty() {
+                        worksheet.protect();
+                    } else {
+                        worksheet.protect_with_password(pw);
                     }
                 }
             }

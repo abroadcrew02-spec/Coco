@@ -8,8 +8,9 @@ use coco_lib::commands::xlsx_io::{
     detect_unsupported_features, export_xlsx_core, import_xlsx_core,
 };
 use rust_xlsxwriter::{
-    ConditionalFormatCell, ConditionalFormatCellRule, ConditionalFormatText,
-    ConditionalFormatTextRule, Workbook,
+    ConditionalFormatCell, ConditionalFormatCellRule, ConditionalFormatDuplicate,
+    ConditionalFormatText, ConditionalFormatTextRule, ConditionalFormatTop, ConditionalFormatTopRule,
+    Workbook,
 };
 use serde_json::Value;
 use std::io::Read;
@@ -134,6 +135,88 @@ fn contains_text_round_trips() {
     assert_eq!(re_cfs.len(), 1);
     assert_eq!(re_cfs[0]["type"].as_str(), Some("containsText"));
     assert_eq!(re_cfs[0]["text"].as_str(), Some("foo"));
+}
+
+#[test]
+fn top10_rule_round_trips() {
+    // Top-5 rule: rust_xlsxwriter emits `<cfRule type="top10" rank="5">`. We
+    // round-trip the rank and the bottom/percent flags through the snapshot.
+    let tmp = TempDir::new().expect("tempdir");
+    let fixture = tmp.path().join("cf_top10.xlsx");
+    let exported = tmp.path().join("cf_top10_out.xlsx");
+
+    {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name("Sheet1").unwrap();
+        let cf = ConditionalFormatTop::new().set_rule(ConditionalFormatTopRule::Top(5));
+        ws.add_conditional_format(0, 0, 9, 0, &cf).expect("add cf");
+        wb.save(&fixture).expect("save");
+    }
+
+    let imported = import_xlsx_core(path_str(&fixture)).expect("import");
+    let snapshot_json = imported.handle.snapshot_json.clone().expect("snapshot");
+    let snap: Value = serde_json::from_str(&snapshot_json).expect("parse");
+    let cfs = snap["sheets"]["sheet-1"]["_conditionalFormatting"]
+        .as_array()
+        .expect("CF present");
+    assert_eq!(cfs.len(), 1);
+    assert_eq!(cfs[0]["type"].as_str(), Some("top10"));
+    assert_eq!(cfs[0]["rank"].as_u64(), Some(5));
+    // Top(5) — not bottom, not percent — so those flags must be absent.
+    assert!(cfs[0].get("bottom").is_none());
+    assert!(cfs[0].get("percent").is_none());
+
+    let export = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
+    assert!(export.success, "export ok: {:?}", export.error);
+
+    let re = import_xlsx_core(path_str(&exported)).expect("re-import");
+    let re_snap: Value =
+        serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_cfs = re_snap["sheets"]["sheet-1"]["_conditionalFormatting"]
+        .as_array()
+        .expect("CF survives round-trip");
+    assert_eq!(re_cfs.len(), 1);
+    assert_eq!(re_cfs[0]["type"].as_str(), Some("top10"));
+    assert_eq!(re_cfs[0]["rank"].as_u64(), Some(5));
+    assert!(re_cfs[0].get("bottom").is_none());
+}
+
+#[test]
+fn duplicate_values_round_trips() {
+    let tmp = TempDir::new().expect("tempdir");
+    let fixture = tmp.path().join("cf_dup.xlsx");
+    let exported = tmp.path().join("cf_dup_out.xlsx");
+
+    {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name("Sheet1").unwrap();
+        let cf = ConditionalFormatDuplicate::new();
+        ws.add_conditional_format(0, 0, 4, 0, &cf).expect("add cf");
+        wb.save(&fixture).expect("save");
+    }
+
+    let imported = import_xlsx_core(path_str(&fixture)).expect("import");
+    let snapshot_json = imported.handle.snapshot_json.clone().expect("snapshot");
+    let snap: Value = serde_json::from_str(&snapshot_json).expect("parse");
+    let cfs = snap["sheets"]["sheet-1"]["_conditionalFormatting"]
+        .as_array()
+        .expect("CF present");
+    assert_eq!(cfs.len(), 1);
+    assert_eq!(cfs[0]["type"].as_str(), Some("duplicateValues"));
+
+    let export = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
+    assert!(export.success, "export ok: {:?}", export.error);
+
+    let re = import_xlsx_core(path_str(&exported)).expect("re-import");
+    let re_snap: Value =
+        serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_cfs = re_snap["sheets"]["sheet-1"]["_conditionalFormatting"]
+        .as_array()
+        .expect("CF survives round-trip");
+    assert_eq!(re_cfs.len(), 1);
+    assert_eq!(re_cfs[0]["type"].as_str(), Some("duplicateValues"));
 }
 
 #[test]

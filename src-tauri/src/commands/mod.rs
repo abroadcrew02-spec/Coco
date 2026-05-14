@@ -1,4 +1,5 @@
 pub mod csv_io;
+pub mod file_io;
 pub mod recovery;
 pub mod security;
 pub mod settings;

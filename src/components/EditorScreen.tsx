@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Univer, UniverInstanceType, LocaleType, CommandType, type IWorkbookData } from "@univerjs/core";
 import { defaultTheme } from "@univerjs/design";
@@ -45,6 +46,10 @@ import InsertHyperlinkDialog, { type HyperlinkFormValue } from "./InsertHyperlin
 import InsertCommentDialog, { type CommentEntry } from "./InsertCommentDialog";
 import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
 import NumberFormatDialog, { type NumberFormatValue } from "./NumberFormatDialog";
+import InsertImageDialog, {
+  type ImageFormValue,
+  type ImagePickResult,
+} from "./InsertImageDialog";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -148,6 +153,12 @@ export default function EditorScreen() {
     endCol: number;
     rangeLabel: string;
     initialCode: string;
+  } | null>(null);
+  // Insert-image dialog: null while closed. Captures the active sheet + the
+  // top-left of the active range so the image anchors where the user clicked.
+  const [imageDialog, setImageDialog] = useState<{
+    sheetId: string;
+    cell: string;
   } | null>(null);
 
   // Read all named ranges from the live Univer workbook via the facade
@@ -761,6 +772,185 @@ export default function EditorScreen() {
     [numFmtDialog, updateSnapshot],
   );
 
+  // Insert-image dialog plumbing. Snapshots the active sheet + the top-left of
+  // the active range so the image anchors at the user's actual cursor cell.
+  const openImageDialog = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let cell = "A1";
+    try {
+      const sel = sheet.getSelection();
+      const range = sel?.getActiveRange();
+      if (range) {
+        const a1 = range.getA1Notation();
+        cell = a1.includes(":") ? a1.split(":")[0] : a1;
+      }
+    } catch {
+      // fall back to A1
+    }
+    setImageDialog({ sheetId, cell });
+  }, []);
+
+  // Tauri-side file picker for the image dialog. Opens the OS open-dialog,
+  // reads the chosen file via our `read_file_bytes_base64` command, and
+  // returns the prepared payload. Returns null if the user cancels.
+  const pickImageFile = useCallback(async (): Promise<ImagePickResult | null> => {
+    const chosen = await openDialog({
+      title: "画像ファイルを選択",
+      multiple: false,
+      filters: [{ name: "画像", extensions: ["png", "jpg", "jpeg", "gif"] }],
+    });
+    if (!chosen) return null;
+    const path = typeof chosen === "string" ? chosen : chosen[0];
+    if (!path) return null;
+    const base64 = await invoke<string>("read_file_bytes_base64", { path });
+    const name = path.split(/[\\/]/).pop() ?? path;
+    // Normalize "jpeg" → "jpg" so the media part name stays in the canonical
+    // form Excel/rust_xlsxwriter use (`xl/media/imageN.jpg`).
+    const extRaw = (name.split(".").pop() ?? "").toLowerCase();
+    const ext = extRaw === "jpeg" ? "jpg" : extRaw;
+    return { ext, base64, name };
+  }, []);
+
+  // Parse a single-cell A1 ref → 0-based (col, row). Returns null on bad input.
+  const a1ToColRow = (a1: string): { col: number; row: number } | null => {
+    const m = /^\$?([A-Za-z]+)\$?([1-9]\d*)$/.exec(a1.trim());
+    if (!m) return null;
+    const letters = m[1].toUpperCase();
+    let col = 0;
+    for (let i = 0; i < letters.length; i++) {
+      col = col * 26 + (letters.charCodeAt(i) - 64);
+    }
+    return { col: col - 1, row: parseInt(m[2], 10) - 1 };
+  };
+
+  // Apply the new image by mutating the snapshot's `_preservedParts`.
+  const applyImage = useCallback(
+    (value: ImageFormValue) => {
+      if (!imageDialog) return;
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const snapshot = workbook.save() as unknown as Record<string, unknown>;
+      const sheetOrder = (snapshot.sheetOrder as string[] | undefined) ?? [];
+      const sheetIdx = sheetOrder.indexOf(imageDialog.sheetId);
+      if (sheetIdx < 0) return;
+      const pos = a1ToColRow(value.cell);
+      if (!pos) return;
+
+      type PreservedPart = string;
+      type SheetRef = {
+        drawingRid?: string | null;
+        drawingTarget?: string | null;
+        pivotRels?: Array<{ rid: string; target: string }>;
+      } | null;
+      const preserved = (snapshot._preservedParts as
+        | {
+            parts?: Record<string, PreservedPart>;
+            sheetRefs?: SheetRef[];
+            contentTypes?: string;
+          }
+        | undefined) ?? {};
+      const parts: Record<string, PreservedPart> = { ...(preserved.parts ?? {}) };
+      const sheetRefs: SheetRef[] = (preserved.sheetRefs ?? []).slice();
+
+      const existing = sheetRefs[sheetIdx];
+      if (existing && existing.drawingRid) {
+        console.warn("InsertImage: sheet already has a drawing; skipping");
+        return;
+      }
+
+      const usedImageNums = new Set<number>();
+      const usedDrawingNums = new Set<number>();
+      for (const key of Object.keys(parts)) {
+        const mImg = /^xl\/media\/image(\d+)\.[a-zA-Z]+$/.exec(key);
+        if (mImg) usedImageNums.add(parseInt(mImg[1], 10));
+        const mDr = /^xl\/drawings\/drawing(\d+)\.xml$/.exec(key);
+        if (mDr) usedDrawingNums.add(parseInt(mDr[1], 10));
+      }
+      let imgN = 1;
+      while (usedImageNums.has(imgN)) imgN++;
+      let drN = 1;
+      while (usedDrawingNums.has(drN)) drN++;
+
+      const mediaName = `xl/media/image${imgN}.${value.ext}`;
+      const drawingName = `xl/drawings/drawing${drN}.xml`;
+      const drawingRelsName = `xl/drawings/_rels/drawing${drN}.xml.rels`;
+
+      const fromCol = pos.col;
+      const fromRow = pos.row;
+      const toCol = fromCol + 4;
+      const toRow = fromRow + 10;
+      const drawingXml =
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+        `<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"` +
+        ` xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"` +
+        ` xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+        `<xdr:twoCellAnchor editAs="oneCell">` +
+        `<xdr:from><xdr:col>${fromCol}</xdr:col><xdr:colOff>0</xdr:colOff>` +
+        `<xdr:row>${fromRow}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>` +
+        `<xdr:to><xdr:col>${toCol}</xdr:col><xdr:colOff>0</xdr:colOff>` +
+        `<xdr:row>${toRow}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>` +
+        `<xdr:pic>` +
+        `<xdr:nvPicPr>` +
+        `<xdr:cNvPr id="2" name="Picture 1"/>` +
+        `<xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr>` +
+        `</xdr:nvPicPr>` +
+        `<xdr:blipFill>` +
+        `<a:blip r:embed="rId1"/>` +
+        `<a:stretch><a:fillRect/></a:stretch>` +
+        `</xdr:blipFill>` +
+        `<xdr:spPr>` +
+        `<a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></a:xfrm>` +
+        `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>` +
+        `</xdr:spPr>` +
+        `</xdr:pic>` +
+        `<xdr:clientData/>` +
+        `</xdr:twoCellAnchor>` +
+        `</xdr:wsDr>`;
+
+      const drawingRelsXml =
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+        `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+        `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"` +
+        ` Target="../media/image${imgN}.${value.ext}"/>` +
+        `</Relationships>`;
+
+      const xmlToB64 = (s: string): string => {
+        const bytes = new TextEncoder().encode(s);
+        let bin = "";
+        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        return btoa(bin);
+      };
+
+      parts[mediaName] = value.base64;
+      parts[drawingName] = xmlToB64(drawingXml);
+      parts[drawingRelsName] = xmlToB64(drawingRelsXml);
+
+      while (sheetRefs.length <= sheetIdx) sheetRefs.push(null);
+      sheetRefs[sheetIdx] = {
+        drawingRid: "rId1",
+        drawingTarget: `../drawings/drawing${drN}.xml`,
+        pivotRels: existing?.pivotRels ?? [],
+      };
+
+      (snapshot as Record<string, unknown>)._preservedParts = {
+        ...preserved,
+        parts,
+        sheetRefs,
+      };
+
+      updateSnapshot(JSON.stringify(snapshot));
+    },
+    [imageDialog, updateSnapshot],
+  );
+
   useAutoSave();
 
   // Keyboard shortcuts (req 4.6): Ctrl+S / Cmd+S = save; Ctrl+Shift+S / Cmd+Shift+S = save as.
@@ -1123,6 +1313,15 @@ export default function EditorScreen() {
           <button
             type="button"
             className="toolbar-btn"
+            onClick={openImageDialog}
+            title="画像をワークブックに挿入"
+            aria-label="画像挿入"
+          >
+            🖼 画像挿入
+          </button>
+          <button
+            type="button"
+            className="toolbar-btn"
             onClick={requestSettings}
             title="設定（自動保存間隔など）"
             aria-label="設定"
@@ -1315,6 +1514,14 @@ export default function EditorScreen() {
           initialCode={numFmtDialog.initialCode}
           onApply={applyNumberFormat}
           onClose={() => setNumFmtDialog(null)}
+        />
+      )}
+      {imageDialog && (
+        <InsertImageDialog
+          initialCell={imageDialog.cell}
+          pickFile={pickImageFile}
+          onApply={applyImage}
+          onClose={() => setImageDialog(null)}
         />
       )}
       {warningsDialog === "import" && (

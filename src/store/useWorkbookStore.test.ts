@@ -1319,3 +1319,420 @@ describe("pinnedOrder", () => {
     expect(useWorkbookStore.getState().pinnedOrder).toEqual(["/tmp/b.csv", "/tmp/a.xlsx"]);
   });
 });
+
+// --- Coverage gap fillers (B5) ---------------------------------------------
+
+describe("saveAs additional branches", () => {
+  it("is a no-op when there is no current workbook", async () => {
+    useWorkbookStore.setState({ currentHandle: null });
+    await useWorkbookStore.getState().saveAs("/tmp/foo.xlsx");
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("defaults unknown extension to .xlsx (appends extension)", async () => {
+    invokeMock.mockResolvedValue({ success: true, path: "/tmp/foo.xlsx", warnings: [] });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/foo.coco" }),
+      currentSnapshotJson: "{}",
+    });
+    await useWorkbookStore.getState().saveAs("/tmp/foo.bogus");
+    // The store should route to xlsx writer with .xlsx appended (replacing the unknown ext).
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_export_xlsx",
+      expect.objectContaining({ path: "/tmp/foo.xlsx" })
+    );
+  });
+
+  it("clears recovery when path was previously null (wasUnsaved)", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "workbook_save_as") {
+        return Promise.resolve({ success: true, path: "/tmp/new.coco", error: null });
+      }
+      if (cmd === "workbook_clear_recovery") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: null, workbookId: "wb-untitled" }),
+      currentSnapshotJson: "{}",
+    });
+    await useWorkbookStore.getState().saveAs("/tmp/new.coco");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_clear_recovery",
+      { candidateId: "wb-untitled" }
+    );
+  });
+
+  it("flips to save_failed and surfaces friendly error when result.success=false", async () => {
+    invokeMock.mockResolvedValue({
+      success: false,
+      path: "/tmp/foo.coco",
+      error: "DB_LOCKED",
+    });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/foo.coco" }),
+      currentSnapshotJson: "{}",
+    });
+    await useWorkbookStore.getState().saveAs("/tmp/foo.coco");
+    const s = useWorkbookStore.getState();
+    expect(s.saveStatus).toBe("save_failed");
+    expect(s.lastError).not.toBeNull();
+  });
+
+  it("flips to save_failed when the invoke throws", async () => {
+    invokeMock.mockRejectedValue("EACCES");
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/foo.coco" }),
+      currentSnapshotJson: "{}",
+    });
+    await useWorkbookStore.getState().saveAs("/tmp/foo.coco");
+    expect(useWorkbookStore.getState().saveStatus).toBe("save_failed");
+  });
+});
+
+describe("save additional branches", () => {
+  it("aborts gracefully when user cancels the save dialog (path null)", async () => {
+    saveDialogMock.mockResolvedValue(null);
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: null }),
+      currentSnapshotJson: "{}",
+    });
+    await useWorkbookStore.getState().save();
+    expect(useWorkbookStore.getState().saveStatus).toBe("unsaved");
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("flips to save_failed when .coco save returns success=false", async () => {
+    invokeMock.mockResolvedValue({
+      success: false,
+      path: "/tmp/data.coco",
+      error: "COCO_WRITE_FAILED",
+    });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+      currentSnapshotJson: "{}",
+    });
+    await useWorkbookStore.getState().save();
+    expect(useWorkbookStore.getState().saveStatus).toBe("save_failed");
+  });
+
+  it("catches synchronous invoke rejection on .coco save path", async () => {
+    invokeMock.mockRejectedValue("disk gone");
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+      currentSnapshotJson: "{}",
+    });
+    await useWorkbookStore.getState().save();
+    const s = useWorkbookStore.getState();
+    expect(s.saveStatus).toBe("save_failed");
+    expect(s.lastError).toBe("disk gone");
+  });
+});
+
+describe("promptSaveAs no-handle guard", () => {
+  it("is a no-op when there is no current workbook", async () => {
+    useWorkbookStore.setState({ currentHandle: null });
+    await useWorkbookStore.getState().promptSaveAs();
+    expect(saveDialogMock).not.toHaveBeenCalled();
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("exportXlsx reject path", () => {
+  it("flips to export_failed when invoke throws", async () => {
+    saveDialogMock.mockResolvedValue("/tmp/out.xlsx");
+    invokeMock.mockRejectedValue("ZIP_WRITE_FAILED");
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+      currentSnapshotJson: "{}",
+    });
+    await useWorkbookStore.getState().exportXlsx();
+    const s = useWorkbookStore.getState();
+    expect(s.isExporting).toBe(false);
+    expect(s.saveStatus).toBe("export_failed");
+    expect(s.lastError).not.toBeNull();
+  });
+});
+
+describe("listSheetNames", () => {
+  it("returns sheet metadata from invoke", async () => {
+    invokeMock.mockResolvedValue([{ id: "s1", name: "Sheet1" }]);
+    useWorkbookStore.setState({ currentSnapshotJson: "{\"a\":1}" });
+    const result = await useWorkbookStore.getState().listSheetNames();
+    expect(result).toEqual([{ id: "s1", name: "Sheet1" }]);
+    expect(invokeMock).toHaveBeenCalledWith(
+      "list_sheet_names",
+      { snapshotJson: "{\"a\":1}" }
+    );
+  });
+
+  it("returns [] and sets lastError on invoke rejection", async () => {
+    invokeMock.mockRejectedValue("BAD_SNAPSHOT");
+    const result = await useWorkbookStore.getState().listSheetNames();
+    expect(result).toEqual([]);
+    expect(useWorkbookStore.getState().lastError).not.toBeNull();
+  });
+});
+
+describe("listSnapshots / openSnapshot / vacuum / checkIntegrity / diagnostic happy paths", () => {
+  it("listSnapshots returns [] when there is no current path", async () => {
+    useWorkbookStore.setState({ currentHandle: null });
+    const result = await useWorkbookStore.getState().listSnapshots();
+    expect(result).toEqual([]);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("listSnapshots invokes the backend and returns the snapshot metadata", async () => {
+    invokeMock.mockResolvedValue([
+      { snapshotId: 1, createdAt: "2026-01-01", reason: "manual_save" },
+    ]);
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+    });
+    const result = await useWorkbookStore.getState().listSnapshots();
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_list_snapshots",
+      { path: "/tmp/data.coco" }
+    );
+    expect(result).toHaveLength(1);
+  });
+
+  it("listSnapshots surfaces friendly error and returns [] on reject", async () => {
+    invokeMock.mockRejectedValue("DB_CORRUPT");
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+    });
+    const result = await useWorkbookStore.getState().listSnapshots();
+    expect(result).toEqual([]);
+    expect(useWorkbookStore.getState().lastError).not.toBeNull();
+  });
+
+  it("openSnapshot routes to editor with path forced to null on success", async () => {
+    invokeMock.mockResolvedValue({
+      handle: {
+        workbookId: "wb-snap",
+        path: "/tmp/data.coco",
+        sourceType: "coco",
+        snapshotJson: "{\"s\":1}",
+      },
+      warnings: [],
+    });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+    });
+    await useWorkbookStore.getState().openSnapshot(42);
+    const s = useWorkbookStore.getState();
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_open_snapshot",
+      { path: "/tmp/data.coco", snapshotId: 42 }
+    );
+    expect(s.currentHandle?.path).toBeNull();
+    expect(s.saveStatus).toBe("unsaved");
+    expect(s.currentSnapshotJson).toBe("{\"s\":1}");
+  });
+
+  it("openSnapshot sets friendly error on rejection", async () => {
+    invokeMock.mockRejectedValue("SNAPSHOT_NOT_FOUND");
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+    });
+    await useWorkbookStore.getState().openSnapshot(99);
+    const s = useWorkbookStore.getState();
+    expect(s.saveStatus).toBe("saved");
+    expect(s.lastError).not.toBeNull();
+  });
+
+  it("vacuumWorkbook returns the backend payload on success", async () => {
+    invokeMock.mockResolvedValue({ beforeBytes: 1000, afterBytes: 500 });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+    });
+    const result = await useWorkbookStore.getState().vacuumWorkbook();
+    expect(result).toEqual({ beforeBytes: 1000, afterBytes: 500 });
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_vacuum",
+      { path: "/tmp/data.coco" }
+    );
+  });
+
+  it("vacuumWorkbook returns null and sets lastError on rejection", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+    });
+    const result = await useWorkbookStore.getState().vacuumWorkbook();
+    expect(result).toBeNull();
+    expect(useWorkbookStore.getState().lastError).not.toBeNull();
+  });
+
+  it("checkIntegrity returns the backend payload on success", async () => {
+    invokeMock.mockResolvedValue({ ok: true, issues: [] });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+    });
+    const result = await useWorkbookStore.getState().checkIntegrity();
+    expect(result).toEqual({ ok: true, issues: [] });
+  });
+
+  it("checkIntegrity returns null and sets lastError on rejection", async () => {
+    invokeMock.mockRejectedValue("CORRUPT_PAGES");
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+    });
+    const result = await useWorkbookStore.getState().checkIntegrity();
+    expect(result).toBeNull();
+    expect(useWorkbookStore.getState().lastError).not.toBeNull();
+  });
+
+  it("workbookDiagnosticInfo returns null when no path", async () => {
+    useWorkbookStore.setState({
+      currentHandle: { workbookId: "wb", path: null, sourceType: "new", snapshotJson: "{}" },
+    });
+    const result = await useWorkbookStore.getState().workbookDiagnosticInfo();
+    expect(result).toBeNull();
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("workbookDiagnosticInfo returns the backend payload on success", async () => {
+    invokeMock.mockResolvedValue({
+      path: "/tmp/data.coco",
+      sizeBytes: 4096,
+      snapshotCount: 3,
+      schemaVersion: 1,
+      lastSavedAt: "2026-01-01",
+    });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+    });
+    const result = await useWorkbookStore.getState().workbookDiagnosticInfo();
+    expect(result?.path).toBe("/tmp/data.coco");
+    expect(result?.snapshotCount).toBe(3);
+  });
+
+  it("workbookDiagnosticInfo silently returns null on rejection (non-critical)", async () => {
+    invokeMock.mockRejectedValue("boom");
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+    });
+    const result = await useWorkbookStore.getState().workbookDiagnosticInfo();
+    expect(result).toBeNull();
+    // Non-critical → lastError stays null.
+    expect(useWorkbookStore.getState().lastError).toBeNull();
+  });
+});
+
+describe("removeRecent / clearRecents error paths", () => {
+  it("removeRecent surfaces friendlyError when invoke rejects (does NOT mutate state)", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    useWorkbookStore.setState({
+      recentFiles: [
+        { path: "/a.coco", name: "a.coco", lastOpened: "2026-01-01", exists: true },
+      ],
+    });
+    await useWorkbookStore.getState().removeRecent("/a.coco");
+    const s = useWorkbookStore.getState();
+    expect(s.lastError).not.toBeNull();
+    expect(s.recentFiles).toHaveLength(1); // optimistic remove only happens on success
+  });
+
+  it("clearRecents surfaces friendlyError when invoke rejects", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    useWorkbookStore.setState({
+      recentFiles: [
+        { path: "/a.coco", name: "a.coco", lastOpened: "2026-01-01", exists: true },
+      ],
+    });
+    await useWorkbookStore.getState().clearRecents();
+    const s = useWorkbookStore.getState();
+    expect(s.lastError).not.toBeNull();
+    expect(s.recentFiles).toHaveLength(1);
+  });
+});
+
+describe("settings-load reject swallow", () => {
+  it("loadPinnedOrder swallows invoke rejection (leaves default)", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    await useWorkbookStore.getState().loadPinnedOrder();
+    const s = useWorkbookStore.getState();
+    expect(s.pinnedOrder).toEqual([]);
+    expect(s.lastError).toBeNull();
+  });
+
+  it("loadPinnedPaths swallows invoke rejection (leaves default)", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    await useWorkbookStore.getState().loadPinnedPaths();
+    expect(useWorkbookStore.getState().pinnedPaths).toEqual([]);
+    expect(useWorkbookStore.getState().lastError).toBeNull();
+  });
+
+  it("loadCsvExportEncoding swallows rejection", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    const before = useWorkbookStore.getState().csvExportEncoding;
+    await useWorkbookStore.getState().loadCsvExportEncoding();
+    expect(useWorkbookStore.getState().csvExportEncoding).toBe(before);
+  });
+
+  it("loadCsvImportEncoding swallows rejection", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    const before = useWorkbookStore.getState().csvImportEncoding;
+    await useWorkbookStore.getState().loadCsvImportEncoding();
+    expect(useWorkbookStore.getState().csvImportEncoding).toBe(before);
+  });
+
+  it("loadAutoSaveInterval swallows rejection", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    const before = useWorkbookStore.getState().autoSaveIntervalMs;
+    await useWorkbookStore.getState().loadAutoSaveInterval();
+    expect(useWorkbookStore.getState().autoSaveIntervalMs).toBe(before);
+  });
+
+  it("loadSuppressCsvPocWarning swallows rejection", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    await useWorkbookStore.getState().loadSuppressCsvPocWarning();
+    expect(useWorkbookStore.getState().suppressCsvPocWarning).toBe(false);
+  });
+
+  it("loadRecoveryCandidates swallows rejection (no lastError)", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    await useWorkbookStore.getState().loadRecoveryCandidates();
+    expect(useWorkbookStore.getState().lastError).toBeNull();
+  });
+
+  it("dismissCandidate swallows rejection (does NOT mutate state)", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    useWorkbookStore.setState({
+      recoveryCandidates: [
+        { candidateId: "a", originalPath: null, savedAt: "2026", reason: "auto_save" },
+      ],
+    });
+    await useWorkbookStore.getState().dismissCandidate("a");
+    // Failure → entry stays in the list, no lastError.
+    expect(useWorkbookStore.getState().recoveryCandidates).toHaveLength(1);
+    expect(useWorkbookStore.getState().lastError).toBeNull();
+  });
+});
+
+describe("settings-persist reject is best-effort", () => {
+  it("setCsvExportEncoding keeps in-memory value when invoke rejects", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    await useWorkbookStore.getState().setCsvExportEncoding("shift_jis");
+    expect(useWorkbookStore.getState().csvExportEncoding).toBe("shift_jis");
+  });
+
+  it("setCsvImportEncoding keeps in-memory value when invoke rejects", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    await useWorkbookStore.getState().setCsvImportEncoding("shift_jis");
+    expect(useWorkbookStore.getState().csvImportEncoding).toBe("shift_jis");
+  });
+
+  it("setSuppressCsvPocWarning keeps in-memory value when invoke rejects", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    await useWorkbookStore.getState().setSuppressCsvPocWarning(true);
+    expect(useWorkbookStore.getState().suppressCsvPocWarning).toBe(true);
+  });
+
+  it("setAutoSaveInterval keeps in-memory value when invoke rejects", async () => {
+    invokeMock.mockRejectedValue("DB_LOCKED");
+    await useWorkbookStore.getState().setAutoSaveInterval(12_345);
+    expect(useWorkbookStore.getState().autoSaveIntervalMs).toBe(12_345);
+  });
+});

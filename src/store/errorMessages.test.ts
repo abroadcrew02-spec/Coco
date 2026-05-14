@@ -119,4 +119,32 @@ describe("friendlyError", () => {
       );
     });
   });
+
+  describe("prefix edge cases", () => {
+    it("prefix-only string (no detail tail) yields the translation with empty parens", () => {
+      // Rust historically emits "Sheet not found: <id>", but a programming
+      // error could ship just the prefix. Confirm the result is still
+      // user-facing (Japanese) and does not throw on the empty slice.
+      const result = friendlyError("Sheet not found:");
+      expect(result).toBe("指定されたシートが見つかりません（）");
+    });
+
+    it("prefix without the trailing colon does NOT match — passes through", () => {
+      // "Sheet not found" (no colon) shares the leading text but is NOT
+      // a recognized prefix. Must not get the friendly wrapping or it would
+      // corrupt unrelated logs.
+      const result = friendlyError("Sheet not found anywhere in the workbook");
+      expect(result).toBe("Sheet not found anywhere in the workbook");
+    });
+
+    it("CSV_TOO_LARGE prefix variant ('CSV_TOO_LARGE: ...') matches both forms", () => {
+      // The bare "CSV_TOO_LARGE" hits the FRIENDLY exact map; the
+      // "CSV_TOO_LARGE: <tail>" form hits the PREFIX_FRIENDLY entry and
+      // must yield the same user-facing string (no diagnostic tail leaked).
+      const exact = friendlyError("CSV_TOO_LARGE");
+      const withTail = friendlyError("CSV_TOO_LARGE: more than 5M cells");
+      expect(exact).toBe("CSV のセル数が上限（500万）を超えています。");
+      expect(withTail).toBe(exact);
+    });
+  });
 });

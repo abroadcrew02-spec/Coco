@@ -657,6 +657,43 @@ describe("HomeScreen", () => {
       const call = invokeMock.mock.calls.find((c) => c[0] === "workbook_clear_recovery");
       expect(call?.[1]).toEqual({ candidateId: "r2" });
     });
+
+    it("renders an unknown 'reason' code verbatim (pass-through, no crash)", () => {
+      // Forward-compat: if Rust ships a new reason code, the home screen
+      // should display it raw rather than blanking out the row.
+      useWorkbookStore.setState({
+        recoveryCandidates: [
+          {
+            candidateId: "future",
+            originalPath: "/tmp/future.xlsx",
+            savedAt: "2026-05-13T10:00:00Z",
+            reason: "future_migration_v3",
+          },
+        ],
+      });
+      render(<HomeScreen />);
+      expect(screen.getByText(/future_migration_v3/)).toBeTruthy();
+    });
+
+    it("renders an unparseable savedAt as the raw string (defensive, no crash)", () => {
+      // Regression bait: an old Rust release wrote ISO strings; a hypothetical
+      // future format change must not throw — the row falls back to raw text.
+      useWorkbookStore.setState({
+        recoveryCandidates: [
+          {
+            candidateId: "weird",
+            originalPath: "/tmp/odd.xlsx",
+            savedAt: "not-a-date-at-all",
+            reason: "auto_save",
+          },
+        ],
+      });
+      expect(() => render(<HomeScreen />)).not.toThrow();
+      // Raw savedAt is folded into the same span as the reason — confirm via title attr.
+      const dateNode = screen.getByTitle("not-a-date-at-all");
+      expect(dateNode.textContent).toContain("not-a-date-at-all");
+      expect(dateNode.textContent).toContain("自動保存");
+    });
   });
 
   describe("error banner", () => {

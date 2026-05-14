@@ -1099,6 +1099,78 @@ describe("audit item 16: setAutoSaveInterval rejects non-finite values", () => {
   });
 });
 
+describe("setSaveStatus", () => {
+  it("sets the saveStatus field directly (used by useAutoSave to flip 'auto_saved' back to 'saved')", () => {
+    useWorkbookStore.setState({ saveStatus: "auto_saved" });
+    useWorkbookStore.getState().setSaveStatus("saved");
+    expect(useWorkbookStore.getState().saveStatus).toBe("saved");
+  });
+});
+
+describe("exportCsvToPath error paths", () => {
+  it("flips to export_failed with friendly error when invoke rejects", async () => {
+    // Free-form error from Rust; friendlyError leaves it as-is.
+    invokeMock.mockRejectedValue("disk full");
+    useWorkbookStore.setState({
+      currentHandle: { workbookId: "wb", path: "/tmp/wb.coco", sourceType: "coco", snapshotJson: "{}" },
+      currentSnapshotJson: "{}",
+      csvExportEncoding: "utf8-bom",
+    });
+    await useWorkbookStore.getState().exportCsvToPath("/tmp/out.csv", "sheet-1");
+    const s = useWorkbookStore.getState();
+    expect(s.isExporting).toBe(false);
+    expect(s.saveStatus).toBe("export_failed");
+    expect(s.lastError).toBe("disk full");
+  });
+
+  it("flips to export_failed and surfaces a friendly hint when result.success=false", async () => {
+    invokeMock.mockResolvedValue({
+      success: false,
+      path: "/tmp/out.csv",
+      warnings: [],
+      error: "CSV_EMPTY_WORKBOOK",
+    });
+    useWorkbookStore.setState({
+      currentHandle: { workbookId: "wb", path: "/tmp/wb.coco", sourceType: "coco", snapshotJson: "{}" },
+      currentSnapshotJson: "{}",
+      csvExportEncoding: "utf8-bom",
+    });
+    await useWorkbookStore.getState().exportCsvToPath("/tmp/out.csv", "sheet-1");
+    const s = useWorkbookStore.getState();
+    expect(s.saveStatus).toBe("export_failed");
+    // Friendly translation of CSV_EMPTY_WORKBOOK.
+    expect(s.lastError).toContain("エクスポートできるシート");
+  });
+});
+
+describe("openSnapshot / vacuum / checkIntegrity null-path guards", () => {
+  it("openSnapshot is a no-op when currentHandle has no path", async () => {
+    useWorkbookStore.setState({
+      currentHandle: { workbookId: "wb", path: null, sourceType: "new", snapshotJson: "{}" },
+    });
+    await useWorkbookStore.getState().openSnapshot(1);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("vacuumWorkbook returns null without invoking when path is null", async () => {
+    useWorkbookStore.setState({
+      currentHandle: { workbookId: "wb", path: null, sourceType: "new", snapshotJson: "{}" },
+    });
+    const result = await useWorkbookStore.getState().vacuumWorkbook();
+    expect(result).toBeNull();
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("checkIntegrity returns null without invoking when path is null", async () => {
+    useWorkbookStore.setState({
+      currentHandle: { workbookId: "wb", path: null, sourceType: "new", snapshotJson: "{}" },
+    });
+    const result = await useWorkbookStore.getState().checkIntegrity();
+    expect(result).toBeNull();
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("audit item 17: loadPinnedPaths handles non-array JSON", () => {
   it("ignores a JSON string ('\"hello\"') and leaves pinnedPaths as []", async () => {
     invokeMock.mockResolvedValue(JSON.stringify("hello"));

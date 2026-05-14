@@ -237,4 +237,58 @@ describe("useFileDrop", () => {
       expect(unlistenMock).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("drop edge cases", () => {
+    it("drop while editor is in 'loading' saveStatus is still dispatched (no extra guard)", async () => {
+      // The hook only guards on unsaved-via-dirtyGuard; a loading state doesn't
+      // suppress the drop. Pin that contract — otherwise drag-drop during a
+      // long import would silently swallow a follow-up drop attempt.
+      useWorkbookStore.setState({ screen: "editor", saveStatus: "loading" });
+      render(<Probe />);
+      await fireDrop("/tmp/another.xlsx");
+      expect(invokeMock).toHaveBeenCalledWith("workbook_import_xlsx", {
+        path: "/tmp/another.xlsx",
+      });
+    });
+
+    it("clears isHovering on leave even when a previous drop's dispatch is mid-flight", async () => {
+      // Regression: hover state must not get stuck because the hook awaits
+      // dispatch — the listener should set hovering=false on leave regardless
+      // of pending async work.
+      let resolveImport!: (v: unknown) => void;
+      invokeMock.mockImplementation(
+        () =>
+          new Promise((r) => {
+            resolveImport = r;
+          })
+      );
+      const { container } = render(<Probe />);
+      await waitFor(() => expect(lastHandler).not.toBeNull());
+      await act(async () => {
+        lastHandler!({ payload: { type: "enter", paths: [] } });
+      });
+      expect(container.querySelector("[data-hovering]")?.getAttribute("data-hovering")).toBe(
+        "true"
+      );
+      // Fire a drop (kicks off pending invoke), then a fresh enter/leave cycle.
+      await act(async () => {
+        lastHandler!({ payload: { type: "drop", paths: ["/tmp/slow.xlsx"] } });
+      });
+      expect(container.querySelector("[data-hovering]")?.getAttribute("data-hovering")).toBe(
+        "false"
+      );
+      await act(async () => {
+        lastHandler!({ payload: { type: "enter", paths: [] } });
+        lastHandler!({ payload: { type: "leave" } });
+      });
+      expect(container.querySelector("[data-hovering]")?.getAttribute("data-hovering")).toBe(
+        "false"
+      );
+      // Resolve the pending import so the test doesn't leak a promise.
+      resolveImport({
+        handle: { workbookId: "wb", path: "/tmp/slow.xlsx", sourceType: "xlsx", snapshotJson: "{}" },
+        warnings: [],
+      });
+    });
+  });
 });

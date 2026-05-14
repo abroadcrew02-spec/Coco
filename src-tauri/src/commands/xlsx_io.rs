@@ -788,26 +788,40 @@ fn parse_workbook_sheet_visibility(xml: &str) -> HashMap<String, String> {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct FreezePaneEntry {
     /// 0-based row of the first scrollable cell (== ySplit; rows 0..row are frozen).
+    ///
+    /// For `state="split"`, this carries the raw `ySplit` value as parsed
+    /// (Excel writes split offsets in 1/20 pt units / pixels — we preserve the
+    /// number verbatim so a round-trip is byte-identical).
     pub row: u32,
     /// 0-based column of the first scrollable cell (== xSplit; cols 0..col are frozen).
+    ///
+    /// For `state="split"`, this carries the raw `xSplit` value as parsed
+    /// (see `row` above).
     pub col: u32,
     /// Optional A1-style top-left visible cell in the scrolling pane
     /// (e.g. `"A20"`), as written by `topLeftCell` on the `<pane>` element.
     pub top_left: Option<String>,
+    /// `"frozen"` (the D5 default) or `"split"`. Split panes use the same
+    /// `<pane>` element but `xSplit`/`ySplit` are pixel/twip offsets rather
+    /// than row/col counts. Defaults to `"frozen"` for back-compat.
+    pub state: String,
 }
 
 /// Parse the `<sheetView><pane .../></sheetView>` block of one worksheet's XML
-/// into a `FreezePaneEntry`. Returns `None` when no frozen pane is declared.
-/// Only `state="frozen"` (and its xSplit/ySplit/topLeftCell attrs) is handled.
-///
-/// TODO(xlsx-roundtrip): round-trip split panes (live-drag variant) (see docs/TODOS.md#medium-split-panes)
+/// into a `FreezePaneEntry`. Returns `None` when no pane is declared.
+/// Handles both `state="frozen"` and `state="split"` (the latter is the
+/// live-drag variant — xSplit/ySplit are pixel offsets, not row/col counts).
+/// A missing `state` attribute defaults to `"split"` per the OOXML schema.
 fn parse_sheet_freeze_pane(xml: &str) -> Option<FreezePaneEntry> {
     let view = extract_block(xml, "<sheetView", "</sheetView>")?;
     let pane = find_tag(&view, "<pane")?;
-    let state = parse_attr(&pane, "state").unwrap_or_default();
-    if state != "frozen" {
-        return None;
-    }
+    let raw_state = parse_attr(&pane, "state").unwrap_or_default();
+    let state = match raw_state.as_str() {
+        "frozen" | "frozenSplit" => "frozen",
+        // OOXML default when `state` is absent is "split".
+        "split" | "" => "split",
+        _ => return None,
+    };
     let x_split: u32 = parse_attr(&pane, "xSplit")
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
@@ -822,6 +836,7 @@ fn parse_sheet_freeze_pane(xml: &str) -> Option<FreezePaneEntry> {
         row: y_split,
         col: x_split,
         top_left,
+        state: state.to_string(),
     })
 }
 
@@ -2439,6 +2454,119 @@ fn encode_xml_text(s: &str) -> String {
     out
 }
 
+/// One sheet's split-pane spec, captured during the rust_xlsxwriter pass and
+/// applied to the saved worksheet XML by `rewrite_split_panes_in_zip`.
+#[derive(Debug, Clone)]
+struct SplitPaneSpec {
+    /// Worksheet name (after sanitization), used to locate `xl/worksheets/sheetN.xml`.
+    sheet_name: String,
+    /// Raw `xSplit` value to emit (pixel / twip offset, NOT a column index).
+    x_split: u64,
+    /// Raw `ySplit` value to emit (pixel / twip offset, NOT a row index).
+    y_split: u64,
+    /// Optional `topLeftCell` (A1) — preserved verbatim from the source.
+    top_left: Option<String>,
+}
+
+/// Post-save zip rewrite: for each sheet flagged as split-pane, replace the
+/// `<pane .../>` element rust_xlsxwriter wrote (always `state="frozen"`) with
+/// a `state="split"` variant carrying the snapshot's original xSplit/ySplit
+/// pixel offsets and topLeftCell. No-op when `specs` is empty.
+fn rewrite_split_panes_in_zip(
+    xlsx_path: &std::path::Path,
+    specs: &[SplitPaneSpec],
+) -> Result<(), String> {
+    use std::io::{Cursor, Read, Write};
+
+    if specs.is_empty() {
+        return Ok(());
+    }
+
+    let bytes = std::fs::read(xlsx_path).map_err(|e| format!("read xlsx: {e}"))?;
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    let mut archive = zip::ZipArchive::new(Cursor::new(&bytes))
+        .map_err(|e| format!("open xlsx zip: {e}"))?;
+
+    // Build entry-path -> new XML map for sheets that need a split-pane swap.
+    let mut replacements: HashMap<String, Vec<u8>> = HashMap::new();
+    for spec in specs {
+        let Some(entry_path) = sheet_paths.get(&spec.sheet_name) else {
+            continue;
+        };
+        let mut xml = String::new();
+        match archive.by_name(entry_path) {
+            Ok(mut e) => {
+                if e.read_to_string(&mut xml).is_err() {
+                    continue;
+                }
+            }
+            Err(_) => continue,
+        }
+        // Locate the `<pane ... />` self-closing tag inside the first
+        // <sheetView>. rust_xlsxwriter writes one per sheet when freeze_panes
+        // is set, always with `state="frozen"`. We swap the whole tag.
+        let Some(start) = xml.find("<pane ") else {
+            continue;
+        };
+        let Some(end_rel) = xml[start..].find("/>") else {
+            continue;
+        };
+        let end = start + end_rel + 2;
+        // Replicate rust_xlsxwriter's attribute order so diffs stay minimal:
+        // xSplit, ySplit, topLeftCell, activePane, state.
+        let top_left = spec
+            .top_left
+            .clone()
+            .unwrap_or_else(|| "A1".to_string());
+        let new_pane = format!(
+            r#"<pane xSplit="{x}" ySplit="{y}" topLeftCell="{tl}" activePane="bottomRight" state="split"/>"#,
+            x = spec.x_split,
+            y = spec.y_split,
+            tl = top_left,
+        );
+        let mut new_xml = String::with_capacity(xml.len() + new_pane.len());
+        new_xml.push_str(&xml[..start]);
+        new_xml.push_str(&new_pane);
+        new_xml.push_str(&xml[end..]);
+        replacements.insert(entry_path.clone(), new_xml.into_bytes());
+    }
+
+    if replacements.is_empty() {
+        return Ok(());
+    }
+
+    let mut out_buf: Vec<u8> = Vec::with_capacity(bytes.len());
+    {
+        let mut writer = zip::ZipWriter::new(Cursor::new(&mut out_buf));
+        let opts = zip::write::FileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for i in 0..archive.len() {
+            let mut entry = archive
+                .by_index(i)
+                .map_err(|e| format!("read entry {i}: {e}"))?;
+            let name = entry.name().to_string();
+            writer
+                .start_file(name.clone(), opts)
+                .map_err(|e| format!("start_file: {e}"))?;
+            if let Some(replacement) = replacements.get(&name) {
+                writer
+                    .write_all(replacement)
+                    .map_err(|e| format!("write: {e}"))?;
+            } else {
+                let mut data = Vec::new();
+                entry
+                    .read_to_end(&mut data)
+                    .map_err(|e| format!("read: {e}"))?;
+                writer.write_all(&data).map_err(|e| format!("write: {e}"))?;
+            }
+        }
+        writer.finish().map_err(|e| format!("zip finish: {e}"))?;
+    }
+
+    std::fs::write(xlsx_path, &out_buf).map_err(|e| format!("write xlsx: {e}"))?;
+    Ok(())
+}
+
 /// Post-save zip rewrite: replace `xl/comments*.xml` entries with our own
 /// correctly-mapped XML to work around rust_xlsxwriter 0.77's author/id
 /// ordering bug.
@@ -3959,16 +4087,21 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             }
         }
 
-        // Per-sheet frozen pane. Opt-in: omit `_freezePane` entirely when the
-        // sheet has no frozen rows/cols. `topLeft` is only emitted when the
-        // source workbook carried `topLeftCell` so we don't materialize a
-        // default A1 pre-scroll on round-trip.
+        // Per-sheet frozen / split pane. Opt-in: omit `_freezePane` entirely
+        // when the sheet has no pane declaration. `topLeft` is only emitted
+        // when the source workbook carried `topLeftCell` so we don't
+        // materialize a default A1 pre-scroll on round-trip. `state` is
+        // emitted only when "split" — frozen is the default and stays
+        // implicit for back-compat with D5 snapshots.
         if let Some(fp) = freeze_panes_by_sheet.get(name) {
             let mut obj = Map::new();
             obj.insert("row".into(), Value::from(fp.row));
             obj.insert("col".into(), Value::from(fp.col));
             if let Some(tl) = &fp.top_left {
                 obj.insert("topLeft".into(), Value::String(tl.clone()));
+            }
+            if fp.state == "split" {
+                obj.insert("state".into(), Value::String("split".into()));
             }
             sheet_obj["_freezePane"] = Value::Object(obj);
         }
@@ -4311,6 +4444,11 @@ pub fn export_xlsx_core(
     // Captured per-sheet `(cell, author, text)` tuples for the post-save
     // comments rewrite (works around rust_xlsxwriter 0.77's authorId mis-ordering).
     let mut sheets_with_comments: Vec<(String, Vec<(String, String, String)>)> = Vec::new();
+    // Captured per-sheet split-pane specs. rust_xlsxwriter 0.77 only emits
+    // `state="frozen"` panes — split panes need a post-save XML rewrite to
+    // overwrite the `<pane>` attributes (xSplit / ySplit pixel offsets +
+    // `state="split"`).
+    let mut sheets_with_split_panes: Vec<SplitPaneSpec> = Vec::new();
 
     let build_result: Result<(), String> = (|| -> Result<(), String> {
         for (i, sheet_id_val) in sheet_order.iter().enumerate() {
@@ -4367,20 +4505,51 @@ pub fn export_xlsx_core(
                 }
             }
 
-            // Apply frozen pane from `_freezePane`. Out-of-bounds rows/cols
-            // (or a {0,0} pane) are dropped — rust_xlsxwriter rejects the
-            // former and the latter is a no-op anyway.
+            // Apply frozen / split pane from `_freezePane`. Out-of-bounds
+            // rows/cols (or a {0,0} pane) are dropped — rust_xlsxwriter
+            // rejects the former and the latter is a no-op anyway. For
+            // `state="split"`, rust_xlsxwriter only emits `state="frozen"`
+            // panes; we ask it to emit *some* pane (so the `<pane>` element
+            // and its surrounding `<sheetView>` exist in the worksheet XML)
+            // and then post-process the saved file to rewrite the pane attrs
+            // (xSplit / ySplit values + `state="split"`). See
+            // `rewrite_split_panes_in_zip` below.
             if let Some(fp) = sheet_obj
                 .and_then(|s| s.get("_freezePane"))
                 .and_then(|v| v.as_object())
             {
-                let row = fp.get("row").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                let col = fp.get("col").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
-                if row > 0 || col > 0 {
-                    let _ = worksheet.set_freeze_panes(row, col);
-                    if let Some(tl) = fp.get("topLeft").and_then(|v| v.as_str()) {
-                        if let Some((tr, tc)) = parse_a1(tl) {
-                            let _ = worksheet.set_freeze_panes_top_cell(tr, tc as u16);
+                let row_raw = fp.get("row").and_then(|v| v.as_u64()).unwrap_or(0);
+                let col_raw = fp.get("col").and_then(|v| v.as_u64()).unwrap_or(0);
+                let state = fp
+                    .get("state")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("frozen");
+                if state == "split" {
+                    // For split panes, the row/col are pixel/twip offsets and
+                    // may be much larger than rust_xlsxwriter's row/col limits.
+                    // Pass `(1, 1)` as a placeholder so the writer emits a
+                    // `<pane .../>` element; we'll rewrite the attributes in
+                    // `rewrite_split_panes_in_zip` after the workbook is
+                    // saved. `topLeft` is also re-emitted by that pass.
+                    let _ = worksheet.set_freeze_panes(1u32, 1u16);
+                    sheets_with_split_panes.push(SplitPaneSpec {
+                        sheet_name: safe_name.clone(),
+                        x_split: col_raw,
+                        y_split: row_raw,
+                        top_left: fp
+                            .get("topLeft")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string()),
+                    });
+                } else {
+                    let row = row_raw as u32;
+                    let col = col_raw as u16;
+                    if row > 0 || col > 0 {
+                        let _ = worksheet.set_freeze_panes(row, col);
+                        if let Some(tl) = fp.get("topLeft").and_then(|v| v.as_str()) {
+                            if let Some((tr, tc)) = parse_a1(tl) {
+                                let _ = worksheet.set_freeze_panes_top_cell(tr, tc as u16);
+                            }
                         }
                     }
                 }
@@ -4971,6 +5140,24 @@ pub fn export_xlsx_core(
                 severity: "blocking".to_string(),
                 code: "XLSX_WRITE_FAILED".to_string(),
                 message: format!("comment rewrite failed: {e}"),
+                affected_sheets: None,
+            }],
+            error: Some(format!("XLSX_WRITE_FAILED: {e}")),
+        });
+    }
+
+    // Post-save: rewrite the `<pane>` element on sheets that wanted
+    // `state="split"` rather than the default `state="frozen"`
+    // rust_xlsxwriter 0.77 emits.
+    if let Err(e) = rewrite_split_panes_in_zip(&tmp_path, &sheets_with_split_panes) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Ok(ExportResult {
+            success: false,
+            path: path.clone(),
+            warnings: vec![CompatibilityWarning {
+                severity: "blocking".to_string(),
+                code: "XLSX_WRITE_FAILED".to_string(),
+                message: format!("split-pane rewrite failed: {e}"),
                 affected_sheets: None,
             }],
             error: Some(format!("XLSX_WRITE_FAILED: {e}")),

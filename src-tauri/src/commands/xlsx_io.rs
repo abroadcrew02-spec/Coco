@@ -95,8 +95,30 @@ struct ParsedStyles {
     /// One CellStyle per cellXfs entry (index = xf id). Empty styles are still kept
     /// to preserve indexing semantics.
     cell_xfs: Vec<CellStyle>,
+    /// Number-format string per cellXfs entry (index = xf id). `None` = no fmt
+    /// (i.e. General or unmapped builtin).
+    cell_num_formats: Vec<Option<String>>,
     /// sheet xml name (e.g. "sheet1") → map of (row0, col0) → xf index
     per_sheet: HashMap<String, HashMap<(u32, u32), usize>>,
+}
+
+/// Built-in Excel numFmtId mappings. Returns `None` for `0` (General) and any
+/// id we don't normalize. Custom formats use ids >= 164 and live in
+/// `<numFmts>` instead.
+fn builtin_num_format(id: u32) -> Option<&'static str> {
+    match id {
+        0 => None, // "General" — no fmt
+        1 => Some("0"),
+        2 => Some("0.00"),
+        9 => Some("0%"),
+        10 => Some("0.00%"),
+        14 => Some("yyyy-mm-dd"), // normalize locale-dependent dates
+        22 => Some("yyyy-mm-dd hh:mm:ss"),
+        38 => Some("#,##0;(#,##0)"),
+        39 => Some("#,##0.00;(#,##0.00)"),
+        49 => Some("@"), // text
+        _ => None,
+    }
 }
 
 fn parse_xlsx_styles(path: &str) -> Result<ParsedStyles, String> {
@@ -112,12 +134,16 @@ fn parse_xlsx_styles(path: &str) -> Result<ParsedStyles, String> {
     if let Ok(mut entry) = archive.by_name("xl/styles.xml") {
         entry.read_to_string(&mut styles_xml).map_err(|e| e.to_string())?;
     }
-    let (fonts, fills, cell_xfs_raw) = parse_styles_xml(&styles_xml);
+    let (fonts, fills, cell_xfs_raw, custom_num_fmts) = parse_styles_xml(&styles_xml);
 
-    // 2. resolve each cellXf to a normalized CellStyle
+    // 2. resolve each cellXf to a normalized CellStyle + number format
     let cell_xfs: Vec<CellStyle> = cell_xfs_raw
         .iter()
         .map(|x| resolve_xf(x, &fonts, &fills))
+        .collect();
+    let cell_num_formats: Vec<Option<String>> = cell_xfs_raw
+        .iter()
+        .map(|x| resolve_num_format(x, &custom_num_fmts))
         .collect();
 
     // 3. workbook.xml: ordered list of (sheet name, r:id)
@@ -161,14 +187,34 @@ fn parse_xlsx_styles(path: &str) -> Result<ParsedStyles, String> {
         }
     }
 
-    Ok(ParsedStyles { cell_xfs, per_sheet })
+    Ok(ParsedStyles {
+        cell_xfs,
+        cell_num_formats,
+        per_sheet,
+    })
 }
 
-/// Returns (fonts, fills, raw_xfs). Each font/fill is a (bold,italic,color)/(color) tuple.
-fn parse_styles_xml(xml: &str) -> (Vec<RawFont>, Vec<RawFill>, Vec<RawXf>) {
+/// Returns (fonts, fills, raw_xfs, custom_num_fmts). Each font/fill is a
+/// (bold,italic,color)/(color) tuple. `custom_num_fmts` is a map of
+/// `numFmtId -> formatCode` for `<numFmt>` entries (typically id >= 164).
+fn parse_styles_xml(
+    xml: &str,
+) -> (Vec<RawFont>, Vec<RawFill>, Vec<RawXf>, HashMap<u32, String>) {
     let mut fonts: Vec<RawFont> = Vec::new();
     let mut fills: Vec<RawFill> = Vec::new();
     let mut xfs: Vec<RawXf> = Vec::new();
+    let mut custom_num_fmts: HashMap<u32, String> = HashMap::new();
+
+    // numFmts: <numFmts ...> <numFmt numFmtId="164" formatCode="..."/> ... </numFmts>
+    if let Some(block) = extract_block(xml, "<numFmts", "</numFmts>") {
+        for el in extract_self_closing_or_paired(&block, "numFmt") {
+            let id = parse_attr(&el, "numFmtId").and_then(|s| s.parse::<u32>().ok());
+            let code = parse_attr(&el, "formatCode");
+            if let (Some(id), Some(code)) = (id, code) {
+                custom_num_fmts.insert(id, decode_xml_entities(&code));
+            }
+        }
+    }
 
     // Fonts: <fonts ...> ... <font> ... </font> ... </fonts>
     if let Some(fonts_block) = extract_block(xml, "<fonts", "</fonts>") {
@@ -208,8 +254,11 @@ fn parse_styles_xml(xml: &str) -> (Vec<RawFont>, Vec<RawFill>, Vec<RawXf>) {
             let mut x = RawXf::default();
             x.font_id = parse_attr(&xf_el, "fontId").and_then(|s| s.parse().ok());
             x.fill_id = parse_attr(&xf_el, "fillId").and_then(|s| s.parse().ok());
+            x.num_fmt_id = parse_attr(&xf_el, "numFmtId").and_then(|s| s.parse().ok());
             x.apply_font = parse_attr(&xf_el, "applyFont").as_deref() == Some("1");
             x.apply_fill = parse_attr(&xf_el, "applyFill").as_deref() == Some("1");
+            x.apply_number_format =
+                parse_attr(&xf_el, "applyNumberFormat").as_deref() == Some("1");
             x.apply_alignment = parse_attr(&xf_el, "applyAlignment").as_deref() == Some("1");
             if let Some(align) = find_tag(&xf_el, "<alignment") {
                 x.h_align = parse_attr(&align, "horizontal");
@@ -224,8 +273,11 @@ fn parse_styles_xml(xml: &str) -> (Vec<RawFont>, Vec<RawFill>, Vec<RawXf>) {
                 let mut x = RawXf::default();
                 x.font_id = parse_attr(&xf_el, "fontId").and_then(|s| s.parse().ok());
                 x.fill_id = parse_attr(&xf_el, "fillId").and_then(|s| s.parse().ok());
+                x.num_fmt_id = parse_attr(&xf_el, "numFmtId").and_then(|s| s.parse().ok());
                 x.apply_font = parse_attr(&xf_el, "applyFont").as_deref() == Some("1");
                 x.apply_fill = parse_attr(&xf_el, "applyFill").as_deref() == Some("1");
+                x.apply_number_format =
+                    parse_attr(&xf_el, "applyNumberFormat").as_deref() == Some("1");
                 x.apply_alignment = parse_attr(&xf_el, "applyAlignment").as_deref() == Some("1");
                 if let Some(align) = find_tag(&xf_el, "<alignment") {
                     x.h_align = parse_attr(&align, "horizontal");
@@ -236,7 +288,17 @@ fn parse_styles_xml(xml: &str) -> (Vec<RawFont>, Vec<RawFill>, Vec<RawXf>) {
         }
     }
 
-    (fonts, fills, xfs)
+    (fonts, fills, xfs, custom_num_fmts)
+}
+
+/// Decode the small set of XML entities that may appear inside `formatCode`
+/// attributes (rust_xlsxwriter / Excel escape `&`, `<`, `>`, `"`).
+fn decode_xml_entities(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
 }
 
 #[derive(Default, Clone)]
@@ -255,11 +317,29 @@ struct RawFill {
 struct RawXf {
     font_id: Option<usize>,
     fill_id: Option<usize>,
+    num_fmt_id: Option<u32>,
     apply_font: bool,
     apply_fill: bool,
+    apply_number_format: bool,
     apply_alignment: bool,
     h_align: Option<String>,
     v_align: Option<String>,
+}
+
+/// Resolve a cellXf's `numFmtId` into a format string. Built-in ids (0..163)
+/// map via `builtin_num_format`; custom ids (>=164 conventionally) look up
+/// `<numFmt>` entries from the workbook. Returns `None` when the cell uses
+/// "General" or an unknown id.
+fn resolve_num_format(xf: &RawXf, custom: &HashMap<u32, String>) -> Option<String> {
+    let id = xf.num_fmt_id?;
+    // Honor the format regardless of `applyNumberFormat` — many writers
+    // (including rust_xlsxwriter) omit the flag even when the format is set.
+    if let Some(code) = custom.get(&id) {
+        if !code.is_empty() {
+            return Some(code.clone());
+        }
+    }
+    builtin_num_format(id).map(|s| s.to_string())
 }
 
 fn resolve_xf(xf: &RawXf, fonts: &[RawFont], fills: &[RawFill]) -> CellStyle {
@@ -588,8 +668,8 @@ fn build_format(style: &CellStyle, num_format: Option<&str>) -> Format {
     fmt
 }
 
-fn data_to_cell(d: &Data) -> Option<Value> {
-    match d {
+fn data_to_cell(d: &Data, num_format_override: Option<&str>) -> Option<Value> {
+    let base = match d {
         Data::Empty => None,
         Data::Int(n) => Some(json!({ "v": n })),
         Data::Float(f) => Some(json!({ "v": f })),
@@ -607,6 +687,18 @@ fn data_to_cell(d: &Data) -> Option<Value> {
         Data::DateTimeIso(s) => Some(json!({ "v": s, "_fmt": "@" })),
         Data::DurationIso(s) => Some(json!({ "v": s })),
         Data::Error(_) => Some(json!({ "v": Value::Null, "t": "e" })),
+    };
+    // Apply the style's number format (when present) on top, overriding the
+    // calamine-derived default. This lets `0%`, `#,##0.00`, etc. round-trip
+    // while leaving the DateTime fallback in place for cells that have no xf.
+    match (base, num_format_override) {
+        (Some(mut v), Some(fmt)) => {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("_fmt".into(), Value::String(fmt.to_string()));
+            }
+            Some(v)
+        }
+        (base, _) => base,
     }
 }
 
@@ -1111,10 +1203,14 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                         }
                     });
 
+                // Look up the xf index for this cell once; reuse it for both
+                // the visual style id and the number-format string.
+                let xf_idx: Option<usize> = sheet_style_lookup
+                    .and_then(|m| m.get(&(abs_r, abs_c)).copied());
+
                 // Resolve a style id (if any) for this cell.
-                let style_id: Option<String> = sheet_style_lookup
-                    .and_then(|m| m.get(&(abs_r, abs_c)).copied())
-                    .and_then(|xf_idx| parsed_styles.as_ref()?.cell_xfs.get(xf_idx).cloned())
+                let style_id: Option<String> = xf_idx
+                    .and_then(|i| parsed_styles.as_ref()?.cell_xfs.get(i).cloned())
                     .filter(|s| !s.is_empty())
                     .map(|style| {
                         if let Some(id) = styles_dedup.get(&style) {
@@ -1127,6 +1223,16 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                         }
                     });
 
+                // Resolve the number-format string for this cell from the same xf.
+                let num_format: Option<String> = xf_idx.and_then(|i| {
+                    parsed_styles
+                        .as_ref()?
+                        .cell_num_formats
+                        .get(i)
+                        .cloned()
+                        .flatten()
+                });
+
                 if let Some(f) = formula_str {
                     let f = if f.starts_with('=') {
                         f
@@ -1138,12 +1244,16 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                     // visual styling round-trips).
                     let mut cell_obj = Map::new();
                     cell_obj.insert("f".into(), Value::String(f));
-                    if let Some(cached) = data_to_cell(cell) {
+                    if let Some(cached) = data_to_cell(cell, num_format.as_deref()) {
                         if let Value::Object(cached_map) = cached {
                             for (k, v) in cached_map.into_iter() {
                                 cell_obj.insert(k, v);
                             }
                         }
+                    } else if let Some(fmt) = &num_format {
+                        // No cached value, but the cell carries a number format
+                        // — keep it so the formula's output renders correctly.
+                        cell_obj.insert("_fmt".into(), Value::String(fmt.clone()));
                     }
                     if let Some(sid) = &style_id {
                         cell_obj.insert("s".into(), Value::String(sid.clone()));
@@ -1153,7 +1263,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                     continue;
                 }
 
-                if let Some(mut v) = data_to_cell(cell) {
+                if let Some(mut v) = data_to_cell(cell, num_format.as_deref()) {
                     if let Some(sid) = &style_id {
                         if let Some(obj) = v.as_object_mut() {
                             obj.insert("s".into(), Value::String(sid.clone()));
@@ -1232,7 +1342,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         severity: "info".to_string(),
         code: "XLSX_POC_IMPORT".to_string(),
         message:
-            "xlsx PoC import: borders, number formats, and merges are not yet preserved (named ranges + font/fill/alignment styles are preserved)"
+            "xlsx PoC import: borders and merges are not yet preserved (named ranges + font/fill/alignment styles + number formats are preserved)"
                 .to_string(),
         affected_sheets: None,
     });
@@ -1753,7 +1863,7 @@ pub fn export_xlsx_core(
         severity: "info".to_string(),
         code: "XLSX_POC_EXPORT".to_string(),
         message: format!(
-            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Borders, merges, and rich text are not yet preserved (named ranges + font/fill/alignment styles + column widths + row heights are preserved)."
+            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Borders, merges, and rich text are not yet preserved (named ranges + font/fill/alignment styles + column widths + row heights + number formats are preserved)."
         ),
         affected_sheets: None,
     });

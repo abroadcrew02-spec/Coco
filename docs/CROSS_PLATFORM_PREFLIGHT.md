@@ -37,15 +37,11 @@ All OS-specific code paths in `src-tauri/src/commands/shell.rs` (the only file w
 
 ### WARNINGs
 
-1. **`src-tauri/src/lib.rs:17-21` — native menu accelerator labels read "Ctrl+..." on macOS.**
-   - What breaks: cosmetic only. The menu items emit `menu-action` events; the frontend handler (`useGlobalShortcuts.ts:53`) already treats `ctrlKey || metaKey` uniformly, so Cmd+N etc. still work. The displayed label "Ctrl+N" in the macOS menu bar will look unidiomatic but is harmless.
-   - Suggested fix: factor the accelerator-suffix builder into a helper that emits `Ctrl+...` on Windows/Linux and `Cmd+...` on macOS (use `#[cfg(target_os = "macos")]`). Or attach native `Accelerator` objects to each menu item via Tauri's menu API. >50 LOC, deferred — see `TODO(cross-platform)` comment in `lib.rs`.
-
-2. **`src-tauri/tauri.conf.json` — no explicit `bundle.macOS.minimumSystemVersion`.**
+1. **`src-tauri/tauri.conf.json` — no explicit `bundle.macOS.minimumSystemVersion`.**
    - What breaks: Tauri's default minimum macOS deployment target (10.13 as of Tauri 2.0) is below §12.3's "macOS 12+" target. Bundles will still build, but if a dependency in the future requires macOS 11+ symbols the build could fail on stale runners. No current runtime hazard.
    - Suggested fix: add `"macOS": { "minimumSystemVersion": "12.0" }` under `bundle` once Tauri 2.x is verified to accept it on this codebase. Not applied automatically because it requires a real macOS build to verify.
 
-3. **`src-tauri/tauri.conf.json` — no `bundle.macOS.signingIdentity`, `entitlements`, or hardened-runtime config.**
+2. **`src-tauri/tauri.conf.json` — no `bundle.macOS.signingIdentity`, `entitlements`, or hardened-runtime config.**
    - What breaks: unsigned `.dmg` will produce a Gatekeeper warning on macOS. Requirements.md §3.1 explicitly calls out "署名済みmacOS `.dmg` による社内配布" so signing must be added before first internal distribution. Build itself will still succeed.
    - Suggested fix: add signing/notarization config once Apple Developer credentials are available; out of scope for this audit.
 
@@ -78,7 +74,6 @@ A fresh macOS build (cargo + `npm run tauri build`) should **succeed** today and
 
 Caveats before declaring "ready":
 
-- macOS menu accelerators will read "Ctrl+..." not "Cmd+..." (cosmetic).
 - The bundle will be unsigned and trigger Gatekeeper. Code signing is a §3.1 requirement before social distribution.
 - No `minimumSystemVersion` is declared, so the produced bundle's metadata may not assert macOS 12+ correctly.
 

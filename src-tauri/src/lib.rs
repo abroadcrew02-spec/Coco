@@ -5,6 +5,15 @@ mod error;
 use tauri::menu::{MenuBuilder, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 
+/// Platform-appropriate modifier-key label for menu accelerator hints.
+/// macOS uses "Cmd"; Windows/Linux use "Ctrl". The keybindings themselves
+/// are routed through useGlobalShortcuts (ctrlKey || metaKey), so this is
+/// purely a display concern.
+#[cfg(target_os = "macos")]
+const MOD: &str = "Cmd";
+#[cfg(not(target_os = "macos"))]
+const MOD: &str = "Ctrl";
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -13,19 +22,12 @@ pub fn run() {
             // their id; the frontend listens and routes to existing store
             // actions. Edit menu items (undo/copy/find/etc.) are intentionally
             // omitted — Univer's built-in chrome already handles them.
-            //
-            // TODO(cross-platform): macOS menu accelerator labels read "Cmd+..." not "Ctrl+..." (see docs/TODOS.md#low-macos-menu-accelerators)
-            // The keybinding itself already works on macOS because
-            // useGlobalShortcuts handles ctrlKey || metaKey, but the
-            // *displayed* label in the menu bar is wrong. See
-            // docs/CROSS_PLATFORM_PREFLIGHT.md WARNING #1 for the suggested
-            // fix (cfg-gated helper or native Accelerator objects).
             let file_menu = SubmenuBuilder::new(app, "ファイル")
-                .text("new", "新規ワークブック\tCtrl+N")
-                .text("open", "開く...\tCtrl+O")
+                .text("new", format!("新規ワークブック\t{MOD}+N"))
+                .text("open", format!("開く...\t{MOD}+O"))
                 .separator()
-                .text("save", "保存\tCtrl+S")
-                .text("save-as", "名前を付けて保存...\tCtrl+Shift+S")
+                .text("save", format!("保存\t{MOD}+S"))
+                .text("save-as", format!("名前を付けて保存...\t{MOD}+Shift+S"))
                 .separator()
                 .text("export-xlsx", "xlsx エクスポート...")
                 .text("export-csv", "CSV エクスポート...")

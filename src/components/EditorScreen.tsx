@@ -650,6 +650,17 @@ export default function EditorScreen() {
     // the sheets adapter wires it to the active worksheet.
     univer.registerPlugin(UniverFindReplacePlugin);
     univer.registerPlugin(UniverSheetsFindReplacePlugin);
+    // TODO(FR-009): wire @univerjs/sheets-filter (installed at the workspace
+    // level) and a sort UI so the in-app filter/sort toggle and column-sort
+    // controls work end-to-end. Round-trip preservation for auto-filter is
+    // already in place (xlsx_io.rs, commit 74594d0); only the editor surface
+    // is missing. Locale bundles for the filter plugin will also need to be
+    // merged into the `locales` map below.
+    // TODO(FR-011): Univer's default LocalUndoRedoService caps the per-unit
+    // undo stack at 20 items (CE = 20 in @univerjs/core), but requirements
+    // §4.1 FR-011 mandates 100. Override IUndoRedoService via the Univer
+    // constructor's `override` field with a subclass that re-implements
+    // pushUndoRedo using a higher cap (and keeps the batching semantics).
 
     // Create workbook from snapshot or default empty workbook
     const initialData: Partial<IWorkbookData> = currentSnapshotJson

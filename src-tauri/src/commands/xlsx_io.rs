@@ -908,6 +908,90 @@ pub(crate) fn parse_xlsx_dimensions(path: &str) -> HashMap<String, SheetDimensio
     out
 }
 
+/// Parse an A1-style range reference like `"B3:D5"` or `"A1"` into 0-based
+/// `(start_row, start_col, end_row, end_col)`. A single cell ref expands to a
+/// range where start == end. Returns `None` for malformed input.
+fn parse_range_ref(s: &str) -> Option<(u32, u32, u32, u32)> {
+    let s = s.trim();
+    if let Some((lhs, rhs)) = s.split_once(':') {
+        let (sr, sc) = parse_a1(lhs.trim())?;
+        let (er, ec) = parse_a1(rhs.trim())?;
+        // Normalize so start <= end on each axis, in case Excel ever emits a
+        // reversed ref (very rare, but cheap to handle).
+        let (sr, er) = if sr <= er { (sr, er) } else { (er, sr) };
+        let (sc, ec) = if sc <= ec { (sc, ec) } else { (ec, sc) };
+        Some((sr, sc, er, ec))
+    } else {
+        let (r, c) = parse_a1(s)?;
+        Some((r, c, r, c))
+    }
+}
+
+/// Parse one sheet's XML and extract the merged-cell ranges declared in its
+/// `<mergeCells>...<mergeCell ref="A1:B2"/>...</mergeCells>` block. Each entry
+/// is `(start_row, start_col, end_row, end_col)`, 0-based, inclusive on both
+/// ends. Single-cell refs (start == end on both axes) are filtered out because
+/// rust_xlsxwriter rejects them on export and Excel itself doesn't allow them.
+fn parse_sheet_merge_cells(xml: &str) -> Vec<(u32, u32, u32, u32)> {
+    let mut out = Vec::new();
+    let Some(block) = extract_block(xml, "<mergeCells", "</mergeCells>") else {
+        return out;
+    };
+    for el in extract_self_closing_or_paired(&block, "mergeCell") {
+        let Some(reference) = parse_attr(&el, "ref") else {
+            continue;
+        };
+        let Some((sr, sc, er, ec)) = parse_range_ref(&reference) else {
+            continue;
+        };
+        if sr == er && sc == ec {
+            // Skip degenerate single-cell merges.
+            continue;
+        }
+        out.push((sr, sc, er, ec));
+    }
+    out
+}
+
+/// Parse per-sheet merged-cell ranges out of an xlsx. Returns a map keyed by
+/// sheet name. Returns an empty map on any I/O / structure error — merges are
+/// best-effort metadata, not load-bearing.
+pub(crate) fn parse_xlsx_merges(path: &str) -> HashMap<String, Vec<(u32, u32, u32, u32)>> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return HashMap::new(),
+    };
+
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    if sheet_paths.is_empty() {
+        return HashMap::new();
+    }
+
+    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
+        Ok(a) => a,
+        Err(_) => return HashMap::new(),
+    };
+
+    let mut out: HashMap<String, Vec<(u32, u32, u32, u32)>> = HashMap::new();
+    for (sheet_name, entry_path) in sheet_paths {
+        let mut xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&entry_path) {
+            if entry.read_to_string(&mut xml).is_ok() {
+                let merges = parse_sheet_merge_cells(&xml);
+                if !merges.is_empty() {
+                    out.insert(sheet_name, merges);
+                }
+            }
+        }
+    }
+
+    out
+}
+
 /// rust_xlsxwriter converts the input width to a character-width-with-padding
 /// before serialising, so calling `set_column_width(N)` actually writes a
 /// different `width` attribute. This function inverts that conversion so the
@@ -1047,6 +1131,8 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     // Pre-parse per-sheet column widths and row heights (calamine doesn't
     // expose this). Best-effort: silently no-op if the structure is unusual.
     let dimensions_by_sheet = parse_xlsx_dimensions(&path);
+    // Pre-parse per-sheet merged-cell ranges (calamine doesn't expose these).
+    let merges_by_sheet = parse_xlsx_merges(&path);
 
     let mut wb: Xlsx<_> =
         open_workbook(&path).map_err(|e| format!("Failed to open xlsx: {e}"))?;
@@ -1210,6 +1296,26 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             }
         }
 
+        // Univer expects mergeData as an array of inclusive 0-based row/col
+        // ranges per sheet. Always emit the field (empty array when none) so
+        // the frontend can rely on its presence.
+        let merge_data: Vec<Value> = merges_by_sheet
+            .get(name)
+            .map(|v| {
+                v.iter()
+                    .map(|(sr, sc, er, ec)| {
+                        json!({
+                            "startRow": sr,
+                            "startColumn": sc,
+                            "endRow": er,
+                            "endColumn": ec,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        sheet_obj["mergeData"] = Value::Array(merge_data);
+
         sheets_map.insert(sheet_id, sheet_obj);
     }
 
@@ -1232,7 +1338,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         severity: "info".to_string(),
         code: "XLSX_POC_IMPORT".to_string(),
         message:
-            "xlsx PoC import: borders, number formats, and merges are not yet preserved (named ranges + font/fill/alignment styles are preserved)"
+            "xlsx PoC import: borders and number formats are not yet preserved (named ranges + font/fill/alignment styles + merged cells are preserved)"
                 .to_string(),
         affected_sheets: None,
     });
@@ -1495,6 +1601,46 @@ pub fn export_xlsx_core(
                 }
             }
 
+            // Apply merged ranges first, then cell writes overwrite the blank
+            // fill that merge_range stamps across the range. Skip degenerate
+            // single-cell entries (rust_xlsxwriter rejects them) and any range
+            // that fails to write (overlap, out-of-bounds) — those are dropped
+            // silently per the best-effort policy. The default Format used here
+            // does not override per-cell styles, since cell writes that follow
+            // carry their own format.
+            let empty_format = Format::new();
+            if let Some(merge_arr) = sheet_obj
+                .and_then(|s| s.get("mergeData"))
+                .and_then(|m| m.as_array())
+            {
+                for entry in merge_arr {
+                    let Some(sr) = entry.get("startRow").and_then(|v| v.as_u64()) else {
+                        continue;
+                    };
+                    let Some(sc) = entry.get("startColumn").and_then(|v| v.as_u64()) else {
+                        continue;
+                    };
+                    let Some(er) = entry.get("endRow").and_then(|v| v.as_u64()) else {
+                        continue;
+                    };
+                    let Some(ec) = entry.get("endColumn").and_then(|v| v.as_u64()) else {
+                        continue;
+                    };
+                    // Normalize order and skip single-cell entries.
+                    let (sr, er) = if sr <= er { (sr, er) } else { (er, sr) };
+                    let (sc, ec) = if sc <= ec { (sc, ec) } else { (ec, sc) };
+                    if sr == er && sc == ec {
+                        continue;
+                    }
+                    let (sr32, sc32, er32, ec32) =
+                        match (u32::try_from(sr), u16::try_from(sc), u32::try_from(er), u16::try_from(ec)) {
+                            (Ok(a), Ok(b), Ok(c), Ok(d)) => (a, b, c, d),
+                            _ => continue,
+                        };
+                    let _ = worksheet.merge_range(sr32, sc32, er32, ec32, "", &empty_format);
+                }
+            }
+
             let cell_data = sheet_obj
                 .and_then(|s| s.get("cellData"))
                 .and_then(|c| c.as_object());
@@ -1753,7 +1899,7 @@ pub fn export_xlsx_core(
         severity: "info".to_string(),
         code: "XLSX_POC_EXPORT".to_string(),
         message: format!(
-            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Borders, merges, and rich text are not yet preserved (named ranges + font/fill/alignment styles + column widths + row heights are preserved)."
+            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Borders and rich text are not yet preserved (named ranges + font/fill/alignment styles + column widths + row heights + merged cells are preserved)."
         ),
         affected_sheets: None,
     });

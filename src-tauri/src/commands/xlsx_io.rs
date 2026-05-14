@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::PathBuf;
 
@@ -2729,6 +2729,29 @@ fn sanitize_sheet_name(raw: &str) -> String {
     truncated
 }
 
+/// Given a sanitized candidate sheet name and a set of names already in use,
+/// return a unique variant. If `candidate` is unused, returns it verbatim.
+/// Otherwise appends `_2`, `_3`, ... until a free name is found, truncating
+/// the base so the final length stays within Excel's 31-char limit.
+fn dedup_sheet_name(candidate: &str, used: &HashSet<String>) -> String {
+    if !used.contains(candidate) {
+        return candidate.to_string();
+    }
+    let base_chars: Vec<char> = candidate.chars().collect();
+    let mut n: u32 = 2;
+    loop {
+        let suffix = format!("_{}", n);
+        let suffix_len = suffix.chars().count();
+        let keep = 31usize.saturating_sub(suffix_len);
+        let base: String = base_chars.iter().take(keep).collect();
+        let candidate_n = format!("{}{}", base, suffix);
+        if !used.contains(&candidate_n) {
+            return candidate_n;
+        }
+        n += 1;
+    }
+}
+
 /// Tauri command wrapper: delegates to export_xlsx_core, then on success records
 /// the saved path in recent_files so the Home screen lists it.
 #[tauri::command]
@@ -2833,6 +2856,7 @@ pub fn export_xlsx_core(
     let mut cell_count: usize = 0;
     let mut formula_count: usize = 0;
     let mut sanitized_names: Vec<String> = Vec::new();
+    let mut used_sheet_names: HashSet<String> = HashSet::new();
     // Cache keyed on (style_id, num_format) so identical (style, format) combos
     // reuse the same rust_xlsxwriter Format object.
     let mut format_cache: HashMap<(String, String), Format> = HashMap::new();
@@ -2866,6 +2890,11 @@ pub fn export_xlsx_core(
                     s
                 }
             };
+            // Dedup against names already assigned to earlier sheets: two raw
+            // names that sanitize to the same value (e.g. "a[b]" and "a_b_")
+            // would otherwise make rust_xlsxwriter reject set_name.
+            let safe_name = dedup_sheet_name(&safe_name, &used_sheet_names);
+            used_sheet_names.insert(safe_name.clone());
 
             let worksheet = workbook.add_worksheet();
             worksheet

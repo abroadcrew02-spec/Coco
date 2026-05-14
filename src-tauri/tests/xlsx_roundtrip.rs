@@ -297,11 +297,6 @@ fn empty_workbook_export_rejected() {
 }
 
 #[test]
-#[ignore = "known bug: sheet name dedup not implemented. \
-After sanitize_sheet_name, '[' ']' both become '_', so 'a[b]' and 'a_b_' collide. \
-The second worksheet's set_name will fail (rust_xlsxwriter rejects duplicate names) \
-and export_xlsx_core returns an error instead of auto-suffixing the duplicate. \
-A future fix should track seen names and append '_2', '_3', ... on collision."]
 fn sheet_name_collision_after_sanitization() {
     // Two raw sheet names "a[b]" and "a_b_" both sanitize to "a_b_".
     // Without dedup logic the second set_name call collides and the export
@@ -357,6 +352,127 @@ fn sheet_name_collision_after_sanitization() {
     sorted.sort();
     sorted.dedup();
     assert_eq!(sorted.len(), 2, "sheet names must be unique post-export, got {:?}", names);
+}
+
+#[test]
+fn sheet_name_collision_three_way() {
+    // Three raw names all sanitizing to "x_y_" must all survive with unique
+    // suffixes (e.g. "x_y_", "x_y__2", "x_y__3").
+    let tmp = TempDir::new().expect("tempdir");
+    let exported_path = tmp.path().join("dedup3.xlsx");
+
+    let snapshot = serde_json::json!({
+        "id": "wb",
+        "name": "Dedup3",
+        "appVersion": "0.1.0",
+        "locale": "enUS",
+        "styles": {},
+        "sheetOrder": ["s1", "s2", "s3"],
+        "sheets": {
+            "s1": {
+                "id": "s1",
+                "name": "x[y]",
+                "rowCount": 5,
+                "columnCount": 5,
+                "cellData": { "0": { "0": { "v": "a" } } },
+            },
+            "s2": {
+                "id": "s2",
+                "name": "x/y\\",
+                "rowCount": 5,
+                "columnCount": 5,
+                "cellData": { "0": { "0": { "v": "b" } } },
+            },
+            "s3": {
+                "id": "s3",
+                "name": "x:y*",
+                "rowCount": 5,
+                "columnCount": 5,
+                "cellData": { "0": { "0": { "v": "c" } } },
+            },
+        },
+        "namedRanges": [],
+    });
+
+    let result = export_xlsx_core(
+        path_str(&exported_path),
+        serde_json::to_string(&snapshot).unwrap(),
+    )
+    .expect("core call returns Ok");
+    assert!(result.success, "export should succeed via dedup, got error={:?}", result.error);
+
+    let wb: Xlsx<_> = open_workbook(&exported_path).expect("open exported");
+    let names = wb.sheet_names();
+    assert_eq!(names.len(), 3, "all 3 sheets must survive, got {:?}", names);
+    let mut sorted = names.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), 3, "sheet names must be unique post-export, got {:?}", names);
+}
+
+#[test]
+fn sheet_name_dedup_skips_existing_suffix() {
+    // A user-provided name that already ends in "_2" must not be silently
+    // overwritten by the auto-suffix path. Three sheets where two would
+    // sanitize to the same base and one is literally "a_b__2": all three
+    // must survive with distinct names.
+    let tmp = TempDir::new().expect("tempdir");
+    let exported_path = tmp.path().join("dedup_existing.xlsx");
+
+    let snapshot = serde_json::json!({
+        "id": "wb",
+        "name": "DedupExisting",
+        "appVersion": "0.1.0",
+        "locale": "enUS",
+        "styles": {},
+        "sheetOrder": ["s1", "s2", "s3"],
+        "sheets": {
+            "s1": {
+                "id": "s1",
+                "name": "a[b]",
+                "rowCount": 5,
+                "columnCount": 5,
+                "cellData": { "0": { "0": { "v": "first" } } },
+            },
+            "s2": {
+                "id": "s2",
+                "name": "a_b__2",
+                "rowCount": 5,
+                "columnCount": 5,
+                "cellData": { "0": { "0": { "v": "user-supplied _2" } } },
+            },
+            "s3": {
+                "id": "s3",
+                "name": "a_b_",
+                "rowCount": 5,
+                "columnCount": 5,
+                "cellData": { "0": { "0": { "v": "collides with first" } } },
+            },
+        },
+        "namedRanges": [],
+    });
+
+    let result = export_xlsx_core(
+        path_str(&exported_path),
+        serde_json::to_string(&snapshot).unwrap(),
+    )
+    .expect("core call returns Ok");
+    assert!(result.success, "export should succeed via dedup, got error={:?}", result.error);
+
+    let wb: Xlsx<_> = open_workbook(&exported_path).expect("open exported");
+    let names = wb.sheet_names();
+    assert_eq!(names.len(), 3, "all 3 sheets must survive, got {:?}", names);
+    let mut sorted = names.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), 3, "sheet names must be unique post-export, got {:?}", names);
+    // The user-supplied "a_b__2" must be preserved verbatim — the auto-suffix
+    // path must skip it and pick something else (e.g. "a_b__3") for s3.
+    assert!(
+        names.iter().any(|n| n == "a_b__2"),
+        "user-supplied 'a_b__2' should be preserved, got {:?}",
+        names
+    );
 }
 
 #[test]

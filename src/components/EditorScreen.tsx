@@ -62,10 +62,15 @@ import InsertImageDialog, {
 } from "./InsertImageDialog";
 import SortDialog, { type SortFormValue } from "./SortDialog";
 import SheetTabColorDialog from "./SheetTabColorDialog";
+import CommentIndicatorsPanel from "./CommentIndicatorsPanel";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
 import { isSheetProtectedInSnapshot } from "../store/sheetProtection";
+import {
+  computeCommentIndicators,
+  type CommentIndicator,
+} from "../store/commentIndicators";
 import { validateMutation, extractCellWrites } from "../store/dataValidation";
 import "./EditorScreen.css";
 
@@ -686,6 +691,40 @@ export default function EditorScreen() {
     },
     [currentSnapshotJson, updateSnapshot],
   );
+
+  // Derive the comment indicator list from the live snapshot so the panel
+  // updates whenever a comment is added, edited, or deleted. Re-derived on
+  // every render keyed off currentSnapshotJson — the helper is pure JSON
+  // parsing + a flatten and the snapshot churn rate is human-paced, so the
+  // cost is negligible vs. the simplicity gain over memoization.
+  const commentIndicators: CommentIndicator[] = computeCommentIndicators(
+    currentSnapshotJson,
+  );
+
+  // Jump the Univer selection to a commented cell when the user clicks an
+  // entry in CommentIndicatorsPanel. Switches sheets first if needed, then
+  // sets the active range to the target A1 cell. Best-effort — silent
+  // no-op if Univer's facade isn't ready or the sheet/cell can't be found
+  // (the panel still works as a read-only directory in that case).
+  const jumpToCommentCell = useCallback((indicator: CommentIndicator) => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    try {
+      const target = workbook.getSheetBySheetId(indicator.sheetId);
+      if (!target) return;
+      const active = workbook.getActiveSheet();
+      if (!active || active.getSheetId() !== indicator.sheetId) {
+        workbook.setActiveSheet(target);
+      }
+      const range = target.getRange(indicator.cell);
+      if (range) range.activate();
+    } catch {
+      // Best-effort: swallow facade exceptions so a bad indicator entry
+      // doesn't crash the panel.
+    }
+  }, []);
 
   // Open the chart dialog targeting the active sheet's current selection.
   // The Univer @univerjs/sheets-chart plugin isn't in this build, so the
@@ -1788,6 +1827,10 @@ export default function EditorScreen() {
       )}
       <div className="univer-wrap">
         <div id="univer-container" ref={containerRef} className="univer-container" />
+        <CommentIndicatorsPanel
+          indicators={commentIndicators}
+          onSelect={jumpToCommentCell}
+        />
         {BUSY_LABELS[saveStatus] && (
           <BusyOverlay
             label={BUSY_LABELS[saveStatus]!.label}

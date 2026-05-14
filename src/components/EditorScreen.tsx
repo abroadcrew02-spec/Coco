@@ -69,6 +69,8 @@ import InsertImageDialog, {
 import SortDialog, { type SortFormValue } from "./SortDialog";
 import SheetTabColorDialog from "./SheetTabColorDialog";
 import CommentIndicatorsPanel from "./CommentIndicatorsPanel";
+import ChartPreviewPanel from "./ChartPreviewPanel";
+import { computeChartPreviews, type ChartPreview } from "./chartPreviewData";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -723,6 +725,35 @@ export default function EditorScreen() {
   const commentIndicators: CommentIndicator[] = computeCommentIndicators(
     currentSnapshotJson,
   );
+
+  // Derive the chart preview list from the live snapshot so the panel
+  // updates whenever a chart is added/removed or its source data changes.
+  // Same shape rationale as commentIndicators above — pure JSON parsing
+  // plus an extract pass, cheap enough to re-run on every render.
+  const chartPreviews: ChartPreview[] = computeChartPreviews(currentSnapshotJson);
+
+  // Jump the Univer selection to a chart's source range when the user
+  // clicks an entry in ChartPreviewPanel. Same best-effort pattern as the
+  // comment indicator jump.
+  const jumpToChartRange = useCallback((preview: ChartPreview) => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    try {
+      const target = workbook.getSheetBySheetId(preview.sheetId);
+      if (!target) return;
+      const active = workbook.getActiveSheet();
+      if (!active || active.getSheetId() !== preview.sheetId) {
+        workbook.setActiveSheet(target);
+      }
+      const range = target.getRange(preview.range);
+      if (range) range.activate();
+    } catch {
+      // Best-effort: swallow facade exceptions so a bad chart entry doesn't
+      // crash the panel.
+    }
+  }, []);
 
   // Jump the Univer selection to a commented cell when the user clicks an
   // entry in CommentIndicatorsPanel. Switches sheets first if needed, then
@@ -2109,6 +2140,10 @@ export default function EditorScreen() {
         <CommentIndicatorsPanel
           indicators={commentIndicators}
           onSelect={jumpToCommentCell}
+        />
+        <ChartPreviewPanel
+          previews={chartPreviews}
+          onSelect={jumpToChartRange}
         />
         {BUSY_LABELS[saveStatus] && (
           <BusyOverlay

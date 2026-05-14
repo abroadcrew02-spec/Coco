@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "pack": "tauri build && node scripts/pack-distbin.mjs",
+    "pack:stage": "node scripts/pack-distbin.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

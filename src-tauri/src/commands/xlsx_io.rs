@@ -2027,6 +2027,117 @@ pub(crate) fn parse_xlsx_merges(path: &str) -> HashMap<String, Vec<(u32, u32, u3
     out
 }
 
+/// Extract the tab color (if any) from a worksheet's XML. Excel stores it as
+/// `<sheetPr><tabColor rgb="FFRRGGBB"/></sheetPr>`. Returns a "#RRGGBB" string
+/// when present; `None` when the sheet has no tab color set.
+fn parse_sheet_tab_color(xml: &str) -> Option<String> {
+    let pr = extract_block(xml, "<sheetPr", "</sheetPr>")?;
+    // tabColor is always self-closing in practice. Locate its opening tag and
+    // read the rgb attr.
+    let open_idx = pr.find("<tabColor")?;
+    let head_end = pr[open_idx..].find('>')? + open_idx + 1;
+    let head = &pr[open_idx..head_end];
+    let rgb = parse_attr(head, "rgb")?;
+    let normalized = normalize_argb(rgb);
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+/// Extract the auto-filter range (if any) from a worksheet's XML. Excel stores
+/// it as `<autoFilter ref="A1:E10"/>`. Returns the raw ref string (e.g.
+/// "A1:E10") when present; `None` when the sheet has no auto-filter.
+fn parse_sheet_auto_filter(xml: &str) -> Option<String> {
+    let open_idx = xml.find("<autoFilter")?;
+    let head_end = xml[open_idx..].find('>')? + open_idx + 1;
+    let head = &xml[open_idx..head_end];
+    let reference = parse_attr(head, "ref")?;
+    let trimmed = reference.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Parse per-sheet tab colors out of an xlsx. Returns a map keyed by sheet name
+/// — sheets without a tab color are simply absent from the map. Best-effort:
+/// returns an empty map on any I/O / structure error.
+pub(crate) fn parse_xlsx_tab_colors(path: &str) -> HashMap<String, String> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return HashMap::new(),
+    };
+
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    if sheet_paths.is_empty() {
+        return HashMap::new();
+    }
+
+    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
+        Ok(a) => a,
+        Err(_) => return HashMap::new(),
+    };
+
+    let mut out: HashMap<String, String> = HashMap::new();
+    for (sheet_name, entry_path) in sheet_paths {
+        let mut xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&entry_path) {
+            if entry.read_to_string(&mut xml).is_ok() {
+                if let Some(color) = parse_sheet_tab_color(&xml) {
+                    out.insert(sheet_name, color);
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// Parse per-sheet auto-filter ranges out of an xlsx. Returns a map keyed by
+/// sheet name — sheets without an auto-filter are simply absent. Best-effort:
+/// returns an empty map on any I/O / structure error.
+pub(crate) fn parse_xlsx_auto_filters(path: &str) -> HashMap<String, String> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return HashMap::new(),
+    };
+
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    if sheet_paths.is_empty() {
+        return HashMap::new();
+    }
+
+    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
+        Ok(a) => a,
+        Err(_) => return HashMap::new(),
+    };
+
+    let mut out: HashMap<String, String> = HashMap::new();
+    for (sheet_name, entry_path) in sheet_paths {
+        let mut xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&entry_path) {
+            if entry.read_to_string(&mut xml).is_ok() {
+                if let Some(reference) = parse_sheet_auto_filter(&xml) {
+                    out.insert(sheet_name, reference);
+                }
+            }
+        }
+    }
+
+    out
+}
+
 /// One parsed `<dataValidation>` element from a worksheet's XML, normalized
 /// into a stable struct that we round-trip through the snapshot JSON. We keep
 /// every attribute Excel writes that's needed to reconstruct the rule, plus
@@ -3581,6 +3692,14 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     let freeze_panes_by_sheet = parse_xlsx_freeze_panes(&path);
     // Pre-parse workbook-level sheet visibility (`state="hidden"` / `"veryHidden"`).
     let sheet_visibility = parse_xlsx_sheet_visibility(&path);
+    // Pre-parse per-sheet tab colors (`<sheetPr><tabColor .../></sheetPr>`).
+    // calamine doesn't surface these; we re-emit on export via
+    // `worksheet.set_tab_color`.
+    let tab_colors_by_sheet = parse_xlsx_tab_colors(&path);
+    // Pre-parse per-sheet auto-filter ranges (`<autoFilter ref="..."/>`).
+    // calamine doesn't surface these; we re-emit on export via
+    // `worksheet.autofilter`.
+    let auto_filters_by_sheet = parse_xlsx_auto_filters(&path);
     // Pre-parse per-sheet hyperlinks. Joins the `<hyperlinks>` block in
     // sheetN.xml with the per-sheet rels file so external URLs are resolved.
     let hyperlinks_by_sheet = parse_xlsx_hyperlinks(&path);
@@ -3808,6 +3927,21 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             })
             .unwrap_or_default();
         sheet_obj["mergeData"] = Value::Array(merge_data);
+
+        // Per-sheet tab color. Opt-in: omit `_tabColor` when the source sheet
+        // has none, so a default workbook doesn't acquire a stray color on
+        // re-export. The value is a "#RRGGBB" string (normalized at parse time).
+        if let Some(color) = tab_colors_by_sheet.get(name) {
+            sheet_obj["_tabColor"] = Value::String(color.clone());
+        }
+
+        // Per-sheet auto-filter range. Opt-in: omit `_autoFilter` when the
+        // sheet has none. The value is the original A1-style ref (e.g.
+        // "A1:E10"); the export side parses it back to row/col indices for
+        // rust_xlsxwriter's `autofilter(...)` call.
+        if let Some(reference) = auto_filters_by_sheet.get(name) {
+            sheet_obj["_autoFilter"] = Value::String(reference.clone());
+        }
 
         // Per-sheet data validations. We only emit `_dataValidations` when the
         // sheet has at least one entry — the absence of the field signals
@@ -4492,6 +4626,32 @@ pub fn export_xlsx_core(
                 if let Some(z) = ps.get("zoomScale").and_then(|v| v.as_u64()) {
                     if let Ok(z16) = u16::try_from(z) {
                         worksheet.set_zoom(z16);
+                    }
+                }
+            }
+
+            // Apply per-sheet tab color from `_tabColor`. Best-effort: silently
+            // skip when the snapshot omits the field or the value isn't a valid
+            // "#RRGGBB" hex.
+            if let Some(color_str) = sheet_obj
+                .and_then(|s| s.get("_tabColor"))
+                .and_then(|v| v.as_str())
+            {
+                if let Some(color) = parse_color(color_str) {
+                    worksheet.set_tab_color(color);
+                }
+            }
+
+            // Apply per-sheet auto-filter from `_autoFilter`. Value is an A1
+            // range ref like "A1:E10". Malformed entries are dropped silently
+            // — best-effort metadata, same policy as merges.
+            if let Some(filter_ref) = sheet_obj
+                .and_then(|s| s.get("_autoFilter"))
+                .and_then(|v| v.as_str())
+            {
+                if let Some((sr, sc, er, ec)) = parse_range_ref(filter_ref) {
+                    if let (Ok(sc16), Ok(ec16)) = (u16::try_from(sc), u16::try_from(ec)) {
+                        let _ = worksheet.autofilter(sr, sc16, er, ec16);
                     }
                 }
             }

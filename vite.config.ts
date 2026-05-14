@@ -34,6 +34,17 @@ function univerChunks(id: string): string | undefined {
 export default defineConfig(async () => ({
   plugins: [react()],
   clearScreen: false,
+  // Worktrees under .claude/worktrees/ hold in-flight agent branches.
+  // Without this exclude, Vitest discovers their test files too and runs
+  // every test 1–6× over.
+  test: {
+    exclude: [
+      "**/node_modules/**",
+      "**/.claude/worktrees/**",
+      "**/src-tauri/**",
+      "**/dist/**",
+    ],
+  },
   server: {
     port: 5173,
     strictPort: true,

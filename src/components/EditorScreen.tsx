@@ -11,6 +11,8 @@ import { UniverSheetsPlugin } from "@univerjs/sheets";
 import { UniverSheetsUIPlugin } from "@univerjs/sheets-ui";
 import { UniverSheetsFormulaPlugin } from "@univerjs/sheets-formula";
 import { UniverSheetsFormulaUIPlugin } from "@univerjs/sheets-formula-ui";
+import { UniverFindReplacePlugin } from "@univerjs/find-replace";
+import { UniverSheetsFindReplacePlugin } from "@univerjs/sheets-find-replace";
 import { FUniver } from "@univerjs/facade";
 
 import SheetsEnUS from "@univerjs/sheets/locale/en-US";
@@ -18,12 +20,15 @@ import SheetsUIEnUS from "@univerjs/sheets-ui/locale/en-US";
 import UIEnUS from "@univerjs/ui/locale/en-US";
 import DocsUIEnUS from "@univerjs/docs-ui/locale/en-US";
 import SheetsFormulaUIEnUS from "@univerjs/sheets-formula-ui/locale/en-US";
+import FindReplaceEnUS from "@univerjs/find-replace/locale/en-US";
+import SheetsFindReplaceEnUS from "@univerjs/sheets-find-replace/locale/en-US";
 
 import "@univerjs/design/lib/index.css";
 import "@univerjs/ui/lib/index.css";
 import "@univerjs/docs-ui/lib/index.css";
 import "@univerjs/sheets-ui/lib/index.css";
 import "@univerjs/sheets-formula-ui/lib/index.css";
+import "@univerjs/find-replace/lib/index.css";
 
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { useAutoSave } from "../hooks/useAutoSave";
@@ -191,6 +196,8 @@ export default function EditorScreen() {
           ...UIEnUS,
           ...DocsUIEnUS,
           ...SheetsFormulaUIEnUS,
+          ...FindReplaceEnUS,
+          ...SheetsFindReplaceEnUS,
         },
       },
     });
@@ -208,6 +215,10 @@ export default function EditorScreen() {
     univer.registerPlugin(UniverSheetsUIPlugin);
     univer.registerPlugin(UniverSheetsFormulaPlugin);
     univer.registerPlugin(UniverSheetsFormulaUIPlugin);
+    // Find/Replace (Ctrl+F / Ctrl+H) — base plugin provides the dialog/services,
+    // the sheets adapter wires it to the active worksheet.
+    univer.registerPlugin(UniverFindReplacePlugin);
+    univer.registerPlugin(UniverSheetsFindReplacePlugin);
 
     // Create workbook from snapshot or default empty workbook
     const initialData: Partial<IWorkbookData> = currentSnapshotJson

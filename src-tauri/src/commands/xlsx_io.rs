@@ -4,8 +4,9 @@ use std::path::PathBuf;
 
 use calamine::{open_workbook, Data, Reader, Xlsx};
 use rust_xlsxwriter::{
-    Color, ConditionalFormatCell, ConditionalFormatCellRule, ConditionalFormatFormula,
-    ConditionalFormatText, ConditionalFormatTextRule, DataValidation, DataValidationErrorStyle,
+    Color, ConditionalFormatCell, ConditionalFormatCellRule, ConditionalFormatDuplicate,
+    ConditionalFormatFormula, ConditionalFormatText, ConditionalFormatTextRule,
+    ConditionalFormatTop, ConditionalFormatTopRule, DataValidation, DataValidationErrorStyle,
     DataValidationRule, Format, FormatAlign, FormatBorder, FormatPattern, Formula, Url, Workbook,
 };
 use serde_json::{json, Map, Value};
@@ -2552,6 +2553,13 @@ pub(crate) struct ConditionalFormattingEntry {
     /// reassign internally.
     pub priority: u32,
     pub stop_if_true: bool,
+    /// `cfRule@rank` for `top10` rules. 0 = unset (defaults to 10 on export).
+    pub rank: u16,
+    /// `cfRule@percent="1"` flag for `top10` rules — switches Top/Bottom to
+    /// TopPercent/BottomPercent.
+    pub percent: bool,
+    /// `cfRule@bottom="1"` flag for `top10` rules — switches Top to Bottom.
+    pub bottom: bool,
 }
 
 /// Parse one sheet's `<conditionalFormatting>` blocks. Unlike data validations
@@ -2598,6 +2606,19 @@ fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEnt
                 .and_then(|s| s.parse::<u32>().ok())
                 .unwrap_or(1);
             let stop_if_true = parse_attr(rule_head, "stopIfTrue")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+            // `top10` rules carry `rank` (the N), and the flags `percent` and
+            // `bottom` to switch between Top/Bottom/TopPercent/BottomPercent.
+            // For other rule types these attributes are absent and the defaults
+            // (0 / false / false) are harmless.
+            let rank = parse_attr(rule_head, "rank")
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or(0);
+            let percent = parse_attr(rule_head, "percent")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+            let bottom = parse_attr(rule_head, "bottom")
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false);
 
@@ -2647,6 +2668,9 @@ fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEnt
                 text,
                 priority,
                 stop_if_true,
+                rank,
+                percent,
+                bottom,
             });
         }
     }
@@ -2738,6 +2762,23 @@ fn apply_conditional_format_from_snapshot(
         .get("stopIfTrue")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    // top10 attributes: `rank` (the N), and the `percent`/`bottom` flags that
+    // pick which ConditionalFormatTopRule variant to use. Excel's default rank
+    // is 10 when the attribute is absent.
+    let rank = entry
+        .get("rank")
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u16::try_from(n).ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(10);
+    let percent = entry
+        .get("percent")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let bottom = entry
+        .get("bottom")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     match rule_type {
         "cellIs" => {
@@ -2806,9 +2847,39 @@ fn apply_conditional_format_from_snapshot(
                 .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
                 .is_ok()
         }
-        // Other rule types (colorScale / dataBar / iconSet / top10 / aboveAverage
-        // / duplicateValues / timePeriod) need typed values we don't reconstruct
-        // yet. Drop silently — PoC scope only.
+        "top10" => {
+            // Pick the variant from the (percent, bottom) flag pair. Excel
+            // encodes all four combinations on the same rule type.
+            let rule = match (percent, bottom) {
+                (false, false) => ConditionalFormatTopRule::Top(rank),
+                (false, true) => ConditionalFormatTopRule::Bottom(rank),
+                (true, false) => ConditionalFormatTopRule::TopPercent(rank),
+                (true, true) => ConditionalFormatTopRule::BottomPercent(rank),
+            };
+            let cf = ConditionalFormatTop::new()
+                .set_rule(rule)
+                .set_multi_range(sqref)
+                .set_stop_if_true(stop_if_true);
+            worksheet
+                .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
+                .is_ok()
+        }
+        "duplicateValues" | "uniqueValues" => {
+            // rust_xlsxwriter exposes one struct for both; `.invert()` switches
+            // it from Duplicate to Unique semantics.
+            let mut cf = ConditionalFormatDuplicate::new()
+                .set_multi_range(sqref)
+                .set_stop_if_true(stop_if_true);
+            if rule_type == "uniqueValues" {
+                cf = cf.invert();
+            }
+            worksheet
+                .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
+                .is_ok()
+        }
+        // Other rule types (colorScale / dataBar / iconSet / aboveAverage /
+        // timePeriod) need typed values we don't reconstruct yet. Drop
+        // silently — PoC scope only.
         _ => false,
     }
 }
@@ -3521,6 +3592,17 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                         obj.insert("priority".into(), Value::from(e.priority));
                         if e.stop_if_true {
                             obj.insert("stopIfTrue".into(), Value::Bool(true));
+                        }
+                        // top10 trio: only emit when present so non-top10 rules
+                        // don't get noisy default fields in the snapshot.
+                        if e.rank > 0 {
+                            obj.insert("rank".into(), Value::from(e.rank));
+                        }
+                        if e.percent {
+                            obj.insert("percent".into(), Value::Bool(true));
+                        }
+                        if e.bottom {
+                            obj.insert("bottom".into(), Value::Bool(true));
                         }
                         Value::Object(obj)
                     })

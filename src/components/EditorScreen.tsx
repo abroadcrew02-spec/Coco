@@ -335,6 +335,7 @@ export default function EditorScreen() {
     [dvDialog, currentSnapshotJson, updateSnapshot],
   );
 
+  // TODO(cf): live in-grid CF highlighting (see docs/TODOS.md#high-cf-live-render)
   // Conditional formatting is currently round-tripped at the snapshot level
   // (xlsx_io.rs preserves _conditionalFormatting per sheet). The Univer CF
   // plugin uses a different rule model (IRange + dxf-style IStyleBase), so for
@@ -731,6 +732,7 @@ export default function EditorScreen() {
     }
   }, []);
 
+  // TODO(chart): live in-grid chart rendering for newly authored charts (see docs/TODOS.md#high-chart-live)
   // Open the chart dialog targeting the active sheet's current selection.
   // The Univer @univerjs/sheets-chart plugin isn't in this build, so the
   // dialog persists into `sheets.<id>._charts` (snapshot-level). The xlsx

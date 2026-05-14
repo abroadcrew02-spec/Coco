@@ -16,9 +16,10 @@ export interface CfRule {
   bottom?: boolean;
   priority?: number;
   stopIfTrue?: boolean;
-  // Style hints — these don't round-trip through the Rust xlsx_io path yet
-  // (dxf table parsing is TODO there), but we carry them through the snapshot
-  // so the user's choices are preserved on save/reopen.
+  // TODO(cf): emit dxf-referenced visual format on export (see docs/TODOS.md#medium-cf-dxf-emit)
+  // Style hints — these don't round-trip through the Rust xlsx_io path yet,
+  // but we carry them through the snapshot so the user's choices are
+  // preserved on save/reopen.
   style?: { bold?: boolean; fontColor?: string; bgColor?: string };
 }
 

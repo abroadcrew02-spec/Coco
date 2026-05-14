@@ -41,6 +41,7 @@ pub fn security_scan_xlsx(path: String) -> Result<SecurityScanResult, String> {
             safe: false,
             blocked: true,
             warnings: vec![
+                // TODO(security): enforce §5.3.2 row/column/formula limits (see docs/TODOS.md#medium-security-row-col-formula-caps)
                 "Row/column/formula limits not yet checked (Phase 2)".to_string(),
             ],
             issues,
@@ -110,6 +111,7 @@ pub fn security_scan_xlsx(path: String) -> Result<SecurityScanResult, String> {
         ));
     }
 
+    // TODO(security): enforce §5.3.2 row/column/formula limits (see docs/TODOS.md#medium-security-row-col-formula-caps)
     warnings.push("Row/column/formula limits not yet checked (Phase 2)".to_string());
 
     let blocked = !issues.is_empty();

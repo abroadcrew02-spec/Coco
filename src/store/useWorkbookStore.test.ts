@@ -986,6 +986,7 @@ describe("loadAutoSaveInterval", () => {
 // --- Audit findings (T2) — items 14-17 -------------------------------------
 
 describe("audit item 14: concurrent open race", () => {
+  // TODO(store): request-token "newer wins" for concurrent open/import (see docs/TODOS.md#medium-concurrent-open-race)
   // The store's openCoco / importXlsx have no request-token, so if the
   // earlier-started invoke resolves AFTER the later-started one, the
   // earlier result clobbers the newer state. Per the audit, the expected

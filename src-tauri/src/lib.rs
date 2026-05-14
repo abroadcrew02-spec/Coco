@@ -14,12 +14,12 @@ pub fn run() {
             // actions. Edit menu items (undo/copy/find/etc.) are intentionally
             // omitted — Univer's built-in chrome already handles them.
             //
-            // TODO(cross-platform): on macOS these accelerator labels should
-            // read "Cmd+..." not "Ctrl+...". The keybinding itself already
-            // works on macOS because useGlobalShortcuts handles
-            // ctrlKey || metaKey, but the *displayed* label in the menu bar
-            // is wrong. See docs/CROSS_PLATFORM_PREFLIGHT.md WARNING #1 for
-            // suggested fix (cfg-gated helper or native Accelerator objects).
+            // TODO(cross-platform): macOS menu accelerator labels read "Cmd+..." not "Ctrl+..." (see docs/TODOS.md#low-macos-menu-accelerators)
+            // The keybinding itself already works on macOS because
+            // useGlobalShortcuts handles ctrlKey || metaKey, but the
+            // *displayed* label in the menu bar is wrong. See
+            // docs/CROSS_PLATFORM_PREFLIGHT.md WARNING #1 for the suggested
+            // fix (cfg-gated helper or native Accelerator objects).
             let file_menu = SubmenuBuilder::new(app, "ファイル")
                 .text("new", "新規ワークブック\tCtrl+N")
                 .text("open", "開く...\tCtrl+O")

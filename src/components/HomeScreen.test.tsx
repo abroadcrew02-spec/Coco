@@ -717,6 +717,229 @@ describe("HomeScreen", () => {
         expect(items[0].textContent).toContain("b.csv");
         expect(items[1].textContent).toContain("a.xlsx");
       });
+
+      it("dragLeave clears the recent-item--drag-over class from the row", () => {
+        useWorkbookStore.setState({
+          pinnedPaths: ["/tmp/a.xlsx", "/tmp/b.csv"],
+          pinnedOrder: ["/tmp/a.xlsx", "/tmp/b.csv"],
+        });
+        const { container } = render(<HomeScreen />);
+        const items = container.querySelectorAll(".recent-list .recent-item");
+        const targetRow = items[1] as HTMLLIElement;
+        const store = new Map<string, string>();
+        const dataTransfer = {
+          setData: (k: string, v: string) => {
+            store.set(k, v);
+          },
+          getData: (k: string) => store.get(k) ?? "",
+          effectAllowed: "move",
+          dropEffect: "move",
+        };
+        fireEvent.dragStart(items[0] as HTMLLIElement, { dataTransfer });
+        fireEvent.dragOver(targetRow, { dataTransfer });
+        expect(targetRow.className).toContain("recent-item--drag-over");
+        fireEvent.dragLeave(targetRow);
+        expect(targetRow.className).not.toContain("recent-item--drag-over");
+      });
+
+      it("dragEnd on the source clears the drag-over class from any active target", () => {
+        useWorkbookStore.setState({
+          pinnedPaths: ["/tmp/a.xlsx", "/tmp/b.csv"],
+          pinnedOrder: ["/tmp/a.xlsx", "/tmp/b.csv"],
+        });
+        const { container } = render(<HomeScreen />);
+        const items = container.querySelectorAll(".recent-list .recent-item");
+        const source = items[0] as HTMLLIElement;
+        const targetRow = items[1] as HTMLLIElement;
+        const store = new Map<string, string>();
+        const dataTransfer = {
+          setData: (k: string, v: string) => {
+            store.set(k, v);
+          },
+          getData: (k: string) => store.get(k) ?? "",
+          effectAllowed: "move",
+          dropEffect: "move",
+        };
+        fireEvent.dragStart(source, { dataTransfer });
+        fireEvent.dragOver(targetRow, { dataTransfer });
+        expect(targetRow.className).toContain("recent-item--drag-over");
+        fireEvent.dragEnd(source);
+        expect(targetRow.className).not.toContain("recent-item--drag-over");
+      });
+
+      it("drop clears the drag-over class from all rows", () => {
+        useWorkbookStore.setState({
+          pinnedPaths: ["/tmp/a.xlsx", "/tmp/b.csv"],
+          pinnedOrder: ["/tmp/a.xlsx", "/tmp/b.csv"],
+        });
+        const { container } = render(<HomeScreen />);
+        const items = container.querySelectorAll(".recent-list .recent-item");
+        const source = items[1] as HTMLLIElement;
+        const targetRow = items[0] as HTMLLIElement;
+        const store = new Map<string, string>();
+        const dataTransfer = {
+          setData: (k: string, v: string) => {
+            store.set(k, v);
+          },
+          getData: (k: string) => store.get(k) ?? "",
+          effectAllowed: "move",
+          dropEffect: "move",
+        };
+        fireEvent.dragStart(source, { dataTransfer });
+        fireEvent.dragOver(targetRow, { dataTransfer });
+        fireEvent.drop(targetRow, { dataTransfer });
+        // After drop, no row should still carry the drag-over indicator —
+        // dragOverPath was set back to null inside the drop handler.
+        const stillFlagged = container.querySelectorAll(
+          ".recent-list .recent-item--drag-over"
+        );
+        expect(stillFlagged).toHaveLength(0);
+      });
+
+      it("dragOver does not apply the drag-over class to an unpinned target", () => {
+        // Only a.xlsx is pinned; c.coco (row 2) is unpinned.
+        useWorkbookStore.setState({
+          pinnedPaths: ["/tmp/a.xlsx"],
+          pinnedOrder: ["/tmp/a.xlsx"],
+        });
+        const { container } = render(<HomeScreen />);
+        const items = container.querySelectorAll(".recent-list .recent-item");
+        const source = items[0] as HTMLLIElement;
+        const unpinnedTarget = items[2] as HTMLLIElement;
+        const store = new Map<string, string>();
+        const dataTransfer = {
+          setData: (k: string, v: string) => {
+            store.set(k, v);
+          },
+          getData: (k: string) => store.get(k) ?? "",
+          effectAllowed: "move",
+          dropEffect: "move",
+        };
+        fireEvent.dragStart(source, { dataTransfer });
+        fireEvent.dragOver(unpinnedTarget, { dataTransfer });
+        expect(unpinnedTarget.className).not.toContain("recent-item--drag-over");
+      });
+
+      it("dragStart on a pinned row stores the path under text/plain", () => {
+        useWorkbookStore.setState({
+          pinnedPaths: ["/tmp/a.xlsx", "/tmp/b.csv"],
+          pinnedOrder: ["/tmp/a.xlsx", "/tmp/b.csv"],
+        });
+        const { container } = render(<HomeScreen />);
+        const items = container.querySelectorAll(".recent-list .recent-item");
+        const source = items[0] as HTMLLIElement;
+        const store = new Map<string, string>();
+        const dataTransfer = {
+          setData: (k: string, v: string) => {
+            store.set(k, v);
+          },
+          getData: (k: string) => store.get(k) ?? "",
+          effectAllowed: "none",
+          dropEffect: "none",
+        };
+        fireEvent.dragStart(source, { dataTransfer });
+        expect(store.get("text/plain")).toBe("/tmp/a.xlsx");
+      });
+
+      it("dropping the dragged row onto itself does not call reorderPinned (degenerate)", () => {
+        useWorkbookStore.setState({
+          pinnedPaths: ["/tmp/a.xlsx", "/tmp/b.csv"],
+          pinnedOrder: ["/tmp/a.xlsx", "/tmp/b.csv"],
+        });
+        const { container } = render(<HomeScreen />);
+        const items = container.querySelectorAll(".recent-list .recent-item");
+        const sameRow = items[0] as HTMLLIElement;
+        const store = new Map<string, string>();
+        const dataTransfer = {
+          setData: (k: string, v: string) => {
+            store.set(k, v);
+          },
+          getData: (k: string) => store.get(k) ?? "",
+          effectAllowed: "move",
+          dropEffect: "move",
+        };
+        fireEvent.dragStart(sameRow, { dataTransfer });
+        fireEvent.drop(sameRow, { dataTransfer });
+        // The drop handler short-circuits when dragged === f.path, so no
+        // set_setting("recents.pinned_order") call should fire.
+        const setCalls = invokeMock.mock.calls.filter(
+          (c) => c[0] === "set_setting" && (c[1] as { key: string }).key === "recents.pinned_order"
+        );
+        expect(setCalls).toHaveLength(0);
+      });
+    });
+
+    describe("row classes", () => {
+      it("missing rows render the recent-item--missing class", () => {
+        const { container } = render(<HomeScreen />);
+        const items = container.querySelectorAll(".recent-list .recent-item");
+        // c.coco (idx 2) is the missing one in the recent-files beforeEach.
+        expect(items[2].className).toContain("recent-item--missing");
+        // The two existing rows should NOT have the missing class.
+        expect(items[0].className).not.toContain("recent-item--missing");
+        expect(items[1].className).not.toContain("recent-item--missing");
+      });
+
+      it("pinned rows render the recent-item--pinned class", () => {
+        useWorkbookStore.setState({ pinnedPaths: ["/tmp/a.xlsx"] });
+        const { container } = render(<HomeScreen />);
+        const items = container.querySelectorAll(".recent-list .recent-item");
+        // a.xlsx sorts to the top when pinned.
+        expect(items[0].className).toContain("recent-item--pinned");
+        // The unpinned ones should not pick up the modifier.
+        expect(items[1].className).not.toContain("recent-item--pinned");
+      });
+
+      it("mouse-entering a row sets it as the focused row", () => {
+        const { container } = render(<HomeScreen />);
+        const items = container.querySelectorAll(".recent-list .recent-item");
+        fireEvent.mouseEnter(items[1]);
+        expect(items[1].className).toContain("recent-item--focused");
+        expect(items[0].className).not.toContain("recent-item--focused");
+      });
+    });
+
+    describe("keyboard navigation edge cases", () => {
+      it("ArrowDown does not advance past the last row (clamped)", () => {
+        const { container } = render(<HomeScreen />);
+        // 3 rows seeded in beforeEach.
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        // One more — should stay on row 2 rather than overflow.
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        const items = container.querySelectorAll(".recent-list .recent-item");
+        expect(items[2].className).toContain("recent-item--focused");
+      });
+
+      it("ArrowUp from no-focus state seeds focus on row 0", () => {
+        const { container } = render(<HomeScreen />);
+        // focusedRecentIdx starts at -1; ArrowUp should land on row 0.
+        fireEvent.keyDown(window, { key: "ArrowUp" });
+        const items = container.querySelectorAll(".recent-list .recent-item");
+        expect(items[0].className).toContain("recent-item--focused");
+      });
+
+      it("Enter with no focused row is a no-op (does not open anything)", () => {
+        render(<HomeScreen />);
+        // No ArrowDown — focusedRecentIdx stays at -1.
+        fireEvent.keyDown(window, { key: "Enter" });
+        const opens = invokeMock.mock.calls.filter((c) =>
+          ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(
+            c[0] as string
+          )
+        );
+        expect(opens).toHaveLength(0);
+      });
+
+      it("Delete with no focused row is a no-op (no remove_recent call)", () => {
+        render(<HomeScreen />);
+        fireEvent.keyDown(window, { key: "Delete" });
+        expect(invokeMock).not.toHaveBeenCalledWith(
+          "workbook_remove_recent",
+          expect.anything()
+        );
+      });
     });
 
     it("the reveal button is disabled for missing files", () => {

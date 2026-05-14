@@ -53,6 +53,11 @@ import NamedRangesDialog, { type NamedRangeEntry } from "./NamedRangesDialog";
 import DataValidationDialog, { type DataValidationEntry } from "./DataValidationDialog";
 import ConditionalFormattingDialog, { type CfRule } from "./ConditionalFormattingDialog";
 import InsertHyperlinkDialog, { type HyperlinkFormValue } from "./InsertHyperlinkDialog";
+import {
+  patchHyperlinkRenders,
+  lookupHyperlink,
+  classifyHyperlink,
+} from "./hyperlinkRender";
 import InsertCommentDialog, { type CommentEntry } from "./InsertCommentDialog";
 import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
 import NumberFormatDialog, { type NumberFormatValue } from "./NumberFormatDialog";
@@ -1419,9 +1424,15 @@ export default function EditorScreen() {
     // 0.5.x, so there's nothing extra to merge into `locales`.
     univer.registerPlugin(UniverSheetsFilterPlugin);
 
-    // Create workbook from snapshot or default empty workbook
+    // Create workbook from snapshot or default empty workbook. We pipe the
+    // snapshot through `patchHyperlinkRenders` first so every cell listed in
+    // `_hyperlinks` arrives at Univer pre-styled (blue + underline) with the
+    // link label as its value. The patch is pure / idempotent — the round
+    // -trip writer ignores the inline style we add since the `_hyperlinks`
+    // array is its source of truth for re-emitting the actual <hyperlink>
+    // elements on xlsx export.
     const initialData: Partial<IWorkbookData> = currentSnapshotJson
-      ? JSON.parse(currentSnapshotJson)
+      ? patchHyperlinkRenders(JSON.parse(currentSnapshotJson))
       : {
           id: "coco-workbook",
           name: "Coco Workbook",
@@ -1551,6 +1562,70 @@ export default function EditorScreen() {
           }
           throw new CustomCommandExecutionError(`data validation: ${err.code}`);
         }
+      }
+    });
+
+    return () => disposable.dispose();
+  }, []);
+
+  // In-grid hyperlink follow (Phase 2). The render side is handled by
+  // `patchHyperlinkRenders` at unit creation; this hook adds the *click*
+  // behavior. We use the sheets-ui `onCellClick` facade event (mixed onto
+  // FWorkbook by `@univerjs/sheets-ui/facade`, auto-imported via
+  // `@univerjs/facade`) — that fires with the (unitId, subUnitId, row, col)
+  // of the clicked cell, which is everything we need to look up an entry
+  // in `_hyperlinks` and route it. External links go through the Rust
+  // `open_url` command (cmd /c start | open | xdg-open, scheme-allowlisted
+  // to http(s) / mailto / file in shell.rs). Internal `#Sheet!A1` targets
+  // route through the facade itself (setActiveSheet + setActiveRange) so
+  // the jump stays in-app.
+  useEffect(() => {
+    if (!fUniverRef.current) return;
+    const fUniver = fUniverRef.current;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+
+    // The mixin signature is on FWorkbookSheetsUIMixin; `getActiveWorkbook`
+    // returns the base FWorkbook type because Univer doesn't auto-narrow.
+    // Defensive cast: if the host build somehow strips the sheets-ui facade
+    // we bail out cleanly instead of throwing on workbook.onCellClick.
+    const onCellClick = (workbook as unknown as {
+      onCellClick?: (cb: (cell: { location: { subUnitId: string; row: number; col: number } }) => void) => { dispose: () => void };
+    }).onCellClick;
+    if (typeof onCellClick !== "function") return;
+
+    const disposable = onCellClick.call(workbook, (cell) => {
+      const { subUnitId, row, col } = cell.location ?? {};
+      if (typeof subUnitId !== "string" || typeof row !== "number" || typeof col !== "number") {
+        return;
+      }
+      const entry = lookupHyperlink(snapshotRef.current, subUnitId, row, col);
+      if (!entry) return;
+      const classified = classifyHyperlink(entry.target);
+      if (!classified) return;
+      if (classified.kind === "external") {
+        // Fire-and-forget — open_url is best-effort; a missing browser
+        // surfaces as a console warning rather than a blocking dialog.
+        invoke("open_url", { url: classified.url }).catch((err) => {
+          // eslint-disable-next-line no-console
+          console.warn("open_url failed:", err);
+        });
+        return;
+      }
+      // Internal link: navigate within the workbook. getSheetByName accepts
+      // the visible sheet name (not the internal id); the round-trip stores
+      // the target with the visible name so this lines up.
+      try {
+        const target = workbook.getSheetByName(classified.sheet);
+        if (!target) return;
+        workbook.setActiveSheet(target);
+        const range = target.getRange(classified.cell);
+        if (range) target.setActiveRange(range);
+      } catch (err) {
+        // Best-effort: a missing/renamed sheet just no-ops rather than
+        // throwing into Univer's command pipeline.
+        // eslint-disable-next-line no-console
+        console.warn("internal hyperlink jump failed:", err);
       }
     });
 

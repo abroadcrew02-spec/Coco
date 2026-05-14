@@ -39,6 +39,7 @@ import BusyOverlay from "./BusyOverlay";
 import SnapshotHistoryDialog from "./SnapshotHistoryDialog";
 import CompatibilityWarningsDialog from "./CompatibilityWarningsDialog";
 import NamedRangesDialog, { type NamedRangeEntry } from "./NamedRangesDialog";
+import DataValidationDialog, { type DataValidationEntry } from "./DataValidationDialog";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -98,6 +99,12 @@ export default function EditorScreen() {
   // Named-ranges dialog state: null while closed; once opened we snapshot the
   // current set so the user can cancel out without mutating the workbook.
   const [namedRanges, setNamedRanges] = useState<NamedRangeEntry[] | null>(null);
+  // Data-validation dialog state: null while closed; opened with the rules for
+  // the currently-active sheet. Edits are flushed straight into the snapshot
+  // because Univer has no first-class DV API we wire to here.
+  const [dvDialog, setDvDialog] = useState<
+    null | { sheetId: string; sheetName: string; rules: DataValidationEntry[] }
+  >(null);
 
   // Read all named ranges from the live Univer workbook via the facade
   // (FWorkbook.getDefinedNames). Falls back to an empty list if the facade
@@ -175,6 +182,56 @@ export default function EditorScreen() {
   const openNamedRangesDialog = useCallback(() => {
     setNamedRanges(readNamedRanges());
   }, [readNamedRanges]);
+
+  // Data-validation dialog plumbing. We work directly on the snapshot JSON
+  // rather than going through Univer because the @univerjs/sheets-data
+  // -validation plugin isn't registered in this build and the round-trip
+  // already drives off the snapshot's `_dataValidations[]` field. MVP scope:
+  // target sheetOrder[0] (the typical single-sheet xlsx); a future cut can
+  // surface a sheet picker.
+  const openDataValidationDialog = useCallback(() => {
+    if (!currentSnapshotJson) return;
+    try {
+      const snap = JSON.parse(currentSnapshotJson) as {
+        sheetOrder?: string[];
+        sheets?: Record<string, { name?: string; _dataValidations?: DataValidationEntry[] }>;
+      };
+      const sheetId = snap.sheetOrder?.[0];
+      if (!sheetId || !snap.sheets || !snap.sheets[sheetId]) return;
+      const sheet = snap.sheets[sheetId];
+      const rules = Array.isArray(sheet._dataValidations)
+        ? sheet._dataValidations.map((r) => ({ ...r }))
+        : [];
+      setDvDialog({ sheetId, sheetName: sheet.name ?? sheetId, rules });
+    } catch {
+      // Malformed snapshot — nothing we can edit; silently no-op.
+    }
+  }, [currentSnapshotJson]);
+
+  const applyDataValidations = useCallback(
+    (next: DataValidationEntry[]) => {
+      if (!dvDialog || !currentSnapshotJson) return;
+      try {
+        const snap = JSON.parse(currentSnapshotJson) as {
+          sheets?: Record<string, { _dataValidations?: DataValidationEntry[] }>;
+        };
+        if (!snap.sheets || !snap.sheets[dvDialog.sheetId]) return;
+        const sheet = snap.sheets[dvDialog.sheetId];
+        // Opt-in field: drop the key entirely when the list is empty so a
+        // sheet that never had DV doesn't gain an empty array on round-trip
+        // (mirrors the Rust side's emission policy in xlsx_io.rs).
+        if (next.length === 0) {
+          delete sheet._dataValidations;
+        } else {
+          sheet._dataValidations = next;
+        }
+        updateSnapshot(JSON.stringify(snap));
+      } catch {
+        // Snapshot got malformed between open and apply — discard the edit.
+      }
+    },
+    [dvDialog, currentSnapshotJson, updateSnapshot],
+  );
 
   useAutoSave();
 
@@ -448,6 +505,15 @@ export default function EditorScreen() {
           <button
             type="button"
             className="toolbar-btn"
+            onClick={openDataValidationDialog}
+            title="データの入力規則を追加・編集"
+            aria-label="データの入力規則"
+          >
+            入力規則
+          </button>
+          <button
+            type="button"
+            className="toolbar-btn"
             onClick={requestSettings}
             title="設定（自動保存間隔など）"
             aria-label="設定"
@@ -591,6 +657,14 @@ export default function EditorScreen() {
           initialRanges={namedRanges}
           onSave={applyNamedRanges}
           onClose={() => setNamedRanges(null)}
+        />
+      )}
+      {dvDialog !== null && (
+        <DataValidationDialog
+          initialRules={dvDialog.rules}
+          sheetName={dvDialog.sheetName}
+          onSave={applyDataValidations}
+          onClose={() => setDvDialog(null)}
         />
       )}
       {warningsDialog === "import" && (

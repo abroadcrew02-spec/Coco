@@ -21,10 +21,17 @@ const APP_SHORTCUTS: Shortcut[] = [
   { keys: ["Enter"], description: "ホーム画面: 選択中のファイルを開く" },
   { keys: ["Delete"], description: "ホーム画面: 選択中のファイルを一覧から削除" },
   { keys: ["P"], description: "ホーム画面: 選択中のファイルをピン留め/解除" },
-  { keys: ["Ctrl", "F3"], description: "名前付き範囲を編集" },
   { keys: ["Ctrl", ","], description: "設定を開く" },
   { keys: ["Ctrl", "/"], description: "このヘルプを表示" },
   { keys: ["F1"], description: "このヘルプを表示（同上）" },
+];
+
+const PHASE2_SHORTCUTS: Shortcut[] = [
+  { keys: ["Ctrl", "F3"], description: "名前付き範囲を編集" },
+  { keys: ["Ctrl", "F8"], description: "条件付き書式を編集" },
+  { keys: ["Ctrl", "K"], description: "ハイパーリンクを挿入" },
+  { keys: ["Shift", "F2"], description: "セルにコメントを挿入 / 編集" },
+  { keys: ["Ctrl", "1"], description: "表示形式（セルの書式設定）を変更" },
 ];
 
 const UNIVER_SHORTCUTS: Shortcut[] = [
@@ -87,6 +94,26 @@ export default function HelpDialog({ onClose }: Props) {
                 ))}
               </tbody>
             </table>
+          </section>
+          <section className="help-section">
+            <h3>Phase 2 ショートカット（オーサリング）</h3>
+            <table className="help-table">
+              <tbody>
+                {PHASE2_SHORTCUTS.map((s, i) => (
+                  <tr key={i}>
+                    <td className="help-keys">
+                      {s.keys.map((k, j) => (
+                        <span key={j} className="help-key">{k}</span>
+                      ))}
+                    </td>
+                    <td className="help-desc">{s.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="help-footnote">
+              グラフ挿入と画像挿入はツールバーの「📊 グラフ」「🖼 画像挿入」ボタンから利用できます。
+            </p>
           </section>
           <section className="help-section">
             <h3>編集ショートカット（Univer 標準）</h3>

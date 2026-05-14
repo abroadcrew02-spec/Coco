@@ -47,6 +47,24 @@ describe("HelpDialog", () => {
       expect(screen.getByText("置換")).toBeTruthy();
     });
 
+    it("renders the Phase 2 authoring shortcuts section with Ctrl+F3 / Ctrl+F8 / Ctrl+K / Shift+F2 / Ctrl+1 and mentions Chart/Image insertion", () => {
+      render(<HelpDialog onClose={onClose} />);
+      // Section header for the new group.
+      expect(screen.getByText("Phase 2 ショートカット（オーサリング）")).toBeTruthy();
+      // Each Phase 2 shortcut description shows up.
+      expect(screen.getByText("名前付き範囲を編集")).toBeTruthy();
+      expect(screen.getByText("条件付き書式を編集")).toBeTruthy();
+      expect(screen.getByText("ハイパーリンクを挿入")).toBeTruthy();
+      expect(screen.getByText("セルにコメントを挿入 / 編集")).toBeTruthy();
+      expect(screen.getByText("表示形式（セルの書式設定）を変更")).toBeTruthy();
+      // Toolbar-only insertions are called out in the footnote.
+      expect(screen.getByText(/グラフ挿入と画像挿入はツールバー/)).toBeTruthy();
+      // Spot-check that the key chips are rendered for at least one row.
+      const row = screen.getByText("ハイパーリンクを挿入").closest("tr")!;
+      expect(row.textContent).toContain("Ctrl");
+      expect(row.textContent).toContain("K");
+    });
+
     it("mentions xlsx, xlsm, csv, and coco file formats", () => {
       render(<HelpDialog onClose={onClose} />);
       const formatSection = screen.getByText("対応ファイル形式").parentElement!;

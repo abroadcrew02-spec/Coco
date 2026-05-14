@@ -42,6 +42,7 @@ import NamedRangesDialog, { type NamedRangeEntry } from "./NamedRangesDialog";
 import DataValidationDialog, { type DataValidationEntry } from "./DataValidationDialog";
 import ConditionalFormattingDialog, { type CfRule } from "./ConditionalFormattingDialog";
 import InsertHyperlinkDialog, { type HyperlinkFormValue } from "./InsertHyperlinkDialog";
+import InsertCommentDialog, { type CommentEntry } from "./InsertCommentDialog";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -119,6 +120,13 @@ export default function EditorScreen() {
     | { sheetId: string; cell: string; display: string }
     | null
   >(null);
+  // Comment dialog state: null while closed. Captures the active sheet + cell
+  // at open time so subsequent selection changes don't move the target.
+  const [commentDialog, setCommentDialog] = useState<{
+    sheetId: string;
+    cellRef: string;
+    existing: CommentEntry | null;
+  } | null>(null);
 
   // Read all named ranges from the live Univer workbook via the facade
   // (FWorkbook.getDefinedNames). Falls back to an empty list if the facade
@@ -370,6 +378,135 @@ export default function EditorScreen() {
     [hyperlinkCtx, updateSnapshot],
   );
 
+  // Resolve a default author for new comments. localStorage > navigator hints
+  // > "Author" fallback. The browser renderer can't read the OS username
+  // directly, so we persist the user's chosen name across sessions instead.
+  const resolveDefaultAuthor = useCallback((): string => {
+    try {
+      const stored = window.localStorage.getItem("coco.commentAuthor");
+      if (stored && stored.trim()) return stored.trim();
+    } catch {
+      // localStorage may throw in private mode — fall through.
+    }
+    return "Author";
+  }, []);
+
+  // Convert (row, col) -> A1 notation. col is 0-based. Mirrors Excel's
+  // 26-letter base-26 column naming (A..Z, AA..AZ, ...).
+  const toA1 = (row: number, col: number): string => {
+    let n = col;
+    let letters = "";
+    while (true) {
+      letters = String.fromCharCode(65 + (n % 26)) + letters;
+      const next = Math.floor(n / 26) - 1;
+      if (next < 0) break;
+      n = next;
+    }
+    return `${letters}${row + 1}`;
+  };
+
+  // Open the comment dialog targeting the current active cell. Reads the
+  // existing comment (if any) from the snapshot's `_comments` array for the
+  // active sheet so editing pre-fills the form correctly.
+  const openCommentDialog = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    const worksheet = workbook.getActiveSheet();
+    if (!worksheet) return;
+    const selection = worksheet.getSelection();
+    const activeRange = selection?.getActiveRange();
+    // Fall back to A1 if there's no selection (shouldn't happen in practice
+    // but keeps the dialog resilient to edge cases like an empty workbook).
+    const row = activeRange?.getRow() ?? 0;
+    const col = activeRange?.getColumn() ?? 0;
+    const cellRef = toA1(row, col);
+    const sheetId = worksheet.getSheetId();
+
+    let existing: CommentEntry | null = null;
+    if (currentSnapshotJson) {
+      try {
+        const snap = JSON.parse(currentSnapshotJson) as {
+          sheets?: Record<string, { _comments?: CommentEntry[] }>;
+        };
+        const arr = snap.sheets?.[sheetId]?._comments ?? [];
+        existing = arr.find((c) => c.cell === cellRef) ?? null;
+      } catch {
+        // Bad snapshot JSON: treat as no existing comment; the apply path
+        // also re-parses defensively so we don't poison the snapshot.
+      }
+    }
+    setCommentDialog({ sheetId, cellRef, existing });
+  }, [currentSnapshotJson]);
+
+  // Apply (insert or update) a comment in the snapshot's `sheets.<id>._comments`
+  // array. Matches by cell ref — if one exists for this cell, replace it;
+  // otherwise append. Always re-stringifies and pushes back via updateSnapshot
+  // so the save button enables and the auto-save path picks up the change.
+  const applyComment = useCallback(
+    (sheetId: string, entry: CommentEntry) => {
+      if (!currentSnapshotJson) return;
+      let snap: {
+        sheets?: Record<string, { _comments?: CommentEntry[] }>;
+      };
+      try {
+        snap = JSON.parse(currentSnapshotJson);
+      } catch {
+        return;
+      }
+      if (!snap.sheets) snap.sheets = {};
+      if (!snap.sheets[sheetId]) snap.sheets[sheetId] = {};
+      const list = snap.sheets[sheetId]._comments ?? [];
+      const idx = list.findIndex((c) => c.cell === entry.cell);
+      if (idx >= 0) {
+        list[idx] = entry;
+      } else {
+        list.push(entry);
+      }
+      snap.sheets[sheetId]._comments = list;
+      updateSnapshot(JSON.stringify(snap));
+      // Persist the chosen author so the next new-comment dialog pre-fills it.
+      if (entry.author && entry.author.trim()) {
+        try {
+          window.localStorage.setItem("coco.commentAuthor", entry.author.trim());
+        } catch {
+          // Best-effort: ignore quota / private-mode errors.
+        }
+      }
+    },
+    [currentSnapshotJson, updateSnapshot],
+  );
+
+  // Remove the comment for a given cell from the snapshot, if present.
+  // No-op when the sheet has no `_comments` array or the cell isn't in it.
+  const deleteComment = useCallback(
+    (sheetId: string, cellRef: string) => {
+      if (!currentSnapshotJson) return;
+      let snap: {
+        sheets?: Record<string, { _comments?: CommentEntry[] }>;
+      };
+      try {
+        snap = JSON.parse(currentSnapshotJson);
+      } catch {
+        return;
+      }
+      const list = snap.sheets?.[sheetId]?._comments;
+      if (!list) return;
+      const next = list.filter((c) => c.cell !== cellRef);
+      if (next.length === list.length) return;
+      if (next.length === 0) {
+        // Drop the key entirely so the round-trip stays clean (Rust side
+        // omits `_comments` when empty).
+        delete snap.sheets![sheetId]._comments;
+      } else {
+        snap.sheets![sheetId]._comments = next;
+      }
+      updateSnapshot(JSON.stringify(snap));
+    },
+    [currentSnapshotJson, updateSnapshot],
+  );
+
   useAutoSave();
 
   // Keyboard shortcuts (req 4.6): Ctrl+S / Cmd+S = save; Ctrl+Shift+S / Cmd+Shift+S = save as.
@@ -397,9 +534,13 @@ export default function EditorScreen() {
         // Ctrl+K / Cmd+K — Excel's Insert Hyperlink shortcut.
         e.preventDefault();
         openHyperlinkDialog();
+      } else if (!mod && e.shiftKey && e.key === "F2") {
+        // Shift+F2 is Excel's convention for "Insert / Edit Cell Comment".
+        e.preventDefault();
+        openCommentDialog();
       }
     },
-    [save, promptSaveAs, openNamedRangesDialog, openCfDialog, openHyperlinkDialog]
+    [save, promptSaveAs, openNamedRangesDialog, openCfDialog, openHyperlinkDialog, openCommentDialog]
   );
 
   const runCsvExport = useCallback(
@@ -838,6 +979,16 @@ export default function EditorScreen() {
           initialDisplay={hyperlinkCtx.display}
           onApply={applyHyperlink}
           onClose={() => setHyperlinkCtx(null)}
+        />
+      )}
+      {commentDialog && (
+        <InsertCommentDialog
+          cellRef={commentDialog.cellRef}
+          initialEntry={commentDialog.existing}
+          defaultAuthor={resolveDefaultAuthor()}
+          onApply={(entry) => applyComment(commentDialog.sheetId, entry)}
+          onDelete={() => deleteComment(commentDialog.sheetId, commentDialog.cellRef)}
+          onClose={() => setCommentDialog(null)}
         />
       )}
       {warningsDialog === "import" && (

@@ -1,7 +1,14 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
-import { Univer, UniverInstanceType, LocaleType, CommandType, type IWorkbookData } from "@univerjs/core";
+import {
+  Univer,
+  UniverInstanceType,
+  LocaleType,
+  CommandType,
+  CustomCommandExecutionError,
+  type IWorkbookData,
+} from "@univerjs/core";
 import { defaultTheme } from "@univerjs/design";
 import { UniverRenderEnginePlugin } from "@univerjs/engine-render";
 import { UniverFormulaEnginePlugin } from "@univerjs/engine-formula";
@@ -55,6 +62,7 @@ import SortDialog, { type SortFormValue } from "./SortDialog";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
+import { isSheetProtectedInSnapshot } from "../store/sheetProtection";
 import "./EditorScreen.css";
 
 // req 5.4.1: "loading" blocks editing (snapshot is being replaced); "saving"
@@ -555,27 +563,32 @@ export default function EditorScreen() {
   // when toggleSheetProtection updates the store.
   const activeSheetProtected = (() => {
     if (!currentSnapshotJson) return false;
-    try {
-      const snap = JSON.parse(currentSnapshotJson) as {
-        sheetOrder?: string[];
-        sheets?: Record<string, { _protected?: { protected?: boolean } }>;
-      };
-      // We can't easily get the live active sheet id here without a render
-      // dependency on Univer, so fall back to the first sheet. The toggle
-      // button always operates on the truly-active sheet via Univer's facade;
-      // the label is just a quick hint and will be wrong for non-first sheets
-      // until the snapshot re-derives. This is acceptable for the MVP.
-      const sid = fUniverRef.current
-        ?.getActiveWorkbook()
-        ?.getActiveSheet()
-        ?.getSheetId()
-        ?? snap.sheetOrder?.[0];
-      if (!sid) return false;
-      return snap.sheets?.[sid]?._protected?.protected === true;
-    } catch {
-      return false;
+    // We can't easily get the live active sheet id here without a render
+    // dependency on Univer, so fall back to the first sheet. The toggle
+    // button always operates on the truly-active sheet via Univer's facade;
+    // the label is just a quick hint and will be wrong for non-first sheets
+    // until the snapshot re-derives. This is acceptable for the MVP.
+    let sid: string | undefined = fUniverRef.current
+      ?.getActiveWorkbook()
+      ?.getActiveSheet()
+      ?.getSheetId();
+    if (!sid) {
+      try {
+        const snap = JSON.parse(currentSnapshotJson) as { sheetOrder?: string[] };
+        sid = snap.sheetOrder?.[0];
+      } catch {
+        return false;
+      }
     }
+    return isSheetProtectedInSnapshot(currentSnapshotJson, sid ?? null);
   })();
+
+  // Ref the latest snapshot JSON so the live command-blocking guard (registered
+  // once at mount) can read it without re-subscribing on every keystroke.
+  const snapshotRef = useRef(currentSnapshotJson);
+  useEffect(() => {
+    snapshotRef.current = currentSnapshotJson;
+  }, [currentSnapshotJson]);
 
   // Remove the comment for a given cell from the snapshot, if present.
   // No-op when the sheet has no `_comments` array or the cell isn't in it.
@@ -1344,6 +1357,45 @@ export default function EditorScreen() {
       disposable.dispose();
     };
   }, [updateSnapshot]);
+
+  // Live sheet-protection enforcement. G3 marks `_protected` in the snapshot
+  // and round-trips it through xlsx, but Univer itself doesn't know about
+  // that key — so without this guard the user could still type into a
+  // "protected" sheet. We hook `onBeforeCommandExecute` (which maps to
+  // Univer's `beforeCommandExecuted` — listeners can throw to cancel) and
+  // reject any mutation whose `params.subUnitId` matches a sheet currently
+  // marked protected in the snapshot. Throwing `CustomCommandExecutionError`
+  // is the documented "polite" cancel — Univer's CommandService catches it
+  // and returns `false` instead of bubbling the error to the console.
+  //
+  // We only block CommandType.MUTATION (the low-level data-changing ops);
+  // selection / scroll / zoom are typed as OPERATION and pass through. The
+  // toggle button itself doesn't go through commandService (it writes the
+  // snapshot via the Zustand store), so unlocking still works.
+  useEffect(() => {
+    if (!fUniverRef.current) return;
+    const fUniver = fUniverRef.current;
+    let lastWarnAt = 0;
+
+    const disposable = fUniver.onBeforeCommandExecute((info) => {
+      if (info.type !== CommandType.MUTATION) return;
+      const params = info.params as { subUnitId?: unknown } | undefined;
+      const subUnitId = typeof params?.subUnitId === "string" ? params.subUnitId : null;
+      if (!subUnitId) return;
+      if (!isSheetProtectedInSnapshot(snapshotRef.current, subUnitId)) return;
+      // Rate-limit the warning so a single keystroke (which fans out to
+      // multiple mutations) doesn't spam the console.
+      const now = Date.now();
+      if (now - lastWarnAt > 500) {
+        lastWarnAt = now;
+        // eslint-disable-next-line no-console
+        console.warn("シートは保護されています");
+      }
+      throw new CustomCommandExecutionError("sheet is protected");
+    });
+
+    return () => disposable.dispose();
+  }, []);
 
   const statusLabel = SAVE_STATUS_LABELS[saveStatus] ?? saveStatus;
   const statusClass = `status-bar__status status-bar__status--${saveStatus}`;

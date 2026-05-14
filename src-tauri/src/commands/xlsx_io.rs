@@ -3,7 +3,10 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use calamine::{open_workbook, Data, Reader, Xlsx};
-use rust_xlsxwriter::{Color, Format, FormatAlign, FormatBorder, FormatPattern, Workbook};
+use rust_xlsxwriter::{
+    Color, DataValidation, DataValidationErrorStyle, DataValidationRule, Format, FormatAlign,
+    FormatBorder, FormatPattern, Formula, Workbook,
+};
 use serde_json::{json, Map, Value};
 
 use crate::commands::workbook::{
@@ -1363,6 +1366,493 @@ pub(crate) fn parse_xlsx_merges(path: &str) -> HashMap<String, Vec<(u32, u32, u3
     out
 }
 
+/// One parsed `<dataValidation>` element from a worksheet's XML, normalized
+/// into a stable struct that we round-trip through the snapshot JSON. We keep
+/// every attribute Excel writes that's needed to reconstruct the rule, plus
+/// the originating sqref so non-contiguous ranges (e.g. `"A1:A5 C1:C5"`)
+/// survive intact.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DataValidationEntry {
+    pub sqref: String,
+    /// One of: "list", "whole", "decimal", "date", "time", "textLength",
+    /// "custom", or "" for the Any type (no validation rule, message-only).
+    pub validation_type: String,
+    /// Operator: "between" | "notBetween" | "equal" | "notEqual" |
+    /// "greaterThan" | "lessThan" | "greaterThanOrEqual" | "lessThanOrEqual".
+    /// Empty for "list", "custom", and types Excel doesn't store an operator on.
+    pub operator: String,
+    pub formula1: String,
+    pub formula2: String,
+    pub allow_blank: bool,
+    pub show_error_message: bool,
+    pub show_input_message: bool,
+    /// "stop" | "warning" | "information". Empty means default ("stop").
+    pub error_style: String,
+    pub error_title: String,
+    pub error_message: String,
+    pub prompt_title: String,
+    pub prompt_message: String,
+}
+
+/// Parse one sheet's `<dataValidations>...</dataValidations>` block. Returns
+/// an empty vec when the sheet has no validations. Tolerant of malformed
+/// entries: a single bad child is skipped, not fatal for the rest.
+fn parse_sheet_data_validations(xml: &str) -> Vec<DataValidationEntry> {
+    let mut out = Vec::new();
+    let Some(block) = extract_block(xml, "<dataValidations", "</dataValidations>") else {
+        return out;
+    };
+    for el in extract_self_closing_or_paired(&block, "dataValidation") {
+        // The opening tag carries the attributes; the inner body holds
+        // <formula1>/<formula2>.
+        let head_end = match el.find('>') {
+            Some(p) => p + 1,
+            None => continue,
+        };
+        let head = &el[..head_end];
+
+        let Some(sqref) = parse_attr(head, "sqref") else {
+            continue;
+        };
+        let sqref = decode_xml_entities(&sqref);
+        if sqref.trim().is_empty() {
+            continue;
+        }
+
+        let validation_type =
+            parse_attr(head, "type").map(|s| decode_xml_entities(&s)).unwrap_or_default();
+        let operator =
+            parse_attr(head, "operator").map(|s| decode_xml_entities(&s)).unwrap_or_default();
+
+        let bool_attr = |name: &str| -> bool {
+            parse_attr(head, name)
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false)
+        };
+        let allow_blank = bool_attr("allowBlank");
+        let show_error_message = bool_attr("showErrorMessage");
+        let show_input_message = bool_attr("showInputMessage");
+        let error_style =
+            parse_attr(head, "errorStyle").map(|s| decode_xml_entities(&s)).unwrap_or_default();
+        let error_title =
+            parse_attr(head, "errorTitle").map(|s| decode_xml_entities(&s)).unwrap_or_default();
+        let error_message =
+            parse_attr(head, "error").map(|s| decode_xml_entities(&s)).unwrap_or_default();
+        let prompt_title =
+            parse_attr(head, "promptTitle").map(|s| decode_xml_entities(&s)).unwrap_or_default();
+        let prompt_message =
+            parse_attr(head, "prompt").map(|s| decode_xml_entities(&s)).unwrap_or_default();
+
+        // Strip the head; the rest holds <formula1>...</formula1>[<formula2>...</formula2>].
+        let body = if head_end < el.len() {
+            &el[head_end..]
+        } else {
+            ""
+        };
+        let formula1 = extract_inner_text(body, "<formula1", "</formula1>").unwrap_or_default();
+        let formula2 = extract_inner_text(body, "<formula2", "</formula2>").unwrap_or_default();
+
+        out.push(DataValidationEntry {
+            sqref,
+            validation_type,
+            operator,
+            formula1: decode_xml_entities(&formula1),
+            formula2: decode_xml_entities(&formula2),
+            allow_blank,
+            show_error_message,
+            show_input_message,
+            error_style,
+            error_title,
+            error_message,
+            prompt_title,
+            prompt_message,
+        });
+    }
+    out
+}
+
+/// Helper: grab the *text* inside `<tag ...>...</tag>` from `xml`. Returns
+/// None if the open tag isn't present.
+fn extract_inner_text(xml: &str, open_prefix: &str, close_tag: &str) -> Option<String> {
+    let open_idx = xml.find(open_prefix)?;
+    let after_open = xml[open_idx..].find('>')? + open_idx + 1;
+    // Self-closing `<formula1/>`.
+    if xml.as_bytes().get(after_open.saturating_sub(2)) == Some(&b'/') {
+        return Some(String::new());
+    }
+    let close_rel = xml[after_open..].find(close_tag)?;
+    Some(xml[after_open..after_open + close_rel].to_string())
+}
+
+/// Parse per-sheet `<dataValidations>` ranges out of an xlsx. Returns a map
+/// keyed by sheet name. Returns an empty map on I/O / structure error — like
+/// the other per-sheet parsers, data validations are best-effort metadata.
+pub(crate) fn parse_xlsx_data_validations(path: &str) -> HashMap<String, Vec<DataValidationEntry>> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return HashMap::new(),
+    };
+
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    if sheet_paths.is_empty() {
+        return HashMap::new();
+    }
+
+    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
+        Ok(a) => a,
+        Err(_) => return HashMap::new(),
+    };
+
+    let mut out: HashMap<String, Vec<DataValidationEntry>> = HashMap::new();
+    for (sheet_name, entry_path) in sheet_paths {
+        let mut xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&entry_path) {
+            if entry.read_to_string(&mut xml).is_ok() {
+                let dvs = parse_sheet_data_validations(&xml);
+                if !dvs.is_empty() {
+                    out.insert(sheet_name, dvs);
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// Build a `rust_xlsxwriter::DataValidation` plus a bounding (first_row,
+/// first_col, last_row, last_col) tuple from one snapshot entry. Returns
+/// `None` for entries that cannot be expressed via rust_xlsxwriter's typed API
+/// (e.g. malformed sqref, unknown `type`, or a `between` rule with
+/// non-numeric formulas) so the caller can drop them without aborting export.
+fn build_data_validation_from_snapshot(
+    entry: &Value,
+) -> Option<(DataValidation, u32, u16, u32, u16)> {
+    let sqref = entry.get("sqref").and_then(|v| v.as_str())?;
+    let sqref = sqref.trim();
+    if sqref.is_empty() {
+        return None;
+    }
+    // Compute the bounding box over a possibly multi-part sqref like
+    // "A1:A5 C1:C5". add_data_validation just needs *a* valid range; the
+    // sqref-as-stored is what actually persists thanks to set_multi_range.
+    let (first_row, first_col, last_row, last_col) = bounding_box_of_sqref(sqref)?;
+    let first_col16: u16 = first_col.try_into().ok()?;
+    let last_col16: u16 = last_col.try_into().ok()?;
+
+    let validation_type = entry
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let formula1 = entry
+        .get("formula1")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let formula2 = entry
+        .get("formula2")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    // OOXML quirk: rust_xlsxwriter (and Excel) omit the `operator` attribute
+    // on `between` rules because it's the implicit default. Reconstruct it
+    // from formula2's presence so we can pick the right typed rule.
+    let operator_raw = entry
+        .get("operator")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let operator = if operator_raw.is_empty() && !formula2.is_empty() {
+        "between"
+    } else {
+        operator_raw
+    };
+
+    let mut dv = DataValidation::new();
+    dv = match validation_type {
+        "list" => {
+            // For list, formula1 is either a literal `"a,b,c"` (note the
+            // outer quotes Excel stores) or a cell-range formula. Pass it to
+            // `allow_list_formula` either way — that variant takes raw text.
+            dv.allow_list_formula(Formula::new(formula1))
+        }
+        "whole" => apply_numeric_rule_i32(dv, operator, formula1, formula2)?,
+        "decimal" => apply_numeric_rule_f64(dv, operator, formula1, formula2)?,
+        "textLength" => apply_text_length_rule(dv, operator, formula1, formula2)?,
+        "custom" => dv.allow_custom(Formula::new(formula1)),
+        // "date" and "time" need datetime values we'd have to parse from the
+        // Excel serial-number representation in formula1. Falling back to
+        // `allow_custom` is lossy but keeps the rule alive instead of
+        // dropping it entirely.
+        "date" | "time" => dv.allow_custom(Formula::new(formula1)),
+        // Empty type => "any" (message-only validation). Nothing to set.
+        "" => dv,
+        // Unknown type — try custom, otherwise drop.
+        _ => {
+            if formula1.is_empty() {
+                return None;
+            }
+            dv.allow_custom(Formula::new(formula1))
+        }
+    };
+
+    let allow_blank = entry
+        .get("allowBlank")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    dv = dv.ignore_blank(allow_blank);
+    let show_input = entry
+        .get("showInputMessage")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    dv = dv.show_input_message(show_input);
+    let show_error = entry
+        .get("showErrorMessage")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    dv = dv.show_error_message(show_error);
+
+    if let Some(style) = entry.get("errorStyle").and_then(|v| v.as_str()) {
+        let style = match style {
+            "warning" => Some(DataValidationErrorStyle::Warning),
+            "information" => Some(DataValidationErrorStyle::Information),
+            "stop" => Some(DataValidationErrorStyle::Stop),
+            _ => None,
+        };
+        if let Some(s) = style {
+            dv = dv.set_error_style(s);
+        }
+    }
+    if let Some(t) = entry.get("errorTitle").and_then(|v| v.as_str()) {
+        if !t.is_empty() {
+            dv = dv.set_error_title(t).ok()?;
+        }
+    }
+    if let Some(m) = entry.get("errorMessage").and_then(|v| v.as_str()) {
+        if !m.is_empty() {
+            dv = dv.set_error_message(m).ok()?;
+        }
+    }
+    if let Some(t) = entry.get("promptTitle").and_then(|v| v.as_str()) {
+        if !t.is_empty() {
+            dv = dv.set_input_title(t).ok()?;
+        }
+    }
+    if let Some(m) = entry.get("promptMessage").and_then(|v| v.as_str()) {
+        if !m.is_empty() {
+            dv = dv.set_input_message(m).ok()?;
+        }
+    }
+
+    // Always preserve the original sqref exactly (including multi-part forms).
+    // set_multi_range overrides the (first_row..last_col) range that
+    // add_data_validation derives.
+    dv = dv.set_multi_range(sqref);
+
+    Some((dv, first_row, first_col16, last_row, last_col16))
+}
+
+/// Bounding box of a possibly multi-part sqref like `"A1:A5 C1:C5"`. The
+/// space-delimited parts each follow A1 or A1:B2 syntax. Returns the box that
+/// encloses every part, or None if no part parses.
+fn bounding_box_of_sqref(sqref: &str) -> Option<(u32, u32, u32, u32)> {
+    let mut sr = u32::MAX;
+    let mut sc = u32::MAX;
+    let mut er: u32 = 0;
+    let mut ec: u32 = 0;
+    let mut any = false;
+    for part in sqref.split_ascii_whitespace() {
+        if let Some((a, b, c, d)) = parse_range_ref(part) {
+            sr = sr.min(a);
+            sc = sc.min(b);
+            er = er.max(c);
+            ec = ec.max(d);
+            any = true;
+        }
+    }
+    if any {
+        Some((sr, sc, er, ec))
+    } else {
+        None
+    }
+}
+
+/// Apply a numeric (whole-number) rule. Operator strings follow the OOXML
+/// names (`equal`, `between`, etc.). Falls back to a formula-typed rule when
+/// the operand isn't a literal integer, so cell-reference operands like `=D1`
+/// also survive.
+fn apply_numeric_rule_i32(
+    dv: DataValidation,
+    operator: &str,
+    f1: &str,
+    f2: &str,
+) -> Option<DataValidation> {
+    let lit1 = f1.trim().parse::<i32>().ok();
+    let lit2 = f2.trim().parse::<i32>().ok();
+    let f1_owned = f1.to_string();
+    let f2_owned = f2.to_string();
+    let formula_rule = |op: &str| -> Option<DataValidationRule<Formula>> {
+        match op {
+            "equal" => Some(DataValidationRule::EqualTo(Formula::new(f1_owned.clone()))),
+            "notEqual" => Some(DataValidationRule::NotEqualTo(Formula::new(f1_owned.clone()))),
+            "greaterThan" => Some(DataValidationRule::GreaterThan(Formula::new(f1_owned.clone()))),
+            "greaterThanOrEqual" => Some(DataValidationRule::GreaterThanOrEqualTo(Formula::new(
+                f1_owned.clone(),
+            ))),
+            "lessThan" => Some(DataValidationRule::LessThan(Formula::new(f1_owned.clone()))),
+            "lessThanOrEqual" => Some(DataValidationRule::LessThanOrEqualTo(Formula::new(
+                f1_owned.clone(),
+            ))),
+            "between" => Some(DataValidationRule::Between(
+                Formula::new(f1_owned.clone()),
+                Formula::new(f2_owned.clone()),
+            )),
+            "notBetween" => Some(DataValidationRule::NotBetween(
+                Formula::new(f1_owned.clone()),
+                Formula::new(f2_owned.clone()),
+            )),
+            _ => None,
+        }
+    };
+    match (operator, lit1, lit2) {
+        ("equal", Some(a), _) => Some(dv.allow_whole_number(DataValidationRule::EqualTo(a))),
+        ("notEqual", Some(a), _) => Some(dv.allow_whole_number(DataValidationRule::NotEqualTo(a))),
+        ("greaterThan", Some(a), _) => {
+            Some(dv.allow_whole_number(DataValidationRule::GreaterThan(a)))
+        }
+        ("greaterThanOrEqual", Some(a), _) => {
+            Some(dv.allow_whole_number(DataValidationRule::GreaterThanOrEqualTo(a)))
+        }
+        ("lessThan", Some(a), _) => Some(dv.allow_whole_number(DataValidationRule::LessThan(a))),
+        ("lessThanOrEqual", Some(a), _) => {
+            Some(dv.allow_whole_number(DataValidationRule::LessThanOrEqualTo(a)))
+        }
+        ("between", Some(a), Some(b)) => {
+            Some(dv.allow_whole_number(DataValidationRule::Between(a, b)))
+        }
+        ("notBetween", Some(a), Some(b)) => {
+            Some(dv.allow_whole_number(DataValidationRule::NotBetween(a, b)))
+        }
+        _ => formula_rule(operator).map(|r| dv.allow_whole_number_formula(r)),
+    }
+}
+
+/// Apply a decimal-number rule. Mirrors `apply_numeric_rule_i32` for f64.
+fn apply_numeric_rule_f64(
+    dv: DataValidation,
+    operator: &str,
+    f1: &str,
+    f2: &str,
+) -> Option<DataValidation> {
+    let lit1 = f1.trim().parse::<f64>().ok();
+    let lit2 = f2.trim().parse::<f64>().ok();
+    let f1_owned = f1.to_string();
+    let f2_owned = f2.to_string();
+    let formula_rule = |op: &str| -> Option<DataValidationRule<Formula>> {
+        match op {
+            "equal" => Some(DataValidationRule::EqualTo(Formula::new(f1_owned.clone()))),
+            "notEqual" => Some(DataValidationRule::NotEqualTo(Formula::new(f1_owned.clone()))),
+            "greaterThan" => Some(DataValidationRule::GreaterThan(Formula::new(f1_owned.clone()))),
+            "greaterThanOrEqual" => Some(DataValidationRule::GreaterThanOrEqualTo(Formula::new(
+                f1_owned.clone(),
+            ))),
+            "lessThan" => Some(DataValidationRule::LessThan(Formula::new(f1_owned.clone()))),
+            "lessThanOrEqual" => Some(DataValidationRule::LessThanOrEqualTo(Formula::new(
+                f1_owned.clone(),
+            ))),
+            "between" => Some(DataValidationRule::Between(
+                Formula::new(f1_owned.clone()),
+                Formula::new(f2_owned.clone()),
+            )),
+            "notBetween" => Some(DataValidationRule::NotBetween(
+                Formula::new(f1_owned.clone()),
+                Formula::new(f2_owned.clone()),
+            )),
+            _ => None,
+        }
+    };
+    match (operator, lit1, lit2) {
+        ("equal", Some(a), _) => Some(dv.allow_decimal_number(DataValidationRule::EqualTo(a))),
+        ("notEqual", Some(a), _) => Some(dv.allow_decimal_number(DataValidationRule::NotEqualTo(a))),
+        ("greaterThan", Some(a), _) => {
+            Some(dv.allow_decimal_number(DataValidationRule::GreaterThan(a)))
+        }
+        ("greaterThanOrEqual", Some(a), _) => {
+            Some(dv.allow_decimal_number(DataValidationRule::GreaterThanOrEqualTo(a)))
+        }
+        ("lessThan", Some(a), _) => Some(dv.allow_decimal_number(DataValidationRule::LessThan(a))),
+        ("lessThanOrEqual", Some(a), _) => {
+            Some(dv.allow_decimal_number(DataValidationRule::LessThanOrEqualTo(a)))
+        }
+        ("between", Some(a), Some(b)) => {
+            Some(dv.allow_decimal_number(DataValidationRule::Between(a, b)))
+        }
+        ("notBetween", Some(a), Some(b)) => {
+            Some(dv.allow_decimal_number(DataValidationRule::NotBetween(a, b)))
+        }
+        _ => formula_rule(operator).map(|r| dv.allow_decimal_number_formula(r)),
+    }
+}
+
+/// Apply a textLength rule.
+fn apply_text_length_rule(
+    dv: DataValidation,
+    operator: &str,
+    f1: &str,
+    f2: &str,
+) -> Option<DataValidation> {
+    let lit1 = f1.trim().parse::<u32>().ok();
+    let lit2 = f2.trim().parse::<u32>().ok();
+    let f1_owned = f1.to_string();
+    let f2_owned = f2.to_string();
+    let formula_rule = |op: &str| -> Option<DataValidationRule<Formula>> {
+        match op {
+            "equal" => Some(DataValidationRule::EqualTo(Formula::new(f1_owned.clone()))),
+            "notEqual" => Some(DataValidationRule::NotEqualTo(Formula::new(f1_owned.clone()))),
+            "greaterThan" => Some(DataValidationRule::GreaterThan(Formula::new(f1_owned.clone()))),
+            "greaterThanOrEqual" => Some(DataValidationRule::GreaterThanOrEqualTo(Formula::new(
+                f1_owned.clone(),
+            ))),
+            "lessThan" => Some(DataValidationRule::LessThan(Formula::new(f1_owned.clone()))),
+            "lessThanOrEqual" => Some(DataValidationRule::LessThanOrEqualTo(Formula::new(
+                f1_owned.clone(),
+            ))),
+            "between" => Some(DataValidationRule::Between(
+                Formula::new(f1_owned.clone()),
+                Formula::new(f2_owned.clone()),
+            )),
+            "notBetween" => Some(DataValidationRule::NotBetween(
+                Formula::new(f1_owned.clone()),
+                Formula::new(f2_owned.clone()),
+            )),
+            _ => None,
+        }
+    };
+    match (operator, lit1, lit2) {
+        ("equal", Some(a), _) => Some(dv.allow_text_length(DataValidationRule::EqualTo(a))),
+        ("notEqual", Some(a), _) => Some(dv.allow_text_length(DataValidationRule::NotEqualTo(a))),
+        ("greaterThan", Some(a), _) => {
+            Some(dv.allow_text_length(DataValidationRule::GreaterThan(a)))
+        }
+        ("greaterThanOrEqual", Some(a), _) => {
+            Some(dv.allow_text_length(DataValidationRule::GreaterThanOrEqualTo(a)))
+        }
+        ("lessThan", Some(a), _) => Some(dv.allow_text_length(DataValidationRule::LessThan(a))),
+        ("lessThanOrEqual", Some(a), _) => {
+            Some(dv.allow_text_length(DataValidationRule::LessThanOrEqualTo(a)))
+        }
+        ("between", Some(a), Some(b)) => {
+            Some(dv.allow_text_length(DataValidationRule::Between(a, b)))
+        }
+        ("notBetween", Some(a), Some(b)) => {
+            Some(dv.allow_text_length(DataValidationRule::NotBetween(a, b)))
+        }
+        _ => formula_rule(operator).map(|r| dv.allow_text_length_formula(r)),
+    }
+}
+
 /// rust_xlsxwriter converts the input width to a character-width-with-padding
 /// before serialising, so calling `set_column_width(N)` actually writes a
 /// different `width` attribute. This function inverts that conversion so the
@@ -1494,7 +1984,26 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         })
         .collect();
 
-    let feature_warnings = detect_unsupported_features(&path).unwrap_or_default();
+    // Pre-parse per-sheet data validations so they can round-trip through the
+    // snapshot. calamine doesn't expose them, and rust_xlsxwriter's high-level
+    // API handles re-emission on export. Must happen BEFORE feature_warnings
+    // so we can suppress the generic "DV will be lost" warning once we know
+    // the rules will round-trip.
+    let data_validations_by_sheet = parse_xlsx_data_validations(&path);
+
+    let mut feature_warnings = detect_unsupported_features(&path).unwrap_or_default();
+    // We now preserve data validations through the snapshot, so the generic
+    // "data validation will be lost on save" warning is misleading once we've
+    // captured at least one rule from the source file. Drop it in that case.
+    // (If parsing yielded zero rules for whatever reason — e.g. the rule lived
+    // somewhere the parser didn't see — we leave the warning so the user
+    // doesn't get a silent data loss.)
+    let dv_rules_seen = data_validations_by_sheet
+        .values()
+        .any(|v: &Vec<DataValidationEntry>| !v.is_empty());
+    if dv_rules_seen {
+        feature_warnings.retain(|w| w.code != "XLSX_DATA_VALIDATION");
+    }
 
     // Per-cell styles: parsed straight from the xlsx ZIP (calamine 0.24 doesn't
     // expose them). Tolerant of failure — missing styles just degrade to "no styles".
@@ -1705,6 +2214,69 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             .unwrap_or_default();
         sheet_obj["mergeData"] = Value::Array(merge_data);
 
+        // Per-sheet data validations. We only emit `_dataValidations` when the
+        // sheet has at least one entry — the absence of the field signals
+        // "no rules" to the export side, preventing a stray empty
+        // <dataValidations count="0"> block that some Excel versions reject.
+        if let Some(dvs) = data_validations_by_sheet.get(name) {
+            if !dvs.is_empty() {
+                let arr: Vec<Value> = dvs
+                    .iter()
+                    .map(|e| {
+                        let mut obj = Map::new();
+                        obj.insert("sqref".into(), Value::String(e.sqref.clone()));
+                        if !e.validation_type.is_empty() {
+                            obj.insert("type".into(), Value::String(e.validation_type.clone()));
+                        }
+                        if !e.operator.is_empty() {
+                            obj.insert("operator".into(), Value::String(e.operator.clone()));
+                        }
+                        if !e.formula1.is_empty() {
+                            obj.insert("formula1".into(), Value::String(e.formula1.clone()));
+                        }
+                        if !e.formula2.is_empty() {
+                            obj.insert("formula2".into(), Value::String(e.formula2.clone()));
+                        }
+                        if e.allow_blank {
+                            obj.insert("allowBlank".into(), Value::Bool(true));
+                        }
+                        if e.show_error_message {
+                            obj.insert("showErrorMessage".into(), Value::Bool(true));
+                        }
+                        if e.show_input_message {
+                            obj.insert("showInputMessage".into(), Value::Bool(true));
+                        }
+                        if !e.error_style.is_empty() {
+                            obj.insert("errorStyle".into(), Value::String(e.error_style.clone()));
+                        }
+                        if !e.error_title.is_empty() {
+                            obj.insert("errorTitle".into(), Value::String(e.error_title.clone()));
+                        }
+                        if !e.error_message.is_empty() {
+                            obj.insert(
+                                "errorMessage".into(),
+                                Value::String(e.error_message.clone()),
+                            );
+                        }
+                        if !e.prompt_title.is_empty() {
+                            obj.insert(
+                                "promptTitle".into(),
+                                Value::String(e.prompt_title.clone()),
+                            );
+                        }
+                        if !e.prompt_message.is_empty() {
+                            obj.insert(
+                                "promptMessage".into(),
+                                Value::String(e.prompt_message.clone()),
+                            );
+                        }
+                        Value::Object(obj)
+                    })
+                    .collect();
+                sheet_obj["_dataValidations"] = Value::Array(arr);
+            }
+        }
+
         sheets_map.insert(sheet_id, sheet_obj);
     }
 
@@ -1727,7 +2299,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         severity: "info".to_string(),
         code: "XLSX_POC_IMPORT".to_string(),
         message:
-            "xlsx PoC import: rich text and conditional formatting are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights are preserved)"
+            "xlsx PoC import: rich text and conditional formatting are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights + data validations are preserved)"
                 .to_string(),
         affected_sheets: None,
     });
@@ -2030,6 +2602,25 @@ pub fn export_xlsx_core(
                 }
             }
 
+            // Re-emit per-sheet data validations from `_dataValidations`. The
+            // helper computes the bounding range from the (possibly multi-part)
+            // sqref so rust_xlsxwriter's `add_data_validation(first_row, ...,
+            // last_row, ...)` shape is satisfied, then `set_multi_range` carries
+            // the original sqref through verbatim (preserving non-contiguous
+            // ranges like "A1:A5 C1:C5"). Malformed entries are dropped silently
+            // — same best-effort policy as merges/named ranges.
+            if let Some(dv_arr) = sheet_obj
+                .and_then(|s| s.get("_dataValidations"))
+                .and_then(|v| v.as_array())
+            {
+                for entry in dv_arr {
+                    if let Some(dv_built) = build_data_validation_from_snapshot(entry) {
+                        let (dv, sr, sc, er, ec) = dv_built;
+                        let _ = worksheet.add_data_validation(sr, sc, er, ec, &dv);
+                    }
+                }
+            }
+
             let cell_data = sheet_obj
                 .and_then(|s| s.get("cellData"))
                 .and_then(|c| c.as_object());
@@ -2288,7 +2879,7 @@ pub fn export_xlsx_core(
         severity: "info".to_string(),
         code: "XLSX_POC_EXPORT".to_string(),
         message: format!(
-            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Rich text and conditional formatting are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats are preserved)."
+            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Rich text and conditional formatting are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats + data validations are preserved)."
         ),
         affected_sheets: None,
     });

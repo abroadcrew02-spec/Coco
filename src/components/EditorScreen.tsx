@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Univer, UniverInstanceType, LocaleType, CommandType, type IWorkbookData } from "@univerjs/core";
 import { defaultTheme } from "@univerjs/design";
@@ -43,6 +44,10 @@ import DataValidationDialog, { type DataValidationEntry } from "./DataValidation
 import ConditionalFormattingDialog, { type CfRule } from "./ConditionalFormattingDialog";
 import InsertHyperlinkDialog, { type HyperlinkFormValue } from "./InsertHyperlinkDialog";
 import InsertCommentDialog, { type CommentEntry } from "./InsertCommentDialog";
+import InsertImageDialog, {
+  type ImageFormValue,
+  type ImagePickResult,
+} from "./InsertImageDialog";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -126,6 +131,12 @@ export default function EditorScreen() {
     sheetId: string;
     cellRef: string;
     existing: CommentEntry | null;
+  } | null>(null);
+  // Insert-image dialog: null while closed. Captures the active sheet + the
+  // top-left of the active range so the image anchors where the user clicked.
+  const [imageDialog, setImageDialog] = useState<{
+    sheetId: string;
+    cell: string;
   } | null>(null);
 
   // Read all named ranges from the live Univer workbook via the facade
@@ -507,6 +518,218 @@ export default function EditorScreen() {
     [currentSnapshotJson, updateSnapshot],
   );
 
+  // Insert-image dialog plumbing. Snapshots the active sheet + the top-left of
+  // the active range so the image anchors at the user's actual cursor cell.
+  const openImageDialog = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let cell = "A1";
+    try {
+      const sel = sheet.getSelection();
+      const range = sel?.getActiveRange();
+      if (range) {
+        const a1 = range.getA1Notation();
+        cell = a1.includes(":") ? a1.split(":")[0] : a1;
+      }
+    } catch {
+      // fall back to A1
+    }
+    setImageDialog({ sheetId, cell });
+  }, []);
+
+  // Tauri-side file picker for the image dialog. Opens the OS open-dialog,
+  // reads the chosen file via our `read_file_bytes_base64` command, and
+  // returns the prepared payload. Returns null if the user cancels.
+  const pickImageFile = useCallback(async (): Promise<ImagePickResult | null> => {
+    const chosen = await openDialog({
+      title: "画像ファイルを選択",
+      multiple: false,
+      filters: [{ name: "画像", extensions: ["png", "jpg", "jpeg", "gif"] }],
+    });
+    if (!chosen) return null;
+    const path = typeof chosen === "string" ? chosen : chosen[0];
+    if (!path) return null;
+    const base64 = await invoke<string>("read_file_bytes_base64", { path });
+    const name = path.split(/[\\/]/).pop() ?? path;
+    // Normalize "jpeg" → "jpg" so the media part name stays in the canonical
+    // form Excel/rust_xlsxwriter use (`xl/media/imageN.jpg`).
+    const extRaw = (name.split(".").pop() ?? "").toLowerCase();
+    const ext = extRaw === "jpeg" ? "jpg" : extRaw;
+    return { ext, base64, name };
+  }, []);
+
+  // Parse a single-cell A1 ref → 0-based (col, row). Returns null on bad input.
+  const a1ToColRow = (a1: string): { col: number; row: number } | null => {
+    const m = /^\$?([A-Za-z]+)\$?([1-9]\d*)$/.exec(a1.trim());
+    if (!m) return null;
+    const letters = m[1].toUpperCase();
+    let col = 0;
+    for (let i = 0; i < letters.length; i++) {
+      col = col * 26 + (letters.charCodeAt(i) - 64);
+    }
+    return { col: col - 1, row: parseInt(m[2], 10) - 1 };
+  };
+
+  // Apply the new image by mutating the snapshot's `_preservedParts`:
+  //   - allocate a fresh imageN.<ext> media part name
+  //   - allocate a fresh drawingN.xml part (+ its rels) referencing the image
+  //   - point the active sheet's drawingRid/drawingTarget at the new drawing
+  // The xlsx_io.rs `inject_preserved_parts` path then writes everything out
+  // on the next save. Limited to sheets that don't already have a drawing —
+  // that case would need rel-merging in the existing drawingN.xml.rels,
+  // which is out of scope for the PoC.
+  const applyImage = useCallback(
+    (value: ImageFormValue) => {
+      if (!imageDialog) return;
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const snapshot = workbook.save() as unknown as Record<string, unknown>;
+      const sheetOrder = (snapshot.sheetOrder as string[] | undefined) ?? [];
+      const sheetIdx = sheetOrder.indexOf(imageDialog.sheetId);
+      if (sheetIdx < 0) return;
+      const pos = a1ToColRow(value.cell);
+      if (!pos) return;
+
+      // Bootstrap or extend _preservedParts. Snapshots from a fresh workbook
+      // won't carry one yet; that's fine — we add it here and the Rust side
+      // picks it up unchanged on export.
+      type PreservedPart = string;
+      type SheetRef = {
+        drawingRid?: string | null;
+        drawingTarget?: string | null;
+        pivotRels?: Array<{ rid: string; target: string }>;
+      } | null;
+      const preserved = (snapshot._preservedParts as
+        | {
+            parts?: Record<string, PreservedPart>;
+            sheetRefs?: SheetRef[];
+            contentTypes?: string;
+          }
+        | undefined) ?? {};
+      const parts: Record<string, PreservedPart> = { ...(preserved.parts ?? {}) };
+      const sheetRefs: SheetRef[] = (preserved.sheetRefs ?? []).slice();
+
+      // Refuse if the target sheet already has a drawing — merging into an
+      // existing drawing XML is out of scope for the PoC. The user will see
+      // the "失敗" status briefly via lastError.
+      const existing = sheetRefs[sheetIdx];
+      if (existing && existing.drawingRid) {
+        // eslint-disable-next-line no-console
+        console.warn("InsertImage: sheet already has a drawing; skipping");
+        return;
+      }
+
+      // Find a free imageN / drawingN slot across the existing parts.
+      const usedImageNums = new Set<number>();
+      const usedDrawingNums = new Set<number>();
+      for (const key of Object.keys(parts)) {
+        const mImg = /^xl\/media\/image(\d+)\.[a-zA-Z]+$/.exec(key);
+        if (mImg) usedImageNums.add(parseInt(mImg[1], 10));
+        const mDr = /^xl\/drawings\/drawing(\d+)\.xml$/.exec(key);
+        if (mDr) usedDrawingNums.add(parseInt(mDr[1], 10));
+      }
+      let imgN = 1;
+      while (usedImageNums.has(imgN)) imgN++;
+      let drN = 1;
+      while (usedDrawingNums.has(drN)) drN++;
+
+      const mediaName = `xl/media/image${imgN}.${value.ext}`;
+      const drawingName = `xl/drawings/drawing${drN}.xml`;
+      const drawingRelsName = `xl/drawings/_rels/drawing${drN}.xml.rels`;
+
+      // Compose the minimal twoCellAnchor drawing. Anchors a roughly
+      // 4-cols × 10-rows region at the user-chosen cell. The image's own
+      // `r:embed="rId1"` resolves through the drawing's rels file below.
+      const fromCol = pos.col;
+      const fromRow = pos.row;
+      const toCol = fromCol + 4;
+      const toRow = fromRow + 10;
+      const drawingXml =
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+        `<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"` +
+        ` xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"` +
+        ` xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+        `<xdr:twoCellAnchor editAs="oneCell">` +
+        `<xdr:from><xdr:col>${fromCol}</xdr:col><xdr:colOff>0</xdr:colOff>` +
+        `<xdr:row>${fromRow}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>` +
+        `<xdr:to><xdr:col>${toCol}</xdr:col><xdr:colOff>0</xdr:colOff>` +
+        `<xdr:row>${toRow}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>` +
+        `<xdr:pic>` +
+        `<xdr:nvPicPr>` +
+        `<xdr:cNvPr id="2" name="Picture 1"/>` +
+        `<xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr>` +
+        `</xdr:nvPicPr>` +
+        `<xdr:blipFill>` +
+        `<a:blip r:embed="rId1"/>` +
+        `<a:stretch><a:fillRect/></a:stretch>` +
+        `</xdr:blipFill>` +
+        `<xdr:spPr>` +
+        `<a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></a:xfrm>` +
+        `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>` +
+        `</xdr:spPr>` +
+        `</xdr:pic>` +
+        `<xdr:clientData/>` +
+        `</xdr:twoCellAnchor>` +
+        `</xdr:wsDr>`;
+
+      const drawingRelsXml =
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+        `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+        `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"` +
+        ` Target="../media/image${imgN}.${value.ext}"/>` +
+        `</Relationships>`;
+
+      // Base64-encode XML strings client-side. The preserved-parts shape
+      // stores everything (binary or text) as base64, mirroring Rust's
+      // b64_encode path.
+      const xmlToB64 = (s: string): string => {
+        // Encode the JS string to UTF-8 bytes, then base64. `btoa` only
+        // accepts Latin-1; the TextEncoder route is safe for any payload.
+        const bytes = new TextEncoder().encode(s);
+        let bin = "";
+        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        return btoa(bin);
+      };
+
+      parts[mediaName] = value.base64;
+      parts[drawingName] = xmlToB64(drawingXml);
+      parts[drawingRelsName] = xmlToB64(drawingRelsXml);
+
+      // Ensure sheetRefs has an entry per known sheet up to our index.
+      while (sheetRefs.length <= sheetIdx) sheetRefs.push(null);
+      const newRid = "rId1"; // local to the sheet's _rels — fresh because the sheet had none.
+      sheetRefs[sheetIdx] = {
+        drawingRid: newRid,
+        drawingTarget: `../drawings/drawing${drN}.xml`,
+        pivotRels: existing?.pivotRels ?? [],
+      };
+
+      // Reseat the preserved-parts block. `contentTypes` is left untouched —
+      // the export path's `merge_content_type_overrides` already re-adds the
+      // image `<Default Extension>` entries and we don't need an Override
+      // for the new drawing because rust_xlsxwriter emits no drawings of its
+      // own (so the captured `originalContentTypes` from a prior import is
+      // sufficient; a brand-new workbook will skip the Override merge but
+      // Excel tolerates the omission since `<Default Extension="png"/>` etc.
+      // already declare the media content types).
+      (snapshot as Record<string, unknown>)._preservedParts = {
+        ...preserved,
+        parts,
+        sheetRefs,
+      };
+
+      updateSnapshot(JSON.stringify(snapshot));
+    },
+    [imageDialog, updateSnapshot],
+  );
+
   useAutoSave();
 
   // Keyboard shortcuts (req 4.6): Ctrl+S / Cmd+S = save; Ctrl+Shift+S / Cmd+Shift+S = save as.
@@ -812,6 +1035,15 @@ export default function EditorScreen() {
           <button
             type="button"
             className="toolbar-btn"
+            onClick={openImageDialog}
+            title="画像をワークブックに挿入"
+            aria-label="画像挿入"
+          >
+            🖼 画像挿入
+          </button>
+          <button
+            type="button"
+            className="toolbar-btn"
             onClick={requestSettings}
             title="設定（自動保存間隔など）"
             aria-label="設定"
@@ -989,6 +1221,14 @@ export default function EditorScreen() {
           onApply={(entry) => applyComment(commentDialog.sheetId, entry)}
           onDelete={() => deleteComment(commentDialog.sheetId, commentDialog.cellRef)}
           onClose={() => setCommentDialog(null)}
+        />
+      )}
+      {imageDialog && (
+        <InsertImageDialog
+          initialCell={imageDialog.cell}
+          pickFile={pickImageFile}
+          onApply={applyImage}
+          onClose={() => setImageDialog(null)}
         />
       )}
       {warningsDialog === "import" && (

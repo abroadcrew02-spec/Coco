@@ -40,6 +40,7 @@ import "@univerjs/sheets-formula-ui/lib/index.css";
 import "@univerjs/find-replace/lib/index.css";
 
 import { undoRedoOverride } from "./univerUndoRedoOverride";
+import { registerCocoContextMenu } from "./univerContextMenu";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { useAutoSave } from "../hooks/useAutoSave";
 import type { CompatibilityWarning } from "../types/workbook";
@@ -94,6 +95,13 @@ export default function EditorScreen() {
   const containerRef = useRef<HTMLDivElement>(null);
   const univerRef = useRef<Univer | null>(null);
   const fUniverRef = useRef<FUniver | null>(null);
+  // Stable refs for the openX dialog handlers so the Univer context-menu
+  // commands (registered once at mount with empty-deps useEffect) always
+  // see the *latest* React-side openX function, not the one captured at
+  // first render. Each render syncs the current openX values below.
+  const openCommentDialogRef = useRef<() => void>(() => {});
+  const openHyperlinkDialogRef = useRef<() => void>(() => {});
+  const openNumberFormatDialogRef = useRef<() => void>(() => {});
 
   const {
     saveStatus,
@@ -1315,6 +1323,14 @@ export default function EditorScreen() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
+  // Sync the openX refs with the current useCallback identities every
+  // render. The Univer context-menu commands (registered once at mount)
+  // read .current at invocation time, so this keeps them up to date
+  // without re-registering against Univer on every render.
+  openCommentDialogRef.current = openCommentDialog;
+  openHyperlinkDialogRef.current = openHyperlinkDialog;
+  openNumberFormatDialogRef.current = openNumberFormatDialog;
+
   // Mount Univer
   useEffect(() => {
     if (!containerRef.current) return;
@@ -1389,7 +1405,17 @@ export default function EditorScreen() {
     univerRef.current = univer;
     fUniverRef.current = FUniver.newAPI(univer);
 
+    // Wire Coco-specific entries (Insert Comment / Hyperlink / Number Format)
+    // into the cell context menu. We forward to the ref-held callbacks so
+    // the menu always invokes the latest React-side dialog opener.
+    const contextMenuReg = registerCocoContextMenu(univer, {
+      openCommentDialog: () => openCommentDialogRef.current(),
+      openHyperlinkDialog: () => openHyperlinkDialogRef.current(),
+      openNumberFormatDialog: () => openNumberFormatDialogRef.current(),
+    });
+
     return () => {
+      contextMenuReg.dispose();
       univer.dispose();
       univerRef.current = null;
       fUniverRef.current = null;

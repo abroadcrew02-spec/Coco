@@ -830,6 +830,123 @@ fn parse_workbook_sheets(xml: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Parse `xl/workbook.xml` for per-sheet visibility. Returns
+/// `sheet name -> state` for any sheet whose `state` attribute is `"hidden"`
+/// or `"veryHidden"`. Sheets without the attribute (i.e. visible) are omitted.
+fn parse_workbook_sheet_visibility(xml: &str) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    if let Some(block) = extract_block(xml, "<sheets", "</sheets>") {
+        for el in extract_self_closing_or_paired(&block, "sheet") {
+            let name = parse_attr(&el, "name").unwrap_or_default();
+            let state = parse_attr(&el, "state").unwrap_or_default();
+            if !name.is_empty() && (state == "hidden" || state == "veryHidden") {
+                out.insert(name, state);
+            }
+        }
+    }
+    out
+}
+
+/// One parsed freeze-pane declaration from a worksheet's `<sheetView>`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct FreezePaneEntry {
+    /// 0-based row of the first scrollable cell (== ySplit; rows 0..row are frozen).
+    pub row: u32,
+    /// 0-based column of the first scrollable cell (== xSplit; cols 0..col are frozen).
+    pub col: u32,
+    /// Optional A1-style top-left visible cell in the scrolling pane
+    /// (e.g. `"A20"`), as written by `topLeftCell` on the `<pane>` element.
+    pub top_left: Option<String>,
+}
+
+/// Parse the `<sheetView><pane .../></sheetView>` block of one worksheet's XML
+/// into a `FreezePaneEntry`. Returns `None` when no frozen pane is declared.
+/// Only `state="frozen"` (and its xSplit/ySplit/topLeftCell attrs) is handled
+/// — split panes (the live-drag variant) are intentionally out of scope.
+fn parse_sheet_freeze_pane(xml: &str) -> Option<FreezePaneEntry> {
+    let view = extract_block(xml, "<sheetView", "</sheetView>")?;
+    let pane = find_tag(&view, "<pane")?;
+    let state = parse_attr(&pane, "state").unwrap_or_default();
+    if state != "frozen" {
+        return None;
+    }
+    let x_split: u32 = parse_attr(&pane, "xSplit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let y_split: u32 = parse_attr(&pane, "ySplit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    if x_split == 0 && y_split == 0 {
+        return None;
+    }
+    let top_left = parse_attr(&pane, "topLeftCell").filter(|s| !s.is_empty());
+    Some(FreezePaneEntry {
+        row: y_split,
+        col: x_split,
+        top_left,
+    })
+}
+
+/// Walk every sheet in an xlsx and pull out its freeze-pane declaration.
+/// Returns `sheet name -> FreezePaneEntry`; sheets without a frozen pane are
+/// omitted.
+pub(crate) fn parse_xlsx_freeze_panes(path: &str) -> HashMap<String, FreezePaneEntry> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return HashMap::new(),
+    };
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    if sheet_paths.is_empty() {
+        return HashMap::new();
+    }
+    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
+        Ok(a) => a,
+        Err(_) => return HashMap::new(),
+    };
+    let mut out: HashMap<String, FreezePaneEntry> = HashMap::new();
+    for (sheet_name, entry_path) in sheet_paths {
+        let mut xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&entry_path) {
+            if entry.read_to_string(&mut xml).is_ok() {
+                if let Some(fp) = parse_sheet_freeze_pane(&xml) {
+                    out.insert(sheet_name, fp);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Read `xl/workbook.xml` from an xlsx and return the sheet-visibility map.
+/// Best-effort: returns empty on read or parse failure.
+pub(crate) fn parse_xlsx_sheet_visibility(path: &str) -> HashMap<String, String> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return HashMap::new(),
+    };
+    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
+        Ok(a) => a,
+        Err(_) => return HashMap::new(),
+    };
+    let mut wb_xml = String::new();
+    if let Ok(mut entry) = archive.by_name("xl/workbook.xml") {
+        if entry.read_to_string(&mut wb_xml).is_err() {
+            return HashMap::new();
+        }
+    } else {
+        return HashMap::new();
+    }
+    parse_workbook_sheet_visibility(&wb_xml)
+}
+
 fn parse_rels(xml: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     for el in extract_self_closing_or_paired(xml, "Relationship") {
@@ -3181,6 +3298,10 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     let dimensions_by_sheet = parse_xlsx_dimensions(&path);
     // Pre-parse per-sheet merged-cell ranges (calamine doesn't expose these).
     let merges_by_sheet = parse_xlsx_merges(&path);
+    // Pre-parse per-sheet frozen-pane declarations (only `state="frozen"`).
+    let freeze_panes_by_sheet = parse_xlsx_freeze_panes(&path);
+    // Pre-parse workbook-level sheet visibility (`state="hidden"` / `"veryHidden"`).
+    let sheet_visibility = parse_xlsx_sheet_visibility(&path);
     // Pre-parse per-sheet hyperlinks. Joins the `<hyperlinks>` block in
     // sheetN.xml with the per-sheet rels file so external URLs are resolved.
     let hyperlinks_by_sheet = parse_xlsx_hyperlinks(&path);
@@ -3550,6 +3671,27 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             }
         }
 
+        // Per-sheet frozen pane. Opt-in: omit `_freezePane` entirely when the
+        // sheet has no frozen rows/cols. `topLeft` is only emitted when the
+        // source workbook carried `topLeftCell` so we don't materialize a
+        // default A1 pre-scroll on round-trip.
+        if let Some(fp) = freeze_panes_by_sheet.get(name) {
+            let mut obj = Map::new();
+            obj.insert("row".into(), Value::from(fp.row));
+            obj.insert("col".into(), Value::from(fp.col));
+            if let Some(tl) = &fp.top_left {
+                obj.insert("topLeft".into(), Value::String(tl.clone()));
+            }
+            sheet_obj["_freezePane"] = Value::Object(obj);
+        }
+
+        // Workbook-level sheet visibility. Opt-in: omit `_sheetState` when the
+        // sheet is visible (the default) so clean files don't acquire a stray
+        // attribute on round-trip.
+        if let Some(state) = sheet_visibility.get(name) {
+            sheet_obj["_sheetState"] = Value::String(state.clone());
+        }
+
         sheets_map.insert(sheet_id, sheet_obj);
     }
 
@@ -3833,6 +3975,42 @@ pub fn export_xlsx_core(
             worksheet
                 .set_name(&safe_name)
                 .map_err(|e| e.to_string())?;
+
+            // Apply sheet visibility from `_sheetState`. Anything other than
+            // "hidden" / "veryHidden" leaves the default (visible).
+            if let Some(state) = sheet_obj
+                .and_then(|s| s.get("_sheetState"))
+                .and_then(|v| v.as_str())
+            {
+                match state {
+                    "hidden" => {
+                        worksheet.set_hidden(true);
+                    }
+                    "veryHidden" => {
+                        worksheet.set_very_hidden(true);
+                    }
+                    _ => {}
+                }
+            }
+
+            // Apply frozen pane from `_freezePane`. Out-of-bounds rows/cols
+            // (or a {0,0} pane) are dropped — rust_xlsxwriter rejects the
+            // former and the latter is a no-op anyway.
+            if let Some(fp) = sheet_obj
+                .and_then(|s| s.get("_freezePane"))
+                .and_then(|v| v.as_object())
+            {
+                let row = fp.get("row").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let col = fp.get("col").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+                if row > 0 || col > 0 {
+                    let _ = worksheet.set_freeze_panes(row, col);
+                    if let Some(tl) = fp.get("topLeft").and_then(|v| v.as_str()) {
+                        if let Some((tr, tc)) = parse_a1(tl) {
+                            let _ = worksheet.set_freeze_panes_top_cell(tr, tc as u16);
+                        }
+                    }
+                }
+            }
 
             // Apply per-column widths from snapshot.columnData.
             if let Some(col_map) = sheet_obj

@@ -425,6 +425,23 @@
   opacity: 1;
 }
 
+/* Pinned rows are draggable; show a grab cursor on the row to hint at it.
+   Switches to grabbing while the user actually holds the row down. */
+.recent-item--pinned {
+  cursor: grab;
+}
+
+.recent-item--pinned:active {
+  cursor: grabbing;
+}
+
+/* Drop-target indicator: a clear top edge highlight on the row being
+   hovered, so the user can predict where the dragged item will land. */
+.recent-item--drag-over {
+  border-top: 2px solid #217346;
+  background-color: #d4e9db;
+}
+
 .recent-pin-indicator {
   margin-right: 6px;
   font-size: 11px;

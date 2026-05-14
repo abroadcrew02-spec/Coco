@@ -32,6 +32,7 @@ interface WorkbookState {
   csvExportEncoding: "utf8-bom" | "utf8" | "shift_jis";
   csvImportEncoding: "auto" | "utf8" | "shift_jis";
   pinnedPaths: string[]; // recent files the user has pinned; sorts to top of home list
+  pinnedOrder: string[]; // user-defined ordering for pinned items (drag-to-reorder)
   suppressCsvPocWarning: boolean; // hide the always-fires "CSV PoC" info banner
 
   // Actions
@@ -68,6 +69,9 @@ interface WorkbookState {
   setCsvImportEncoding: (enc: "auto" | "utf8" | "shift_jis") => Promise<void>;
   loadPinnedPaths: () => Promise<void>;
   togglePinned: (path: string) => Promise<void>;
+  loadPinnedOrder: () => Promise<void>;
+  setPinnedOrder: (order: string[]) => Promise<void>;
+  reorderPinned: (dragged: string, target: string) => Promise<void>;
   loadSuppressCsvPocWarning: () => Promise<void>;
   setSuppressCsvPocWarning: (v: boolean) => Promise<void>;
   listSnapshots: () => Promise<SnapshotMeta[]>;
@@ -114,6 +118,7 @@ const DEFAULT_CSV_IMPORT_ENCODING: CsvImportEncoding = "auto";
 const VALID_CSV_IMPORT_ENCODINGS: CsvImportEncoding[] = ["auto", "utf8", "shift_jis"];
 
 const PINNED_PATHS_KEY = "recents.pinned_paths";
+const PINNED_ORDER_KEY = "recents.pinned_order";
 const SUPPRESS_CSV_POC_KEY = "csv.suppress_poc_warning";
 
 export const useWorkbookStore = create<WorkbookState>((set, get) => ({
@@ -133,6 +138,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   csvExportEncoding: DEFAULT_CSV_ENCODING,
   csvImportEncoding: DEFAULT_CSV_IMPORT_ENCODING,
   pinnedPaths: [],
+  pinnedOrder: [],
   suppressCsvPocWarning: false,
 
   newWorkbook: async () => {
@@ -656,6 +662,56 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     set({ pinnedPaths: next });
     try {
       await invoke("set_setting", { key: PINNED_PATHS_KEY, value: JSON.stringify(next) });
+    } catch {
+      // best-effort persistence
+    }
+  },
+
+  loadPinnedOrder: async () => {
+    try {
+      const raw = await invoke<string | null>("get_setting", { key: PINNED_ORDER_KEY });
+      if (raw === null) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.every((p) => typeof p === "string")) {
+        set({ pinnedOrder: parsed });
+      }
+    } catch {
+      // non-critical: empty order stays (falls back to lastOpened DESC)
+    }
+  },
+
+  setPinnedOrder: async (order: string[]) => {
+    set({ pinnedOrder: order });
+    try {
+      await invoke("set_setting", { key: PINNED_ORDER_KEY, value: JSON.stringify(order) });
+    } catch {
+      // best-effort persistence
+    }
+  },
+
+  reorderPinned: async (dragged: string, target: string) => {
+    if (dragged === target) return;
+    const cur = get().pinnedOrder;
+    // Start from the existing order, appending any pinned paths not yet
+    // tracked so the array can faithfully represent the current visible order.
+    const pinned = get().pinnedPaths;
+    const base = [...cur];
+    for (const p of pinned) {
+      if (!base.includes(p)) base.push(p);
+    }
+    // Remove dragged from its current position; insert it where target sits.
+    const without = base.filter((p) => p !== dragged);
+    const targetIdx = without.indexOf(target);
+    if (targetIdx < 0) {
+      // Target isn't in the order array at all — append dragged after it
+      // (the seeded order above guarantees it should be there, but guard anyway).
+      without.push(dragged);
+    } else {
+      without.splice(targetIdx, 0, dragged);
+    }
+    set({ pinnedOrder: without });
+    try {
+      await invoke("set_setting", { key: PINNED_ORDER_KEY, value: JSON.stringify(without) });
     } catch {
       // best-effort persistence
     }

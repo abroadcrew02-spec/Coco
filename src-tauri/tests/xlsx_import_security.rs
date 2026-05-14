@@ -73,12 +73,13 @@ fn valid_small_xlsx_imports_without_security_block() {
         .filter(|w| w.severity == "blocking")
         .collect();
     assert!(blocking.is_empty(), "valid file should not be blocked, got {:?}", result.warnings);
-    // The security "Phase 2 limits not yet checked" warning is INFO/WARNING severity,
-    // so it should NOT appear as a blocking entry. But it WILL be in the warnings list
-    // as a non-blocking entry.
+    // §5.3.2 caps are now enforced inline, so the legacy "Phase 2 limits not yet
+    // checked" XLSX_SECURITY_WARNING is gone. A clean small file should produce
+    // no XLSX_SECURITY_WARNING entries.
     assert!(
-        result.warnings.iter().any(|w| w.code == "XLSX_SECURITY_WARNING" && w.message.contains("Phase 2")),
-        "expected Phase 2 security warning to pass through"
+        !result.warnings.iter().any(|w| w.code == "XLSX_SECURITY_WARNING"),
+        "valid small xlsx should not surface any XLSX_SECURITY_WARNING entries, got {:?}",
+        result.warnings
     );
     // The original PoC import info warning should also be there.
     assert!(result.warnings.iter().any(|w| w.code == "XLSX_POC_IMPORT"));

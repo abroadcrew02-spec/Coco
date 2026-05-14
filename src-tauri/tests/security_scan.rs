@@ -9,7 +9,7 @@ fn path_str(p: &std::path::Path) -> String {
 }
 
 #[test]
-fn test_valid_xlsx_is_safe_with_phase2_warning() {
+fn test_valid_xlsx_is_safe() {
     let tmp = TempDir::new().expect("tempdir");
     let path = tmp.path().join("valid.xlsx");
 
@@ -31,13 +31,13 @@ fn test_valid_xlsx_is_safe_with_phase2_warning() {
         result.issues
     );
     assert!(
-        result.warnings.iter().any(|w| w.contains("Phase 2")),
-        "expected Phase 2 warning, got {:?}",
+        result.warnings.is_empty(),
+        "valid xlsx should have no warnings now that §5.3.2 caps are enforced, got {:?}",
         result.warnings
     );
     assert!(
-        !result.safe,
-        "safe should be false because the Phase 2 warning is always present"
+        result.safe,
+        "valid xlsx should report safe=true once the Phase 2 placeholder warning is gone"
     );
 }
 

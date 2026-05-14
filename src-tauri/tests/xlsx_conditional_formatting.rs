@@ -335,6 +335,240 @@ fn cf_rule_style_emits_dxf_on_export() {
     );
 }
 
+/// colorScale CF rules use cfvo + color children that rust_xlsxwriter doesn't
+/// model. We round-trip them as a verbatim `<cfRule>` XML splice. The fixture
+/// is hand-crafted because rust_xlsxwriter can't write colorScale either —
+/// build a minimal xlsx, then post-write the cfRule into sheet1.xml directly.
+#[test]
+fn color_scale_round_trips() {
+    let tmp = TempDir::new().expect("tempdir");
+    let fixture = tmp.path().join("cf_color_scale.xlsx");
+    let exported = tmp.path().join("cf_color_scale_out.xlsx");
+
+    {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name("Sheet1").unwrap();
+        ws.write_number(0, 0, 1.0).unwrap();
+        ws.write_number(1, 0, 5.0).unwrap();
+        ws.write_number(2, 0, 10.0).unwrap();
+        wb.save(&fixture).expect("save");
+    }
+    inject_raw_cfrule(
+        &fixture,
+        "A1:A3",
+        r#"<cfRule type="colorScale" priority="1"><colorScale><cfvo type="min"/><cfvo type="max"/><color rgb="FFF8696B"/><color rgb="FFFCFCFF"/></colorScale></cfRule>"#,
+    );
+
+    let imported = import_xlsx_core(path_str(&fixture)).expect("import");
+    let snapshot_json = imported.handle.snapshot_json.clone().expect("snapshot");
+    let snap: Value = serde_json::from_str(&snapshot_json).expect("parse");
+    let cfs = snap["sheets"]["sheet-1"]["_conditionalFormatting"]
+        .as_array()
+        .expect("_conditionalFormatting present");
+    assert_eq!(cfs.len(), 1, "expected one CF rule");
+    assert_eq!(cfs[0]["type"].as_str(), Some("colorScale"));
+    let raw = cfs[0]["raw"].as_str().expect("raw payload present");
+    assert!(
+        raw.contains("colorScale") && raw.contains("F8696B"),
+        "raw payload should preserve colorScale body, got: {raw}"
+    );
+
+    let export = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
+    assert!(export.success, "export ok: {:?}", export.error);
+
+    // Re-import: verify both the type and a piece of the inner payload
+    // (gradient stop color) survive byte-for-byte.
+    let re = import_xlsx_core(path_str(&exported)).expect("re-import");
+    let re_snap: Value =
+        serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_cfs = re_snap["sheets"]["sheet-1"]["_conditionalFormatting"]
+        .as_array()
+        .expect("CF survives round-trip");
+    assert_eq!(re_cfs.len(), 1);
+    assert_eq!(re_cfs[0]["type"].as_str(), Some("colorScale"));
+    let re_raw = re_cfs[0]["raw"].as_str().expect("raw present on re-import");
+    assert!(
+        re_raw.contains("F8696B"),
+        "color stop preserved on round-trip, got: {re_raw}"
+    );
+
+    // Sanity: the exported sheet XML must carry a <colorScale> element.
+    let sheet_xml = read_sheet1_xml(&exported);
+    assert!(
+        sheet_xml.contains("<colorScale"),
+        "exported sheet1.xml must contain <colorScale>; got:\n{sheet_xml}"
+    );
+}
+
+/// dataBar CF rules use cfvo + color children that rust_xlsxwriter doesn't
+/// model. Round-trip via the same verbatim XML splice path.
+#[test]
+fn data_bar_round_trips() {
+    let tmp = TempDir::new().expect("tempdir");
+    let fixture = tmp.path().join("cf_data_bar.xlsx");
+    let exported = tmp.path().join("cf_data_bar_out.xlsx");
+
+    {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name("Sheet1").unwrap();
+        ws.write_number(0, 0, 1.0).unwrap();
+        ws.write_number(1, 0, 5.0).unwrap();
+        ws.write_number(2, 0, 10.0).unwrap();
+        wb.save(&fixture).expect("save");
+    }
+    inject_raw_cfrule(
+        &fixture,
+        "A1:A3",
+        r#"<cfRule type="dataBar" priority="1"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FF638EC6"/></dataBar></cfRule>"#,
+    );
+
+    let imported = import_xlsx_core(path_str(&fixture)).expect("import");
+    let snapshot_json = imported.handle.snapshot_json.clone().expect("snapshot");
+    let snap: Value = serde_json::from_str(&snapshot_json).expect("parse");
+    let cfs = snap["sheets"]["sheet-1"]["_conditionalFormatting"]
+        .as_array()
+        .expect("CF present");
+    assert_eq!(cfs.len(), 1);
+    assert_eq!(cfs[0]["type"].as_str(), Some("dataBar"));
+    assert!(cfs[0]["raw"].as_str().unwrap().contains("638EC6"));
+
+    let export = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
+    assert!(export.success, "export ok: {:?}", export.error);
+
+    let re = import_xlsx_core(path_str(&exported)).expect("re-import");
+    let re_snap: Value =
+        serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_cfs = re_snap["sheets"]["sheet-1"]["_conditionalFormatting"]
+        .as_array()
+        .expect("CF survives round-trip");
+    assert_eq!(re_cfs.len(), 1);
+    assert_eq!(re_cfs[0]["type"].as_str(), Some("dataBar"));
+    assert!(re_cfs[0]["raw"].as_str().unwrap().contains("638EC6"));
+
+    let sheet_xml = read_sheet1_xml(&exported);
+    assert!(
+        sheet_xml.contains("<dataBar"),
+        "exported sheet1.xml must contain <dataBar>; got:\n{sheet_xml}"
+    );
+}
+
+/// iconSet CF rules carry an `iconSet@iconSet` attribute (e.g.
+/// `3TrafficLights1`) plus per-threshold cfvo children. Same verbatim splice
+/// strategy as colorScale / dataBar.
+#[test]
+fn icon_set_round_trips() {
+    let tmp = TempDir::new().expect("tempdir");
+    let fixture = tmp.path().join("cf_icon_set.xlsx");
+    let exported = tmp.path().join("cf_icon_set_out.xlsx");
+
+    {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name("Sheet1").unwrap();
+        ws.write_number(0, 0, 1.0).unwrap();
+        ws.write_number(1, 0, 5.0).unwrap();
+        ws.write_number(2, 0, 10.0).unwrap();
+        wb.save(&fixture).expect("save");
+    }
+    inject_raw_cfrule(
+        &fixture,
+        "A1:A3",
+        r#"<cfRule type="iconSet" priority="1"><iconSet iconSet="3TrafficLights1"><cfvo type="percent" val="0"/><cfvo type="percent" val="33"/><cfvo type="percent" val="67"/></iconSet></cfRule>"#,
+    );
+
+    let imported = import_xlsx_core(path_str(&fixture)).expect("import");
+    let snapshot_json = imported.handle.snapshot_json.clone().expect("snapshot");
+    let snap: Value = serde_json::from_str(&snapshot_json).expect("parse");
+    let cfs = snap["sheets"]["sheet-1"]["_conditionalFormatting"]
+        .as_array()
+        .expect("CF present");
+    assert_eq!(cfs.len(), 1);
+    assert_eq!(cfs[0]["type"].as_str(), Some("iconSet"));
+    assert!(cfs[0]["raw"].as_str().unwrap().contains("3TrafficLights1"));
+
+    let export = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
+    assert!(export.success, "export ok: {:?}", export.error);
+
+    let re = import_xlsx_core(path_str(&exported)).expect("re-import");
+    let re_snap: Value =
+        serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_cfs = re_snap["sheets"]["sheet-1"]["_conditionalFormatting"]
+        .as_array()
+        .expect("CF survives round-trip");
+    assert_eq!(re_cfs.len(), 1);
+    assert_eq!(re_cfs[0]["type"].as_str(), Some("iconSet"));
+    assert!(re_cfs[0]["raw"].as_str().unwrap().contains("3TrafficLights1"));
+
+    let sheet_xml = read_sheet1_xml(&exported);
+    assert!(
+        sheet_xml.contains("<iconSet"),
+        "exported sheet1.xml must contain <iconSet>; got:\n{sheet_xml}"
+    );
+}
+
+/// Test helper: splice a raw `<cfRule>` element into `sheet1.xml` of an
+/// existing xlsx by wrapping it in a `<conditionalFormatting sqref="...">`
+/// block. Used to hand-craft fixtures for rule types (colorScale / dataBar /
+/// iconSet) that rust_xlsxwriter cannot emit. Inserts the block just before
+/// `</worksheet>`, which Excel accepts even though the strict OOXML schema
+/// wants it before pageMargins/etc.
+fn inject_raw_cfrule(xlsx_path: &PathBuf, sqref: &str, cf_rule_xml: &str) {
+    use std::io::{Cursor, Read, Write};
+
+    let bytes = std::fs::read(xlsx_path).expect("read xlsx");
+    let mut archive =
+        zip::ZipArchive::new(Cursor::new(&bytes)).expect("open xlsx zip");
+
+    let mut sheet_xml = String::new();
+    {
+        let mut entry = archive.by_name("xl/worksheets/sheet1.xml").expect("sheet1.xml");
+        entry.read_to_string(&mut sheet_xml).expect("read sheet xml");
+    }
+
+    let block =
+        format!(r#"<conditionalFormatting sqref="{sqref}">{cf_rule_xml}</conditionalFormatting>"#);
+    // Insert before the first post-CF element that exists, falling back to
+    // </worksheet>. This mirrors the production splice's insertion logic.
+    let candidates = [
+        "<pageMargins",
+        "<pageSetup",
+        "<headerFooter",
+        "</worksheet>",
+    ];
+    let insert_at = candidates
+        .iter()
+        .filter_map(|n| sheet_xml.find(n))
+        .min()
+        .expect("at least </worksheet>");
+    let mut new_sheet = String::with_capacity(sheet_xml.len() + block.len());
+    new_sheet.push_str(&sheet_xml[..insert_at]);
+    new_sheet.push_str(&block);
+    new_sheet.push_str(&sheet_xml[insert_at..]);
+
+    let mut out_buf: Vec<u8> = Vec::with_capacity(bytes.len());
+    {
+        let mut writer = zip::ZipWriter::new(Cursor::new(&mut out_buf));
+        let opts = zip::write::FileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i).expect("entry");
+            let name = entry.name().to_string();
+            writer.start_file(name.clone(), opts).expect("start");
+            if name == "xl/worksheets/sheet1.xml" {
+                writer.write_all(new_sheet.as_bytes()).expect("write");
+            } else {
+                let mut data = Vec::new();
+                entry.read_to_end(&mut data).expect("read");
+                writer.write_all(&data).expect("write");
+            }
+        }
+        writer.finish().expect("zip finish");
+    }
+    std::fs::write(xlsx_path, &out_buf).expect("write xlsx");
+}
+
 /// Style is only emitted as a dxf when the bag has at least one populated
 /// field. A rule with no style (the imported-from-source common case) must
 /// not balloon `<dxfs>`.

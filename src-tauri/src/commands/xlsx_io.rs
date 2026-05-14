@@ -2567,6 +2567,151 @@ fn rewrite_split_panes_in_zip(
     Ok(())
 }
 
+/// Post-save zip rewrite: splice extra `<conditionalFormatting>` blocks into
+/// per-sheet XML for CF rule types rust_xlsxwriter can't emit (colorScale,
+/// dataBar, iconSet). Each entry is one cfRule's verbatim XML keyed by sqref;
+/// rules sharing the same sheet+sqref are coalesced into a single
+/// `<conditionalFormatting sqref="...">...</conditionalFormatting>` element.
+///
+/// Insertion point: per OOXML schema, `<conditionalFormatting>` must precede
+/// `<pageMargins>` / `<pageSetup>` / `<headerFooter>` / `<drawing>` /
+/// `<tableParts>` / `<extLst>` / `</worksheet>`. We find the earliest of
+/// those and inject right before it. If an existing `</conditionalFormatting>`
+/// is present (the typed CF path emitted one) we insert immediately after to
+/// keep the blocks contiguous.
+fn rewrite_extra_cf_in_zip(
+    xlsx_path: &std::path::Path,
+    extras: &[(String, String, String)],
+) -> Result<(), String> {
+    use std::io::{Cursor, Read, Write};
+
+    if extras.is_empty() {
+        return Ok(());
+    }
+
+    let bytes = std::fs::read(xlsx_path).map_err(|e| format!("read xlsx: {e}"))?;
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    let mut archive = zip::ZipArchive::new(Cursor::new(&bytes))
+        .map_err(|e| format!("open xlsx zip: {e}"))?;
+
+    // Group: sheet_name -> Vec<(sqref, raw_cfRule_xml)>
+    let mut by_sheet: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    for (sheet_name, sqref, raw) in extras {
+        by_sheet
+            .entry(sheet_name.clone())
+            .or_default()
+            .push((sqref.clone(), raw.clone()));
+    }
+
+    let mut replacements: HashMap<String, Vec<u8>> = HashMap::new();
+    for (sheet_name, items) in &by_sheet {
+        let Some(entry_path) = sheet_paths.get(sheet_name) else {
+            continue;
+        };
+        let mut xml = String::new();
+        match archive.by_name(entry_path) {
+            Ok(mut e) => {
+                if e.read_to_string(&mut xml).is_err() {
+                    continue;
+                }
+            }
+            Err(_) => continue,
+        }
+
+        // Coalesce by sqref so all cfRules sharing a range live in one
+        // <conditionalFormatting> block (Excel accepts split blocks too, but
+        // a single block keeps the file tidier).
+        let mut by_sqref: Vec<(String, Vec<String>)> = Vec::new();
+        for (sqref, raw) in items {
+            if let Some(slot) = by_sqref.iter_mut().find(|(s, _)| s == sqref) {
+                slot.1.push(raw.clone());
+            } else {
+                by_sqref.push((sqref.clone(), vec![raw.clone()]));
+            }
+        }
+
+        let mut blocks = String::new();
+        for (sqref, raws) in &by_sqref {
+            blocks.push_str(&format!(
+                r#"<conditionalFormatting sqref="{}">"#,
+                encode_xml_text(sqref)
+            ));
+            for r in raws {
+                blocks.push_str(r);
+            }
+            blocks.push_str("</conditionalFormatting>");
+        }
+
+        // Pick insertion point. Prefer right after an existing
+        // </conditionalFormatting>; otherwise before the earliest of the
+        // post-CF elements; otherwise before </worksheet>.
+        let insert_at = if let Some(p) = xml.rfind("</conditionalFormatting>") {
+            Some(p + "</conditionalFormatting>".len())
+        } else {
+            let candidates = [
+                "<pageMargins",
+                "<pageSetup",
+                "<headerFooter",
+                "<rowBreaks",
+                "<colBreaks",
+                "<drawing",
+                "<legacyDrawing",
+                "<tableParts",
+                "<extLst",
+                "</worksheet>",
+            ];
+            candidates
+                .iter()
+                .filter_map(|needle| xml.find(needle))
+                .min()
+        };
+
+        let Some(pos) = insert_at else {
+            continue;
+        };
+        let mut new_xml = String::with_capacity(xml.len() + blocks.len());
+        new_xml.push_str(&xml[..pos]);
+        new_xml.push_str(&blocks);
+        new_xml.push_str(&xml[pos..]);
+        replacements.insert(entry_path.clone(), new_xml.into_bytes());
+    }
+
+    if replacements.is_empty() {
+        return Ok(());
+    }
+
+    let mut out_buf: Vec<u8> = Vec::with_capacity(bytes.len());
+    {
+        let mut writer = zip::ZipWriter::new(Cursor::new(&mut out_buf));
+        let opts = zip::write::FileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for i in 0..archive.len() {
+            let mut entry = archive
+                .by_index(i)
+                .map_err(|e| format!("read entry {i}: {e}"))?;
+            let name = entry.name().to_string();
+            writer
+                .start_file(name.clone(), opts)
+                .map_err(|e| format!("start_file: {e}"))?;
+            if let Some(replacement) = replacements.get(&name) {
+                writer
+                    .write_all(replacement)
+                    .map_err(|e| format!("write: {e}"))?;
+            } else {
+                let mut data = Vec::new();
+                entry
+                    .read_to_end(&mut data)
+                    .map_err(|e| format!("read: {e}"))?;
+                writer.write_all(&data).map_err(|e| format!("write: {e}"))?;
+            }
+        }
+        writer.finish().map_err(|e| format!("zip finish: {e}"))?;
+    }
+
+    std::fs::write(xlsx_path, &out_buf).map_err(|e| format!("write xlsx: {e}"))?;
+    Ok(())
+}
+
 /// Post-save zip rewrite: replace `xl/comments*.xml` entries with our own
 /// correctly-mapped XML to work around rust_xlsxwriter 0.77's author/id
 /// ordering bug.
@@ -2929,6 +3074,13 @@ pub(crate) struct ConditionalFormattingEntry {
     pub percent: bool,
     /// `cfRule@bottom="1"` flag for `top10` rules — switches Top to Bottom.
     pub bottom: bool,
+    /// Verbatim `<cfRule>...</cfRule>` source for rule types that can't be
+    /// reconstructed through rust_xlsxwriter's typed CF API (currently
+    /// `colorScale`, `dataBar`, `iconSet`). Empty for rules that round-trip
+    /// via the typed fields above. When non-empty, the export side splices
+    /// this back into the sheet XML verbatim inside a
+    /// `<conditionalFormatting sqref="...">` block.
+    pub raw: String,
 }
 
 /// Parse one sheet's `<conditionalFormatting>` blocks. Unlike data validations
@@ -2991,6 +3143,30 @@ fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEnt
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false);
 
+            // For rule types we don't reconstruct via rust_xlsxwriter
+            // (colorScale / dataBar / iconSet — all gradient/visual rules),
+            // stash the entire <cfRule>...</cfRule> XML so the export side
+            // can splice it back verbatim. This preserves the rule end-to-end
+            // without needing to model its inner cfvo/color/dataBar/iconSet
+            // schemas. Authoring these isn't a goal — preservation is.
+            if matches!(rule_type.as_str(), "colorScale" | "dataBar" | "iconSet") {
+                out.push(ConditionalFormattingEntry {
+                    sqref: sqref.clone(),
+                    rule_type,
+                    operator: String::new(),
+                    formula1: String::new(),
+                    formula2: String::new(),
+                    text: String::new(),
+                    priority,
+                    stop_if_true,
+                    rank: 0,
+                    percent: false,
+                    bottom: false,
+                    raw: rule_el.clone(),
+                });
+                continue;
+            }
+
             let rule_body = if rule_head_end < rule_el.len() {
                 &rule_el[rule_head_end..]
             } else {
@@ -3040,6 +3216,7 @@ fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEnt
                 rank,
                 percent,
                 bottom,
+                raw: String::new(),
             });
         }
     }
@@ -4059,6 +4236,12 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                         if e.bottom {
                             obj.insert("bottom".into(), Value::Bool(true));
                         }
+                        // Verbatim cfRule XML for colorScale / dataBar /
+                        // iconSet — the export side will re-emit this inside
+                        // a fresh `<conditionalFormatting sqref="...">` block.
+                        if !e.raw.is_empty() {
+                            obj.insert("raw".into(), Value::String(e.raw.clone()));
+                        }
                         Value::Object(obj)
                     })
                     .collect();
@@ -4449,6 +4632,11 @@ pub fn export_xlsx_core(
     // overwrite the `<pane>` attributes (xSplit / ySplit pixel offsets +
     // `state="split"`).
     let mut sheets_with_split_panes: Vec<SplitPaneSpec> = Vec::new();
+    // Captured per-sheet raw `<cfRule>` XML for CF rule types that
+    // rust_xlsxwriter doesn't expose typed APIs for (colorScale / dataBar /
+    // iconSet). Each tuple is `(safe_sheet_name, sqref, raw_cfRule_xml)`.
+    // `rewrite_extra_cf_in_zip` splices these into the saved sheet XML.
+    let mut sheets_with_extra_cf: Vec<(String, String, String)> = Vec::new();
 
     let build_result: Result<(), String> = (|| -> Result<(), String> {
         for (i, sheet_id_val) in sheet_order.iter().enumerate() {
@@ -4793,6 +4981,27 @@ pub fn export_xlsx_core(
                 .and_then(|v| v.as_array())
             {
                 for entry in cf_arr {
+                    // colorScale / dataBar / iconSet round-trip via a
+                    // verbatim XML splice rather than rust_xlsxwriter's typed
+                    // CF API (which doesn't cover them). Stash and skip; the
+                    // post-write pass injects a fresh `<conditionalFormatting>`
+                    // block. Other rule types fall through to the typed path.
+                    let raw = entry.get("raw").and_then(|v| v.as_str()).unwrap_or("");
+                    if !raw.is_empty() {
+                        let sqref = entry
+                            .get("sqref")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if !sqref.trim().is_empty() {
+                            sheets_with_extra_cf.push((
+                                safe_name.clone(),
+                                sqref,
+                                raw.to_string(),
+                            ));
+                        }
+                        continue;
+                    }
                     let _ = apply_conditional_format_from_snapshot(worksheet, entry);
                 }
             }
@@ -5158,6 +5367,23 @@ pub fn export_xlsx_core(
                 severity: "blocking".to_string(),
                 code: "XLSX_WRITE_FAILED".to_string(),
                 message: format!("split-pane rewrite failed: {e}"),
+                affected_sheets: None,
+            }],
+            error: Some(format!("XLSX_WRITE_FAILED: {e}")),
+        });
+    }
+
+    // Post-save: splice in raw `<cfRule>` blocks for CF types
+    // (colorScale / dataBar / iconSet) that rust_xlsxwriter doesn't model.
+    if let Err(e) = rewrite_extra_cf_in_zip(&tmp_path, &sheets_with_extra_cf) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Ok(ExportResult {
+            success: false,
+            path: path.clone(),
+            warnings: vec![CompatibilityWarning {
+                severity: "blocking".to_string(),
+                code: "XLSX_WRITE_FAILED".to_string(),
+                message: format!("extra CF rewrite failed: {e}"),
                 affected_sheets: None,
             }],
             error: Some(format!("XLSX_WRITE_FAILED: {e}")),

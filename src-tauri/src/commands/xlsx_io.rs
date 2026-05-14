@@ -3553,7 +3553,11 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         sheets_map.insert(sheet_id, sheet_obj);
     }
 
-    let snapshot = json!({
+    // Chart-preservation: capture chart/drawing/theme parts byte-for-byte so
+    // they survive a save round-trip even though we don't render them.
+    let preserved_parts = parse_xlsx_preserved_parts(&path);
+
+    let mut snapshot = json!({
         "id": workbook_id,
         "name": "Imported Workbook",
         "appVersion": "0.1.0",
@@ -3563,6 +3567,9 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         "sheets": Value::Object(sheets_map),
         "namedRanges": named_ranges,
     });
+    if let Some(pp) = preserved_parts {
+        snapshot["_preservedParts"] = pp;
+    }
 
     let snapshot_json = serde_json::to_string(&snapshot).map_err(|e| e.to_string())?;
 
@@ -3572,7 +3579,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         severity: "info".to_string(),
         code: "XLSX_POC_IMPORT".to_string(),
         message:
-            "xlsx PoC import: charts and pivot tables are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights + rich text + data validations + conditional formatting rules are preserved)"
+            "xlsx PoC import: pivot tables are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights + rich text + data validations + conditional formatting + charts (blob-preserved) are preserved)"
                 .to_string(),
         affected_sheets: None,
     });
@@ -4292,6 +4299,17 @@ pub fn export_xlsx_core(
         });
     }
 
+    // Chart-preservation: if the snapshot carried `_preservedParts`, reopen
+    // the temp xlsx and splice the preserved chart/drawing/theme parts back
+    // in. Best-effort: a failure here leaves the rust_xlsxwriter-written file
+    // in place so the user at least gets their cells + styles.
+    let mut chart_injection_failed: Option<String> = None;
+    if let Some(preserved) = snapshot.get("_preservedParts") {
+        if let Err(e) = inject_preserved_parts(&tmp_path, preserved, sheet_order.len()) {
+            chart_injection_failed = Some(e);
+        }
+    }
+
     if let Err(e) = std::fs::rename(&tmp_path, &target_path) {
         let msg = e.to_string();
         let _ = std::fs::remove_file(&tmp_path);
@@ -4314,10 +4332,21 @@ pub fn export_xlsx_core(
         severity: "info".to_string(),
         code: "XLSX_POC_EXPORT".to_string(),
         message: format!(
-            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Charts and pivot tables are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats + rich text + data validations + conditional formatting rules are preserved)."
+            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Pivot tables are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats + rich text + data validations + conditional formatting + charts (blob-preserved) are preserved)."
         ),
         affected_sheets: None,
     });
+
+    if let Some(err) = chart_injection_failed {
+        warnings.push(CompatibilityWarning {
+            severity: "warning".to_string(),
+            code: "XLSX_CHART_INJECTION_FAILED".to_string(),
+            message: format!(
+                "Preserved chart parts could not be re-injected into the saved file: {err}"
+            ),
+            affected_sheets: None,
+        });
+    }
 
     if !sanitized_names.is_empty() {
         warnings.push(CompatibilityWarning {
@@ -4359,4 +4388,445 @@ pub fn export_xlsx_core(
         warnings,
         error: None,
     })
+}
+
+// ============================================================================
+// Chart preservation (blob-level).
+//
+// Charts in xlsx are spread across several parts (`xl/charts/*`,
+// `xl/drawings/*`, their `_rels`, `xl/theme/*`) plus a per-sheet `<drawing>`
+// reference that lives inside the worksheet XML. Rendering them is out of
+// scope for the PoC — instead we preserve every related part byte-for-byte
+// in the snapshot and inject it back on export so the saved file still
+// carries its charts.
+//
+// On import: `parse_xlsx_preserved_parts` walks the source zip, base64-encodes
+// every preserved part under a single JSON object keyed by zip entry path,
+// and records each sheet's `<drawing r:id="..."/>` element + the relationship
+// target it points at. The whole thing is stamped into the snapshot under
+// `_preservedParts`.
+//
+// On export: after `rust_xlsxwriter` writes the new xlsx to `tmp_path`,
+// `inject_preserved_parts` reopens that zip and rewrites it with every
+// preserved blob added, the `[Content_Types].xml` overrides merged in, and
+// a `<drawing>` ref plus `_rels/sheetN.xml.rels` inserted into the matching
+// (by sheet-order position) worksheet.
+//
+// Limits:
+//   - Per-part cap: 16 MiB.
+//   - Aggregate cap: 32 MiB (defense against a maliciously crafted file).
+//   - Only the parts listed in `PRESERVED_PREFIXES` are captured.
+// ============================================================================
+
+const PRESERVED_PART_SIZE_CAP: usize = 16 * 1024 * 1024;
+const PRESERVED_TOTAL_SIZE_CAP: usize = 32 * 1024 * 1024;
+
+/// Path prefixes captured verbatim from the source xlsx. Each entry whose
+/// name starts with one of these is base64-encoded into the snapshot.
+const PRESERVED_PREFIXES: &[&str] = &[
+    "xl/charts/",
+    "xl/drawings/",
+    "xl/theme/",
+];
+
+/// Minimal base64 encoder — avoids adding a crate dependency for a single
+/// internal use. Standard RFC 4648 alphabet, with `=` padding.
+fn b64_encode(input: &[u8]) -> String {
+    const ALPHA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(((input.len() + 2) / 3) * 4);
+    let mut i = 0;
+    while i + 3 <= input.len() {
+        let n = ((input[i] as u32) << 16) | ((input[i + 1] as u32) << 8) | input[i + 2] as u32;
+        out.push(ALPHA[((n >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHA[((n >> 12) & 0x3f) as usize] as char);
+        out.push(ALPHA[((n >> 6) & 0x3f) as usize] as char);
+        out.push(ALPHA[(n & 0x3f) as usize] as char);
+        i += 3;
+    }
+    let rem = input.len() - i;
+    if rem == 1 {
+        let n = (input[i] as u32) << 16;
+        out.push(ALPHA[((n >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHA[((n >> 12) & 0x3f) as usize] as char);
+        out.push('=');
+        out.push('=');
+    } else if rem == 2 {
+        let n = ((input[i] as u32) << 16) | ((input[i + 1] as u32) << 8);
+        out.push(ALPHA[((n >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHA[((n >> 12) & 0x3f) as usize] as char);
+        out.push(ALPHA[((n >> 6) & 0x3f) as usize] as char);
+        out.push('=');
+    }
+    out
+}
+
+fn b64_decode(input: &str) -> Option<Vec<u8>> {
+    fn decode_char(b: u8) -> Option<u8> {
+        match b {
+            b'A'..=b'Z' => Some(b - b'A'),
+            b'a'..=b'z' => Some(b - b'a' + 26),
+            b'0'..=b'9' => Some(b - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let bytes: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+    if bytes.len() % 4 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+    let mut i = 0;
+    while i < bytes.len() {
+        let b0 = decode_char(bytes[i])?;
+        let b1 = decode_char(bytes[i + 1])?;
+        let c2 = bytes[i + 2];
+        let c3 = bytes[i + 3];
+        let n0 = (b0 as u32) << 18 | (b1 as u32) << 12;
+        if c2 == b'=' {
+            out.push((n0 >> 16) as u8);
+        } else {
+            let b2 = decode_char(c2)?;
+            let n = n0 | (b2 as u32) << 6;
+            if c3 == b'=' {
+                out.push((n >> 16) as u8);
+                out.push((n >> 8) as u8);
+            } else {
+                let b3 = decode_char(c3)?;
+                let n = n | b3 as u32;
+                out.push((n >> 16) as u8);
+                out.push((n >> 8) as u8);
+                out.push(n as u8);
+            }
+        }
+        i += 4;
+    }
+    Some(out)
+}
+
+/// Walk the source xlsx zip and return preserved parts + per-sheet drawing
+/// refs. Returns `None` when there's nothing to preserve so callers can skip
+/// stamping an empty `_preservedParts` block into the snapshot.
+pub(crate) fn parse_xlsx_preserved_parts(path: &str) -> Option<Value> {
+    use std::fs::File;
+    use zip::ZipArchive;
+
+    let file = File::open(path).ok()?;
+    let mut archive = ZipArchive::new(file).ok()?;
+
+    let mut parts: Map<String, Value> = Map::new();
+    let mut total_size: usize = 0;
+
+    // Pass 1: collect all preserved blobs (charts, drawings, theme, and their
+    // _rels). The `_rels` subdirs live UNDER each prefix already, so the
+    // prefix check is sufficient.
+    for i in 0..archive.len() {
+        let mut entry = match archive.by_index(i) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let name = entry.name().to_string();
+        let matches = PRESERVED_PREFIXES.iter().any(|p| name.starts_with(p));
+        if !matches {
+            continue;
+        }
+        // Directory entries (rare but legal) — skip.
+        if name.ends_with('/') {
+            continue;
+        }
+        let size = entry.size() as usize;
+        if size > PRESERVED_PART_SIZE_CAP {
+            continue;
+        }
+        if total_size.saturating_add(size) > PRESERVED_TOTAL_SIZE_CAP {
+            break;
+        }
+        let mut buf = Vec::with_capacity(size);
+        if std::io::Read::read_to_end(&mut entry, &mut buf).is_err() {
+            continue;
+        }
+        total_size += buf.len();
+        parts.insert(name, Value::String(b64_encode(&buf)));
+    }
+
+    if parts.is_empty() {
+        return None;
+    }
+
+    // Pass 2: capture per-sheet drawing references. For each worksheet, pull
+    // its `<drawing r:id="..."/>` element from the body and the corresponding
+    // target from its `_rels/sheetN.xml.rels`. Indexed by position in
+    // `workbook.xml`'s `<sheets>` list so we can re-link on export — the
+    // export side uses the snapshot's `sheetOrder` position.
+    let bytes = std::fs::read(path).ok()?;
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    // Reuse the canonical ordering from workbook.xml (calamine returns sheets
+    // in this order too).
+    let workbook_xml = {
+        let mut s = String::new();
+        if let Ok(mut e) = archive.by_name("xl/workbook.xml") {
+            let _ = std::io::Read::read_to_string(&mut e, &mut s);
+        }
+        s
+    };
+    let ordered_sheets = parse_workbook_sheets(&workbook_xml);
+
+    let mut sheet_refs: Vec<Value> = Vec::new();
+    for (sheet_name, _rid) in &ordered_sheets {
+        let Some(sheet_part) = sheet_paths.get(sheet_name) else {
+            sheet_refs.push(Value::Null);
+            continue;
+        };
+        // Read the worksheet body to find a `<drawing r:id="rdN"/>` element.
+        let mut body = String::new();
+        if let Ok(mut entry) = archive.by_name(sheet_part) {
+            let _ = std::io::Read::read_to_string(&mut entry, &mut body);
+        }
+        let drawing_rid: Option<String> = body
+            .find("<drawing")
+            .map(|s| &body[s..])
+            .and_then(|chunk| chunk.find("/>").map(|e| &chunk[..e]))
+            .and_then(|tag| parse_attr(tag, "r:id"));
+
+        // Look up the rId in the per-sheet rels.
+        let sheet_rels_path = sheet_part_to_rels_path(sheet_part);
+        let mut sheet_rels_xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&sheet_rels_path) {
+            let _ = std::io::Read::read_to_string(&mut entry, &mut sheet_rels_xml);
+        }
+        let rid_to_target = parse_rels(&sheet_rels_xml);
+
+        let drawing_target = drawing_rid
+            .as_ref()
+            .and_then(|rid| rid_to_target.get(rid).cloned());
+
+        if drawing_rid.is_some() && drawing_target.is_some() {
+            sheet_refs.push(json!({
+                "drawingRid": drawing_rid,
+                "drawingTarget": drawing_target,
+            }));
+        } else {
+            sheet_refs.push(Value::Null);
+        }
+    }
+
+    // Also preserve the source [Content_Types].xml so we can pluck out the
+    // chart/drawing Override entries on export.
+    let mut content_types_xml = String::new();
+    if let Ok(mut e) = archive.by_name("[Content_Types].xml") {
+        let _ = std::io::Read::read_to_string(&mut e, &mut content_types_xml);
+    }
+
+    Some(json!({
+        "parts": Value::Object(parts),
+        "sheetRefs": sheet_refs,
+        "contentTypes": content_types_xml,
+    }))
+}
+
+/// Map a worksheet entry path to its sibling `_rels` path.
+/// e.g. `"xl/worksheets/sheet1.xml"` → `"xl/worksheets/_rels/sheet1.xml.rels"`.
+fn sheet_part_to_rels_path(sheet_part: &str) -> String {
+    if let Some((dir, file)) = sheet_part.rsplit_once('/') {
+        format!("{dir}/_rels/{file}.rels")
+    } else {
+        format!("_rels/{sheet_part}.rels")
+    }
+}
+
+/// Reopen the freshly-written xlsx zip at `tmp_path`, append every preserved
+/// part, inject the per-sheet drawing references, and merge content-type
+/// overrides. Best-effort: any failure logs (silent in tests) and leaves the
+/// original file untouched.
+pub(crate) fn inject_preserved_parts(
+    tmp_path: &std::path::Path,
+    preserved: &Value,
+    sheet_order_len: usize,
+) -> Result<(), String> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::{write::FileOptions, ZipArchive, ZipWriter};
+
+    let parts = preserved
+        .get("parts")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| "preserved: missing parts".to_string())?;
+    let sheet_refs = preserved
+        .get("sheetRefs")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let original_content_types = preserved
+        .get("contentTypes")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let original_bytes = fs::read(tmp_path).map_err(|e| e.to_string())?;
+    let mut src = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+
+    let mut out_buf: Vec<u8> = Vec::with_capacity(original_bytes.len() + 4096);
+    {
+        let mut out = ZipWriter::new(Cursor::new(&mut out_buf));
+        let opts: FileOptions = FileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        // Track entries we will skip on copy because we're rewriting them.
+        // Up to `sheet_order_len` sheet XMLs may need a `<drawing>` injection,
+        // and a matching `_rels` file may need to be added/replaced.
+        let mut sheet_to_drawing: HashMap<usize, (String, String)> = HashMap::new(); // sheet_idx → (rId, target)
+        for (idx, val) in sheet_refs.iter().enumerate() {
+            if idx >= sheet_order_len {
+                break;
+            }
+            let Some(obj) = val.as_object() else { continue };
+            let Some(rid) = obj.get("drawingRid").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(target) = obj.get("drawingTarget").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            sheet_to_drawing.insert(idx, (rid.to_string(), target.to_string()));
+        }
+
+        // We rewrite [Content_Types].xml and sheet XMLs / rels we touch.
+        let mut skip_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+        skip_names.insert("[Content_Types].xml".to_string());
+        for idx in sheet_to_drawing.keys() {
+            let n = idx + 1;
+            skip_names.insert(format!("xl/worksheets/sheet{n}.xml"));
+            skip_names.insert(format!("xl/worksheets/_rels/sheet{n}.xml.rels"));
+        }
+        // Also skip any of the preserved-part target names so a stale empty
+        // copy from rust_xlsxwriter (unlikely, but defensive) doesn't survive.
+        for name in parts.keys() {
+            skip_names.insert(name.clone());
+        }
+
+        // Copy all entries from rust_xlsxwriter's output, skipping ones we
+        // intend to rewrite.
+        for i in 0..src.len() {
+            let mut entry = src.by_index(i).map_err(|e| e.to_string())?;
+            let name = entry.name().to_string();
+            if skip_names.contains(&name) {
+                continue;
+            }
+            let mut buf = Vec::with_capacity(entry.size() as usize);
+            std::io::Read::read_to_end(&mut entry, &mut buf).map_err(|e| e.to_string())?;
+            out.start_file(&name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, &buf).map_err(|e| e.to_string())?;
+        }
+
+        // Inject preserved parts (charts, drawings, theme, their rels).
+        for (name, val) in parts.iter() {
+            let Some(s) = val.as_str() else { continue };
+            let Some(bytes) = b64_decode(s) else { continue };
+            out.start_file(name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, &bytes).map_err(|e| e.to_string())?;
+        }
+
+        // Rewrite each affected worksheet XML with a `<drawing r:id="..."/>`
+        // tail. Also write a fresh `_rels/sheetN.xml.rels` carrying that rId.
+        // We must reopen src fresh because we already exhausted the iterator
+        // above on the borrow that got moved into the loop. Re-create archive.
+        let mut src2 =
+            ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+        for (idx, (rid, target)) in &sheet_to_drawing {
+            let n = idx + 1;
+            let sheet_name = format!("xl/worksheets/sheet{n}.xml");
+            let mut sheet_xml = String::new();
+            if let Ok(mut e) = src2.by_name(&sheet_name) {
+                let _ = std::io::Read::read_to_string(&mut e, &mut sheet_xml);
+            }
+            if sheet_xml.is_empty() {
+                continue;
+            }
+            // Inject `<drawing r:id="..."/>` just before `</worksheet>`.
+            let injected = if let Some(pos) = sheet_xml.rfind("</worksheet>") {
+                let mut s = String::with_capacity(sheet_xml.len() + 64);
+                s.push_str(&sheet_xml[..pos]);
+                s.push_str(&format!("<drawing r:id=\"{rid}\"/>"));
+                s.push_str(&sheet_xml[pos..]);
+                s
+            } else {
+                sheet_xml
+            };
+            out.start_file(&sheet_name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, injected.as_bytes()).map_err(|e| e.to_string())?;
+
+            // Compose a minimal `_rels/sheetN.xml.rels` with just the drawing
+            // relationship. If rust_xlsxwriter wrote one with other rels
+            // (hyperlinks, etc.) we lose them — acceptable for the PoC.
+            let rels = format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n\
+                 <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n\
+                 <Relationship Id=\"{rid}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"{target}\"/>\n\
+                 </Relationships>"
+            );
+            let rels_name = format!("xl/worksheets/_rels/sheet{n}.xml.rels");
+            out.start_file(&rels_name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, rels.as_bytes()).map_err(|e| e.to_string())?;
+        }
+
+        // Rewrite [Content_Types].xml: pull the new (rust_xlsxwriter-emitted)
+        // body, then splice in any chart/drawing Override entries from the
+        // original. We don't need to dedupe perfectly — Excel is tolerant of
+        // duplicate Overrides as long as content types agree.
+        let mut new_ct = String::new();
+        if let Ok(mut e) = src.by_name("[Content_Types].xml") {
+            let _ = std::io::Read::read_to_string(&mut e, &mut new_ct);
+        }
+        let merged_ct = merge_content_type_overrides(&new_ct, original_content_types);
+        out.start_file("[Content_Types].xml", opts)
+            .map_err(|e| e.to_string())?;
+        std::io::Write::write_all(&mut out, merged_ct.as_bytes()).map_err(|e| e.to_string())?;
+
+        out.finish().map_err(|e| e.to_string())?;
+    }
+
+    fs::write(tmp_path, &out_buf).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Splice chart/drawing-related `<Override>` entries from `original_ct` into
+/// `new_ct` so the resulting `[Content_Types].xml` advertises the parts we
+/// just injected. Overrides whose PartName already appears in `new_ct` are
+/// skipped to keep the file deterministic.
+fn merge_content_type_overrides(new_ct: &str, original_ct: &str) -> String {
+    // Pull every <Override .../> from the original, keep only the ones whose
+    // PartName matches a preserved prefix.
+    let mut adds: Vec<String> = Vec::new();
+    let mut cursor = 0usize;
+    while let Some(rel) = original_ct[cursor..].find("<Override") {
+        let start = cursor + rel;
+        let rest = &original_ct[start..];
+        let Some(end) = rest.find("/>") else { break };
+        let tag = &original_ct[start..start + end + 2];
+        cursor = start + end + 2;
+        let part_name = parse_attr(tag, "PartName").unwrap_or_default();
+        // Strip leading slash to compare against preserved keys.
+        let normalized = part_name.trim_start_matches('/');
+        let keep = PRESERVED_PREFIXES.iter().any(|p| normalized.starts_with(p));
+        if !keep {
+            continue;
+        }
+        if new_ct.contains(&format!("PartName=\"{part_name}\"")) {
+            continue;
+        }
+        adds.push(tag.to_string());
+    }
+    if adds.is_empty() {
+        return new_ct.to_string();
+    }
+    // Inject right before the closing </Types>.
+    if let Some(pos) = new_ct.rfind("</Types>") {
+        let mut out = String::with_capacity(new_ct.len() + adds.iter().map(|s| s.len()).sum::<usize>() + 16);
+        out.push_str(&new_ct[..pos]);
+        for tag in &adds {
+            out.push_str(tag);
+        }
+        out.push_str(&new_ct[pos..]);
+        out
+    } else {
+        new_ct.to_string()
+    }
 }

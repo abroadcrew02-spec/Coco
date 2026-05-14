@@ -43,6 +43,7 @@ import DataValidationDialog, { type DataValidationEntry } from "./DataValidation
 import ConditionalFormattingDialog, { type CfRule } from "./ConditionalFormattingDialog";
 import InsertHyperlinkDialog, { type HyperlinkFormValue } from "./InsertHyperlinkDialog";
 import InsertCommentDialog, { type CommentEntry } from "./InsertCommentDialog";
+import NumberFormatDialog, { type NumberFormatValue } from "./NumberFormatDialog";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -126,6 +127,19 @@ export default function EditorScreen() {
     sheetId: string;
     cellRef: string;
     existing: CommentEntry | null;
+  } | null>(null);
+  // Number-format dialog state: null while closed. Captures the active sheet
+  // + the bounding rows/cols of the selection (inclusive) at open time, plus
+  // a human-readable range label and the format code of the anchor cell for
+  // the dialog to pre-select a matching preset.
+  const [numFmtDialog, setNumFmtDialog] = useState<{
+    sheetId: string;
+    startRow: number;
+    endRow: number;
+    startCol: number;
+    endCol: number;
+    rangeLabel: string;
+    initialCode: string;
   } | null>(null);
 
   // Read all named ranges from the live Univer workbook via the facade
@@ -507,6 +521,126 @@ export default function EditorScreen() {
     [currentSnapshotJson, updateSnapshot],
   );
 
+  // Number-format dialog plumbing. Captures the active selection's bounding
+  // rows/cols + the anchor cell's existing `_fmt` (so the dialog can pre-select
+  // a preset) and stashes them in state. We pin coords at open time so the
+  // user can confirm later even if focus moves.
+  const openNumberFormatDialog = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    const sheetName = sheet.getSheetName();
+    let startRow = 0;
+    let endRow = 0;
+    let startCol = 0;
+    let endCol = 0;
+    let rangeLabel = `${sheetName}!A1`;
+    try {
+      const sel = sheet.getSelection();
+      const range = sel?.getActiveRange();
+      if (range) {
+        startRow = range.getRow();
+        startCol = range.getColumn();
+        // Univer's facade only exposes width/height on FRange — derive the
+        // end coords from the width/height so we cover multi-cell selections.
+        const height = (range as unknown as { getHeight?: () => number }).getHeight?.() ?? 1;
+        const width = (range as unknown as { getWidth?: () => number }).getWidth?.() ?? 1;
+        endRow = startRow + Math.max(0, height - 1);
+        endCol = startCol + Math.max(0, width - 1);
+        rangeLabel = `${sheetName}!${range.getA1Notation()}`;
+      }
+    } catch {
+      // Best-effort: fall back to A1 single cell.
+    }
+
+    // Read existing _fmt on the anchor cell, if any, from the live snapshot.
+    let initialCode = "";
+    if (currentSnapshotJson) {
+      try {
+        const snap = JSON.parse(currentSnapshotJson) as {
+          sheets?: Record<
+            string,
+            { cellData?: Record<string, Record<string, { _fmt?: string }>> }
+          >;
+        };
+        const cell = snap.sheets?.[sheetId]?.cellData?.[String(startRow)]?.[String(startCol)];
+        if (cell && typeof cell._fmt === "string") initialCode = cell._fmt;
+      } catch {
+        // Malformed snapshot — leave initialCode empty so "General" is picked.
+      }
+    }
+    setNumFmtDialog({
+      sheetId,
+      startRow,
+      endRow,
+      startCol,
+      endCol,
+      rangeLabel,
+      initialCode,
+    });
+  }, [currentSnapshotJson]);
+
+  // Apply a format code to every cell in the captured selection by walking
+  // the snapshot directly: read → mutate cellData[r][c]._fmt → write back via
+  // updateSnapshot. We use the snapshot path because Univer 0.5.x's facade
+  // exposes setNumberFormat only via the optional @univerjs/sheets-numfmt
+  // plugin, which Coco doesn't register; the round-trip in xlsx_io.rs is
+  // already keyed off the per-cell `_fmt` field, so this is the simplest
+  // path that preserves the format through save/load.
+  const applyNumberFormat = useCallback(
+    (value: NumberFormatValue) => {
+      if (!numFmtDialog) return;
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      // Re-derive the snapshot from Univer (not the cached JSON) so we don't
+      // clobber edits the user made while the dialog was open.
+      const snapshot = workbook.save() as unknown as {
+        sheets?: Record<
+          string,
+          {
+            cellData?: Record<
+              string,
+              Record<string, Record<string, unknown> | undefined>
+            >;
+          }
+        >;
+      };
+      const sheetObj = snapshot.sheets?.[numFmtDialog.sheetId];
+      if (!sheetObj) return;
+      if (!sheetObj.cellData) sheetObj.cellData = {};
+      const cellData = sheetObj.cellData;
+      const code = value.code.trim();
+      for (let r = numFmtDialog.startRow; r <= numFmtDialog.endRow; r++) {
+        const rowKey = String(r);
+        if (!cellData[rowKey]) cellData[rowKey] = {};
+        const row = cellData[rowKey];
+        for (let c = numFmtDialog.startCol; c <= numFmtDialog.endCol; c++) {
+          const colKey = String(c);
+          const existing = row[colKey];
+          if (code) {
+            // Create the cell if it didn't exist (formatting a blank cell is
+            // legitimate — Excel keeps the style on empty cells too).
+            const cell = existing ?? {};
+            cell._fmt = code;
+            row[colKey] = cell;
+          } else if (existing) {
+            // Empty code means "General" → drop the _fmt key entirely so the
+            // round-trip stays clean (Rust side omits unset formats).
+            delete existing._fmt;
+          }
+        }
+      }
+      updateSnapshot(JSON.stringify(snapshot));
+    },
+    [numFmtDialog, updateSnapshot],
+  );
+
   useAutoSave();
 
   // Keyboard shortcuts (req 4.6): Ctrl+S / Cmd+S = save; Ctrl+Shift+S / Cmd+Shift+S = save as.
@@ -538,9 +672,22 @@ export default function EditorScreen() {
         // Shift+F2 is Excel's convention for "Insert / Edit Cell Comment".
         e.preventDefault();
         openCommentDialog();
+      } else if (mod && !e.shiftKey && e.key === "1") {
+        // Ctrl+1 / Cmd+1 — Excel's "Format Cells" dialog. We narrow it to the
+        // Number Format dialog for the PoC.
+        e.preventDefault();
+        openNumberFormatDialog();
       }
     },
-    [save, promptSaveAs, openNamedRangesDialog, openCfDialog, openHyperlinkDialog, openCommentDialog]
+    [
+      save,
+      promptSaveAs,
+      openNamedRangesDialog,
+      openCfDialog,
+      openHyperlinkDialog,
+      openCommentDialog,
+      openNumberFormatDialog,
+    ]
   );
 
   const runCsvExport = useCallback(
@@ -812,6 +959,15 @@ export default function EditorScreen() {
           <button
             type="button"
             className="toolbar-btn"
+            onClick={openNumberFormatDialog}
+            title="選択範囲の表示形式を変更 (Ctrl+1)"
+            aria-label="表示形式"
+          >
+            🔢 表示形式
+          </button>
+          <button
+            type="button"
+            className="toolbar-btn"
             onClick={requestSettings}
             title="設定（自動保存間隔など）"
             aria-label="設定"
@@ -989,6 +1145,14 @@ export default function EditorScreen() {
           onApply={(entry) => applyComment(commentDialog.sheetId, entry)}
           onDelete={() => deleteComment(commentDialog.sheetId, commentDialog.cellRef)}
           onClose={() => setCommentDialog(null)}
+        />
+      )}
+      {numFmtDialog && (
+        <NumberFormatDialog
+          rangeLabel={numFmtDialog.rangeLabel}
+          initialCode={numFmtDialog.initialCode}
+          onApply={applyNumberFormat}
+          onClose={() => setNumFmtDialog(null)}
         />
       )}
       {warningsDialog === "import" && (

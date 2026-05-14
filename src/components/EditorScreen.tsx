@@ -60,6 +60,7 @@ import InsertImageDialog, {
   type ImagePickResult,
 } from "./InsertImageDialog";
 import SortDialog, { type SortFormValue } from "./SortDialog";
+import SheetTabColorDialog from "./SheetTabColorDialog";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -177,6 +178,15 @@ export default function EditorScreen() {
   const [sortDialog, setSortDialog] = useState<{
     sheetId: string;
     range: string;
+  } | null>(null);
+  // Tab-color dialog state. Captures the active sheet id + name + the
+  // currently-applied color at open time so the dialog can preselect the
+  // matching swatch and so the apply callback writes to a stable target
+  // (mirrors the sheet-protection / number-format pinning pattern).
+  const [tabColorDialog, setTabColorDialog] = useState<{
+    sheetId: string;
+    sheetName: string;
+    initialColor: string | null;
   } | null>(null);
 
   // Read all named ranges from the live Univer workbook via the facade
@@ -558,6 +568,54 @@ export default function EditorScreen() {
     }
     updateSnapshot(JSON.stringify(fresh));
   }, [updateSnapshot]);
+
+  // Open the tab-color dialog targeting the active sheet. We re-derive the
+  // snapshot from Univer so the dialog sees the current `_tabColor` even if
+  // it was just changed in another flow. Display name comes from the facade.
+  const openTabColorDialog = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    const activeSheet = workbook.getActiveSheet();
+    if (!activeSheet) return;
+    const sheetId = activeSheet.getSheetId();
+    const sheetName = activeSheet.getSheetName();
+    let initialColor: string | null = null;
+    const fresh = workbook.save() as unknown as {
+      sheets?: Record<string, { _tabColor?: string }>;
+    };
+    const raw = fresh.sheets?.[sheetId]?._tabColor;
+    if (typeof raw === "string" && raw.trim()) {
+      initialColor = raw.trim();
+    }
+    setTabColorDialog({ sheetId, sheetName, initialColor });
+  }, []);
+
+  // Apply (or clear) the chosen tab color to the snapshot. Sets
+  // `sheets.<id>._tabColor = "#RRGGBB"` on apply, or deletes the key when the
+  // user picks "remove color" (keeps the round-trip clean — Rust omits the
+  // field when absent). Mirrors the toggleSheetProtection write pattern.
+  const applyTabColor = useCallback(
+    (sheetId: string, color: string | null) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as {
+        sheets?: Record<string, { _tabColor?: string }>;
+      };
+      if (!fresh.sheets || !fresh.sheets[sheetId]) return;
+      const sheet = fresh.sheets[sheetId];
+      if (color === null) {
+        delete sheet._tabColor;
+      } else {
+        sheet._tabColor = color;
+      }
+      updateSnapshot(JSON.stringify(fresh));
+    },
+    [updateSnapshot],
+  );
 
   // Reactive flag: is the active sheet currently protected per the snapshot?
   // Derived from `currentSnapshotJson` so the button label flips immediately
@@ -1520,6 +1578,16 @@ export default function EditorScreen() {
             >
               {activeSheetProtected ? "🔓 解除" : "🔒 保護"}
             </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={openTabColorDialog}
+              title="シートタブの色を変更"
+              aria-label="シートタブの色"
+              data-testid="sheet-tab-color"
+            >
+              🎨 タブ色
+            </button>
           </div>
           <span className="toolbar-divider" aria-hidden="true" />
           {/* 挿入系: 名前付き範囲 / グラフ / 画像挿入 */}
@@ -1772,6 +1840,14 @@ export default function EditorScreen() {
           initialRange={sortDialog.range}
           onApply={applySort}
           onClose={() => setSortDialog(null)}
+        />
+      )}
+      {tabColorDialog && (
+        <SheetTabColorDialog
+          sheetName={tabColorDialog.sheetName}
+          initialColor={tabColorDialog.initialColor}
+          onApply={(color) => applyTabColor(tabColorDialog.sheetId, color)}
+          onClose={() => setTabColorDialog(null)}
         />
       )}
       {warningsDialog === "import" && (

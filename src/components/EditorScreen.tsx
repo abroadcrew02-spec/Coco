@@ -50,6 +50,7 @@ import InsertImageDialog, {
   type ImageFormValue,
   type ImagePickResult,
 } from "./InsertImageDialog";
+import SortDialog, { type SortFormValue } from "./SortDialog";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -159,6 +160,13 @@ export default function EditorScreen() {
   const [imageDialog, setImageDialog] = useState<{
     sheetId: string;
     cell: string;
+  } | null>(null);
+  // Sort dialog: null while closed. Pins the active sheet + a default A1 range
+  // derived from the current selection at open time so the user's input lands
+  // on a stable target even if focus shifts.
+  const [sortDialog, setSortDialog] = useState<{
+    sheetId: string;
+    range: string;
   } | null>(null);
 
   // Read all named ranges from the live Univer workbook via the facade
@@ -951,6 +959,169 @@ export default function EditorScreen() {
     [imageDialog, updateSnapshot],
   );
 
+  // Open the sort dialog with the active sheet + a default range derived from
+  // the current selection. Falls back to A1:A1 when there's no live selection.
+  const openSortDialog = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let range = "A1:A1";
+    try {
+      const sel = sheet.getSelection();
+      const r = sel?.getActiveRange();
+      if (r) {
+        const a1 = r.getA1Notation();
+        // Single-cell selections aren't sortable — promote to a self range so
+        // the dialog's validation can prompt the user to widen it.
+        range = a1.includes(":") ? a1 : `${a1}:${a1}`;
+      }
+    } catch {
+      // Best-effort: keep the A1:A1 default.
+    }
+    setSortDialog({ sheetId, range });
+  }, []);
+
+  // Apply a sort by mutating the snapshot's cellData for the target sheet in
+  // place. Univer 0.5.x doesn't expose a stable FRange.sort() in this build
+  // (sheets-sort isn't installed), so we do the row reordering ourselves:
+  //   1. Parse the A1 range into start/end row+col.
+  //   2. Collect each row's cellData (per-cell shallow copy) within the
+  //      column window.
+  //   3. Sort the rows by the requested keys (asc/desc), comparing numerically
+  //      when both sides are numeric, otherwise as case-insensitive strings.
+  //   4. Write the rows back into cellData in the new order, dropping any
+  //      old cells in the affected columns that aren't replaced.
+  const applySort = useCallback(
+    (value: SortFormValue) => {
+      if (!sortDialog) return;
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const snapshot = workbook.save() as unknown as {
+        sheets?: Record<
+          string,
+          {
+            cellData?: Record<
+              string,
+              Record<string, Record<string, unknown> | undefined>
+            >;
+          }
+        >;
+      };
+      const sheetObj = snapshot.sheets?.[sortDialog.sheetId];
+      if (!sheetObj) return;
+      if (!sheetObj.cellData) sheetObj.cellData = {};
+      const cellData = sheetObj.cellData;
+
+      // Strip an optional "Sheet!" prefix; the apply targets the captured
+      // sheetId already so a prefix from another sheet would just be ignored
+      // anyway. We're permissive on this.
+      const bareRange = value.range.includes("!")
+        ? value.range.split("!")[1]
+        : value.range;
+      const m = /^\$?([A-Za-z]+)\$?(\d+):\$?([A-Za-z]+)\$?(\d+)$/.exec(bareRange);
+      if (!m) return;
+      const colLettersToIdx = (letters: string): number => {
+        let n = 0;
+        for (const ch of letters.toUpperCase()) {
+          n = n * 26 + (ch.charCodeAt(0) - 64);
+        }
+        return n - 1;
+      };
+      const c1 = colLettersToIdx(m[1]);
+      const r1 = parseInt(m[2], 10) - 1;
+      const c2 = colLettersToIdx(m[3]);
+      const r2 = parseInt(m[4], 10) - 1;
+      const startRow = Math.min(r1, r2);
+      const endRow = Math.max(r1, r2);
+      const startCol = Math.min(c1, c2);
+      const endCol = Math.max(c1, c2);
+      const firstSortRow = value.hasHeader ? startRow + 1 : startRow;
+      if (firstSortRow > endRow) return;
+
+      // Pull each row (only the columns inside the range) into an array so
+      // we can reorder by index without mutating cellData mid-iteration.
+      type RowSlice = Record<string, Record<string, unknown> | undefined>;
+      const slices: RowSlice[] = [];
+      for (let r = firstSortRow; r <= endRow; r++) {
+        const slice: RowSlice = {};
+        const src = cellData[String(r)];
+        if (src) {
+          for (let c = startCol; c <= endCol; c++) {
+            const cell = src[String(c)];
+            if (cell !== undefined) slice[String(c)] = cell;
+          }
+        }
+        slices.push(slice);
+      }
+
+      const readSortValue = (slice: RowSlice, colIdx: number): unknown => {
+        const cell = slice[String(colIdx)];
+        if (!cell) return undefined;
+        // Univer cell shape: { v: primitive } | { p: rich-text doc }. For the
+        // PoC we compare on `v`; rich-text cells fall back to an empty string.
+        const v = (cell as { v?: unknown }).v;
+        return v;
+      };
+
+      const compare = (a: RowSlice, b: RowSlice): number => {
+        for (const lv of value.levels) {
+          // Convert 1-based column to absolute 0-based index inside cellData.
+          const absCol = startCol + (lv.column - 1);
+          const av = readSortValue(a, absCol);
+          const bv = readSortValue(b, absCol);
+          // Empty / undefined always sorts last regardless of direction
+          // (mirrors Excel's "blanks at the bottom" convention).
+          const aEmpty = av === undefined || av === null || av === "";
+          const bEmpty = bv === undefined || bv === null || bv === "";
+          if (aEmpty && bEmpty) continue;
+          if (aEmpty) return 1;
+          if (bEmpty) return -1;
+          let cmp = 0;
+          if (typeof av === "number" && typeof bv === "number") {
+            cmp = av - bv;
+          } else {
+            const as = String(av).toLowerCase();
+            const bs = String(bv).toLowerCase();
+            cmp = as < bs ? -1 : as > bs ? 1 : 0;
+          }
+          if (cmp !== 0) return lv.ascending ? cmp : -cmp;
+        }
+        return 0;
+      };
+
+      slices.sort(compare);
+
+      // Wipe the original rows' columns inside the range, then write back the
+      // sorted slices. We avoid deleting whole rows so cells outside the
+      // column window stay put.
+      for (let r = firstSortRow; r <= endRow; r++) {
+        const row = cellData[String(r)];
+        if (!row) continue;
+        for (let c = startCol; c <= endCol; c++) {
+          delete row[String(c)];
+        }
+      }
+      for (let i = 0; i < slices.length; i++) {
+        const r = firstSortRow + i;
+        const rowKey = String(r);
+        if (!cellData[rowKey]) cellData[rowKey] = {};
+        const row = cellData[rowKey];
+        for (const [colKey, cell] of Object.entries(slices[i])) {
+          if (cell !== undefined) row[colKey] = cell;
+        }
+      }
+
+      updateSnapshot(JSON.stringify(snapshot));
+    },
+    [sortDialog, updateSnapshot],
+  );
+
   useAutoSave();
 
   // Keyboard shortcuts (req 4.6): Ctrl+S / Cmd+S = save; Ctrl+Shift+S / Cmd+Shift+S = save as.
@@ -1107,12 +1278,13 @@ export default function EditorScreen() {
     // the sheets adapter wires it to the active worksheet.
     univer.registerPlugin(UniverFindReplacePlugin);
     univer.registerPlugin(UniverSheetsFindReplacePlugin);
-    // TODO(FR-009): wire @univerjs/sheets-filter (installed at the workspace
-    // level) and a sort UI so the in-app filter/sort toggle and column-sort
-    // controls work end-to-end. Round-trip preservation for auto-filter is
-    // already in place (xlsx_io.rs, commit 74594d0); only the editor surface
-    // is missing. Locale bundles for the filter plugin will also need to be
-    // merged into the `locales` map below.
+    // Sort is wired via the SortDialog (toolbar "↕ 並べ替え") which writes
+    // sorted rows back into the snapshot's cellData directly — this build
+    // doesn't include @univerjs/sheets-sort. Filter UI (FR-009 second half)
+    // is still pending: the snapshot round-trip for auto-filter is preserved
+    // (xlsx_io.rs, commit 74594d0) but @univerjs/sheets-filter isn't yet
+    // registered. Locale bundles for the filter plugin would also need to be
+    // merged into the `locales` map below when that ships.
     // TODO(FR-011): Univer's default LocalUndoRedoService caps the per-unit
     // undo stack at 20 items (CE = 20 in @univerjs/core), but requirements
     // §4.1 FR-011 mandates 100. Override IUndoRedoService via the Univer
@@ -1322,6 +1494,15 @@ export default function EditorScreen() {
           <button
             type="button"
             className="toolbar-btn"
+            onClick={openSortDialog}
+            title="選択範囲を並べ替え"
+            aria-label="並べ替え"
+          >
+            ↕ 並べ替え
+          </button>
+          <button
+            type="button"
+            className="toolbar-btn"
             onClick={requestSettings}
             title="設定（自動保存間隔など）"
             aria-label="設定"
@@ -1522,6 +1703,13 @@ export default function EditorScreen() {
           pickFile={pickImageFile}
           onApply={applyImage}
           onClose={() => setImageDialog(null)}
+        />
+      )}
+      {sortDialog && (
+        <SortDialog
+          initialRange={sortDialog.range}
+          onApply={applySort}
+          onClose={() => setSortDialog(null)}
         />
       )}
       {warningsDialog === "import" && (

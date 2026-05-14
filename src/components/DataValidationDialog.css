@@ -1,0 +1,263 @@
+.dv-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1250;
+}
+
+.dv-modal {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  max-width: 620px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #eee;
+  background-color: #fafafa;
+}
+
+.dv-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #217346;
+  margin: 0;
+}
+
+.dv-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  color: #999;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.dv-close:hover {
+  color: #333;
+  background-color: #eee;
+}
+
+.dv-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dv-empty {
+  font-size: 13px;
+  color: #757575;
+  margin: 0;
+  padding: 16px 0;
+  text-align: center;
+}
+
+.dv-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dv-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background-color: #fafafa;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+}
+
+.dv-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.dv-item-sqref {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: #217346;
+}
+
+.dv-item-summary {
+  font-size: 12px;
+  color: #424242;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dv-item-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dv-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #424242;
+  background-color: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.dv-btn:hover:not(:disabled) {
+  background-color: #f0f0f0;
+  border-color: #b0b0b0;
+}
+
+.dv-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dv-btn--primary {
+  background-color: #217346;
+  color: #fff;
+  border-color: #217346;
+}
+
+.dv-btn--primary:hover:not(:disabled) {
+  background-color: #1a5c38;
+  border-color: #1a5c38;
+}
+
+.dv-btn--danger {
+  color: #b00020;
+  border-color: #e7c0c0;
+}
+
+.dv-btn--danger:hover:not(:disabled) {
+  background-color: #fbecec;
+  border-color: #b00020;
+}
+
+.dv-btn--add {
+  align-self: flex-start;
+  padding: 7px 14px;
+  font-size: 13px;
+  color: #217346;
+  border-color: #b9d8c4;
+  background-color: #f1faf4;
+}
+
+.dv-btn--add:hover:not(:disabled) {
+  background-color: #e3f3e9;
+  border-color: #92c2a3;
+}
+
+.dv-form {
+  border: 1px solid #d0d8d4;
+  border-radius: 6px;
+  background-color: #f6fbf8;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dv-form-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #424242;
+  margin: 0;
+}
+
+.dv-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dv-field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.dv-field-label {
+  font-size: 12px;
+  color: #555;
+}
+
+.dv-input {
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid #c8d0cc;
+  border-radius: 3px;
+  font-family: inherit;
+}
+
+.dv-input:focus {
+  outline: none;
+  border-color: #217346;
+  box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
+}
+
+.dv-textarea {
+  resize: vertical;
+  min-height: 36px;
+  font-family: inherit;
+}
+
+.dv-error {
+  margin: 0;
+  font-size: 12px;
+  color: #b00020;
+}
+
+.dv-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dv-footer {
+  padding: 12px 20px;
+  background-color: #fafafa;
+  border-top: 1px solid #eee;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dv-hint {
+  margin: 0;
+  font-size: 11px;
+  color: #757575;
+  line-height: 1.5;
+}
+
+.dv-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

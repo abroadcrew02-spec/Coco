@@ -2934,6 +2934,40 @@ pub(crate) fn parse_xlsx_conditional_formatting(
     out
 }
 
+/// Build a rust_xlsxwriter `Format` for a CF rule's `style` bag (see
+/// ConditionalFormattingDialog.tsx). The dialog only emits fields that are
+/// set; we mirror that here so an empty/missing object yields `None` and the
+/// caller skips `.set_format(...)`. When rust_xlsxwriter writes the workbook
+/// it lifts this Format into the `<dxfs>` block of `xl/styles.xml` and refers
+/// to it via `dxfId` on the cfRule.
+///
+/// Supported keys: `bold`, `italic`, `fontColor` (#RRGGBB), `bgColor`
+/// (#RRGGBB; emitted as a solid pattern fill). Unknown keys are ignored.
+fn build_cf_rule_format(style: Option<&Value>) -> Option<Format> {
+    let obj = style?.as_object()?;
+    let bold = obj.get("bold").and_then(|v| v.as_bool()).unwrap_or(false);
+    let italic = obj.get("italic").and_then(|v| v.as_bool()).unwrap_or(false);
+    let font_color = obj.get("fontColor").and_then(|v| v.as_str()).and_then(parse_color);
+    let bg_color = obj.get("bgColor").and_then(|v| v.as_str()).and_then(parse_color);
+    if !bold && !italic && font_color.is_none() && bg_color.is_none() {
+        return None;
+    }
+    let mut fmt = Format::new();
+    if bold {
+        fmt = fmt.set_bold();
+    }
+    if italic {
+        fmt = fmt.set_italic();
+    }
+    if let Some(c) = font_color {
+        fmt = fmt.set_font_color(c);
+    }
+    if let Some(c) = bg_color {
+        fmt = fmt.set_background_color(c).set_pattern(FormatPattern::Solid);
+    }
+    Some(fmt)
+}
+
 /// Apply a conditional-formatting snapshot entry to the given worksheet. The
 /// generic `add_conditional_format<T: ConditionalFormat>` API can't be called
 /// through a trait object, so this helper dispatches on `rule_type` and calls
@@ -2997,6 +3031,14 @@ fn apply_conditional_format_from_snapshot(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    // Optional `style` bag carried by authored rules (see
+    // ConditionalFormattingDialog.tsx). We translate the hints into a
+    // rust_xlsxwriter `Format`, which the library serializes as an `<dxf>`
+    // entry in `xl/styles.xml` and references via `dxfId` on the cfRule. We
+    // only build the Format when at least one field is set so unstyled rules
+    // stay dxf-free.
+    let style_format: Option<Format> = build_cf_rule_format(entry.get("style"));
+
     match rule_type {
         "cellIs" => {
             // Pick the rule variant from the OOXML operator. Operands round-
@@ -3018,10 +3060,13 @@ fn apply_conditional_format_from_snapshot(
             let Some(rule) = rule else {
                 return false;
             };
-            let cf = ConditionalFormatCell::new()
+            let mut cf = ConditionalFormatCell::new()
                 .set_rule(rule)
                 .set_multi_range(sqref)
                 .set_stop_if_true(stop_if_true);
+            if let Some(f) = style_format {
+                cf = cf.set_format(f);
+            }
             worksheet
                 .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
                 .is_ok()
@@ -3044,10 +3089,13 @@ fn apply_conditional_format_from_snapshot(
                 "endsWith" => ConditionalFormatTextRule::EndsWith(literal),
                 _ => unreachable!(),
             };
-            let cf = ConditionalFormatText::new()
+            let mut cf = ConditionalFormatText::new()
                 .set_rule(rule)
                 .set_multi_range(sqref)
                 .set_stop_if_true(stop_if_true);
+            if let Some(f) = style_format {
+                cf = cf.set_format(f);
+            }
             worksheet
                 .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
                 .is_ok()
@@ -3056,10 +3104,13 @@ fn apply_conditional_format_from_snapshot(
             if formula1.is_empty() {
                 return false;
             }
-            let cf = ConditionalFormatFormula::new()
+            let mut cf = ConditionalFormatFormula::new()
                 .set_rule(formula1)
                 .set_multi_range(sqref)
                 .set_stop_if_true(stop_if_true);
+            if let Some(f) = style_format {
+                cf = cf.set_format(f);
+            }
             worksheet
                 .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
                 .is_ok()
@@ -3073,10 +3124,13 @@ fn apply_conditional_format_from_snapshot(
                 (true, false) => ConditionalFormatTopRule::TopPercent(rank),
                 (true, true) => ConditionalFormatTopRule::BottomPercent(rank),
             };
-            let cf = ConditionalFormatTop::new()
+            let mut cf = ConditionalFormatTop::new()
                 .set_rule(rule)
                 .set_multi_range(sqref)
                 .set_stop_if_true(stop_if_true);
+            if let Some(f) = style_format {
+                cf = cf.set_format(f);
+            }
             worksheet
                 .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
                 .is_ok()
@@ -3089,6 +3143,9 @@ fn apply_conditional_format_from_snapshot(
                 .set_stop_if_true(stop_if_true);
             if rule_type == "uniqueValues" {
                 cf = cf.invert();
+            }
+            if let Some(f) = style_format {
+                cf = cf.set_format(f);
             }
             worksheet
                 .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
@@ -4555,11 +4612,13 @@ pub fn export_xlsx_core(
             // Re-emit per-sheet conditional formatting rules from
             // `_conditionalFormatting`. Each entry is dispatched on its
             // `type` to the matching rust_xlsxwriter conditional-format
-            // variant (cellIs / containsText / expression / ...). dxf-
-            // referenced visual styling is NOT preserved through this PoC
-            // — rules round-trip with rust_xlsxwriter's default styling so
-            // the rule shape (range + condition) survives even though the
-            // colours / fonts attached to each rule do not.
+            // variant (cellIs / containsText / expression / ...). When the
+            // entry carries a `style` bag (authored via the dialog), we
+            // build a `Format` and call `.set_format(...)` on the rule so
+            // rust_xlsxwriter emits a matching `<dxf>` entry in
+            // `xl/styles.xml`. Imported rules don't currently carry styles
+            // because we don't parse the dxf table on the import side
+            // (see the doc on ConditionalFormattingEntry).
             if let Some(cf_arr) = sheet_obj
                 .and_then(|s| s.get("_conditionalFormatting"))
                 .and_then(|v| v.as_array())

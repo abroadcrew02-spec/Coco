@@ -30,6 +30,15 @@ fn read_sheet1_xml(path: &PathBuf) -> String {
     xml
 }
 
+fn read_styles_xml(path: &PathBuf) -> String {
+    let file = std::fs::File::open(path).expect("open xlsx");
+    let mut archive = zip::ZipArchive::new(file).expect("zip");
+    let mut entry = archive.by_name("xl/styles.xml").expect("styles.xml");
+    let mut xml = String::new();
+    entry.read_to_string(&mut xml).expect("read styles xml");
+    xml
+}
+
 #[test]
 fn cell_is_greater_than_round_trips() {
     let tmp = TempDir::new().expect("tempdir");
@@ -253,5 +262,121 @@ fn no_conditional_formatting_yields_no_block() {
     assert!(
         !xml.contains("<conditionalFormatting"),
         "clean sheet must not emit a <conditionalFormatting> block; got:\n{xml}"
+    );
+}
+
+/// Authored CF rules carry a `style` bag from the dialog
+/// (ConditionalFormattingDialog.tsx). On export we must translate that into a
+/// rust_xlsxwriter `Format`, which then lands as a non-empty `<dxfs>` block in
+/// `xl/styles.xml`. Without the style hookup the exported xlsx had an empty
+/// `<dxfs count="0"/>` and Excel showed CF rules with no visible formatting.
+#[test]
+fn cf_rule_style_emits_dxf_on_export() {
+    let tmp = TempDir::new().expect("tempdir");
+    let fixture = tmp.path().join("cf_style_in.xlsx");
+    let exported = tmp.path().join("cf_style_out.xlsx");
+
+    // Seed a clean workbook (no CF). We'll inject the rule + style via
+    // snapshot mutation, which mirrors how the dialog produces rules in
+    // production (authored client-side, no source dxf to parse).
+    {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name("Sheet1").unwrap();
+        ws.write_string(0, 0, "x").unwrap();
+        wb.save(&fixture).expect("save");
+    }
+
+    let imported = import_xlsx_core(path_str(&fixture)).expect("import");
+    let mut snap: Value =
+        serde_json::from_str(imported.handle.snapshot_json.as_ref().unwrap()).expect("parse");
+
+    // Inject one authored cellIs>100 rule with a bgColor + bold style. This is
+    // the exact JSON shape the dialog's submitForm produces.
+    let rule = serde_json::json!({
+        "sqref": "A1:A10",
+        "type": "cellIs",
+        "operator": "greaterThan",
+        "formula1": "100",
+        "priority": 1,
+        "style": { "bold": true, "bgColor": "#FFE082" }
+    });
+    snap["sheets"]["sheet-1"]["_conditionalFormatting"] = Value::Array(vec![rule]);
+    let mutated = serde_json::to_string(&snap).expect("ser");
+
+    let export = export_xlsx_core(path_str(&exported), mutated).expect("export");
+    assert!(export.success, "export ok: {:?}", export.error);
+
+    // The cfRule itself must reference a dxfId (rust_xlsxwriter assigns them
+    // contiguously starting at 0).
+    let sheet_xml = read_sheet1_xml(&exported);
+    assert!(
+        sheet_xml.contains("dxfId="),
+        "exported cfRule should reference a dxfId; sheet1.xml:\n{sheet_xml}"
+    );
+
+    // And `xl/styles.xml` must carry a non-trivial `<dxfs>` block containing
+    // the colour we asked for. The pattern fill colour shows up as
+    // `bgColor rgb="FFFFE082"` (FF alpha prefix). We assert on the hex bytes
+    // rather than the exact attribute layout to stay robust against
+    // rust_xlsxwriter's emit tweaks.
+    let styles_xml = read_styles_xml(&exported);
+    assert!(
+        styles_xml.contains("<dxfs"),
+        "styles.xml should have a <dxfs> block; got:\n{styles_xml}"
+    );
+    assert!(
+        !styles_xml.contains("<dxfs count=\"0\""),
+        "styles.xml should NOT have an empty <dxfs> block; got:\n{styles_xml}"
+    );
+    assert!(
+        styles_xml.to_uppercase().contains("FFE082"),
+        "styles.xml dxf should encode bgColor #FFE082; got:\n{styles_xml}"
+    );
+}
+
+/// Style is only emitted as a dxf when the bag has at least one populated
+/// field. A rule with no style (the imported-from-source common case) must
+/// not balloon `<dxfs>`.
+#[test]
+fn cf_rule_without_style_keeps_dxfs_empty() {
+    let tmp = TempDir::new().expect("tempdir");
+    let fixture = tmp.path().join("cf_no_style_in.xlsx");
+    let exported = tmp.path().join("cf_no_style_out.xlsx");
+
+    {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name("Sheet1").unwrap();
+        ws.write_string(0, 0, "y").unwrap();
+        wb.save(&fixture).expect("save");
+    }
+
+    let imported = import_xlsx_core(path_str(&fixture)).expect("import");
+    let mut snap: Value =
+        serde_json::from_str(imported.handle.snapshot_json.as_ref().unwrap()).expect("parse");
+    // Same rule, no `style` key.
+    let rule = serde_json::json!({
+        "sqref": "B1:B5",
+        "type": "cellIs",
+        "operator": "lessThan",
+        "formula1": "10",
+        "priority": 1,
+    });
+    snap["sheets"]["sheet-1"]["_conditionalFormatting"] = Value::Array(vec![rule]);
+    let mutated = serde_json::to_string(&snap).expect("ser");
+
+    let export = export_xlsx_core(path_str(&exported), mutated).expect("export");
+    assert!(export.success, "export ok: {:?}", export.error);
+
+    let sheet_xml = read_sheet1_xml(&exported);
+    assert!(
+        sheet_xml.contains("<cfRule"),
+        "cfRule must be emitted even without style; got:\n{sheet_xml}"
+    );
+    // No dxfId reference when no style — rust_xlsxwriter omits the attribute.
+    assert!(
+        !sheet_xml.contains("dxfId="),
+        "unstyled cfRule must not reference a dxfId; got:\n{sheet_xml}"
     );
 }

@@ -91,6 +91,25 @@
   border-color: #1a5c38;
 }
 
+/* Pressed/active state for toggles (Format Painter, etc.) */
+.toolbar-btn--active {
+  background-color: #d4e9d8;
+  border-color: #217346;
+  color: #1a5c38;
+  box-shadow: inset 0 1px 2px rgba(33, 115, 70, 0.18);
+}
+
+.toolbar-btn--active:hover:not(:disabled) {
+  background-color: #c2dfc8;
+  border-color: #1a5c38;
+}
+
+/* Format-painter cursor over the Univer grid while the tool is armed. */
+.univer-wrap--format-painter,
+.univer-wrap--format-painter * {
+  cursor: cell !important;
+}
+
 /* Warning banner */
 .warning-banner {
   display: flex;

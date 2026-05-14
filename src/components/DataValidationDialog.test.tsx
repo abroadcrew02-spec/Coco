@@ -185,6 +185,42 @@ describe("DataValidationDialog", () => {
     expect(updated.showErrorMessage).toBe(true);
   });
 
+  it("clicking 編集 prefills the form and submitting replaces by index", () => {
+    render(
+      <DataValidationDialog
+        initialRules={SEED}
+        sheetName="Sheet1"
+        onSave={onSave}
+        onClose={onClose}
+      />,
+    );
+    // Open the FIRST rule (list type).
+    const row = screen.getByText("A1:A10").closest("li")!;
+    expect(row.className).not.toMatch(/dv-item--editing/);
+    fireEvent.click(within(row).getByRole("button", { name: /A1:A10.*編集/ }));
+
+    // Prefilled.
+    expect(screen.getByText("入力規則を編集")).toBeTruthy();
+    const sqrefInput = screen.getByLabelText("適用範囲 (sqref)") as HTMLInputElement;
+    expect(sqrefInput.value).toBe("A1:A10");
+    const formulaInput = screen.getByLabelText("リストの値 / 参照") as HTMLInputElement;
+    expect(formulaInput.value).toBe('"Yes,No,Maybe"');
+    expect(screen.getByText("A1:A10").closest("li")!.className).toMatch(
+      /dv-item--editing/,
+    );
+
+    // Mutate sqref and submit via 更新.
+    fireEvent.change(sqrefInput, { target: { value: "A1:A20" } });
+    fireEvent.click(screen.getByRole("button", { name: "更新" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "適用" }));
+    const saved = onSave.mock.calls[0][0];
+    // Replaced in place (length unchanged, index 0 updated, index 1 intact).
+    expect(saved).toHaveLength(2);
+    expect(saved[0]).toMatchObject({ sqref: "A1:A20", type: "list" });
+    expect(saved[1].sqref).toBe("B2");
+  });
+
   it("ESC closes without calling onSave", () => {
     render(
       <DataValidationDialog

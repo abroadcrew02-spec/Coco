@@ -95,6 +95,15 @@ function emptyForm(): CfRule {
   };
 }
 
+// Clone a rule into the form's mutable shape (deep-copy the style bag so the
+// list entry isn't aliased by in-progress edits).
+function ruleToForm(r: CfRule): CfRule {
+  return {
+    ...r,
+    style: r.style ? { ...r.style } : { bold: false, fontColor: "", bgColor: "" },
+  };
+}
+
 function summarize(r: CfRule): string {
   switch (r.type) {
     case "cellIs":
@@ -160,6 +169,12 @@ export default function ConditionalFormattingDialog({
     setFormError(null);
   };
 
+  const openEditForm = (idx: number) => {
+    setEditingIndex(idx);
+    setForm(ruleToForm(rules[idx]));
+    setFormError(null);
+  };
+
   const cancelForm = () => {
     setEditingIndex(null);
     setFormError(null);
@@ -172,12 +187,14 @@ export default function ConditionalFormattingDialog({
       setFormError(err);
       return;
     }
+    const isAdding = editingIndex === -1;
     // Strip empty optional fields so the saved rule matches the Rust-side
-    // "omit when absent" snapshot policy.
+    // "omit when absent" snapshot policy. When updating, preserve the
+    // original rule's priority so we don't churn render order.
     const clean: CfRule = {
       sqref: form.sqref.trim(),
       type: form.type,
-      priority: rules.length + 1,
+      priority: isAdding ? rules.length + 1 : rules[editingIndex].priority ?? editingIndex + 1,
     };
     if (form.type === "cellIs") {
       clean.operator = form.operator;
@@ -202,13 +219,20 @@ export default function ConditionalFormattingDialog({
       if (form.style?.bgColor) s.bgColor = form.style.bgColor;
       clean.style = s;
     }
-    setRules([...rules, clean]);
+    if (isAdding) {
+      setRules([...rules, clean]);
+    } else {
+      const next = rules.slice();
+      next[editingIndex] = clean;
+      setRules(next);
+    }
     setEditingIndex(null);
     setFormError(null);
   };
 
   const deleteRule = (idx: number) => {
     setRules(rules.filter((_, i) => i !== idx));
+    if (editingIndex === idx) setEditingIndex(null);
   };
 
   const apply = () => {
@@ -238,14 +262,26 @@ export default function ConditionalFormattingDialog({
             <ul className="cf-list" aria-label="登録済みの条件付き書式">
               {rules.map((r, idx) => {
                 const styleText = styleHint(r.style);
+                const isEditing = editingIndex === idx;
                 return (
-                  <li key={`${r.sqref}-${idx}`} className="cf-item">
+                  <li
+                    key={`${r.sqref}-${idx}`}
+                    className={`cf-item${isEditing ? " cf-item--editing" : ""}`}
+                  >
                     <div className="cf-item-text">
                       <span className="cf-item-sqref">{r.sqref}</span>
                       <span className="cf-item-summary">{summarize(r)}</span>
                       {styleText && <span className="cf-item-style">書式: {styleText}</span>}
                     </div>
                     <div className="cf-item-actions">
+                      <button
+                        type="button"
+                        className="cf-btn"
+                        onClick={() => openEditForm(idx)}
+                        aria-label={`${r.sqref} のルールを編集`}
+                      >
+                        編集
+                      </button>
                       <button
                         type="button"
                         className="cf-btn cf-btn--danger"
@@ -266,7 +302,9 @@ export default function ConditionalFormattingDialog({
             </button>
           ) : (
             <div className="cf-form" role="group" aria-label="条件付き書式の編集フォーム">
-              <h3 className="cf-form-title">新しい条件付き書式</h3>
+              <h3 className="cf-form-title">
+                {editingIndex === -1 ? "新しい条件付き書式" : "条件付き書式を編集"}
+              </h3>
               <label className="cf-field">
                 <span className="cf-field-label">範囲 (sqref)</span>
                 <input
@@ -437,7 +475,7 @@ export default function ConditionalFormattingDialog({
                   className="cf-btn cf-btn--primary"
                   onClick={submitForm}
                 >
-                  追加
+                  {editingIndex === -1 ? "追加" : "更新"}
                 </button>
               </div>
             </div>

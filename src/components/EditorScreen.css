@@ -16,7 +16,8 @@
   background-color: #fafafa;
   border-bottom: 1px solid #e0e0e0;
   flex-shrink: 0;
-  height: 40px;
+  min-height: 40px;
+  flex-wrap: wrap;
 }
 
 .editor-toolbar__left,
@@ -24,6 +25,26 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Logical group inside the toolbar (e.g. "編集" / "挿入"). Visually a tight
+   cluster of buttons separated from neighboring groups by .toolbar-divider. */
+.toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Vertical separator between toolbar groups. Aria-hidden in the DOM since
+   the group landmark already communicates the boundary to assistive tech. */
+.toolbar-divider {
+  display: inline-block;
+  width: 1px;
+  height: 22px;
+  background-color: #d0d0d0;
+  margin: 0 2px;
+  flex-shrink: 0;
 }
 
 .editor-toolbar__filename {

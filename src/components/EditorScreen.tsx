@@ -1250,75 +1250,84 @@ export default function EditorScreen() {
               履歴
             </button>
           )}
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={openNamedRangesDialog}
-            title="名前付き範囲を編集 (Ctrl+F3)"
-            aria-label="名前付き範囲"
-          >
-            名前付き範囲
-          </button>
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={openDataValidationDialog}
-            title="データの入力規則を追加・編集"
-            aria-label="データの入力規則"
-          >
-            入力規則
-          </button>
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={openCfDialog}
-            title="条件付き書式を編集 (Ctrl+F8)"
-            aria-label="条件付き書式"
-          >
-            条件付き書式...
-          </button>
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={openChartDialog}
-            title="選択範囲からグラフを挿入"
-            aria-label="グラフを挿入"
-          >
-            📊 グラフ
-          </button>
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={openNumberFormatDialog}
-            title="選択範囲の表示形式を変更 (Ctrl+1)"
-            aria-label="表示形式"
-          >
-            🔢 表示形式
-          </button>
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={toggleSheetProtection}
-            title={
-              activeSheetProtected
-                ? "シート保護を解除（書き込み可に戻す）"
-                : "シートを保護（読み取り専用にする）"
-            }
-            aria-label="シート保護"
-            aria-pressed={activeSheetProtected}
-            data-testid="sheet-protection-toggle"
-          >
-            {activeSheetProtected ? "🔓 解除" : "🔒 保護"}
-          </button>
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={openImageDialog}
-            title="画像をワークブックに挿入"
-            aria-label="画像挿入"
-          >
-            🖼 画像挿入
-          </button>
+          <span className="toolbar-divider" aria-hidden="true" />
+          {/* 編集系: 入力規則 / 条件付き書式 / 表示形式 / シート保護 */}
+          <div className="toolbar-group" role="group" aria-label="編集">
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={openDataValidationDialog}
+              title="データの入力規則を追加・編集"
+              aria-label="データの入力規則"
+            >
+              入力規則
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={openCfDialog}
+              title="条件付き書式を編集 (Ctrl+F8)"
+              aria-label="条件付き書式"
+            >
+              条件付き書式...
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={openNumberFormatDialog}
+              title="選択範囲の表示形式を変更 (Ctrl+1)"
+              aria-label="表示形式"
+            >
+              🔢 表示形式
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={toggleSheetProtection}
+              title={
+                activeSheetProtected
+                  ? "シート保護を解除（書き込み可に戻す）"
+                  : "シートを保護（読み取り専用にする）"
+              }
+              aria-label="シート保護"
+              aria-pressed={activeSheetProtected}
+              data-testid="sheet-protection-toggle"
+            >
+              {activeSheetProtected ? "🔓 解除" : "🔒 保護"}
+            </button>
+          </div>
+          <span className="toolbar-divider" aria-hidden="true" />
+          {/* 挿入系: 名前付き範囲 / グラフ / 画像挿入 */}
+          <div className="toolbar-group" role="group" aria-label="挿入">
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={openNamedRangesDialog}
+              title="名前付き範囲を編集 (Ctrl+F3)"
+              aria-label="名前付き範囲"
+            >
+              名前付き範囲
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={openChartDialog}
+              title="選択範囲からグラフを挿入"
+              aria-label="グラフを挿入"
+            >
+              📊 グラフ
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={openImageDialog}
+              title="画像をワークブックに挿入"
+              aria-label="画像挿入"
+            >
+              🖼 画像挿入
+            </button>
+          </div>
+          <span className="toolbar-divider" aria-hidden="true" />
           <button
             type="button"
             className="toolbar-btn"

@@ -106,12 +106,6 @@ None.
 
 ## Low — polish
 
-### low-macos-menu-accelerators
-- **Title**: Native menu accelerator labels read "Cmd+…" on macOS, not "Ctrl+…"
-- **Refs**: `src-tauri/src/lib.rs:17-22`, `docs/CROSS_PLATFORM_PREFLIGHT.md` WARNING #1
-- **Effort**: S
-- **Why deferred**: Cosmetic only. `useGlobalShortcuts` already treats `ctrlKey || metaKey` uniformly so Cmd+N works; just the displayed label is wrong. >50 LOC to refactor; deferred until a real macOS build pass.
-
 ### low-macos-minimum-system-version
 - **Title**: Declare `bundle.macOS.minimumSystemVersion = "12.0"` in `tauri.conf.json`
 - **Refs**: `docs/CROSS_PLATFORM_PREFLIGHT.md` WARNING #2

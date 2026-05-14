@@ -107,4 +107,16 @@ writeFileSync(
   JSON.stringify({ generatedAt: new Date().toISOString(), artifacts: manifest }, null, 2) + "\n",
 );
 
+// Regenerate distbin/README.md from the template so installer notes always
+// accompany the artifacts (requirements.md §5.6: distribution materials).
+const readmeTemplate = join(root, "docs", "DISTBIN_README_TEMPLATE.md");
+if (existsSync(readmeTemplate)) {
+  copyFileSync(readmeTemplate, join(distBin, "README.md"));
+  console.log(`[pack-distbin] readme    README.md  (from docs/DISTBIN_README_TEMPLATE.md)`);
+} else {
+  console.warn(
+    `[pack-distbin] WARN: ${readmeTemplate} not found; distbin/README.md not generated.`,
+  );
+}
+
 console.log(`[pack-distbin] Staged ${manifest.length} artifact(s) in ${distBin}`);

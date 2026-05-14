@@ -58,7 +58,7 @@ Verdict legend:
 | ------ | ------- | ----- |
 | FR-301 | OK      | `workbook_export_csv` writes UTF-8 BOM by default (`utf8_bom` encoding option); Shift_JIS available for legacy. Round-trip tests in `csv_export.rs`. |
 | FR-302 | OK      | `SheetPickerModal` invoked in `EditorScreen.handleCsvExport` when sheet count > 1; single-sheet path skips the dialog. |
-| FR-303 | OK      | CSV emission converts numeric-cell `_fmt` date formats to YYYY-MM-DD via `excel_serial_to_date`; cached formula values used over formula text. |
+| FR-303 | OK      | CSV emission honors `_fmt` per cell (表示値ベース): date / datetime via `format_date_or_datetime` (token substitution `yyyy/yy/mm/m/dd/d/hh/h/mm/m/ss/s`, US-style `m/d/yyyy` supported), time-only `hh:mm:ss`, percent `0%` / `0.00%`, currency `$#,##0.00` / `¥#,##0` (locale-tagged `[$X-409]` symbol detected), `@` text format. Cached formula values used over formula text. |
 | FR-304 | OK      | `needs_injection_guard` in `csv_io.rs` prefixes `=`, `+`, `-`, `@` cells with `'`. Test coverage in `csv_export.rs`. |
 
 §4.7 totals: 4 OK / 0 PARTIAL / 0 MISSING.
@@ -105,7 +105,7 @@ Phase 2 dialog count: **10 dialogs** (CF, DV, Hyperlink, Comment, Chart, NumberF
 - **Audit log (§5.3.5)** — local audit log not implemented.
 - **Performance benchmark harness** — `perf.rs` exists but no acceptance-number gate is wired into CI.
 - **Code signing / notarization / SHA-256 in distribution** — packager exists but signing steps are not automated.
-- **CSV time-only / datetime formats** — `is_date_only_format` covers Y+M+D; HH:MM-only and mixed datetime fall back to raw serials.
+- **CSV exotic format codes** — date / datetime / time-only / percent / currency (`$`, `¥`, `€`, `£`) and `@` text are honored on export; locale-tagged currency `[$X-409]` parses the symbol. Exponential (`0.0E+00`), fraction (`??/??`), elapsed-time (`[h]:mm`), and multi-letter month names (`mmm`, `mmmm`) still fall through to plain numeric.
 
 ## What changed since the prior audit (`MVP1_AUDIT.md`)
 

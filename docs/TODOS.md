@@ -102,12 +102,6 @@ None.
 - **Effort**: S
 - **Why deferred**: A skipped test pins the bug as it stands. Store has no request-token, so an earlier-started invoke resolving last clobbers the newer state.
 
-### medium-csv-time-datetime-formats
-- **Title**: CSV emission for HH:MM-only and mixed datetime formats
-- **Refs**: COVERAGE.md "Known limitations / deferred"
-- **Effort**: S
-- **Why deferred**: `is_date_only_format` covers Y+M+D; HH:MM-only and mixed datetime fall back to raw serials.
-
 ---
 
 ## Low — polish

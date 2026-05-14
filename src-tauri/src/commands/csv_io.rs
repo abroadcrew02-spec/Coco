@@ -265,20 +265,30 @@ pub fn workbook_export_csv(
                             // Checked in specificity order: datetime > date >
                             // percent > plain numeric.
                             let s = if let (Some(f), Some(fmt)) = (serial, fmt_field) {
-                                if is_datetime_format(fmt) {
+                                if is_text_format(fmt) {
+                                    // "@" text format: emit the number verbatim
+                                    // (no thousands separators, no formatting).
+                                    format_number(f)
+                                } else if is_datetime_format(fmt) {
                                     match excel_serial_to_datetime(f) {
-                                        Some(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
+                                        Some(dt) => format_date_or_datetime(dt, fmt, true),
                                         None => format_number(f),
                                     }
                                 } else if is_date_only_format(fmt) {
                                     match excel_serial_to_date(f) {
-                                        Some(d) => d.format("%Y-%m-%d").to_string(),
+                                        Some(d) => format_date_or_datetime(
+                                            d.and_hms_opt(0, 0, 0).unwrap(),
+                                            fmt,
+                                            false,
+                                        ),
                                         None => format_number(f),
                                     }
                                 } else if is_time_only_format(fmt) {
                                     format_time(f)
                                 } else if is_percent_format(fmt) {
                                     format_percent(f, fmt)
+                                } else if is_currency_format(fmt) {
+                                    format_currency(f, fmt)
                                 } else {
                                     format_number(f)
                                 }
@@ -546,6 +556,188 @@ fn format_percent(value: f64, fmt: &str) -> String {
     } else {
         format!("{:.*}%", decimals, pct)
     }
+}
+
+/// Returns true if the cell's `_fmt` is the literal Excel text-format code
+/// `@`. Text-formatted numeric cells are emitted verbatim (no thousands
+/// separators, no special date interpretation).
+fn is_text_format(fmt: &str) -> bool {
+    fmt.trim() == "@"
+}
+
+/// Returns true if the cell's `_fmt` looks like a currency format. Heuristic:
+/// any pattern containing `$`, `¥`, `€`, `£` outside of a literal-quote.
+/// Doesn't validate the full Excel format-code grammar — that's a TODO.
+fn is_currency_format(fmt: &str) -> bool {
+    // Allow leading `[$X-409]` etc. — common in Excel locale-tagged currency.
+    fmt.contains('$') || fmt.contains('¥') || fmt.contains('€') || fmt.contains('£')
+}
+
+/// Render `value` as a currency string using the given `fmt` code. Supports
+/// the common patterns: "$#,##0.00", "$#,##0", "¥#,##0", "[$$-409]#,##0.00".
+/// Falls back to plain numeric formatting if the format is unrecognized.
+fn format_currency(value: f64, fmt: &str) -> String {
+    // Extract symbol: first non-digit, non-#, non-comma, non-period, non-bracket char.
+    let symbol = pick_currency_symbol(fmt).unwrap_or('$');
+    // Decimal count: zeros after the `.` in the format string, capped at 6.
+    let mut decimals = 0usize;
+    if let Some(dot_idx) = fmt.find('.') {
+        for c in fmt[dot_idx + 1..].chars() {
+            if c == '0' {
+                decimals += 1;
+                if decimals >= 6 {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+    let uses_thousands = fmt.contains("#,##");
+    let abs_value = value.abs();
+    let formatted = if uses_thousands {
+        format_thousands(abs_value, decimals)
+    } else if decimals == 0 {
+        format!("{}", abs_value.round() as i64)
+    } else {
+        format!("{:.*}", decimals, abs_value)
+    };
+    let sign = if value < 0.0 { "-" } else { "" };
+    format!("{}{}{}", sign, symbol, formatted)
+}
+
+/// First currency-looking glyph in the format string. Handles bare symbols
+/// and the `[$SYMBOL-LOCALE]` form. Returns None if none found.
+fn pick_currency_symbol(fmt: &str) -> Option<char> {
+    // Look for [$...-...] first.
+    if let Some(start) = fmt.find("[$") {
+        let rest = &fmt[start + 2..];
+        if let Some(end) = rest.find('-').or_else(|| rest.find(']')) {
+            for c in rest[..end].chars() {
+                if !c.is_ascii_alphanumeric() {
+                    return Some(c);
+                }
+            }
+            // Fallback to first char in the bracket if no special glyph.
+            if let Some(c) = rest[..end].chars().next() {
+                return Some(c);
+            }
+        }
+    }
+    for c in fmt.chars() {
+        if matches!(c, '$' | '¥' | '€' | '£') {
+            return Some(c);
+        }
+    }
+    None
+}
+
+/// Format a positive value with thousands separators and the given decimals.
+fn format_thousands(value: f64, decimals: usize) -> String {
+    let raw = if decimals == 0 {
+        format!("{}", value.round() as i64)
+    } else {
+        format!("{:.*}", decimals, value)
+    };
+    let (int_part, frac_part) = match raw.find('.') {
+        Some(i) => (&raw[..i], Some(&raw[i + 1..])),
+        None => (raw.as_str(), None),
+    };
+    let mut grouped = String::new();
+    for (i, c) in int_part.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(c);
+    }
+    let int_grouped: String = grouped.chars().rev().collect();
+    match frac_part {
+        Some(f) => format!("{}.{}", int_grouped, f),
+        None => int_grouped,
+    }
+}
+
+/// Render a date / datetime using the format code's literal-by-literal
+/// substitution of `yyyy/yy/mm/m/dd/d/hh/h/mm/m/ss/s`. Falls back to
+/// ISO 8601 if the format code doesn't yield any token replacements.
+/// `is_datetime` controls whether time tokens are emitted; when false we
+/// stop after the date portion so a pure date format stays date-only.
+fn format_date_or_datetime(
+    dt: chrono::NaiveDateTime,
+    fmt: &str,
+    is_datetime: bool,
+) -> String {
+    use chrono::{Datelike, Timelike};
+    let lower = fmt.to_ascii_lowercase();
+    // Tokens are matched longest-first to avoid `m` swallowing `mm` etc.
+    // Months can collide with minutes — in Excel the disambiguator is
+    // adjacency to `h` / `s`. We approximate: after an `h` or `:` token,
+    // `mm` / `m` mean minutes; otherwise they mean months.
+    let mut out = String::with_capacity(fmt.len());
+    let bytes = lower.as_bytes();
+    let mut i = 0;
+    let mut after_hour = false;
+    while i < bytes.len() {
+        let rest = &bytes[i..];
+        let starts = |s: &[u8]| rest.starts_with(s);
+        if starts(b"yyyy") {
+            out.push_str(&format!("{:04}", dt.year()));
+            i += 4;
+        } else if starts(b"yy") {
+            out.push_str(&format!("{:02}", dt.year() % 100));
+            i += 2;
+        } else if is_datetime && starts(b"hh") {
+            out.push_str(&format!("{:02}", dt.hour()));
+            i += 2;
+            after_hour = true;
+        } else if is_datetime && starts(b"h") {
+            out.push_str(&format!("{}", dt.hour()));
+            i += 1;
+            after_hour = true;
+        } else if is_datetime && starts(b"ss") {
+            out.push_str(&format!("{:02}", dt.second()));
+            i += 2;
+        } else if is_datetime && starts(b"s") {
+            out.push_str(&format!("{}", dt.second()));
+            i += 1;
+        } else if starts(b"mm") {
+            if after_hour {
+                out.push_str(&format!("{:02}", dt.minute()));
+            } else {
+                out.push_str(&format!("{:02}", dt.month()));
+            }
+            i += 2;
+        } else if starts(b"m") {
+            if after_hour {
+                out.push_str(&format!("{}", dt.minute()));
+            } else {
+                out.push_str(&format!("{}", dt.month()));
+            }
+            i += 1;
+        } else if starts(b"dd") {
+            out.push_str(&format!("{:02}", dt.day()));
+            i += 2;
+        } else if starts(b"d") {
+            out.push_str(&format!("{}", dt.day()));
+            i += 1;
+        } else {
+            // Pass-through for separators (- / : space etc.) and any other
+            // literal characters. Use the original-case byte from `fmt` so
+            // that we don't lower-case user separators (rare but possible).
+            let ch = fmt.as_bytes()[i] as char;
+            out.push(ch);
+            i += 1;
+        }
+    }
+    // If we couldn't match any tokens (out == fmt verbatim, no digits added),
+    // fall back to ISO so the cell is still meaningful.
+    if !out.chars().any(|c| c.is_ascii_digit()) {
+        if is_datetime {
+            return dt.format("%Y-%m-%d %H:%M:%S").to_string();
+        }
+        return dt.format("%Y-%m-%d").to_string();
+    }
+    out
 }
 
 fn infer_csv_cell(raw: &str) -> Option<Value> {

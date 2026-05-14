@@ -213,6 +213,157 @@ fn hidden_sheet_state_round_trips() {
 }
 
 #[test]
+fn split_panes_round_trip() {
+    // Split panes use the same `<pane>` element as frozen panes, but
+    // `xSplit` / `ySplit` are pixel/twip offsets (not row/col counts) and
+    // `state="split"` (or no `state` attribute) selects the live-drag mode.
+    // We preserve the raw numbers verbatim; D5 only handled `state="frozen"`,
+    // so the split path is exercised here.
+    let tmp = TempDir::new().expect("tempdir");
+    let fixture = tmp.path().join("split.xlsx");
+    let exported = tmp.path().join("split_exported.xlsx");
+
+    // xSplit=2880 / ySplit=1500 are typical Excel split offsets (1/20pt twips).
+    let sheet1_inner = r#"<sheetViews><sheetView workbookViewId="0"><pane xSplit="2880" ySplit="1500" topLeftCell="C5" state="split"/></sheetView></sheetViews><sheetData/>"#;
+    let sheet2_inner = r#"<sheetData/>"#;
+    write_xlsx_fixture(
+        &fixture,
+        r#"<sheet name="S1" sheetId="1" r:id="rId1"/><sheet name="S2" sheetId="2" r:id="rId2"/>"#,
+        sheet1_inner,
+        sheet2_inner,
+    );
+
+    // Import → snapshot should expose `_freezePane` with state="split".
+    let result = import_xlsx_core(path_str(&fixture)).expect("import");
+    let snap_json = result.handle.snapshot_json.clone().expect("snapshot");
+    let snap: Value = serde_json::from_str(&snap_json).expect("parse snap");
+
+    let fp = &snap["sheets"]["sheet-1"]["_freezePane"];
+    assert!(fp.is_object(), "expected _freezePane on sheet-1, got {snap}");
+    assert_eq!(fp["state"].as_str(), Some("split"));
+    assert_eq!(fp["row"].as_u64(), Some(1500));
+    assert_eq!(fp["col"].as_u64(), Some(2880));
+    assert_eq!(fp["topLeft"].as_str(), Some("C5"));
+
+    // Export → on-disk sheet1.xml carries state="split" with the same offsets.
+    let export = export_xlsx_core(path_str(&exported), snap_json).expect("export");
+    assert!(export.success, "export should succeed: {:?}", export.error);
+
+    let xml = read_entry(&exported, "xl/worksheets/sheet1.xml");
+    assert!(
+        xml.contains("state=\"split\""),
+        "exported sheet1.xml should record state=\"split\"; got:\n{xml}"
+    );
+    assert!(
+        xml.contains("xSplit=\"2880\""),
+        "exported sheet1.xml should preserve xSplit=\"2880\"; got:\n{xml}"
+    );
+    assert!(
+        xml.contains("ySplit=\"1500\""),
+        "exported sheet1.xml should preserve ySplit=\"1500\"; got:\n{xml}"
+    );
+    assert!(
+        xml.contains("topLeftCell=\"C5\""),
+        "exported sheet1.xml should preserve topLeftCell=\"C5\"; got:\n{xml}"
+    );
+
+    // Re-import → split state survives the round-trip.
+    let result2 = import_xlsx_core(path_str(&exported)).expect("re-import");
+    let snap2: Value = serde_json::from_str(&result2.handle.snapshot_json.unwrap()).unwrap();
+    let fp2 = &snap2["sheets"]["sheet-1"]["_freezePane"];
+    assert!(
+        fp2.is_object(),
+        "after round-trip, sheet-1 should still carry _freezePane; got {snap2}"
+    );
+    assert_eq!(fp2["state"].as_str(), Some("split"));
+    assert_eq!(fp2["row"].as_u64(), Some(1500));
+    assert_eq!(fp2["col"].as_u64(), Some(2880));
+    assert_eq!(fp2["topLeft"].as_str(), Some("C5"));
+}
+
+#[test]
+fn mixed_frozen_and_split_round_trip() {
+    // A workbook can mix modes: sheet1 frozen (rows/cols), sheet2 split
+    // (pixel offsets). Each sheet's pane state should be preserved
+    // independently — no cross-contamination of the `state` attribute.
+    let tmp = TempDir::new().expect("tempdir");
+    let fixture = tmp.path().join("mixed.xlsx");
+    let exported = tmp.path().join("mixed_exported.xlsx");
+
+    let sheet1_inner = r#"<sheetViews><sheetView workbookViewId="0"><pane xSplit="2" ySplit="4" topLeftCell="C5" state="frozen"/></sheetView></sheetViews><sheetData/>"#;
+    let sheet2_inner = r#"<sheetViews><sheetView workbookViewId="0"><pane xSplit="1800" ySplit="3000" topLeftCell="D10" state="split"/></sheetView></sheetViews><sheetData/>"#;
+    write_xlsx_fixture(
+        &fixture,
+        r#"<sheet name="S1" sheetId="1" r:id="rId1"/><sheet name="S2" sheetId="2" r:id="rId2"/>"#,
+        sheet1_inner,
+        sheet2_inner,
+    );
+
+    let result = import_xlsx_core(path_str(&fixture)).expect("import");
+    let snap_json = result.handle.snapshot_json.clone().expect("snapshot");
+    let snap: Value = serde_json::from_str(&snap_json).expect("parse snap");
+
+    // sheet-1: frozen — `state` field should be omitted (frozen is the default).
+    let fp1 = &snap["sheets"]["sheet-1"]["_freezePane"];
+    assert!(fp1.is_object(), "expected _freezePane on sheet-1, got {snap}");
+    assert!(
+        fp1.get("state").is_none(),
+        "frozen is the default; `state` should be omitted on sheet-1, got {fp1}"
+    );
+    assert_eq!(fp1["row"].as_u64(), Some(4));
+    assert_eq!(fp1["col"].as_u64(), Some(2));
+
+    // sheet-2: split — `state` field should be present.
+    let fp2 = &snap["sheets"]["sheet-2"]["_freezePane"];
+    assert!(fp2.is_object(), "expected _freezePane on sheet-2, got {snap}");
+    assert_eq!(fp2["state"].as_str(), Some("split"));
+    assert_eq!(fp2["row"].as_u64(), Some(3000));
+    assert_eq!(fp2["col"].as_u64(), Some(1800));
+
+    // Export and confirm both panes survive with the correct state.
+    let export = export_xlsx_core(path_str(&exported), snap_json).expect("export");
+    assert!(export.success, "export should succeed: {:?}", export.error);
+
+    let xml1 = read_entry(&exported, "xl/worksheets/sheet1.xml");
+    assert!(
+        xml1.contains("state=\"frozen\""),
+        "sheet1.xml should carry state=\"frozen\"; got:\n{xml1}"
+    );
+    assert!(
+        !xml1.contains("state=\"split\""),
+        "sheet1.xml must NOT carry state=\"split\"; got:\n{xml1}"
+    );
+
+    let xml2 = read_entry(&exported, "xl/worksheets/sheet2.xml");
+    assert!(
+        xml2.contains("state=\"split\""),
+        "sheet2.xml should carry state=\"split\"; got:\n{xml2}"
+    );
+    assert!(
+        xml2.contains("xSplit=\"1800\""),
+        "sheet2.xml should preserve xSplit=\"1800\"; got:\n{xml2}"
+    );
+    assert!(
+        xml2.contains("ySplit=\"3000\""),
+        "sheet2.xml should preserve ySplit=\"3000\"; got:\n{xml2}"
+    );
+
+    // Re-import → both panes still distinct.
+    let result2 = import_xlsx_core(path_str(&exported)).expect("re-import");
+    let snap2: Value = serde_json::from_str(&result2.handle.snapshot_json.unwrap()).unwrap();
+    let rt1 = &snap2["sheets"]["sheet-1"]["_freezePane"];
+    let rt2 = &snap2["sheets"]["sheet-2"]["_freezePane"];
+    assert!(rt1.is_object() && rt2.is_object(), "both panes should round-trip; got {snap2}");
+    assert!(
+        rt1.get("state").is_none(),
+        "after round-trip, sheet-1 is still frozen (state omitted); got {rt1}"
+    );
+    assert_eq!(rt2["state"].as_str(), Some("split"));
+    assert_eq!(rt2["row"].as_u64(), Some(3000));
+    assert_eq!(rt2["col"].as_u64(), Some(1800));
+}
+
+#[test]
 fn defaults_are_not_emitted() {
     // Regression: a workbook with no frozen panes and all-visible sheets must
     // round-trip cleanly — i.e. neither `_freezePane` nor `_sheetState` should

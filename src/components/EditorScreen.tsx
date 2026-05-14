@@ -43,6 +43,7 @@ import DataValidationDialog, { type DataValidationEntry } from "./DataValidation
 import ConditionalFormattingDialog, { type CfRule } from "./ConditionalFormattingDialog";
 import InsertHyperlinkDialog, { type HyperlinkFormValue } from "./InsertHyperlinkDialog";
 import InsertCommentDialog, { type CommentEntry } from "./InsertCommentDialog";
+import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -126,6 +127,13 @@ export default function EditorScreen() {
     sheetId: string;
     cellRef: string;
     existing: CommentEntry | null;
+  } | null>(null);
+  // Chart dialog state: null while closed. Pins the active sheet and the
+  // range derived from the current selection at open time so the user's
+  // input lands on a stable target even if focus shifts.
+  const [chartDialog, setChartDialog] = useState<{
+    sheetId: string;
+    range: string;
   } | null>(null);
 
   // Read all named ranges from the live Univer workbook via the facade
@@ -507,6 +515,61 @@ export default function EditorScreen() {
     [currentSnapshotJson, updateSnapshot],
   );
 
+  // Open the chart dialog targeting the active sheet's current selection.
+  // The Univer @univerjs/sheets-chart plugin isn't in this build, so the
+  // dialog persists into `sheets.<id>._charts` (snapshot-level). The xlsx
+  // round-trip preserves existing chart blobs byte-for-byte (xlsx_io.rs),
+  // but newly authored entries are data-only — re-emitting chart OOXML is
+  // out of scope here. Falls back to A1 if there's no live selection.
+  const openChartDialog = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let range = "A1";
+    try {
+      const sel = sheet.getSelection();
+      const r = sel?.getActiveRange();
+      if (r) range = r.getA1Notation();
+    } catch {
+      // Best-effort: keep the A1 default if Univer's selection API throws.
+    }
+    setChartDialog({ sheetId, range });
+  }, []);
+
+  // Append the authored chart to `sheets.<id>._charts` in the live workbook
+  // snapshot. We re-derive from FWorkbook.save() (rather than the cached
+  // currentSnapshotJson) so the apply doesn't clobber edits made while the
+  // dialog was open. The on-disk shape is { range, type, title? } — matches
+  // the dialog's emitted value plus the field rename (chartType -> type).
+  const applyChart = useCallback(
+    (value: ChartFormValue) => {
+      if (!chartDialog) return;
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const snapshot = workbook.save() as unknown as Record<string, unknown>;
+      const sheets = (snapshot.sheets as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const sheetObj = sheets[chartDialog.sheetId];
+      if (!sheetObj) return;
+      const existing = Array.isArray(sheetObj._charts)
+        ? (sheetObj._charts as Array<Record<string, unknown>>)
+        : [];
+      const entry: Record<string, string> = {
+        range: value.range,
+        type: value.chartType,
+      };
+      if (value.title) entry.title = value.title;
+      sheetObj._charts = [...existing, entry];
+      updateSnapshot(JSON.stringify(snapshot));
+    },
+    [chartDialog, updateSnapshot],
+  );
+
   useAutoSave();
 
   // Keyboard shortcuts (req 4.6): Ctrl+S / Cmd+S = save; Ctrl+Shift+S / Cmd+Shift+S = save as.
@@ -812,6 +875,15 @@ export default function EditorScreen() {
           <button
             type="button"
             className="toolbar-btn"
+            onClick={openChartDialog}
+            title="選択範囲からグラフを挿入"
+            aria-label="グラフを挿入"
+          >
+            📊 グラフ
+          </button>
+          <button
+            type="button"
+            className="toolbar-btn"
             onClick={requestSettings}
             title="設定（自動保存間隔など）"
             aria-label="設定"
@@ -989,6 +1061,13 @@ export default function EditorScreen() {
           onApply={(entry) => applyComment(commentDialog.sheetId, entry)}
           onDelete={() => deleteComment(commentDialog.sheetId, commentDialog.cellRef)}
           onClose={() => setCommentDialog(null)}
+        />
+      )}
+      {chartDialog && (
+        <InsertChartDialog
+          initialRange={chartDialog.range}
+          onApply={applyChart}
+          onClose={() => setChartDialog(null)}
         />
       )}
       {warningsDialog === "import" && (

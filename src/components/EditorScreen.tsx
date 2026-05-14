@@ -41,6 +41,7 @@ import CompatibilityWarningsDialog from "./CompatibilityWarningsDialog";
 import NamedRangesDialog, { type NamedRangeEntry } from "./NamedRangesDialog";
 import DataValidationDialog, { type DataValidationEntry } from "./DataValidationDialog";
 import ConditionalFormattingDialog, { type CfRule } from "./ConditionalFormattingDialog";
+import InsertHyperlinkDialog, { type HyperlinkFormValue } from "./InsertHyperlinkDialog";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -110,6 +111,13 @@ export default function EditorScreen() {
   // current rules + the sheet name when opening so the user can cancel out.
   const [cfDialog, setCfDialog] = useState<
     { sheetName: string; sheetId: string; rules: CfRule[] } | null
+  >(null);
+  // Insert-hyperlink dialog state: when non-null the dialog is open with the
+  // captured active-cell ref + sheet id snapshotted at open time. We pin the
+  // sheet id so the user can apply later even if the underlying selection moves.
+  const [hyperlinkCtx, setHyperlinkCtx] = useState<
+    | { sheetId: string; cell: string; display: string }
+    | null
   >(null);
 
   // Read all named ranges from the live Univer workbook via the facade
@@ -295,6 +303,73 @@ export default function EditorScreen() {
     [updateSnapshot],
   );
 
+  // Snapshot the active sheet + cell when the user invokes Insert Hyperlink.
+  // We pin both so the apply step targets the cell the user saw at open time,
+  // even if focus moves while the dialog is up. Falls back to Sheet1!A1 when
+  // there's no live selection.
+  const openHyperlinkDialog = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let cell = "A1";
+    let display = "";
+    try {
+      const sel = sheet.getSelection();
+      const range = sel?.getActiveRange();
+      if (range) {
+        // Use the top-left of the active range as the anchor (mirrors Excel's
+        // Insert Hyperlink behavior on a multi-cell selection).
+        const a1 = range.getA1Notation();
+        cell = a1.includes(":") ? a1.split(":")[0] : a1;
+        const value = range.getValue();
+        if (typeof value === "string" && value) display = value;
+        else if (typeof value === "number") display = String(value);
+      }
+    } catch {
+      // Best-effort: fall back to the A1 default.
+    }
+    setHyperlinkCtx({ sheetId, cell, display });
+  }, []);
+
+  // Append the new hyperlink to `sheets.<id>._hyperlinks` in the snapshot and
+  // reload Univer from it. We go snapshot-level because Univer 0.5.x's facade
+  // doesn't expose a stable hyperlink API; the round-trip path in xlsx_io.rs
+  // (parse_xlsx_hyperlinks / build_hyperlink_from_snapshot) is the source of
+  // truth for the shape: { cell, target, display?, tooltip? }.
+  const applyHyperlink = useCallback(
+    (value: HyperlinkFormValue) => {
+      if (!hyperlinkCtx) return;
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const snapshot = workbook.save() as unknown as Record<string, unknown>;
+      const sheets = (snapshot.sheets as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const sheetObj = sheets[hyperlinkCtx.sheetId];
+      if (!sheetObj) return;
+      const existing = Array.isArray(sheetObj._hyperlinks)
+        ? (sheetObj._hyperlinks as Array<Record<string, unknown>>)
+        : [];
+      // Drop any prior link on the same cell — Excel only allows one
+      // hyperlink per cell, and the rels writer on export would otherwise
+      // emit two competing r:id entries for the same ref.
+      const filtered = existing.filter((e) => e.cell !== value.cell);
+      const entry: Record<string, string> = {
+        cell: value.cell,
+        target: value.target,
+      };
+      if (value.display) entry.display = value.display;
+      if (value.tooltip) entry.tooltip = value.tooltip;
+      sheetObj._hyperlinks = [...filtered, entry];
+      updateSnapshot(JSON.stringify(snapshot));
+    },
+    [hyperlinkCtx, updateSnapshot],
+  );
+
   useAutoSave();
 
   // Keyboard shortcuts (req 4.6): Ctrl+S / Cmd+S = save; Ctrl+Shift+S / Cmd+Shift+S = save as.
@@ -318,9 +393,13 @@ export default function EditorScreen() {
         // is a ribbon path with no portable shortcut.
         e.preventDefault();
         openCfDialog();
+      } else if (mod && !e.shiftKey && (e.key === "k" || e.key === "K")) {
+        // Ctrl+K / Cmd+K — Excel's Insert Hyperlink shortcut.
+        e.preventDefault();
+        openHyperlinkDialog();
       }
     },
-    [save, promptSaveAs, openNamedRangesDialog, openCfDialog]
+    [save, promptSaveAs, openNamedRangesDialog, openCfDialog, openHyperlinkDialog]
   );
 
   const runCsvExport = useCallback(
@@ -751,6 +830,14 @@ export default function EditorScreen() {
           initialRules={cfDialog.rules}
           onSave={(next) => applyCfRules(cfDialog.sheetId, next)}
           onClose={() => setCfDialog(null)}
+        />
+      )}
+      {hyperlinkCtx && (
+        <InsertHyperlinkDialog
+          initialCell={hyperlinkCtx.cell}
+          initialDisplay={hyperlinkCtx.display}
+          onApply={applyHyperlink}
+          onClose={() => setHyperlinkCtx(null)}
         />
       )}
       {warningsDialog === "import" && (

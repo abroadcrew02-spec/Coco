@@ -168,4 +168,66 @@ describe("CompatibilityWarningsDialog", () => {
       expect(onClose).not.toHaveBeenCalled();
     });
   });
+
+  describe("edge cases", () => {
+    it("renders no sections when warnings list is empty", () => {
+      // Title + close affordances render, but the body contains no section.
+      // Defensive: a caller could legally pass an empty list (e.g. once all
+      // warnings get dismissed individually in a future iteration).
+      const { container } = render(
+        <CompatibilityWarningsDialog warnings={[]} title="空" onClose={onClose} />
+      );
+      expect(container.querySelector(".compat-section")).toBeNull();
+      // Title still renders so the user can dismiss the modal even when empty.
+      expect(screen.getByText("空")).toBeTruthy();
+      // Footer 閉じる button is still present.
+      const closers = screen.getAllByRole("button", { name: "閉じる" });
+      expect(closers.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("renders only the blocking section when all warnings are blocking", () => {
+      // Use messages that don't include "ブロック" so the section header
+      // (which contains the label "ブロック (開けない)") is unambiguous.
+      const { container } = render(
+        <CompatibilityWarningsDialog
+          warnings={[
+            w("blocking", "B1", "メッセージ1"),
+            w("blocking", "B2", "メッセージ2"),
+            w("blocking", "B3", "メッセージ3"),
+          ]}
+          title="t"
+          onClose={onClose}
+        />
+      );
+      expect(container.querySelector(".compat-section--blocking")).toBeTruthy();
+      expect(container.querySelector(".compat-section--warning")).toBeNull();
+      expect(container.querySelector(".compat-section--info")).toBeNull();
+      const headers = container.querySelectorAll(".compat-section-title");
+      expect(headers).toHaveLength(1);
+      expect(headers[0].textContent).toContain("ブロック");
+      expect(headers[0].textContent).toContain("(3)");
+    });
+
+    it("renders a very long message verbatim (no truncation in component)", () => {
+      // Triage rule: truncation is a CSS concern (text-overflow), never a JS
+      // one — losing the tail of an error message is worse than overflow.
+      const longMsg =
+        "数式 INDIRECT を含むセルが多数あり、再計算に失敗しました。" +
+        "影響範囲が広いため詳細を一覧でお示しします: " +
+        "Sheet1!A1, Sheet1!A2, Sheet1!A3, Sheet1!A4, Sheet1!A5, " +
+        "Sheet1!A6, Sheet1!A7, Sheet1!A8, Sheet1!A9, Sheet1!A10. " +
+        "それぞれのセルを確認し、参照範囲が有効か再度ご確認ください。";
+      render(
+        <CompatibilityWarningsDialog
+          warnings={[w("warning", "FORMULA_INDIRECT", longMsg)]}
+          title="t"
+          onClose={onClose}
+        />
+      );
+      const node = screen.getByText(longMsg);
+      // Full text present, not abbreviated.
+      expect(node.textContent).toBe(longMsg);
+      expect(node.textContent!.length).toBe(longMsg.length);
+    });
+  });
 });

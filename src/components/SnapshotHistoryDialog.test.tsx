@@ -232,6 +232,43 @@ describe("SnapshotHistoryDialog", () => {
         expect(screen.getByText("スナップショットがありません。")).toBeTruthy();
       });
     });
+
+    it("ArrowDown / Enter are no-ops while still loading (no crash)", async () => {
+      // Keep the list promise pending so the dialog stays in the loading state.
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "workbook_diagnostic_info") return Promise.resolve(null);
+        return new Promise(() => {}); // pending forever
+      });
+      render(<SnapshotHistoryDialog onClose={onClose} />);
+      expect(screen.getByText("読み込み中...")).toBeTruthy();
+      // The hook's branch returns early when snapshots.length === 0, so these
+      // keys must not blow up trying to read a row at the current index.
+      expect(() => {
+        fireEvent.keyDown(window, { key: "ArrowDown" });
+        fireEvent.keyDown(window, { key: "Enter" });
+        fireEvent.keyDown(window, { key: "ArrowUp" });
+      }).not.toThrow();
+      // No workbook_open_snapshot should have been invoked.
+      const openCall = invokeMock.mock.calls.find(
+        (c) => c[0] === "workbook_open_snapshot"
+      );
+      expect(openCall).toBeUndefined();
+    });
+
+    it("Enter does nothing when the snapshot list is empty (no row to open)", async () => {
+      invokeMock.mockResolvedValue([]); // list resolves empty
+      render(<SnapshotHistoryDialog onClose={onClose} />);
+      await waitFor(() =>
+        expect(screen.getByText("スナップショットがありません。")).toBeTruthy()
+      );
+      fireEvent.keyDown(window, { key: "Enter" });
+      const openCall = invokeMock.mock.calls.find(
+        (c) => c[0] === "workbook_open_snapshot"
+      );
+      expect(openCall).toBeUndefined();
+      // Dialog stays open.
+      expect(onClose).not.toHaveBeenCalled();
+    });
   });
 
   // Helper for vacuum / integrity tests: switch invokeMock to a command-aware

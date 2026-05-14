@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use calamine::{open_workbook, Data, Reader, Xlsx};
 use rust_xlsxwriter::{
     Color, DataValidation, DataValidationErrorStyle, DataValidationRule, Format, FormatAlign,
-    FormatBorder, FormatPattern, Formula, Workbook,
+    FormatBorder, FormatPattern, Formula, Url, Workbook,
 };
 use serde_json::{json, Map, Value};
 
@@ -1857,6 +1857,207 @@ pub(crate) fn parse_xlsx_data_validations(path: &str) -> HashMap<String, Vec<Dat
     out
 }
 
+/// One parsed `<hyperlink>` entry from a worksheet's XML, resolved against the
+/// per-sheet rels file so the URL target is in hand. Internal links (Excel's
+/// `<hyperlink location="Sheet2!A1"/>` shape with no rels rId) store the target
+/// in `target` with a leading `#` so the export side can re-emit them via
+/// rust_xlsxwriter's `internal:` URL prefix.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HyperlinkEntry {
+    /// A1-style single-cell ref. The OOXML attribute is `ref="A1"`. We only
+    /// handle single-cell hyperlinks (Excel itself only writes them per-cell
+    /// in practice). Range refs are stored verbatim and snapped to the top-left
+    /// cell on export.
+    pub cell: String,
+    /// Resolved target. For external links this is the URL pulled from the
+    /// per-sheet rels Target attribute. For internal links it's `#Sheet2!A1`
+    /// (taken from the `location` attribute on the hyperlink element, with a
+    /// leading `#`).
+    pub target: String,
+    /// Optional display text shown in the cell (the `display` attribute).
+    pub display: String,
+    /// Optional tooltip text (the `tooltip` attribute).
+    pub tooltip: String,
+}
+
+/// Parse one sheet's `<hyperlinks>...</hyperlinks>` block. `rels` maps the
+/// per-sheet rId → Target string (for external hyperlinks). Returns an empty
+/// vec when the sheet has no hyperlinks.
+fn parse_sheet_hyperlinks(
+    xml: &str,
+    rels: &HashMap<String, String>,
+) -> Vec<HyperlinkEntry> {
+    let mut out = Vec::new();
+    let Some(block) = extract_block(xml, "<hyperlinks", "</hyperlinks>") else {
+        return out;
+    };
+    for el in extract_self_closing_or_paired(&block, "hyperlink") {
+        // Only need the opening tag's attributes.
+        let head_end = match el.find('>') {
+            Some(p) => p + 1,
+            None => continue,
+        };
+        let head = &el[..head_end];
+        let Some(cell_ref) = parse_attr(head, "ref") else {
+            continue;
+        };
+        let cell_ref = decode_xml_entities(&cell_ref);
+        // Range refs like "A1:B2" — keep just the top-left cell since
+        // rust_xlsxwriter writes URLs per-cell.
+        let cell = cell_ref
+            .split_once(':')
+            .map(|(lhs, _)| lhs.to_string())
+            .unwrap_or(cell_ref);
+        if cell.trim().is_empty() {
+            continue;
+        }
+
+        // r:id resolves to an entry in the per-sheet rels (external link).
+        // OOXML namespacing means we may see "r:id" or "id" depending on
+        // emitter; parse_attr does a literal match so try both.
+        let rid = parse_attr(head, "r:id")
+            .or_else(|| parse_attr(head, "id"))
+            .map(|s| decode_xml_entities(&s));
+        let location = parse_attr(head, "location").map(|s| decode_xml_entities(&s));
+        let display = parse_attr(head, "display")
+            .map(|s| decode_xml_entities(&s))
+            .unwrap_or_default();
+        let tooltip = parse_attr(head, "tooltip")
+            .map(|s| decode_xml_entities(&s))
+            .unwrap_or_default();
+
+        let target = match (rid.as_deref(), location.as_deref()) {
+            (Some(r), _) if !r.is_empty() => match rels.get(r) {
+                Some(t) if !t.is_empty() => {
+                    // External rels Target may itself carry a "#anchor" for
+                    // sheet-local links written via the rels indirection.
+                    // Append the location if present so e.g.
+                    // file://foo.xlsx#Sheet1!A1 round-trips.
+                    if let Some(loc) = location.as_deref().filter(|s| !s.is_empty()) {
+                        format!("{t}#{loc}")
+                    } else {
+                        t.clone()
+                    }
+                }
+                // rId unresolved: fall back to location-only if available.
+                _ => match location.as_deref() {
+                    Some(loc) if !loc.is_empty() => format!("#{loc}"),
+                    _ => continue,
+                },
+            },
+            (_, Some(loc)) if !loc.is_empty() => format!("#{loc}"),
+            _ => continue,
+        };
+
+        out.push(HyperlinkEntry {
+            cell,
+            target,
+            display,
+            tooltip,
+        });
+    }
+    out
+}
+
+/// Resolve per-sheet rels file path for a given worksheet entry path. The
+/// rels file lives at `xl/worksheets/_rels/sheetN.xml.rels` for an entry at
+/// `xl/worksheets/sheetN.xml`. Returns the conventional rels path either way
+/// (the caller is responsible for handling "missing entry" gracefully).
+fn sheet_rels_path(sheet_entry_path: &str) -> Option<String> {
+    let (dir, file) = sheet_entry_path.rsplit_once('/')?;
+    Some(format!("{dir}/_rels/{file}.rels"))
+}
+
+/// Parse per-sheet hyperlinks out of an xlsx, joining each sheet's
+/// `<hyperlinks>` block with its dedicated rels file. Returns a map keyed by
+/// sheet name. Empty map on I/O / structure error — hyperlinks are best-effort
+/// metadata, same policy as merges and data validations.
+pub(crate) fn parse_xlsx_hyperlinks(path: &str) -> HashMap<String, Vec<HyperlinkEntry>> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return HashMap::new(),
+    };
+
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    if sheet_paths.is_empty() {
+        return HashMap::new();
+    }
+
+    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
+        Ok(a) => a,
+        Err(_) => return HashMap::new(),
+    };
+
+    let mut out: HashMap<String, Vec<HyperlinkEntry>> = HashMap::new();
+    for (sheet_name, entry_path) in sheet_paths {
+        // Read the per-sheet rels file (may be absent — internal-only links).
+        let rels: HashMap<String, String> = sheet_rels_path(&entry_path)
+            .and_then(|rels_path| {
+                let mut s = String::new();
+                archive
+                    .by_name(&rels_path)
+                    .ok()?
+                    .read_to_string(&mut s)
+                    .ok()?;
+                Some(parse_rels(&s))
+            })
+            .unwrap_or_default();
+
+        let mut xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&entry_path) {
+            if entry.read_to_string(&mut xml).is_ok() {
+                let links = parse_sheet_hyperlinks(&xml, &rels);
+                if !links.is_empty() {
+                    out.insert(sheet_name, links);
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// Build a `rust_xlsxwriter::Url` and 0-based (row, col) from one snapshot
+/// hyperlink entry. Returns `None` for malformed entries (bad cell ref, empty
+/// target) so the caller can drop them without aborting export.
+fn build_hyperlink_from_snapshot(entry: &Value) -> Option<(u32, u16, Url)> {
+    let cell = entry.get("cell").and_then(|v| v.as_str())?.trim();
+    if cell.is_empty() {
+        return None;
+    }
+    let target = entry.get("target").and_then(|v| v.as_str())?.trim();
+    if target.is_empty() {
+        return None;
+    }
+    let (row, col) = parse_a1(cell)?;
+    let col16: u16 = col.try_into().ok()?;
+
+    // Map our snapshot's "#Sheet2!A1" form to rust_xlsxwriter's "internal:"
+    // pseudo-URI. External http(s)/ftp/mailto/file URLs pass through as-is.
+    let link_str = if let Some(loc) = target.strip_prefix('#') {
+        format!("internal:{loc}")
+    } else {
+        target.to_string()
+    };
+
+    let mut url = Url::new(link_str);
+    if let Some(display) = entry.get("display").and_then(|v| v.as_str()) {
+        if !display.is_empty() {
+            url = url.set_text(display);
+        }
+    }
+    if let Some(tooltip) = entry.get("tooltip").and_then(|v| v.as_str()) {
+        if !tooltip.is_empty() {
+            url = url.set_tip(tooltip);
+        }
+    }
+    Some((row, col16, url))
+}
+
 /// Build a `rust_xlsxwriter::DataValidation` plus a bounding (first_row,
 /// first_col, last_row, last_col) tuple from one snapshot entry. Returns
 /// `None` for entries that cannot be expressed via rust_xlsxwriter's typed API
@@ -2347,6 +2548,9 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     let dimensions_by_sheet = parse_xlsx_dimensions(&path);
     // Pre-parse per-sheet merged-cell ranges (calamine doesn't expose these).
     let merges_by_sheet = parse_xlsx_merges(&path);
+    // Pre-parse per-sheet hyperlinks. Joins the `<hyperlinks>` block in
+    // sheetN.xml with the per-sheet rels file so external URLs are resolved.
+    let hyperlinks_by_sheet = parse_xlsx_hyperlinks(&path);
     // Pre-parse rich-text runs from sharedStrings.xml + inline `<is>` strings.
     // calamine flattens rich strings to plain — we re-attach the runs here.
     let rich_text = parse_xlsx_rich_text(&path).ok();
@@ -2624,6 +2828,30 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                     })
                     .collect();
                 sheet_obj["_dataValidations"] = Value::Array(arr);
+            }
+        }
+
+        // Per-sheet hyperlinks. Opt-in: omit `_hyperlinks` when empty so a
+        // workbook that never had links doesn't acquire an empty array on
+        // round-trip.
+        if let Some(links) = hyperlinks_by_sheet.get(name) {
+            if !links.is_empty() {
+                let arr: Vec<Value> = links
+                    .iter()
+                    .map(|e| {
+                        let mut obj = Map::new();
+                        obj.insert("cell".into(), Value::String(e.cell.clone()));
+                        obj.insert("target".into(), Value::String(e.target.clone()));
+                        if !e.display.is_empty() {
+                            obj.insert("display".into(), Value::String(e.display.clone()));
+                        }
+                        if !e.tooltip.is_empty() {
+                            obj.insert("tooltip".into(), Value::String(e.tooltip.clone()));
+                        }
+                        Value::Object(obj)
+                    })
+                    .collect();
+                sheet_obj["_hyperlinks"] = Value::Array(arr);
             }
         }
 
@@ -3168,6 +3396,23 @@ pub fn export_xlsx_core(
                                 .map_err(|e| e.to_string())?;
                             cell_count += 1;
                         }
+                    }
+                }
+            }
+
+            // Re-emit per-sheet hyperlinks from `_hyperlinks` AFTER cell writes
+            // so the URL clobbers any plain string written at the same (row,
+            // col). rust_xlsxwriter's `write_url` builds the per-sheet rels
+            // file automatically and uses the `display` text (set via
+            // `Url::set_text`) as the visible cell value. Malformed entries
+            // are skipped silently — same best-effort policy as merges/DVs.
+            if let Some(link_arr) = sheet_obj
+                .and_then(|s| s.get("_hyperlinks"))
+                .and_then(|v| v.as_array())
+            {
+                for entry in link_arr {
+                    if let Some((row, col, url)) = build_hyperlink_from_snapshot(entry) {
+                        let _ = worksheet.write_url(row, col, url);
                     }
                 }
             }

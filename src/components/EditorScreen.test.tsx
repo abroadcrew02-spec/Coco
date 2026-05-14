@@ -33,4 +33,20 @@ describe("EditorScreen Univer plugin wiring", () => {
       /"@univerjs\/find-replace\/lib\/index\.css"/,
     );
   });
+
+  it("renders the sheet-protection toggle button and wires its handler", () => {
+    // The toolbar button must be present with the testid and onClick handler
+    // so toggling sheet protection routes through `toggleSheetProtection`.
+    expect(editorSource).toMatch(/toggleSheetProtection/);
+    expect(editorSource).toMatch(/data-testid="sheet-protection-toggle"/);
+    // Locked / unlocked labels — emoji + Japanese verb. Guards against
+    // accidental label drift.
+    expect(editorSource).toMatch(/🔒 保護/);
+    expect(editorSource).toMatch(/🔓 解除/);
+    // The handler must write back via updateSnapshot so the save button
+    // enables and the round-trip catches the change.
+    expect(editorSource).toMatch(/updateSnapshot\(JSON\.stringify\(fresh\)\)/);
+    // Snapshot field name — must match the Rust side `_protected`.
+    expect(editorSource).toMatch(/_protected/);
+  });
 });

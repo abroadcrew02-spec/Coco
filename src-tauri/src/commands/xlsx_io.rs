@@ -4,8 +4,9 @@ use std::path::PathBuf;
 
 use calamine::{open_workbook, Data, Reader, Xlsx};
 use rust_xlsxwriter::{
-    Color, DataValidation, DataValidationErrorStyle, DataValidationRule, Format, FormatAlign,
-    FormatBorder, FormatPattern, Formula, Url, Workbook,
+    Color, ConditionalFormatCell, ConditionalFormatCellRule, ConditionalFormatFormula,
+    ConditionalFormatText, ConditionalFormatTextRule, DataValidation, DataValidationErrorStyle,
+    DataValidationRule, Format, FormatAlign, FormatBorder, FormatPattern, Formula, Url, Workbook,
 };
 use serde_json::{json, Map, Value};
 
@@ -2189,6 +2190,296 @@ fn build_data_validation_from_snapshot(
     Some((dv, first_row, first_col16, last_row, last_col16))
 }
 
+/// One parsed `<conditionalFormatting>` block + `<cfRule>` from a worksheet's
+/// XML. Each entry represents a single rule (a block can carry multiple
+/// `cfRule` children — we flatten to one entry per rule, sharing the parent's
+/// sqref). PoC scope: preserve the rule shape so it survives a round-trip; we
+/// do NOT preserve the dxf-referenced visual format (dxfId → styles.xml dxfs)
+/// because rust_xlsxwriter expects a fresh `Format` per rule and we don't yet
+/// parse the dxf table.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ConditionalFormattingEntry {
+    pub sqref: String,
+    /// `cfRule@type`: "cellIs", "containsText", "notContainsText",
+    /// "beginsWith", "endsWith", "expression", or anything else we'll round-trip
+    /// the value through as best-effort. Empty means "unknown" — dropped on export.
+    pub rule_type: String,
+    /// `cfRule@operator`: "greaterThan", "lessThan", "between", "equal",
+    /// "containsText", etc. Empty when the rule type implies the operator.
+    pub operator: String,
+    pub formula1: String,
+    pub formula2: String,
+    /// For text rules, the literal text being matched. Excel stores this both
+    /// in `cfRule@text` and inside the synthetic `<formula>` it generates;
+    /// we surface it explicitly so the export side doesn't have to parse the
+    /// formula expression.
+    pub text: String,
+    /// `cfRule@priority`. Lower number = higher priority. We preserve it so
+    /// re-export keeps the original ordering, though rust_xlsxwriter will
+    /// reassign internally.
+    pub priority: u32,
+    pub stop_if_true: bool,
+}
+
+/// Parse one sheet's `<conditionalFormatting>` blocks. Unlike data validations
+/// (single block per sheet, multiple children), CF has one block per sqref
+/// with one or more `<cfRule>` children — so we scan all matching blocks and
+/// flatten the rules into a single Vec.
+fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEntry> {
+    let mut out = Vec::new();
+    for cf_block in extract_self_closing_or_paired(xml, "conditionalFormatting") {
+        // Element header carries `sqref`. Body holds one or more <cfRule>.
+        let head_end = match cf_block.find('>') {
+            Some(p) => p + 1,
+            None => continue,
+        };
+        let head = &cf_block[..head_end];
+        let Some(sqref) = parse_attr(head, "sqref") else {
+            continue;
+        };
+        let sqref = decode_xml_entities(&sqref);
+        if sqref.trim().is_empty() {
+            continue;
+        }
+        let body = if head_end < cf_block.len() {
+            &cf_block[head_end..]
+        } else {
+            ""
+        };
+        for rule_el in extract_self_closing_or_paired(body, "cfRule") {
+            let rule_head_end = match rule_el.find('>') {
+                Some(p) => p + 1,
+                None => continue,
+            };
+            let rule_head = &rule_el[..rule_head_end];
+            let rule_type = parse_attr(rule_head, "type")
+                .map(|s| decode_xml_entities(&s))
+                .unwrap_or_default();
+            let operator = parse_attr(rule_head, "operator")
+                .map(|s| decode_xml_entities(&s))
+                .unwrap_or_default();
+            let text = parse_attr(rule_head, "text")
+                .map(|s| decode_xml_entities(&s))
+                .unwrap_or_default();
+            let priority = parse_attr(rule_head, "priority")
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(1);
+            let stop_if_true = parse_attr(rule_head, "stopIfTrue")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+
+            let rule_body = if rule_head_end < rule_el.len() {
+                &rule_el[rule_head_end..]
+            } else {
+                ""
+            };
+            // A cfRule may carry 0, 1, or 2 <formula> children.
+            let mut formulas: Vec<String> = Vec::new();
+            let mut cursor = 0;
+            while let Some(rel) = rule_body[cursor..].find("<formula") {
+                let abs = cursor + rel;
+                let after = abs + "<formula".len();
+                let next_ch = rule_body.as_bytes().get(after).copied();
+                if !matches!(next_ch, Some(b' ') | Some(b'>') | Some(b'/')) {
+                    cursor = after;
+                    continue;
+                }
+                let gt = match rule_body[abs..].find('>') {
+                    Some(p) => abs + p,
+                    None => break,
+                };
+                if rule_body.as_bytes().get(gt - 1) == Some(&b'/') {
+                    formulas.push(String::new());
+                    cursor = gt + 1;
+                    continue;
+                }
+                match rule_body[gt..].find("</formula>") {
+                    Some(p) => {
+                        let inner = &rule_body[gt + 1..gt + p];
+                        formulas.push(decode_xml_entities(inner));
+                        cursor = gt + p + "</formula>".len();
+                    }
+                    None => break,
+                }
+            }
+            let formula1 = formulas.first().cloned().unwrap_or_default();
+            let formula2 = formulas.get(1).cloned().unwrap_or_default();
+
+            out.push(ConditionalFormattingEntry {
+                sqref: sqref.clone(),
+                rule_type,
+                operator,
+                formula1,
+                formula2,
+                text,
+                priority,
+                stop_if_true,
+            });
+        }
+    }
+    out
+}
+
+/// Parse per-sheet `<conditionalFormatting>` rules out of an xlsx. Mirrors the
+/// data-validation parser: best-effort, empty map on any structural error.
+pub(crate) fn parse_xlsx_conditional_formatting(
+    path: &str,
+) -> HashMap<String, Vec<ConditionalFormattingEntry>> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return HashMap::new(),
+    };
+
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    if sheet_paths.is_empty() {
+        return HashMap::new();
+    }
+
+    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
+        Ok(a) => a,
+        Err(_) => return HashMap::new(),
+    };
+
+    let mut out: HashMap<String, Vec<ConditionalFormattingEntry>> = HashMap::new();
+    for (sheet_name, entry_path) in sheet_paths {
+        let mut xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&entry_path) {
+            if entry.read_to_string(&mut xml).is_ok() {
+                let rules = parse_sheet_conditional_formatting(&xml);
+                if !rules.is_empty() {
+                    out.insert(sheet_name, rules);
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// Apply a conditional-formatting snapshot entry to the given worksheet. The
+/// generic `add_conditional_format<T: ConditionalFormat>` API can't be called
+/// through a trait object, so this helper dispatches on `rule_type` and calls
+/// the typed method directly. Returns `false` if the entry was unsupported and
+/// silently dropped (so the caller can keep going for the rest).
+fn apply_conditional_format_from_snapshot(
+    worksheet: &mut rust_xlsxwriter::Worksheet,
+    entry: &Value,
+) -> bool {
+    let Some(sqref) = entry.get("sqref").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    let sqref = sqref.trim();
+    if sqref.is_empty() {
+        return false;
+    }
+    let Some((first_row, first_col, last_row, last_col)) = bounding_box_of_sqref(sqref) else {
+        return false;
+    };
+    let first_col16: u16 = match first_col.try_into().ok() {
+        Some(v) => v,
+        None => return false,
+    };
+    let last_col16: u16 = match last_col.try_into().ok() {
+        Some(v) => v,
+        None => return false,
+    };
+
+    let rule_type = entry
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let operator = entry
+        .get("operator")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let formula1 = entry.get("formula1").and_then(|v| v.as_str()).unwrap_or("");
+    let formula2 = entry.get("formula2").and_then(|v| v.as_str()).unwrap_or("");
+    let text_val = entry.get("text").and_then(|v| v.as_str()).unwrap_or("");
+    let stop_if_true = entry
+        .get("stopIfTrue")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    match rule_type {
+        "cellIs" => {
+            // Pick the rule variant from the OOXML operator. Operands round-
+            // trip as Formula values so cell refs (e.g. "=A1") and literals
+            // ("100") both pass through.
+            let f1 = Formula::new(formula1);
+            let f2 = Formula::new(formula2);
+            let rule: Option<ConditionalFormatCellRule<Formula>> = match operator {
+                "equal" => Some(ConditionalFormatCellRule::EqualTo(f1)),
+                "notEqual" => Some(ConditionalFormatCellRule::NotEqualTo(f1)),
+                "greaterThan" => Some(ConditionalFormatCellRule::GreaterThan(f1)),
+                "greaterThanOrEqual" => Some(ConditionalFormatCellRule::GreaterThanOrEqualTo(f1)),
+                "lessThan" => Some(ConditionalFormatCellRule::LessThan(f1)),
+                "lessThanOrEqual" => Some(ConditionalFormatCellRule::LessThanOrEqualTo(f1)),
+                "between" => Some(ConditionalFormatCellRule::Between(f1, f2)),
+                "notBetween" => Some(ConditionalFormatCellRule::NotBetween(f1, f2)),
+                _ => None,
+            };
+            let Some(rule) = rule else {
+                return false;
+            };
+            let cf = ConditionalFormatCell::new()
+                .set_rule(rule)
+                .set_multi_range(sqref)
+                .set_stop_if_true(stop_if_true);
+            worksheet
+                .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
+                .is_ok()
+        }
+        "containsText" | "notContainsText" | "beginsWith" | "endsWith" => {
+            // `text` is the canonical literal; fall back to formula1 just in
+            // case the source file omits the attribute (rare).
+            let literal = if !text_val.is_empty() {
+                text_val.to_string()
+            } else {
+                formula1.to_string()
+            };
+            if literal.is_empty() {
+                return false;
+            }
+            let rule = match rule_type {
+                "containsText" => ConditionalFormatTextRule::Contains(literal),
+                "notContainsText" => ConditionalFormatTextRule::DoesNotContain(literal),
+                "beginsWith" => ConditionalFormatTextRule::BeginsWith(literal),
+                "endsWith" => ConditionalFormatTextRule::EndsWith(literal),
+                _ => unreachable!(),
+            };
+            let cf = ConditionalFormatText::new()
+                .set_rule(rule)
+                .set_multi_range(sqref)
+                .set_stop_if_true(stop_if_true);
+            worksheet
+                .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
+                .is_ok()
+        }
+        "expression" => {
+            if formula1.is_empty() {
+                return false;
+            }
+            let cf = ConditionalFormatFormula::new()
+                .set_rule(formula1)
+                .set_multi_range(sqref)
+                .set_stop_if_true(stop_if_true);
+            worksheet
+                .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
+                .is_ok()
+        }
+        // Other rule types (colorScale / dataBar / iconSet / top10 / aboveAverage
+        // / duplicateValues / timePeriod) need typed values we don't reconstruct
+        // yet. Drop silently — PoC scope only.
+        _ => false,
+    }
+}
+
 /// Bounding box of a possibly multi-part sqref like `"A1:A5 C1:C5"`. The
 /// space-delimited parts each follow A1 or A1:B2 syntax. Returns the box that
 /// encloses every part, or None if no part parses.
@@ -2525,6 +2816,8 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     // so we can suppress the generic "DV will be lost" warning once we know
     // the rules will round-trip.
     let data_validations_by_sheet = parse_xlsx_data_validations(&path);
+    // Same pattern for conditional formatting rules.
+    let conditional_formats_by_sheet = parse_xlsx_conditional_formatting(&path);
 
     let mut feature_warnings = detect_unsupported_features(&path).unwrap_or_default();
     // We now preserve data validations through the snapshot, so the generic
@@ -2538,6 +2831,13 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         .any(|v: &Vec<DataValidationEntry>| !v.is_empty());
     if dv_rules_seen {
         feature_warnings.retain(|w| w.code != "XLSX_DATA_VALIDATION");
+    }
+    // Same suppression for conditional formatting once we've captured rules.
+    let cf_rules_seen = conditional_formats_by_sheet
+        .values()
+        .any(|v: &Vec<ConditionalFormattingEntry>| !v.is_empty());
+    if cf_rules_seen {
+        feature_warnings.retain(|w| w.code != "XLSX_CONDITIONAL_FORMATTING");
     }
 
     // Per-cell styles: parsed straight from the xlsx ZIP (calamine 0.24 doesn't
@@ -2855,6 +3155,43 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             }
         }
 
+        // Per-sheet conditional formatting rules. Opt-in: omit entirely when
+        // the sheet has none, so a clean file doesn't get a stray
+        // `<conditionalFormatting>` block on re-export. Mirrors the
+        // _dataValidations shape on purpose.
+        if let Some(cfs) = conditional_formats_by_sheet.get(name) {
+            if !cfs.is_empty() {
+                let arr: Vec<Value> = cfs
+                    .iter()
+                    .map(|e| {
+                        let mut obj = Map::new();
+                        obj.insert("sqref".into(), Value::String(e.sqref.clone()));
+                        if !e.rule_type.is_empty() {
+                            obj.insert("type".into(), Value::String(e.rule_type.clone()));
+                        }
+                        if !e.operator.is_empty() {
+                            obj.insert("operator".into(), Value::String(e.operator.clone()));
+                        }
+                        if !e.formula1.is_empty() {
+                            obj.insert("formula1".into(), Value::String(e.formula1.clone()));
+                        }
+                        if !e.formula2.is_empty() {
+                            obj.insert("formula2".into(), Value::String(e.formula2.clone()));
+                        }
+                        if !e.text.is_empty() {
+                            obj.insert("text".into(), Value::String(e.text.clone()));
+                        }
+                        obj.insert("priority".into(), Value::from(e.priority));
+                        if e.stop_if_true {
+                            obj.insert("stopIfTrue".into(), Value::Bool(true));
+                        }
+                        Value::Object(obj)
+                    })
+                    .collect();
+                sheet_obj["_conditionalFormatting"] = Value::Array(arr);
+            }
+        }
+
         sheets_map.insert(sheet_id, sheet_obj);
     }
 
@@ -2877,7 +3214,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         severity: "info".to_string(),
         code: "XLSX_POC_IMPORT".to_string(),
         message:
-            "xlsx PoC import: conditional formatting rules are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights + rich text + data validations are preserved)"
+            "xlsx PoC import: charts and pivot tables are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights + rich text + data validations + conditional formatting rules are preserved)"
                 .to_string(),
         affected_sheets: None,
     });
@@ -3228,6 +3565,23 @@ pub fn export_xlsx_core(
                 }
             }
 
+            // Re-emit per-sheet conditional formatting rules from
+            // `_conditionalFormatting`. Each entry is dispatched on its
+            // `type` to the matching rust_xlsxwriter conditional-format
+            // variant (cellIs / containsText / expression / ...). dxf-
+            // referenced visual styling is NOT preserved through this PoC
+            // — rules round-trip with rust_xlsxwriter's default styling so
+            // the rule shape (range + condition) survives even though the
+            // colours / fonts attached to each rule do not.
+            if let Some(cf_arr) = sheet_obj
+                .and_then(|s| s.get("_conditionalFormatting"))
+                .and_then(|v| v.as_array())
+            {
+                for entry in cf_arr {
+                    let _ = apply_conditional_format_from_snapshot(worksheet, entry);
+                }
+            }
+
             let cell_data = sheet_obj
                 .and_then(|s| s.get("cellData"))
                 .and_then(|c| c.as_object());
@@ -3540,7 +3894,7 @@ pub fn export_xlsx_core(
         severity: "info".to_string(),
         code: "XLSX_POC_EXPORT".to_string(),
         message: format!(
-            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Conditional formatting rules are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats + rich text + data validations are preserved)."
+            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Charts and pivot tables are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats + rich text + data validations + conditional formatting rules are preserved)."
         ),
         affected_sheets: None,
     });

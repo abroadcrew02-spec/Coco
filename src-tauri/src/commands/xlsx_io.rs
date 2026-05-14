@@ -2022,6 +2022,339 @@ pub(crate) fn parse_xlsx_hyperlinks(path: &str) -> HashMap<String, Vec<Hyperlink
     out
 }
 
+/// One parsed cell-note entry from a worksheet's linked `comments*.xml`.
+/// Coco preserves only the legacy (non-threaded) form: cell reference, author
+/// name, plain text. Modern threaded comments (`xl/threadedComments/*`) and
+/// VML drawing geometry are intentionally dropped on import — rust_xlsxwriter
+/// re-creates fresh VML for any note we re-emit on export.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CommentEntry {
+    pub cell: String,
+    pub author: String,
+    pub text: String,
+}
+
+/// Parse one sheet's linked `comments*.xml`. Strips the Excel-style
+/// "Author:\n" prefix when present so the snapshot stores only the
+/// user-authored content.
+fn parse_comments_xml(xml: &str) -> Vec<CommentEntry> {
+    let mut out: Vec<CommentEntry> = Vec::new();
+
+    let mut authors: Vec<String> = Vec::new();
+    if let Some(block) = extract_block(xml, "<authors", "</authors>") {
+        for el in extract_self_closing_or_paired(&block, "author") {
+            let body = if let Some(gt) = el.find('>') {
+                let after = &el[gt + 1..];
+                if let Some(end) = after.rfind("</author>") {
+                    &after[..end]
+                } else {
+                    after
+                }
+            } else {
+                ""
+            };
+            authors.push(decode_xml_entities(body));
+        }
+    }
+
+    let Some(list) = extract_block(xml, "<commentList", "</commentList>") else {
+        return out;
+    };
+
+    for el in extract_elements(&list, "<comment", "</comment>") {
+        let head_end = match el.find('>') {
+            Some(p) => p + 1,
+            None => continue,
+        };
+        let head = &el[..head_end];
+        let Some(cell) = parse_attr(head, "ref") else {
+            continue;
+        };
+        let cell = decode_xml_entities(&cell);
+        let author_id: Option<usize> =
+            parse_attr(head, "authorId").and_then(|s| s.parse().ok());
+        let author = author_id
+            .and_then(|i| authors.get(i).cloned())
+            .unwrap_or_default();
+
+        let body = if head_end < el.len() {
+            &el[head_end..]
+        } else {
+            ""
+        };
+        let text_block = extract_block(body, "<text", "</text>").unwrap_or_default();
+        let mut text = String::new();
+        let mut cursor = 0usize;
+        while let Some(open) = text_block[cursor..].find("<t") {
+            let abs_open = cursor + open;
+            let rest = &text_block[abs_open..];
+            let after_t = abs_open + 2;
+            let next_ch = text_block.as_bytes().get(after_t).copied();
+            if !matches!(next_ch, Some(b'>') | Some(b' ') | Some(b'/')) {
+                cursor = abs_open + 2;
+                continue;
+            }
+            let Some(gt_rel) = rest.find('>') else {
+                break;
+            };
+            if text_block.as_bytes().get(abs_open + gt_rel - 1) == Some(&b'/') {
+                cursor = abs_open + gt_rel + 1;
+                continue;
+            }
+            let text_start = abs_open + gt_rel + 1;
+            let Some(close_rel) = text_block[text_start..].find("</t>") else {
+                break;
+            };
+            text.push_str(&text_block[text_start..text_start + close_rel]);
+            cursor = text_start + close_rel + 4;
+        }
+        let text = decode_xml_entities(&text);
+
+        let text = if !author.is_empty() {
+            let prefix = format!("{author}:\n");
+            text.strip_prefix(&prefix).map(|s| s.to_string()).unwrap_or(text)
+        } else {
+            text
+        };
+
+        out.push(CommentEntry { cell, author, text });
+    }
+
+    out
+}
+
+/// Serialize a list of `(cell, author, text)` into a `xl/commentsN.xml` body.
+/// Overwrites the file rust_xlsxwriter 0.77 emits — upstream mis-orders the
+/// `<authors>` list relative to per-note `authorId`. Our rewrite keeps the
+/// author/comment ids in lockstep so author values round-trip correctly.
+fn build_comments_xml(notes: &[(String, String, String)]) -> String {
+    use std::fmt::Write as _;
+    let mut authors: Vec<String> = Vec::new();
+    for (_, author, _) in notes {
+        let name = if author.is_empty() { "Author".to_string() } else { author.clone() };
+        if !authors.iter().any(|a| a == &name) {
+            authors.push(name);
+        }
+    }
+
+    let mut out = String::new();
+    out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
+    out.push_str("<comments xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">");
+    if !authors.is_empty() {
+        out.push_str("<authors>");
+        for a in &authors {
+            let _ = write!(out, "<author>{}</author>", encode_xml_text(a));
+        }
+        out.push_str("</authors>");
+    }
+    out.push_str("<commentList>");
+    for (cell, author, text) in notes {
+        let display_author = if author.is_empty() { "Author" } else { author.as_str() };
+        let author_id = authors.iter().position(|a| a == display_author).unwrap_or(0);
+        let _ = write!(out, "<comment ref=\"{}\" authorId=\"{}\"><text>", encode_xml_text(cell), author_id);
+        let _ = write!(
+            out,
+            "<r><rPr><b/><sz val=\"8\"/><color indexed=\"81\"/><rFont val=\"Tahoma\"/><family val=\"2\"/></rPr><t xml:space=\"preserve\">{}:</t></r>",
+            encode_xml_text(display_author)
+        );
+        let prefixed = format!("\n{}", text);
+        let _ = write!(
+            out,
+            "<r><rPr><sz val=\"8\"/><color indexed=\"81\"/><rFont val=\"Tahoma\"/><family val=\"2\"/></rPr><t xml:space=\"preserve\">{}</t></r>",
+            encode_xml_text(&prefixed)
+        );
+        out.push_str("</text></comment>");
+    }
+    out.push_str("</commentList></comments>");
+    out
+}
+
+/// Minimal XML escaper for body text and attribute values.
+fn encode_xml_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Post-save zip rewrite: replace `xl/comments*.xml` entries with our own
+/// correctly-mapped XML to work around rust_xlsxwriter 0.77's author/id
+/// ordering bug.
+fn rewrite_comments_in_zip(
+    xlsx_path: &std::path::Path,
+    sheets_with_comments: &[(String, Vec<(String, String, String)>)],
+) -> Result<(), String> {
+    use std::io::{Cursor, Read, Write};
+
+    if sheets_with_comments.is_empty() {
+        return Ok(());
+    }
+
+    let bytes = std::fs::read(xlsx_path).map_err(|e| format!("read xlsx: {e}"))?;
+
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    let mut archive = zip::ZipArchive::new(Cursor::new(&bytes))
+        .map_err(|e| format!("open xlsx zip: {e}"))?;
+
+    let mut sheet_to_comments_path: HashMap<String, String> = HashMap::new();
+    for (sheet_name, entry_path) in &sheet_paths {
+        let rels_path = match entry_path.rsplit_once('/') {
+            Some((dir, file)) => format!("{dir}/_rels/{file}.rels"),
+            None => continue,
+        };
+        let mut rels_xml = String::new();
+        if let Ok(mut e) = archive.by_name(&rels_path) {
+            if e.read_to_string(&mut rels_xml).is_err() {
+                continue;
+            }
+        } else {
+            continue;
+        }
+        let mut target: Option<String> = None;
+        for rel in extract_self_closing_or_paired(&rels_xml, "Relationship") {
+            let ty = parse_attr(&rel, "Type").unwrap_or_default();
+            if ty.ends_with("/comments") {
+                if let Some(t) = parse_attr(&rel, "Target") {
+                    target = Some(t);
+                    break;
+                }
+            }
+        }
+        if let Some(t) = target {
+            let normalized = if let Some(s) = t.strip_prefix('/') {
+                s.to_string()
+            } else if let Some(s) = t.strip_prefix("../") {
+                format!("xl/{s}")
+            } else {
+                match entry_path.rsplit_once('/') {
+                    Some((dir, _)) => format!("{dir}/{t}"),
+                    None => t,
+                }
+            };
+            sheet_to_comments_path.insert(sheet_name.clone(), normalized);
+        }
+    }
+
+    let mut replacements: HashMap<String, Vec<u8>> = HashMap::new();
+    for (sheet_name, notes) in sheets_with_comments {
+        if let Some(path) = sheet_to_comments_path.get(sheet_name) {
+            let xml = build_comments_xml(notes);
+            replacements.insert(path.clone(), xml.into_bytes());
+        }
+    }
+    if replacements.is_empty() {
+        return Ok(());
+    }
+
+    let mut out_buf: Vec<u8> = Vec::with_capacity(bytes.len());
+    {
+        let mut writer = zip::ZipWriter::new(Cursor::new(&mut out_buf));
+        let opts = zip::write::FileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for i in 0..archive.len() {
+            let mut entry = archive
+                .by_index(i)
+                .map_err(|e| format!("read entry {i}: {e}"))?;
+            let name = entry.name().to_string();
+            writer.start_file(name.clone(), opts).map_err(|e| format!("start_file: {e}"))?;
+            if let Some(replacement) = replacements.get(&name) {
+                writer.write_all(replacement).map_err(|e| format!("write: {e}"))?;
+            } else {
+                let mut data = Vec::new();
+                entry.read_to_end(&mut data).map_err(|e| format!("read: {e}"))?;
+                writer.write_all(&data).map_err(|e| format!("write: {e}"))?;
+            }
+        }
+        writer.finish().map_err(|e| format!("zip finish: {e}"))?;
+    }
+
+    std::fs::write(xlsx_path, &out_buf).map_err(|e| format!("write xlsx: {e}"))?;
+    Ok(())
+}
+
+/// Parse cell comments from an xlsx ZIP, grouped by sheet name. Empty map on
+/// I/O / parse error — comments are best-effort metadata.
+pub(crate) fn parse_xlsx_comments(path: &str) -> HashMap<String, Vec<CommentEntry>> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return HashMap::new(),
+    };
+
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    if sheet_paths.is_empty() {
+        return HashMap::new();
+    }
+
+    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
+        Ok(a) => a,
+        Err(_) => return HashMap::new(),
+    };
+
+    let mut out: HashMap<String, Vec<CommentEntry>> = HashMap::new();
+    for (sheet_name, entry_path) in sheet_paths {
+        let rels_path = match entry_path.rsplit_once('/') {
+            Some((dir, file)) => format!("{dir}/_rels/{file}.rels"),
+            None => continue,
+        };
+        let mut rels_xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&rels_path) {
+            if entry.read_to_string(&mut rels_xml).is_err() {
+                continue;
+            }
+        } else {
+            continue;
+        }
+
+        let mut comments_target: Option<String> = None;
+        for rel in extract_self_closing_or_paired(&rels_xml, "Relationship") {
+            let ty = parse_attr(&rel, "Type").unwrap_or_default();
+            if ty.ends_with("/comments") || ty.ends_with("/comments\"") {
+                if let Some(target) = parse_attr(&rel, "Target") {
+                    comments_target = Some(target);
+                    break;
+                }
+            }
+        }
+        let Some(target) = comments_target else {
+            continue;
+        };
+        let normalized = if let Some(stripped) = target.strip_prefix('/') {
+            stripped.to_string()
+        } else if let Some(stripped) = target.strip_prefix("../") {
+            format!("xl/{stripped}")
+        } else {
+            match entry_path.rsplit_once('/') {
+                Some((dir, _)) => format!("{dir}/{target}"),
+                None => target.clone(),
+            }
+        };
+
+        let mut comments_xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&normalized) {
+            if entry.read_to_string(&mut comments_xml).is_ok() {
+                let entries = parse_comments_xml(&comments_xml);
+                if !entries.is_empty() {
+                    out.insert(sheet_name, entries);
+                }
+            }
+        }
+    }
+
+    out
+}
+
 /// Build a `rust_xlsxwriter::Url` and 0-based (row, col) from one snapshot
 /// hyperlink entry. Returns `None` for malformed entries (bad cell ref, empty
 /// target) so the caller can drop them without aborting export.
@@ -2851,6 +3184,10 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     // Pre-parse per-sheet hyperlinks. Joins the `<hyperlinks>` block in
     // sheetN.xml with the per-sheet rels file so external URLs are resolved.
     let hyperlinks_by_sheet = parse_xlsx_hyperlinks(&path);
+    // Pre-parse per-sheet cell comments / notes. Each sheet's rels file points
+    // to its `xl/commentsN.xml`; we read author + plain text and stash on the
+    // snapshot for re-emission via rust_xlsxwriter's insert_note on export.
+    let comments_by_sheet = parse_xlsx_comments(&path);
     // Pre-parse rich-text runs from sharedStrings.xml + inline `<is>` strings.
     // calamine flattens rich strings to plain — we re-attach the runs here.
     let rich_text = parse_xlsx_rich_text(&path).ok();
@@ -3192,6 +3529,27 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             }
         }
 
+        // Per-sheet cell comments / notes. Opt-in: omit `_comments` when empty
+        // so a workbook with no notes doesn't acquire an empty array on
+        // round-trip (which would also force `xl/commentsN.xml` to be emitted).
+        if let Some(notes) = comments_by_sheet.get(name) {
+            if !notes.is_empty() {
+                let arr: Vec<Value> = notes
+                    .iter()
+                    .map(|e| {
+                        let mut obj = Map::new();
+                        obj.insert("cell".into(), Value::String(e.cell.clone()));
+                        if !e.author.is_empty() {
+                            obj.insert("author".into(), Value::String(e.author.clone()));
+                        }
+                        obj.insert("text".into(), Value::String(e.text.clone()));
+                        Value::Object(obj)
+                    })
+                    .collect();
+                sheet_obj["_comments"] = Value::Array(arr);
+            }
+        }
+
         sheets_map.insert(sheet_id, sheet_obj);
     }
 
@@ -3427,6 +3785,9 @@ pub fn export_xlsx_core(
     let mut format_cache: HashMap<(String, String), Format> = HashMap::new();
     let mut named_range_failures: Vec<String> = Vec::new();
     let mut scoped_names_downgraded: Vec<String> = Vec::new();
+    // Captured per-sheet `(cell, author, text)` tuples for the post-save
+    // comments rewrite (works around rust_xlsxwriter 0.77's authorId mis-ordering).
+    let mut sheets_with_comments: Vec<(String, Vec<(String, String, String)>)> = Vec::new();
 
     let build_result: Result<(), String> = (|| -> Result<(), String> {
         for (i, sheet_id_val) in sheet_order.iter().enumerate() {
@@ -3771,6 +4132,48 @@ pub fn export_xlsx_core(
                 }
             }
 
+            // Re-emit cell comments / notes from `_comments`. We disable
+            // rust_xlsxwriter's automatic "Author:\n" prefix because our
+            // import side strips it back off and round-trips would otherwise
+            // double-apply. We still call insert_note so rust_xlsxwriter wires
+            // up content-types and rels, then `rewrite_comments_in_zip` (run
+            // after save) overwrites the comments XML with a correctly-mapped
+            // version (workaround for rust_xlsxwriter 0.77 author/id bug).
+            let mut sheet_notes: Vec<(String, String, String)> = Vec::new();
+            if let Some(note_arr) = sheet_obj
+                .and_then(|s| s.get("_comments"))
+                .and_then(|v| v.as_array())
+            {
+                for entry in note_arr {
+                    let Some(cell) = entry.get("cell").and_then(|v| v.as_str()) else {
+                        continue;
+                    };
+                    let Some((row, col)) = parse_a1(cell) else {
+                        continue;
+                    };
+                    let Ok(col_u16) = u16::try_from(col) else {
+                        continue;
+                    };
+                    let text = entry
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let author = entry
+                        .get("author")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let mut note = rust_xlsxwriter::Note::new(text).add_author_prefix(false);
+                    if !author.is_empty() {
+                        note = note.set_author(author);
+                    }
+                    let _ = worksheet.insert_note(row, col_u16, &note);
+                    sheet_notes.push((cell.to_string(), author.to_string(), text.to_string()));
+                }
+            }
+            if !sheet_notes.is_empty() {
+                sheets_with_comments.push((safe_name.clone(), sheet_notes));
+            }
+
             sheet_count += 1;
         }
 
@@ -3869,6 +4272,23 @@ pub fn export_xlsx_core(
                 affected_sheets: None,
             }],
             error: Some(format!("XLSX_WRITE_FAILED: {msg}")),
+        });
+    }
+
+    // Post-save: rewrite `xl/commentsN.xml` entries with our own correctly-
+    // mapped XML to work around rust_xlsxwriter 0.77's author/id bug.
+    if let Err(e) = rewrite_comments_in_zip(&tmp_path, &sheets_with_comments) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Ok(ExportResult {
+            success: false,
+            path: path.clone(),
+            warnings: vec![CompatibilityWarning {
+                severity: "blocking".to_string(),
+                code: "XLSX_WRITE_FAILED".to_string(),
+                message: format!("comment rewrite failed: {e}"),
+                affected_sheets: None,
+            }],
+            error: Some(format!("XLSX_WRITE_FAILED: {e}")),
         });
     }
 

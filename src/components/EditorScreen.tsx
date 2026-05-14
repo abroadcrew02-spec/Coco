@@ -39,6 +39,7 @@ import BusyOverlay from "./BusyOverlay";
 import SnapshotHistoryDialog from "./SnapshotHistoryDialog";
 import CompatibilityWarningsDialog from "./CompatibilityWarningsDialog";
 import NamedRangesDialog, { type NamedRangeEntry } from "./NamedRangesDialog";
+import ConditionalFormattingDialog, { type CfRule } from "./ConditionalFormattingDialog";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -98,6 +99,11 @@ export default function EditorScreen() {
   // Named-ranges dialog state: null while closed; once opened we snapshot the
   // current set so the user can cancel out without mutating the workbook.
   const [namedRanges, setNamedRanges] = useState<NamedRangeEntry[] | null>(null);
+  // Conditional-formatting dialog state. We snapshot the active sheet's
+  // current rules + the sheet name when opening so the user can cancel out.
+  const [cfDialog, setCfDialog] = useState<
+    { sheetName: string; sheetId: string; rules: CfRule[] } | null
+  >(null);
 
   // Read all named ranges from the live Univer workbook via the facade
   // (FWorkbook.getDefinedNames). Falls back to an empty list if the facade
@@ -176,6 +182,62 @@ export default function EditorScreen() {
     setNamedRanges(readNamedRanges());
   }, [readNamedRanges]);
 
+  // Conditional formatting is currently round-tripped at the snapshot level
+  // (xlsx_io.rs preserves _conditionalFormatting per sheet). The Univer CF
+  // plugin uses a different rule model (IRange + dxf-style IStyleBase), so for
+  // this PoC we author into the snapshot directly: read → edit → write back via
+  // updateSnapshot. Live highlighting is therefore deferred until save+reopen.
+  const openCfDialog = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    const activeSheet = workbook.getActiveSheet();
+    if (!activeSheet) return;
+    const sheetId = activeSheet.getSheetId();
+    const sheetName = activeSheet.getSheetName();
+    let rules: CfRule[] = [];
+    try {
+      const snap = currentSnapshotJson ? JSON.parse(currentSnapshotJson) : null;
+      const sheetObj = snap?.sheets?.[sheetId];
+      const arr = sheetObj?._conditionalFormatting;
+      if (Array.isArray(arr)) {
+        rules = arr as CfRule[];
+      }
+    } catch {
+      rules = [];
+    }
+    setCfDialog({ sheetName, sheetId, rules });
+  }, [currentSnapshotJson]);
+
+  // Persist authored CF rules back into the workbook snapshot. We re-derive
+  // the snapshot from the live Univer workbook (not the cached
+  // currentSnapshotJson) so we don't clobber edits the user made while the
+  // dialog was open, then splice in `_conditionalFormatting` for the target
+  // sheet and push the result through updateSnapshot.
+  const applyCfRules = useCallback(
+    (sheetId: string, next: CfRule[]) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as {
+        sheets: Record<string, Record<string, unknown>>;
+      };
+      const sheetObj = fresh.sheets?.[sheetId];
+      if (!sheetObj) return;
+      if (next.length === 0) {
+        // Mirror the Rust "omit when empty" convention on the export side so
+        // a sheet that loses all its rules doesn't keep a stray empty array.
+        delete sheetObj._conditionalFormatting;
+      } else {
+        sheetObj._conditionalFormatting = next;
+      }
+      updateSnapshot(JSON.stringify(fresh));
+    },
+    [updateSnapshot],
+  );
+
   useAutoSave();
 
   // Keyboard shortcuts (req 4.6): Ctrl+S / Cmd+S = save; Ctrl+Shift+S / Cmd+Shift+S = save as.
@@ -192,9 +254,16 @@ export default function EditorScreen() {
       } else if (mod && e.key === "F3") {
         e.preventDefault();
         openNamedRangesDialog();
+      } else if (mod && (e.key === "F8" || e.key === "f8")) {
+        // Excel binds Ctrl+F8 to "Workbook Size" — we don't implement that
+        // legacy dialog, so we reuse the binding for our authoring dialog
+        // since the closest stock Excel binding (Home → Conditional Formatting)
+        // is a ribbon path with no portable shortcut.
+        e.preventDefault();
+        openCfDialog();
       }
     },
-    [save, promptSaveAs, openNamedRangesDialog]
+    [save, promptSaveAs, openNamedRangesDialog, openCfDialog]
   );
 
   const runCsvExport = useCallback(
@@ -448,6 +517,15 @@ export default function EditorScreen() {
           <button
             type="button"
             className="toolbar-btn"
+            onClick={openCfDialog}
+            title="条件付き書式を編集 (Ctrl+F8)"
+            aria-label="条件付き書式"
+          >
+            条件付き書式...
+          </button>
+          <button
+            type="button"
+            className="toolbar-btn"
             onClick={requestSettings}
             title="設定（自動保存間隔など）"
             aria-label="設定"
@@ -591,6 +669,14 @@ export default function EditorScreen() {
           initialRanges={namedRanges}
           onSave={applyNamedRanges}
           onClose={() => setNamedRanges(null)}
+        />
+      )}
+      {cfDialog && (
+        <ConditionalFormattingDialog
+          sheetName={cfDialog.sheetName}
+          initialRules={cfDialog.rules}
+          onSave={(next) => applyCfRules(cfDialog.sheetId, next)}
+          onClose={() => setCfDialog(null)}
         />
       )}
       {warningsDialog === "import" && (

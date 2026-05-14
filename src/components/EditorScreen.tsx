@@ -31,6 +31,7 @@ import "@univerjs/sheets-ui/lib/index.css";
 import "@univerjs/sheets-formula-ui/lib/index.css";
 import "@univerjs/find-replace/lib/index.css";
 
+import { undoRedoOverride } from "./univerUndoRedoOverride";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { useAutoSave } from "../hooks/useAutoSave";
 import type { CompatibilityWarning } from "../types/workbook";
@@ -1088,6 +1089,8 @@ export default function EditorScreen() {
           ...SheetsFindReplaceEnUS,
         },
       },
+      // FR-011: bump the per-unit undo stack from Univer's default 20 to 100.
+      override: undoRedoOverride,
     });
 
     univer.registerPlugin(UniverRenderEnginePlugin);
@@ -1113,12 +1116,6 @@ export default function EditorScreen() {
     // already in place (xlsx_io.rs, commit 74594d0); only the editor surface
     // is missing. Locale bundles for the filter plugin will also need to be
     // merged into the `locales` map below.
-    // TODO(FR-011): Univer's default LocalUndoRedoService caps the per-unit
-    // undo stack at 20 items (CE = 20 in @univerjs/core), but requirements
-    // §4.1 FR-011 mandates 100. Override IUndoRedoService via the Univer
-    // constructor's `override` field with a subclass that re-implements
-    // pushUndoRedo using a higher cap (and keeps the batching semantics).
-
     // Create workbook from snapshot or default empty workbook
     const initialData: Partial<IWorkbookData> = currentSnapshotJson
       ? JSON.parse(currentSnapshotJson)

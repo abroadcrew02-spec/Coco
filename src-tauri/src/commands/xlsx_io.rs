@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::PathBuf;
 
 use calamine::{open_workbook, Data, Reader, Xlsx};
@@ -131,6 +132,245 @@ pub fn detect_unsupported_features(path: &str) -> Result<Vec<CompatibilityWarnin
     Ok(warnings)
 }
 
+/// Per-sheet column widths and row heights parsed straight out of the xlsx
+/// worksheet XML. calamine 0.24 does not expose this metadata, so we parse the
+/// raw zip ourselves.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct SheetDimensions {
+    /// Map of 0-based column index -> width (in character units, as stored in xlsx XML).
+    pub columns: HashMap<u32, f64>,
+    /// Map of 0-based row index -> height (in point units).
+    pub rows: HashMap<u32, f64>,
+}
+
+/// Read `xl/workbook.xml` and the rels file to build a `sheet name -> worksheet
+/// xml zip-path` mapping. Returns an empty map on any parse error (callers
+/// should treat the absence of dimensions as "no custom widths/heights").
+fn parse_sheet_path_map(archive_bytes: &[u8]) -> HashMap<String, String> {
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let mut out: HashMap<String, String> = HashMap::new();
+
+    let Ok(mut archive) = ZipArchive::new(Cursor::new(archive_bytes)) else {
+        return out;
+    };
+
+    // Pull workbook.xml — list of <sheet name="..." sheetId="..." r:id="rIdN"/>
+    let mut workbook_xml = String::new();
+    if let Ok(mut entry) = archive.by_name("xl/workbook.xml") {
+        if entry.read_to_string(&mut workbook_xml).is_err() {
+            return out;
+        }
+    } else {
+        return out;
+    }
+
+    // Pull rels — maps rId -> Target (e.g. "worksheets/sheet1.xml")
+    let mut rels_xml = String::new();
+    if let Ok(mut entry) = archive.by_name("xl/_rels/workbook.xml.rels") {
+        let _ = entry.read_to_string(&mut rels_xml);
+    }
+
+    let rid_to_target = parse_rels(&rels_xml);
+    let sheets = parse_workbook_sheets(&workbook_xml);
+
+    for (name, rid) in sheets {
+        if let Some(target) = rid_to_target.get(&rid) {
+            // Targets can be "worksheets/sheet1.xml" or "/xl/worksheets/sheet1.xml".
+            let normalized = if target.starts_with('/') {
+                target.trim_start_matches('/').to_string()
+            } else {
+                format!("xl/{target}")
+            };
+            out.insert(name, normalized);
+        }
+    }
+
+    out
+}
+
+fn parse_workbook_sheets(xml: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    // Find <sheets> ... </sheets> body and pull <sheet .../> tags.
+    let body = match (xml.find("<sheets"), xml.find("</sheets>")) {
+        (Some(s), Some(e)) if e > s => &xml[s..e],
+        _ => return out,
+    };
+    let mut cursor = 0usize;
+    while let Some(start) = body[cursor..].find("<sheet ") {
+        let abs_start = cursor + start;
+        let rest = &body[abs_start..];
+        let end = match rest.find("/>").or_else(|| rest.find('>')) {
+            Some(e) => e,
+            None => break,
+        };
+        let tag = &rest[..end];
+        let name = extract_attr(tag, "name").unwrap_or_default();
+        // r:id can also appear as just "id" in some files; check both.
+        let rid = extract_attr(tag, "r:id")
+            .or_else(|| extract_attr(tag, "id"))
+            .unwrap_or_default();
+        if !name.is_empty() && !rid.is_empty() {
+            out.push((name, rid));
+        }
+        cursor = abs_start + end + 2;
+    }
+    out
+}
+
+fn parse_rels(xml: &str) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let mut cursor = 0usize;
+    while let Some(start) = xml[cursor..].find("<Relationship ") {
+        let abs_start = cursor + start;
+        let rest = &xml[abs_start..];
+        let end = match rest.find("/>").or_else(|| rest.find('>')) {
+            Some(e) => e,
+            None => break,
+        };
+        let tag = &rest[..end];
+        let id = extract_attr(tag, "Id").unwrap_or_default();
+        let target = extract_attr(tag, "Target").unwrap_or_default();
+        if !id.is_empty() && !target.is_empty() {
+            out.insert(id, target);
+        }
+        cursor = abs_start + end + 2;
+    }
+    out
+}
+
+/// Pull a `key="value"` attribute out of a substring. Naive but adequate for
+/// the well-formed XML rust_xlsxwriter / Excel emit.
+fn extract_attr(tag: &str, key: &str) -> Option<String> {
+    let needle = format!("{key}=\"");
+    let start = tag.find(&needle)? + needle.len();
+    let rest = &tag[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+/// Parse one sheet's XML, returning the dimensions block (or default/empty if
+/// no custom widths/heights are declared).
+fn parse_sheet_dimensions_xml(xml: &str) -> SheetDimensions {
+    let mut dims = SheetDimensions::default();
+
+    // --- columns ---
+    if let (Some(s), Some(e)) = (xml.find("<cols"), xml.find("</cols>")) {
+        if e > s {
+            let body = &xml[s..e];
+            let mut cursor = 0usize;
+            while let Some(start) = body[cursor..].find("<col ") {
+                let abs_start = cursor + start;
+                let rest = &body[abs_start..];
+                let end = match rest.find("/>").or_else(|| rest.find('>')) {
+                    Some(end) => end,
+                    None => break,
+                };
+                let tag = &rest[..end];
+                let is_custom = extract_attr(tag, "customWidth").as_deref() == Some("1");
+                if is_custom {
+                    let min: Option<u32> = extract_attr(tag, "min").and_then(|s| s.parse().ok());
+                    let max: Option<u32> = extract_attr(tag, "max").and_then(|s| s.parse().ok());
+                    let width: Option<f64> =
+                        extract_attr(tag, "width").and_then(|s| s.parse().ok());
+                    if let (Some(min), Some(max), Some(w)) = (min, max, width) {
+                        // min/max are 1-based, inclusive; convert to 0-based.
+                        let start_col = min.saturating_sub(1);
+                        let end_col = max.saturating_sub(1);
+                        for c in start_col..=end_col {
+                            dims.columns.insert(c, w);
+                        }
+                    }
+                }
+                cursor = abs_start + end + 2;
+            }
+        }
+    }
+
+    // --- rows ---
+    // We only need the opening <row ...> tags. Scan them sequentially.
+    let mut cursor = 0usize;
+    while let Some(start) = xml[cursor..].find("<row ") {
+        let abs_start = cursor + start;
+        let rest = &xml[abs_start..];
+        // Find the end of the start-tag (the first '>', not counting self-closing edge cases).
+        let end = match rest.find('>') {
+            Some(e) => e,
+            None => break,
+        };
+        let tag = &rest[..end];
+        let is_custom = extract_attr(tag, "customHeight").as_deref() == Some("1");
+        if is_custom {
+            let r: Option<u32> = extract_attr(tag, "r").and_then(|s| s.parse().ok());
+            let h: Option<f64> = extract_attr(tag, "ht").and_then(|s| s.parse().ok());
+            if let (Some(r), Some(h)) = (r, h) {
+                // `r` is 1-based; convert to 0-based.
+                dims.rows.insert(r.saturating_sub(1), h);
+            }
+        }
+        cursor = abs_start + end + 1;
+    }
+
+    dims
+}
+
+/// Parse per-sheet column widths and row heights out of an xlsx. Returns a map
+/// keyed by sheet name. Quietly returns an empty map if anything is malformed
+/// — dimensions are best-effort metadata, not load-bearing.
+pub(crate) fn parse_xlsx_dimensions(path: &str) -> HashMap<String, SheetDimensions> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return HashMap::new(),
+    };
+
+    let sheet_paths = parse_sheet_path_map(&bytes);
+    if sheet_paths.is_empty() {
+        return HashMap::new();
+    }
+
+    let mut archive = match ZipArchive::new(Cursor::new(&bytes)) {
+        Ok(a) => a,
+        Err(_) => return HashMap::new(),
+    };
+
+    let mut out: HashMap<String, SheetDimensions> = HashMap::new();
+    for (sheet_name, entry_path) in sheet_paths {
+        let mut xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&entry_path) {
+            if entry.read_to_string(&mut xml).is_ok() {
+                let dims = parse_sheet_dimensions_xml(&xml);
+                if !dims.columns.is_empty() || !dims.rows.is_empty() {
+                    out.insert(sheet_name, dims);
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// rust_xlsxwriter converts the input width to a character-width-with-padding
+/// before serialising, so calling `set_column_width(N)` actually writes a
+/// different `width` attribute. This function inverts that conversion so the
+/// xlsx ends up with the requested raw value.
+///
+/// Conversion (for width >= 1): `out = (((in*7) + 5) / 7 * 256).floor() / 256`.
+/// Plain inverse (`in = N - 5/7`) lands right on the edge of a floor() step
+/// and fp rounding can drop us down to `N - 1/256`. Adding `1/512` puts us
+/// safely inside the (1/256 wide) acceptance window so `out == N` exactly.
+fn inverse_col_width_for_xlsxwriter(target_raw_width: f64) -> f64 {
+    if target_raw_width >= 1.0 {
+        target_raw_width - 5.0 / 7.0 + 1.0 / 512.0
+    } else {
+        target_raw_width
+    }
+}
+
 /// Tauri command wrapper. Calls the pure-Rust core and records the file in recent files.
 #[tauri::command]
 pub fn workbook_import_xlsx(
@@ -247,6 +487,10 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
 
     let feature_warnings = detect_unsupported_features(&path).unwrap_or_default();
 
+    // Pre-parse per-sheet column widths and row heights (calamine doesn't
+    // expose this). Best-effort: silently no-op if the structure is unusual.
+    let dimensions_by_sheet = parse_xlsx_dimensions(&path);
+
     let mut wb: Xlsx<_> =
         open_workbook(&path).map_err(|e| format!("Failed to open xlsx: {e}"))?;
 
@@ -319,13 +563,38 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             large_sheets.push(name.clone());
         }
 
-        let sheet_obj = json!({
+        // Attach per-column widths and per-row heights when the xlsx declared them.
+        let mut sheet_obj = json!({
             "id": sheet_id,
             "name": name,
             "rowCount": row_count,
             "columnCount": col_count,
             "cellData": Value::Object(cell_data),
         });
+
+        if let Some(dims) = dimensions_by_sheet.get(name) {
+            if !dims.columns.is_empty() {
+                let mut col_data: Map<String, Value> = Map::new();
+                let mut keys: Vec<u32> = dims.columns.keys().copied().collect();
+                keys.sort_unstable();
+                for k in keys {
+                    let w = dims.columns[&k];
+                    col_data.insert(k.to_string(), json!({ "w": w }));
+                }
+                sheet_obj["columnData"] = Value::Object(col_data);
+            }
+            if !dims.rows.is_empty() {
+                let mut row_data: Map<String, Value> = Map::new();
+                let mut keys: Vec<u32> = dims.rows.keys().copied().collect();
+                keys.sort_unstable();
+                for k in keys {
+                    let h = dims.rows[&k];
+                    row_data.insert(k.to_string(), json!({ "h": h }));
+                }
+                sheet_obj["rowData"] = Value::Object(row_data);
+            }
+        }
+
         sheets_map.insert(sheet_id, sheet_obj);
     }
 
@@ -534,6 +803,46 @@ pub fn workbook_export_xlsx(
                 .set_name(&safe_name)
                 .map_err(|e| e.to_string())?;
 
+            // Apply per-column widths from snapshot.columnData.
+            if let Some(col_map) = sheet_obj
+                .and_then(|s| s.get("columnData"))
+                .and_then(|c| c.as_object())
+            {
+                for (col_key, val) in col_map.iter() {
+                    let Some(col_idx): Option<u16> = col_key.parse().ok() else {
+                        continue;
+                    };
+                    let Some(w) = val.get("w").and_then(|w| w.as_f64()) else {
+                        continue;
+                    };
+                    // Compensate for rust_xlsxwriter's internal char-width
+                    // conversion so the on-disk xlsx records the same width
+                    // we read on import.
+                    let raw = inverse_col_width_for_xlsxwriter(w);
+                    worksheet
+                        .set_column_width(col_idx, raw)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+
+            // Apply per-row heights from snapshot.rowData.
+            if let Some(row_map) = sheet_obj
+                .and_then(|s| s.get("rowData"))
+                .and_then(|c| c.as_object())
+            {
+                for (row_key, val) in row_map.iter() {
+                    let Some(row_idx): Option<u32> = row_key.parse().ok() else {
+                        continue;
+                    };
+                    let Some(h) = val.get("h").and_then(|h| h.as_f64()) else {
+                        continue;
+                    };
+                    worksheet
+                        .set_row_height(row_idx, h)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+
             let cell_data = sheet_obj
                 .and_then(|s| s.get("cellData"))
                 .and_then(|c| c.as_object());
@@ -692,7 +1001,7 @@ pub fn workbook_export_xlsx(
         severity: "info".to_string(),
         code: "XLSX_POC_EXPORT".to_string(),
         message: format!(
-            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Styles, merges, column widths, named ranges, and rich text are not yet preserved."
+            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Styles, merges, named ranges, and rich text are not yet preserved."
         ),
         affected_sheets: None,
     });

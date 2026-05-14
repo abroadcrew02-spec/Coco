@@ -64,6 +64,7 @@ import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
 import { isSheetProtectedInSnapshot } from "../store/sheetProtection";
+import { validateMutation, extractCellWrites } from "../store/dataValidation";
 import "./EditorScreen.css";
 
 // req 5.4.1: "loading" blocks editing (snapshot is being replaced); "saving"
@@ -1395,6 +1396,39 @@ export default function EditorScreen() {
         console.warn("シートは保護されています");
       }
       throw new CustomCommandExecutionError("sheet is protected");
+    });
+
+    return () => disposable.dispose();
+  }, []);
+
+  // Live data-validation enforcement. B2 round-trips `_dataValidations[]`
+  // through xlsx and F2 added an authoring dialog, but without this guard a
+  // user can still type anything into a cell with a DV rule. We mirror the
+  // sheet-protection hook above: hook `onBeforeCommandExecute`, decode the
+  // SetRangeValuesMutation params, and reject the mutation if any cell write
+  // violates a rule on its sheet. CustomCommandExecutionError cancels the
+  // mutation politely (no console error).
+  useEffect(() => {
+    if (!fUniverRef.current) return;
+    const fUniver = fUniverRef.current;
+    let lastWarnAt = 0;
+
+    const disposable = fUniver.onBeforeCommandExecute((info) => {
+      if (info.type !== CommandType.MUTATION) return;
+      const { subUnitId, writes } = extractCellWrites(info.params);
+      if (!subUnitId || writes.length === 0) return;
+      for (const w of writes) {
+        const err = validateMutation(snapshotRef.current, subUnitId, w.row, w.col, w.value);
+        if (err) {
+          const now = Date.now();
+          if (now - lastWarnAt > 500) {
+            lastWarnAt = now;
+            // eslint-disable-next-line no-console
+            console.warn(`入力規則違反: ${err.message}`);
+          }
+          throw new CustomCommandExecutionError(`data validation: ${err.code}`);
+        }
+      }
     });
 
     return () => disposable.dispose();

@@ -1,4 +1,5 @@
 // In-grid hyperlink rendering (Phase 2).
+// TODO(hyperlink): re-style cells live when InsertHyperlinkDialog authors a new entry (see docs/TODOS.md#high-hyperlink-live)
 //
 // The xlsx round-trip stores per-sheet hyperlinks at `sheets.<sid>._hyperlinks`
 // (entries: { cell: "A1", target: "https://...", display?, tooltip? }). This

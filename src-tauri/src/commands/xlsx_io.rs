@@ -22,7 +22,9 @@ const LARGE_SHEET_THRESHOLD: usize = 100_000;
 
 /// Normalized cell style extracted from xl/styles.xml + per-sheet `<c s="..."/>` refs.
 /// Scope: font (bold/italic/color) + fill (color) + alignment (horizontal/vertical)
-/// + borders (per-side style/color). Number formats and rich text remain out of scope.
+/// + borders (per-side style/color).
+///
+/// TODO(xlsx-roundtrip): promote number formats + rich text into this normalized struct (see docs/TODOS.md#medium-number-format-richtext-styles)
 #[derive(Default, Clone, PartialEq, Eq, Hash)]
 struct CellStyle {
     bold: bool,
@@ -796,8 +798,9 @@ pub(crate) struct FreezePaneEntry {
 
 /// Parse the `<sheetView><pane .../></sheetView>` block of one worksheet's XML
 /// into a `FreezePaneEntry`. Returns `None` when no frozen pane is declared.
-/// Only `state="frozen"` (and its xSplit/ySplit/topLeftCell attrs) is handled
-/// — split panes (the live-drag variant) are intentionally out of scope.
+/// Only `state="frozen"` (and its xSplit/ySplit/topLeftCell attrs) is handled.
+///
+/// TODO(xlsx-roundtrip): round-trip split panes (live-drag variant) (see docs/TODOS.md#medium-split-panes)
 fn parse_sheet_freeze_pane(xml: &str) -> Option<FreezePaneEntry> {
     let view = extract_block(xml, "<sheetView", "</sheetView>")?;
     let pane = find_tag(&view, "<pane")?;
@@ -2761,7 +2764,11 @@ fn build_data_validation_from_snapshot(
 /// One parsed `<conditionalFormatting>` block + `<cfRule>` from a worksheet's
 /// XML. Each entry represents a single rule (a block can carry multiple
 /// `cfRule` children — we flatten to one entry per rule, sharing the parent's
-/// sqref). PoC scope: preserve the rule shape so it survives a round-trip; we
+/// sqref).
+///
+/// TODO(cf): emit dxf-referenced visual format on export (see docs/TODOS.md#medium-cf-dxf-emit)
+///
+/// PoC scope: preserve the rule shape so it survives a round-trip; we
 /// do NOT preserve the dxf-referenced visual format (dxfId → styles.xml dxfs)
 /// because rust_xlsxwriter expects a fresh `Format` per rule and we don't yet
 /// parse the dxf table.
@@ -3087,9 +3094,8 @@ fn apply_conditional_format_from_snapshot(
                 .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
                 .is_ok()
         }
-        // Other rule types (colorScale / dataBar / iconSet / aboveAverage /
-        // timePeriod) need typed values we don't reconstruct yet. Drop
-        // silently — PoC scope only.
+        // TODO(cf): reconstruct colorScale / dataBar / iconSet / aboveAverage / timePeriod rules (see docs/TODOS.md#medium-cf-more-rule-types)
+        // These rule types need typed values we don't reconstruct yet — drop silently.
         _ => false,
     }
 }

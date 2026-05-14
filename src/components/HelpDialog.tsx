@@ -21,6 +21,7 @@ const APP_SHORTCUTS: Shortcut[] = [
   { keys: ["Enter"], description: "ホーム画面: 選択中のファイルを開く" },
   { keys: ["Delete"], description: "ホーム画面: 選択中のファイルを一覧から削除" },
   { keys: ["P"], description: "ホーム画面: 選択中のファイルをピン留め/解除" },
+  { keys: ["Ctrl", "F3"], description: "名前付き範囲を編集" },
   { keys: ["Ctrl", ","], description: "設定を開く" },
   { keys: ["Ctrl", "/"], description: "このヘルプを表示" },
   { keys: ["F1"], description: "このヘルプを表示（同上）" },

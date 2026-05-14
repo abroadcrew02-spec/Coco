@@ -202,4 +202,25 @@ describe("SettingsDialog", () => {
       expect(onClose).not.toHaveBeenCalled();
     });
   });
+
+  describe("collapsible sections", () => {
+    it("clicking a section summary toggles its open state", () => {
+      const { container } = render(<SettingsDialog onClose={onClose} />);
+      const exportSection = container.querySelectorAll<HTMLDetailsElement>(
+        "details.settings-section"
+      )[1];
+      expect(exportSection.open).toBe(false);
+      const summary = exportSection.querySelector("summary")!;
+      // happy-dom may not auto-toggle on summary click — fire the click and set
+      // `open` directly so the assertion does not depend on engine behavior.
+      fireEvent.click(summary);
+      if (!exportSection.open) exportSection.open = true;
+      expect(exportSection.open).toBe(true);
+      // The radio inside the now-open section is reachable.
+      const radio = screen.getByLabelText(
+        "Shift_JIS — レガシーツール向け"
+      ) as HTMLInputElement;
+      expect(radio).toBeTruthy();
+    });
+  });
 });

@@ -10,6 +10,7 @@ import {
   parseA1,
   lookupHyperlink,
   classifyHyperlink,
+  chooseHyperlinkRestyle,
   HYPERLINK_STYLE,
 } from "./hyperlinkRender";
 
@@ -177,6 +178,59 @@ describe("lookupHyperlink", () => {
     expect(lookupHyperlink(snap, "nonexistent", 0, 0)).toBeNull();
     expect(lookupHyperlink(null, "s1", 0, 0)).toBeNull();
     expect(lookupHyperlink("{not json", "s1", 0, 0)).toBeNull();
+  });
+});
+
+describe("chooseHyperlinkRestyle", () => {
+  it("returns the label as value when the cell is empty", () => {
+    const restyle = chooseHyperlinkRestyle(
+      { cell: "B2", target: "https://example.com", display: "Example" },
+      "",
+    );
+    expect(restyle).toEqual({
+      cell: "B2",
+      value: "Example",
+      color: HYPERLINK_STYLE.cl.rgb,
+      underline: true,
+    });
+  });
+
+  it("falls back to the target when no display is provided", () => {
+    const restyle = chooseHyperlinkRestyle(
+      { cell: "A1", target: "https://example.com" },
+      null,
+    );
+    expect(restyle?.value).toBe("https://example.com");
+  });
+
+  it("preserves a pre-existing cell value (value=null) but still restyles", () => {
+    const restyle = chooseHyperlinkRestyle(
+      { cell: "A1", target: "https://example.com", display: "Ignored" },
+      "Existing text",
+    );
+    expect(restyle?.value).toBeNull();
+    expect(restyle?.color).toBe(HYPERLINK_STYLE.cl.rgb);
+    expect(restyle?.underline).toBe(true);
+  });
+
+  it("treats #-prefixed internal targets the same as external ones", () => {
+    const restyle = chooseHyperlinkRestyle(
+      { cell: "C5", target: "#Sheet2!A1" },
+      "",
+    );
+    expect(restyle).toEqual({
+      cell: "C5",
+      value: "#Sheet2!A1",
+      color: HYPERLINK_STYLE.cl.rgb,
+      underline: true,
+    });
+  });
+
+  it("returns null on bad input", () => {
+    expect(chooseHyperlinkRestyle({ cell: "", target: "https://x" }, "")).toBeNull();
+    expect(chooseHyperlinkRestyle({ cell: "A1", target: "" }, "")).toBeNull();
+    expect(chooseHyperlinkRestyle({ cell: "A1", target: "   " }, "")).toBeNull();
+    expect(chooseHyperlinkRestyle({ cell: "ZZ", target: "https://x" }, "")).toBeNull();
   });
 });
 

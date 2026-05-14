@@ -1,5 +1,4 @@
 // In-grid hyperlink rendering (Phase 2).
-// TODO(hyperlink): re-style cells live when InsertHyperlinkDialog authors a new entry (see docs/TODOS.md#high-hyperlink-live)
 //
 // The xlsx round-trip stores per-sheet hyperlinks at `sheets.<sid>._hyperlinks`
 // (entries: { cell: "A1", target: "https://...", display?, tooltip? }). This
@@ -186,6 +185,55 @@ export function lookupHyperlink(
     if (coord.row === row && coord.col === col) return link;
   }
   return null;
+}
+
+/**
+ * Decide the live-restyle parameters for a freshly authored hyperlink. The
+ * EditorScreen.applyHyperlink path patches the snapshot and re-renders, but
+ * the snapshot patch (above) only fires at `createUnit` time — in-session
+ * inserts therefore won't pick up the blue+underline until the file is closed
+ * and re-opened. The fix is to also drive the Univer facade imperatively;
+ * this helper centralizes the decision of *what* to set so it stays in lock
+ * step with `patchHyperlinkRenders` and is unit-testable without a live
+ * Univer instance.
+ *
+ *  - Returns null when the entry is malformed (no cell ref, empty target,
+ *    bad A1) — caller skips the live restyle.
+ *  - `value` is the label to write into the cell, mirroring the snapshot
+ *    patch: `display ?? target`, but only when the cell is currently empty.
+ *    Pass `currentCellValue` to indicate the cell already has content; we
+ *    leave the user's text alone in that case (`value` is null).
+ *  - `color` + `underline` are always set — they're the link visual.
+ */
+export interface HyperlinkRestyle {
+  cell: string;
+  value: string | null;
+  color: string;
+  underline: true;
+}
+
+export function chooseHyperlinkRestyle(
+  entry: { cell: string; target: string; display?: string },
+  currentCellValue: unknown,
+): HyperlinkRestyle | null {
+  if (!entry || typeof entry.cell !== "string" || typeof entry.target !== "string") {
+    return null;
+  }
+  if (!entry.target.trim()) return null;
+  if (!parseA1(entry.cell)) return null;
+
+  const hasValue =
+    currentCellValue !== undefined &&
+    currentCellValue !== null &&
+    currentCellValue !== "";
+  const label =
+    entry.display && entry.display.length > 0 ? entry.display : entry.target;
+  return {
+    cell: entry.cell,
+    value: hasValue ? null : label,
+    color: HYPERLINK_STYLE.cl.rgb,
+    underline: true,
+  };
 }
 
 /**

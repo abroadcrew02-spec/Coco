@@ -55,6 +55,58 @@ struct BorderSide {
     color: Option<String>,   // "#RRGGBB"
 }
 
+/// One formatting run inside a rich-text cell. Mirrors the subset of OOXML
+/// `<rPr>` (run properties) we round-trip. Fields are all optional so the
+/// JSON shape stays compact — only the run's actual styling appears.
+#[derive(Default, Clone, PartialEq, Debug)]
+struct RichRun {
+    text: String,
+    bold: bool,
+    italic: bool,
+    color: Option<String>,   // "#RRGGBB"
+    font_size: Option<f64>,  // point size (xlsx `sz val="..."`)
+    font_name: Option<String>,
+}
+
+impl RichRun {
+    fn to_json(&self) -> Value {
+        let mut obj = Map::new();
+        obj.insert("text".into(), Value::String(self.text.clone()));
+        if self.bold {
+            obj.insert("bold".into(), Value::Bool(true));
+        }
+        if self.italic {
+            obj.insert("italic".into(), Value::Bool(true));
+        }
+        if let Some(c) = &self.color {
+            obj.insert("color".into(), Value::String(c.clone()));
+        }
+        if let Some(sz) = self.font_size {
+            obj.insert("fontSize".into(), json!(sz));
+        }
+        if let Some(n) = &self.font_name {
+            obj.insert("fontName".into(), Value::String(n.clone()));
+        }
+        Value::Object(obj)
+    }
+
+    fn from_json(v: &Value) -> Option<RichRun> {
+        let obj = v.as_object()?;
+        let text = obj.get("text").and_then(|x| x.as_str())?.to_string();
+        Some(RichRun {
+            text,
+            bold: obj.get("bold").and_then(|x| x.as_bool()).unwrap_or(false),
+            italic: obj.get("italic").and_then(|x| x.as_bool()).unwrap_or(false),
+            color: obj.get("color").and_then(|x| x.as_str()).map(|s| s.to_string()),
+            font_size: obj.get("fontSize").and_then(|x| x.as_f64()),
+            font_name: obj
+                .get("fontName")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string()),
+        })
+    }
+}
+
 impl CellStyle {
     fn is_empty(&self) -> bool {
         !self.bold
@@ -259,6 +311,265 @@ fn parse_xlsx_styles(path: &str) -> Result<ParsedStyles, String> {
         cell_num_formats,
         per_sheet,
     })
+}
+
+/// Per-sheet rich-text map: (row0, col0) -> Vec<RichRun>. Plain strings stay
+/// out of the map so a missing entry means "use the plain calamine value".
+type SheetRichTextMap = HashMap<(u32, u32), Vec<RichRun>>;
+
+/// Parsed rich-text data for a workbook. Only the per-sheet map is consumed
+/// downstream; the shared-strings vec is kept as an intermediate during
+/// `parse_xlsx_rich_text` (used to resolve `<c t="s">` lookups) and isn't
+/// read further once `per_sheet` is built.
+struct ParsedRichText {
+    per_sheet: HashMap<String, SheetRichTextMap>,
+}
+
+/// Parse `xl/sharedStrings.xml` + each sheet to find rich-text cells.
+///
+/// Two sources of rich text:
+/// - `<si><r><rPr>...</rPr><t>...</t></r>...<si>` in sharedStrings.xml. Cells
+///   referencing the index via `<c t="s"><v>N</v></c>` inherit the runs.
+/// - `<c t="inlineStr"><is><r>...</r>...</is></c>` directly in the sheet XML.
+fn parse_xlsx_rich_text(path: &str) -> Result<ParsedRichText, String> {
+    use std::fs::File;
+    use std::io::Read;
+    use zip::ZipArchive;
+
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("Invalid xlsx (zip): {e}"))?;
+
+    // 1. sharedStrings.xml — optional (workbooks with only inline strings omit it)
+    let mut ss_xml = String::new();
+    if let Ok(mut entry) = archive.by_name("xl/sharedStrings.xml") {
+        entry.read_to_string(&mut ss_xml).map_err(|e| e.to_string())?;
+    }
+    let shared = parse_shared_strings_xml(&ss_xml);
+
+    // 2. workbook.xml + rels to enumerate sheets (mirrors parse_xlsx_styles).
+    let mut wb_xml = String::new();
+    if let Ok(mut entry) = archive.by_name("xl/workbook.xml") {
+        entry.read_to_string(&mut wb_xml).map_err(|e| e.to_string())?;
+    }
+    let sheet_refs = parse_workbook_sheets(&wb_xml);
+
+    let mut rels_xml = String::new();
+    if let Ok(mut entry) = archive.by_name("xl/_rels/workbook.xml.rels") {
+        entry.read_to_string(&mut rels_xml).map_err(|e| e.to_string())?;
+    }
+    let rels = parse_rels(&rels_xml);
+
+    // 3. Walk each sheet for shared-string refs that point to rich entries and
+    //    for inline rich strings.
+    let mut per_sheet: HashMap<String, SheetRichTextMap> = HashMap::new();
+    for (sheet_name, rid) in &sheet_refs {
+        let target = match rels.get(rid) {
+            Some(t) => t.clone(),
+            None => continue,
+        };
+        let zip_path = if target.starts_with('/') {
+            target.trim_start_matches('/').to_string()
+        } else {
+            format!("xl/{}", target)
+        };
+        let mut sheet_xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&zip_path) {
+            if entry.read_to_string(&mut sheet_xml).is_err() {
+                continue;
+            }
+        } else {
+            continue;
+        }
+        let map = parse_sheet_rich_text(&sheet_xml, &shared);
+        if !map.is_empty() {
+            per_sheet.insert(sheet_name.clone(), map);
+        }
+    }
+
+    let _ = shared; // explicitly drop — only per_sheet is consumed by callers.
+    Ok(ParsedRichText { per_sheet })
+}
+
+/// Parse `xl/sharedStrings.xml` into one entry per `<si>`. Entries are
+/// `Some(runs)` when the `<si>` contains multiple `<r>` children (or any
+/// `<r>` carrying `<rPr>`); plain `<si><t>text</t></si>` stays as `None`
+/// because calamine already gives us the plain string. The vec is indexed
+/// by the shared-string id used in `<c t="s"><v>N</v></c>`.
+fn parse_shared_strings_xml(xml: &str) -> Vec<Option<Vec<RichRun>>> {
+    let mut out: Vec<Option<Vec<RichRun>>> = Vec::new();
+    if xml.is_empty() {
+        return out;
+    }
+    let Some(block) = extract_block(xml, "<sst", "</sst>") else {
+        return out;
+    };
+    for si in extract_elements(&block, "<si", "</si>") {
+        let runs = parse_rich_runs(&si);
+        if runs.is_empty() {
+            out.push(None);
+        } else if runs.len() == 1 && !run_has_formatting(&runs[0]) {
+            // A single un-formatted `<r>` (no rPr) is effectively a plain string.
+            out.push(None);
+        } else {
+            out.push(Some(runs));
+        }
+    }
+    out
+}
+
+/// True when a run carries any visible formatting (i.e. should be kept as a
+/// rich run rather than collapsed into the plain string).
+fn run_has_formatting(r: &RichRun) -> bool {
+    r.bold
+        || r.italic
+        || r.color.is_some()
+        || r.font_size.is_some()
+        || r.font_name.is_some()
+}
+
+/// Extract all `<r>...</r>` runs inside the given element body (works for
+/// both `<si>` and `<is>` containers). Returns an empty Vec when no `<r>`
+/// children are present.
+fn parse_rich_runs(container_xml: &str) -> Vec<RichRun> {
+    let mut runs: Vec<RichRun> = Vec::new();
+    for r in extract_elements(container_xml, "<r", "</r>") {
+        // Skip `<rPh>` (Asian phonetic) accidentally caught by the `<r` prefix
+        // — extract_elements already gates on the char after the prefix, but
+        // double-check the element header here.
+        if r.starts_with("<rPh") || r.starts_with("<rPr") {
+            continue;
+        }
+        // Text portion: `<t>...</t>` or `<t xml:space="preserve">...</t>`.
+        let text = extract_t_text(&r).unwrap_or_default();
+        if text.is_empty() {
+            // rust_xlsxwriter rejects empty rich runs; skip them on import too
+            // so we don't round-trip a run that re-export would refuse.
+            continue;
+        }
+        let mut run = RichRun {
+            text,
+            ..RichRun::default()
+        };
+        // Run properties (`<rPr>`) carry font formatting for this run only.
+        if let Some(rpr) = extract_block(&r, "<rPr", "</rPr>") {
+            run.bold = has_self_or_open_tag(&rpr, "<b");
+            run.italic = has_self_or_open_tag(&rpr, "<i");
+            if let Some(color_el) = find_tag(&rpr, "<color") {
+                run.color = parse_attr(&color_el, "rgb").map(normalize_argb);
+            }
+            if let Some(sz_el) = find_tag(&rpr, "<sz") {
+                run.font_size = parse_attr(&sz_el, "val").and_then(|v| v.parse::<f64>().ok());
+            }
+            if let Some(name_el) = find_tag(&rpr, "<rFont") {
+                run.font_name = parse_attr(&name_el, "val");
+            }
+        }
+        runs.push(run);
+    }
+    runs
+}
+
+/// Pull the body of the first `<t>...</t>` child inside an `<r>` run. Honors
+/// `xml:space="preserve"` by *not* trimming the returned text. Returns an
+/// empty string for `<t/>` (Excel writes this for an empty run, although
+/// rust_xlsxwriter rejects empty runs on export so we drop them upstream).
+fn extract_t_text(run_xml: &str) -> Option<String> {
+    // Find the opening `<t` of the run's text child. We have to be careful
+    // not to grab a `<t>` inside `<rPr>` etc., but `<rPr>` never contains
+    // `<t>`, so scanning the run as-is is fine.
+    let open = run_xml.find("<t")?;
+    // Ensure the next char is a valid tag boundary (space, '>', '/').
+    let next = run_xml.as_bytes().get(open + 2).copied();
+    if !matches!(next, Some(b' ') | Some(b'>') | Some(b'/')) {
+        return None;
+    }
+    let gt = run_xml[open..].find('>')? + open;
+    // Self-closing `<t/>` ⇒ empty.
+    if run_xml.as_bytes().get(gt - 1) == Some(&b'/') {
+        return Some(String::new());
+    }
+    let close = run_xml[gt..].find("</t>")? + gt;
+    Some(decode_xml_entities(&run_xml[gt + 1..close]))
+}
+
+/// For one sheet's XML, find every `<c>` that points to a rich shared string
+/// or carries an inline rich string. Returns a (row, col) -> runs map. The
+/// `shared` argument is the workbook's parsed sharedStrings table.
+fn parse_sheet_rich_text(
+    xml: &str,
+    shared: &[Option<Vec<RichRun>>],
+) -> SheetRichTextMap {
+    let mut out: SheetRichTextMap = HashMap::new();
+    let bytes = xml.as_bytes();
+    let mut i: usize = 0;
+    while i + 2 < bytes.len() {
+        // Find an opening `<c ` / `<c>` / `<c/>` tag (NOT `<col>`, `<cell...>`).
+        if bytes[i] == b'<'
+            && bytes[i + 1] == b'c'
+            && (bytes[i + 2] == b' ' || bytes[i + 2] == b'>' || bytes[i + 2] == b'/')
+        {
+            let mut j = i + 2;
+            while j < bytes.len() && bytes[j] != b'>' {
+                j += 1;
+            }
+            if j >= bytes.len() {
+                break;
+            }
+            let opening = &xml[i..=j];
+            let self_closing = bytes.get(j - 1) == Some(&b'/');
+            let r_attr = parse_attr(opening, "r");
+            let t_attr = parse_attr(opening, "t");
+            let coord = r_attr.as_deref().and_then(parse_a1);
+
+            // If the `<c>` is self-closing it can't carry a value/runs.
+            if self_closing {
+                i = j + 1;
+                continue;
+            }
+
+            // Locate the matching `</c>` (cells can't nest).
+            let close_rel = match xml[j..].find("</c>") {
+                Some(p) => p,
+                None => break,
+            };
+            let body = &xml[j + 1..j + close_rel];
+            let end_abs = j + close_rel + "</c>".len();
+
+            if let Some(coord) = coord {
+                match t_attr.as_deref() {
+                    Some("s") => {
+                        // Shared-string reference: <v>N</v>
+                        if let Some(v_block) = extract_block(body, "<v", "</v>") {
+                            if let Ok(idx) = v_block.trim().parse::<usize>() {
+                                if let Some(Some(runs)) = shared.get(idx) {
+                                    out.insert(coord, runs.clone());
+                                }
+                            }
+                        }
+                    }
+                    Some("inlineStr") => {
+                        // Inline string: `<is>` with optional `<r>` runs.
+                        if let Some(is_block) = extract_block(body, "<is", "</is>") {
+                            let runs = parse_rich_runs(&is_block);
+                            // Only treat as rich when at least one run has
+                            // formatting (or the cell has multiple runs).
+                            let keep = runs.len() > 1
+                                || runs.iter().any(run_has_formatting);
+                            if keep && !runs.is_empty() {
+                                out.insert(coord, runs);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            i = end_abs;
+        } else {
+            i += 1;
+        }
+    }
+    out
 }
 
 /// Returns (fonts, fills, borders, raw_xfs, custom_num_fmts). Each font/fill
@@ -823,6 +1134,29 @@ fn build_format(style: &CellStyle, num_format: Option<&str>) -> Format {
     }
     if let Some(nf) = num_format {
         fmt = fmt.set_num_format(nf);
+    }
+    fmt
+}
+
+/// Build a Format suitable for one rich-text run. Only Font properties survive
+/// in rich strings per Excel's rules; fill/border/alignment on a per-run basis
+/// are silently ignored by the rust_xlsxwriter rich-string API.
+fn build_run_format(run: &RichRun) -> Format {
+    let mut fmt = Format::new();
+    if run.bold {
+        fmt = fmt.set_bold();
+    }
+    if run.italic {
+        fmt = fmt.set_italic();
+    }
+    if let Some(c) = run.color.as_deref().and_then(parse_color) {
+        fmt = fmt.set_font_color(c);
+    }
+    if let Some(sz) = run.font_size {
+        fmt = fmt.set_font_size(sz);
+    }
+    if let Some(name) = run.font_name.as_deref() {
+        fmt = fmt.set_font_name(name);
     }
     fmt
 }
@@ -2013,6 +2347,9 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     let dimensions_by_sheet = parse_xlsx_dimensions(&path);
     // Pre-parse per-sheet merged-cell ranges (calamine doesn't expose these).
     let merges_by_sheet = parse_xlsx_merges(&path);
+    // Pre-parse rich-text runs from sharedStrings.xml + inline `<is>` strings.
+    // calamine flattens rich strings to plain — we re-attach the runs here.
+    let rich_text = parse_xlsx_rich_text(&path).ok();
 
     let mut wb: Xlsx<_> =
         open_workbook(&path).map_err(|e| format!("Failed to open xlsx: {e}"))?;
@@ -2056,6 +2393,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         let col_count = used_cols.max(MIN_COLS);
 
         let sheet_style_lookup = parsed_styles.as_ref().and_then(|ps| ps.per_sheet.get(name));
+        let sheet_rich_lookup = rich_text.as_ref().and_then(|rt| rt.per_sheet.get(name));
 
         let mut cell_data: Map<String, Value> = Map::new();
         let mut non_empty_cells: usize = 0;
@@ -2137,10 +2475,22 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                     continue;
                 }
 
+                // Rich-text runs for this cell, if any. Looked up by absolute
+                // coords because the rich-text scanner reads sheet XML
+                // independent of calamine's view of the range.
+                let rich_runs: Option<&Vec<RichRun>> =
+                    sheet_rich_lookup.and_then(|m| m.get(&(abs_r, abs_c)));
+
                 if let Some(mut v) = data_to_cell(cell, num_format.as_deref()) {
                     if let Some(sid) = &style_id {
                         if let Some(obj) = v.as_object_mut() {
                             obj.insert("s".into(), Value::String(sid.clone()));
+                        }
+                    }
+                    if let Some(runs) = rich_runs {
+                        if let Some(obj) = v.as_object_mut() {
+                            let arr: Vec<Value> = runs.iter().map(RichRun::to_json).collect();
+                            obj.insert("_richRuns".into(), Value::Array(arr));
                         }
                     }
                     row_map.insert(c.to_string(), v);
@@ -2299,7 +2649,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         severity: "info".to_string(),
         code: "XLSX_POC_IMPORT".to_string(),
         message:
-            "xlsx PoC import: rich text and conditional formatting are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights + data validations are preserved)"
+            "xlsx PoC import: conditional formatting rules are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights + rich text + data validations are preserved)"
                 .to_string(),
         affected_sheets: None,
     });
@@ -2681,6 +3031,43 @@ pub fn export_xlsx_core(
                             continue;
                         }
 
+                        // Rich-text cells: write each run with its own Format.
+                        // rust_xlsxwriter's write_rich_string takes &[(&Format, &str)]
+                        // and rejects empty segments, so build the Vec carefully.
+                        if let Some(runs_arr) =
+                            cell_val.get("_richRuns").and_then(|v| v.as_array())
+                        {
+                            let parsed_runs: Vec<RichRun> = runs_arr
+                                .iter()
+                                .filter_map(RichRun::from_json)
+                                .filter(|r| !r.text.is_empty())
+                                .collect();
+                            if !parsed_runs.is_empty() {
+                                let formats: Vec<Format> = parsed_runs
+                                    .iter()
+                                    .map(build_run_format)
+                                    .collect();
+                                let segments: Vec<(&Format, &str)> = parsed_runs
+                                    .iter()
+                                    .zip(formats.iter())
+                                    .map(|(r, f)| (f, r.text.as_str()))
+                                    .collect();
+                                let write_res = if let Some(ref fmt) = fmt_obj {
+                                    worksheet.write_rich_string_with_format(
+                                        row_idx, col_idx, &segments, fmt,
+                                    )
+                                } else {
+                                    worksheet.write_rich_string(row_idx, col_idx, &segments)
+                                };
+                                if write_res.is_ok() {
+                                    cell_count += 1;
+                                    continue;
+                                }
+                                // On failure, fall through to plain `v` write so
+                                // the cell isn't dropped.
+                            }
+                        }
+
                         if let Some(v) = cell_val.get("v") {
                             match v {
                                 Value::Null => {
@@ -2879,7 +3266,7 @@ pub fn export_xlsx_core(
         severity: "info".to_string(),
         code: "XLSX_POC_EXPORT".to_string(),
         message: format!(
-            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Rich text and conditional formatting are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats + data validations are preserved)."
+            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Conditional formatting rules are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats + rich text + data validations are preserved)."
         ),
         affected_sheets: None,
     });

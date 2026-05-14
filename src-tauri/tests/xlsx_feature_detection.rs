@@ -389,6 +389,115 @@ fn worksheet_scan_cap_enforced_at_16mib() {
     );
 }
 
+// --- medium-cf-comment-falsepositive --------------------------------------
+// A literal `<conditionalFormatting` (or `<dataValidations`) inside an XML
+// comment must not trigger a false-positive warning.
+
+#[test]
+fn conditional_formatting_inside_xml_comment_is_ignored() {
+    let tmp = TempDir::new().unwrap();
+    let sheet_xml = br#"<?xml version="1.0"?>
+<worksheet><sheetData/>
+<!-- <conditionalFormatting sqref="A1"><cfRule type="cellIs"/></conditionalFormatting> -->
+</worksheet>"#;
+    let path = build_zip_with_contents(
+        &tmp,
+        "cf_commented.xlsx",
+        &[
+            ("xl/workbook.xml", b"<xml/>"),
+            ("xl/worksheets/sheet1.xml", sheet_xml),
+        ],
+    );
+    let result = detect_unsupported_features(&path_str(&path)).unwrap();
+    assert!(
+        !result.iter().any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
+        "commented-out CF must not produce a warning, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn data_validation_inside_xml_comment_is_ignored() {
+    let tmp = TempDir::new().unwrap();
+    let sheet_xml = br#"<?xml version="1.0"?>
+<worksheet><sheetData/>
+<!-- <dataValidations count="1"><dataValidation type="list"/></dataValidations> -->
+</worksheet>"#;
+    let path = build_zip_with_contents(
+        &tmp,
+        "dv_commented.xlsx",
+        &[
+            ("xl/workbook.xml", b"<xml/>"),
+            ("xl/worksheets/sheet1.xml", sheet_xml),
+        ],
+    );
+    let result = detect_unsupported_features(&path_str(&path)).unwrap();
+    assert!(
+        !result.iter().any(|w| w.code == "XLSX_DATA_VALIDATION"),
+        "commented-out DV must not produce a warning, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn conditional_formatting_real_after_commented_block_still_detected() {
+    // Mix: a commented-out CF block followed by a real one. The real one must
+    // still surface the warning — the comment skip is precise, not global.
+    let tmp = TempDir::new().unwrap();
+    let sheet_xml = br#"<?xml version="1.0"?>
+<worksheet><sheetData/>
+<!-- <conditionalFormatting sqref="A1"/> -->
+<conditionalFormatting sqref="B1:B5"><cfRule type="cellIs"/></conditionalFormatting>
+</worksheet>"#;
+    let path = build_zip_with_contents(
+        &tmp,
+        "cf_mixed.xlsx",
+        &[
+            ("xl/workbook.xml", b"<xml/>"),
+            ("xl/worksheets/sheet1.xml", sheet_xml),
+        ],
+    );
+    let result = detect_unsupported_features(&path_str(&path)).unwrap();
+    assert!(
+        result.iter().any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
+        "real CF after commented one must still warn, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn conditional_formatting_inside_comment_straddling_chunk_boundary() {
+    // The 64 KiB chunk boundary lands inside the XML comment so the scanner's
+    // overlap-and-state-restore logic has to keep `in_comment=true` across the
+    // boundary. Place the literal `<conditionalFormatting` shortly after the
+    // boundary, still inside the comment — it must NOT trip the marker.
+    let tmp = TempDir::new().unwrap();
+    const CHUNK: usize = 65_536;
+    let prefix = b"<worksheet><sheetData/><!-- ";
+    // Pad inside the comment until we cross the boundary, then drop the marker.
+    let padding_needed = CHUNK.saturating_sub(prefix.len()).saturating_add(8);
+    let mut sheet_xml: Vec<u8> = Vec::with_capacity(CHUNK + 1024);
+    sheet_xml.extend_from_slice(prefix);
+    sheet_xml.extend(std::iter::repeat(b' ').take(padding_needed));
+    sheet_xml.extend_from_slice(b"<conditionalFormatting/>");
+    sheet_xml.extend_from_slice(b" --></worksheet>");
+
+    let path = build_zip_with_contents(
+        &tmp,
+        "cf_comment_split.xlsx",
+        &[
+            ("xl/workbook.xml", b"<xml/>"),
+            ("xl/worksheets/sheet1.xml", &sheet_xml),
+        ],
+    );
+    let result = detect_unsupported_features(&path_str(&path)).unwrap();
+    assert!(
+        !result.iter().any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
+        "commented CF straddling chunk boundary must stay suppressed, got {:?}",
+        result
+    );
+}
+
 #[test]
 fn invalid_zip_returns_err() {
     let tmp = TempDir::new().unwrap();

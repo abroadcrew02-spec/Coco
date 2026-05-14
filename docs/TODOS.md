@@ -66,11 +66,10 @@ None.
 - **Effort**: M
 - **Why deferred**: Need typed values we don't reconstruct yet; currently dropped silently. Authoring side only emits cellIs / containsText / top10 / duplicateValues / uniqueValues.
 
-### medium-cf-comment-falsepositive
+### medium-cf-comment-falsepositive (closed)
 - **Title**: Strip XML comments before CF / DV substring scan
 - **Refs**: `.claude/audit-findings.md` MINOR-1
-- **Effort**: S
-- **Why deferred**: `<!-- <conditionalFormatting --> ` produces a false-positive match in the unsupported-feature detector. Either strip comments first or document the acceptance.
+- **Resolution**: `worksheet_contains_marker` in `src-tauri/src/commands/xlsx_io.rs` now drives a small `<!-- ... -->`-aware state machine instead of a flat substring search. `in_comment` state is carried across the 64 KiB chunk boundary via a tracked overlap-start mirror so a comment that straddles a chunk still suppresses the match. Tests in `src-tauri/tests/xlsx_feature_detection.rs` cover commented CF, commented DV, mixed commented + real CF, and a chunk-straddling commented CF.
 
 ### medium-detect-streaming
 - **Title**: Stream `detect_unsupported_features` worksheet XML instead of `read_to_string`
@@ -112,11 +111,10 @@ None.
 - **Effort**: S
 - **Why deferred**: Cosmetic only. `useGlobalShortcuts` already treats `ctrlKey || metaKey` uniformly so Cmd+N works; just the displayed label is wrong. >50 LOC to refactor; deferred until a real macOS build pass.
 
-### low-macos-minimum-system-version
+### low-macos-minimum-system-version (closed)
 - **Title**: Declare `bundle.macOS.minimumSystemVersion = "12.0"` in `tauri.conf.json`
 - **Refs**: `docs/CROSS_PLATFORM_PREFLIGHT.md` WARNING #2
-- **Effort**: S
-- **Why deferred**: Tauri's default deployment target (10.13) is below §12.3 "macOS 12+". No current runtime hazard; needs a real macOS build to verify the property name is accepted.
+- **Resolution**: Added `bundle.macOS.minimumSystemVersion = "12.0"` to `src-tauri/tauri.conf.json`. Property name verified against Tauri v2 schema. A macOS build pass is still needed to confirm the linker honors it.
 
 ### low-perf-bench-harness
 - **Title**: Wire performance acceptance numbers (60 fps scroll, 8 s 5 MB import) into CI

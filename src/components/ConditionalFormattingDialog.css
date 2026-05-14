@@ -89,6 +89,12 @@
   border-radius: 4px;
 }
 
+.cf-item--editing {
+  background-color: #e8f4ec;
+  border-color: #92c2a3;
+  box-shadow: 0 0 0 1px #92c2a3 inset;
+}
+
 .cf-item-text {
   display: flex;
   flex-direction: column;

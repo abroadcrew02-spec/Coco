@@ -114,6 +114,47 @@ describe("ConditionalFormattingDialog", () => {
     expect(onSave.mock.calls[0][0]).toEqual([]);
   });
 
+  it("edits an existing rule in-place (prefill, update, replace by index)", () => {
+    const seed: CfRule[] = [
+      { sqref: "A1:A10", type: "cellIs", operator: "greaterThan", formula1: "100", priority: 1 },
+      { sqref: "C1:C5", type: "containsText", operator: "containsText", text: "err", priority: 2 },
+    ];
+    render(
+      <ConditionalFormattingDialog
+        sheetName="Sheet1"
+        initialRules={seed}
+        onSave={onSave}
+        onClose={onClose}
+      />,
+    );
+    // Click 編集 on the second row.
+    const row = screen.getByText("C1:C5").closest("li")!;
+    expect(row.className).not.toMatch(/cf-item--editing/);
+    fireEvent.click(within(row).getByRole("button", { name: /C1:C5 のルールを編集/ }));
+
+    // Form should prefill with that rule and the row should be highlighted.
+    expect(screen.getByText("条件付き書式を編集")).toBeTruthy();
+    const sqrefInput = screen.getByLabelText("範囲 (sqref)") as HTMLInputElement;
+    expect(sqrefInput.value).toBe("C1:C5");
+    const typeSelect = screen.getByLabelText("ルール種別") as HTMLSelectElement;
+    expect(typeSelect.value).toBe("containsText");
+    const textInput = screen.getByLabelText("含むテキスト") as HTMLInputElement;
+    expect(textInput.value).toBe("err");
+    expect(screen.getByText("C1:C5").closest("li")!.className).toMatch(/cf-item--editing/);
+
+    // Modify the text and submit.
+    fireEvent.change(textInput, { target: { value: "warn" } });
+    fireEvent.click(screen.getByRole("button", { name: "更新" }));
+
+    // Apply and check the rule was REPLACED at index 1 (not appended).
+    fireEvent.click(screen.getByRole("button", { name: "適用" }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0][0];
+    expect(saved).toHaveLength(2);
+    expect(saved[0].sqref).toBe("A1:A10");
+    expect(saved[1]).toMatchObject({ sqref: "C1:C5", type: "containsText", text: "warn" });
+  });
+
   it("ESC closes the dialog without calling onSave", () => {
     render(
       <ConditionalFormattingDialog

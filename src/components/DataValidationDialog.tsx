@@ -243,7 +243,10 @@ export default function DataValidationDialog({
           ) : (
             <ul className="dv-list" aria-label="登録済みの入力規則">
               {rules.map((r, idx) => (
-                <li key={idx} className="dv-item">
+                <li
+                  key={idx}
+                  className={`dv-item${editingIndex === idx ? " dv-item--editing" : ""}`}
+                >
                   <div className="dv-item-text">
                     <span className="dv-item-sqref">{r.sqref}</span>
                     <span className="dv-item-summary">{summarize(r)}</span>

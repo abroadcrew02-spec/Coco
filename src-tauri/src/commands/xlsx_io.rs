@@ -4220,7 +4220,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         severity: "info".to_string(),
         code: "XLSX_POC_IMPORT".to_string(),
         message:
-            "xlsx PoC import: threaded comments are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights + rich text + data validations + conditional formatting + charts (blob-preserved) + pivot tables (blob-preserved) are preserved)"
+            "xlsx PoC import: threaded comments are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights + rich text + data validations + conditional formatting + charts (blob-preserved) + pivot tables (blob-preserved) + images/drawings (blob-preserved) are preserved)"
                 .to_string(),
         affected_sheets: None,
     });
@@ -5114,7 +5114,7 @@ pub fn export_xlsx_core(
         severity: "info".to_string(),
         code: "XLSX_POC_EXPORT".to_string(),
         message: format!(
-            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Threaded comments are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats + rich text + data validations + conditional formatting + charts (blob-preserved) + pivot tables (blob-preserved) are preserved)."
+            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Threaded comments are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats + rich text + data validations + conditional formatting + charts (blob-preserved) + pivot tables (blob-preserved) + images/drawings (blob-preserved) are preserved)."
         ),
         affected_sheets: None,
     });
@@ -5173,7 +5173,7 @@ pub fn export_xlsx_core(
 }
 
 // ============================================================================
-// Blob-level part preservation (charts, drawings, theme, pivot tables).
+// Blob-level part preservation (charts, drawings, theme, pivot tables, media).
 //
 // These features are spread across several xlsx parts plus per-sheet
 // relationship entries. Rendering them is out of scope for the PoC — instead
@@ -5214,6 +5214,7 @@ const PRESERVED_PREFIXES: &[&str] = &[
     "xl/theme/",
     "xl/pivotTables/",
     "xl/pivotCache/",
+    "xl/media/",
 ];
 
 /// Minimal base64 encoder — avoids adding a crate dependency for a single
@@ -5636,6 +5637,11 @@ pub(crate) fn inject_preserved_parts(
 /// `new_ct` so the resulting `[Content_Types].xml` advertises the parts we
 /// just injected. Overrides whose PartName already appears in `new_ct` are
 /// skipped to keep the file deterministic.
+///
+/// Also re-adds `<Default Extension="..."/>` entries for image extensions
+/// (png/jpg/jpeg/gif/bmp/tiff) so embedded images injected back under
+/// `xl/media/` still have a content-type advertised. rust_xlsxwriter drops
+/// these Defaults when the workbook has no images of its own.
 fn merge_content_type_overrides(new_ct: &str, original_ct: &str) -> String {
     // Pull every <Override .../> from the original, keep only the ones whose
     // PartName matches a preserved prefix.
@@ -5659,6 +5665,30 @@ fn merge_content_type_overrides(new_ct: &str, original_ct: &str) -> String {
         }
         adds.push(tag.to_string());
     }
+
+    // Also splice in `<Default Extension="..."/>` entries for image
+    // extensions from the original — embedded images injected under
+    // `xl/media/` need these or Excel will reject the file.
+    const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff"];
+    let mut cursor = 0usize;
+    while let Some(rel) = original_ct[cursor..].find("<Default") {
+        let start = cursor + rel;
+        let rest = &original_ct[start..];
+        let Some(end) = rest.find("/>") else { break };
+        let tag = &original_ct[start..start + end + 2];
+        cursor = start + end + 2;
+        let ext = parse_attr(tag, "Extension").unwrap_or_default().to_lowercase();
+        if !IMAGE_EXTS.contains(&ext.as_str()) {
+            continue;
+        }
+        if new_ct.contains(&format!("Extension=\"{ext}\""))
+            || new_ct.contains(&format!("Extension=\"{}\"", ext.to_uppercase()))
+        {
+            continue;
+        }
+        adds.push(tag.to_string());
+    }
+
     if adds.is_empty() {
         return new_ct.to_string();
     }

@@ -1,7 +1,20 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
+// After the dialog's snapshots state moves from null → loaded, the keydown
+// effect re-registers its listener with the populated rows in its closure.
+// `waitFor` confirms the DOM is updated, but in React 18 the effect can flush
+// one microtask later. If we fireEvent.keyDown(window) in that gap, the stale
+// listener (snapshots === null) early-returns and the test reads a unchanged
+// selection — flaky under full-suite contention. This helper drains pending
+// microtasks/effects so the listener is guaranteed to be the post-load one.
+async function flushEffects() {
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
@@ -172,6 +185,7 @@ describe("SnapshotHistoryDialog", () => {
     it("ArrowDown moves selection to the next row", async () => {
       const { container } = render(<SnapshotHistoryDialog onClose={onClose} />);
       await waitFor(() => screen.getAllByText("このバージョンを開く"));
+      await flushEffects();
       fireEvent.keyDown(window, { key: "ArrowDown" });
       const selected = container.querySelectorAll(".snapshot-item--selected");
       expect(selected.length).toBe(1);
@@ -184,6 +198,7 @@ describe("SnapshotHistoryDialog", () => {
     it("ArrowUp from the first row is a no-op (no underflow)", async () => {
       const { container } = render(<SnapshotHistoryDialog onClose={onClose} />);
       await waitFor(() => screen.getAllByText("このバージョンを開く"));
+      await flushEffects();
       fireEvent.keyDown(window, { key: "ArrowUp" });
       const items = container.querySelectorAll(".snapshot-item");
       expect(items[0].className).toContain("snapshot-item--selected");
@@ -192,6 +207,7 @@ describe("SnapshotHistoryDialog", () => {
     it("ArrowDown past the last row stays at the last (no overflow)", async () => {
       const { container } = render(<SnapshotHistoryDialog onClose={onClose} />);
       await waitFor(() => screen.getAllByText("このバージョンを開く"));
+      await flushEffects();
       fireEvent.keyDown(window, { key: "ArrowDown" });
       fireEvent.keyDown(window, { key: "ArrowDown" });
       fireEvent.keyDown(window, { key: "ArrowDown" }); // attempt overflow
@@ -206,6 +222,7 @@ describe("SnapshotHistoryDialog", () => {
       });
       render(<SnapshotHistoryDialog onClose={onClose} />);
       await waitFor(() => screen.getAllByText("このバージョンを開く"));
+      await flushEffects();
       // Move selection to index 1 (snapshotId=2) then press Enter.
       fireEvent.keyDown(window, { key: "ArrowDown" });
       fireEvent.keyDown(window, { key: "Enter" });

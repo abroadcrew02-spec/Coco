@@ -43,6 +43,7 @@ beforeEach(() => {
     csvExportEncoding: "utf8-bom",
     csvImportEncoding: "auto",
     pinnedPaths: [],
+    pinnedOrder: [],
     suppressCsvPocWarning: false,
   });
 });
@@ -1188,5 +1189,133 @@ describe("audit item 17: loadPinnedPaths handles non-array JSON", () => {
     invokeMock.mockResolvedValue("42");
     await useWorkbookStore.getState().loadPinnedPaths();
     expect(useWorkbookStore.getState().pinnedPaths).toEqual([]);
+  });
+});
+
+describe("pinnedOrder", () => {
+  it("defaults to an empty array", () => {
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual([]);
+  });
+
+  it("loadPinnedOrder reads a JSON array from app_settings", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify(["/tmp/a.xlsx", "/tmp/b.csv"]));
+    await useWorkbookStore.getState().loadPinnedOrder();
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual(["/tmp/a.xlsx", "/tmp/b.csv"]);
+  });
+
+  it("loadPinnedOrder leaves default on null", async () => {
+    invokeMock.mockResolvedValue(null);
+    await useWorkbookStore.getState().loadPinnedOrder();
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual([]);
+  });
+
+  it("loadPinnedOrder ignores malformed JSON", async () => {
+    invokeMock.mockResolvedValue("not valid json");
+    await useWorkbookStore.getState().loadPinnedOrder();
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual([]);
+  });
+
+  it("loadPinnedOrder rejects an array containing non-strings", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify(["/tmp/a.xlsx", 42]));
+    await useWorkbookStore.getState().loadPinnedOrder();
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual([]);
+  });
+
+  it("loadPinnedOrder ignores a JSON object", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify({ a: 1 }));
+    await useWorkbookStore.getState().loadPinnedOrder();
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual([]);
+  });
+
+  it("setPinnedOrder updates state and persists JSON", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await useWorkbookStore.getState().setPinnedOrder(["/tmp/a.xlsx", "/tmp/b.csv"]);
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual(["/tmp/a.xlsx", "/tmp/b.csv"]);
+    expect(invokeMock).toHaveBeenCalledWith(
+      "set_setting",
+      expect.objectContaining({
+        key: "recents.pinned_order",
+        value: JSON.stringify(["/tmp/a.xlsx", "/tmp/b.csv"]),
+      })
+    );
+  });
+
+  it("setPinnedOrder keeps in-memory state even when persistence fails", async () => {
+    invokeMock.mockRejectedValue("db locked");
+    await useWorkbookStore.getState().setPinnedOrder(["/tmp/a.xlsx"]);
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual(["/tmp/a.xlsx"]);
+  });
+
+  it("reorderPinned moves dragged to where target is (insert before target)", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    useWorkbookStore.setState({
+      pinnedPaths: ["/tmp/a.xlsx", "/tmp/b.csv", "/tmp/c.coco"],
+      pinnedOrder: ["/tmp/a.xlsx", "/tmp/b.csv", "/tmp/c.coco"],
+    });
+    await useWorkbookStore.getState().reorderPinned("/tmp/c.coco", "/tmp/a.xlsx");
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual([
+      "/tmp/c.coco",
+      "/tmp/a.xlsx",
+      "/tmp/b.csv",
+    ]);
+    expect(invokeMock).toHaveBeenCalledWith(
+      "set_setting",
+      expect.objectContaining({
+        key: "recents.pinned_order",
+        value: JSON.stringify(["/tmp/c.coco", "/tmp/a.xlsx", "/tmp/b.csv"]),
+      })
+    );
+  });
+
+  it("reorderPinned is a no-op when dragged equals target", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    useWorkbookStore.setState({
+      pinnedPaths: ["/tmp/a.xlsx", "/tmp/b.csv"],
+      pinnedOrder: ["/tmp/a.xlsx", "/tmp/b.csv"],
+    });
+    await useWorkbookStore.getState().reorderPinned("/tmp/a.xlsx", "/tmp/a.xlsx");
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual(["/tmp/a.xlsx", "/tmp/b.csv"]);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("reorderPinned seeds untracked pinned paths into the order before reordering", async () => {
+    // pinnedOrder is empty but pinnedPaths has entries — reorder should still work
+    // by treating pinnedPaths as the implicit starting order.
+    invokeMock.mockResolvedValue(undefined);
+    useWorkbookStore.setState({
+      pinnedPaths: ["/tmp/a.xlsx", "/tmp/b.csv", "/tmp/c.coco"],
+      pinnedOrder: [],
+    });
+    await useWorkbookStore.getState().reorderPinned("/tmp/b.csv", "/tmp/a.xlsx");
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual([
+      "/tmp/b.csv",
+      "/tmp/a.xlsx",
+      "/tmp/c.coco",
+    ]);
+  });
+
+  it("reorderPinned moves dragged later in the list (target after current position)", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    useWorkbookStore.setState({
+      pinnedPaths: ["/tmp/a.xlsx", "/tmp/b.csv", "/tmp/c.coco"],
+      pinnedOrder: ["/tmp/a.xlsx", "/tmp/b.csv", "/tmp/c.coco"],
+    });
+    await useWorkbookStore.getState().reorderPinned("/tmp/a.xlsx", "/tmp/c.coco");
+    // After removing 'a' the array is ["b","c"]; inserting 'a' at idx-of('c')=1 gives ["b","a","c"].
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual([
+      "/tmp/b.csv",
+      "/tmp/a.xlsx",
+      "/tmp/c.coco",
+    ]);
+  });
+
+  it("reorderPinned keeps in-memory state even when persistence fails", async () => {
+    invokeMock.mockRejectedValue("db locked");
+    useWorkbookStore.setState({
+      pinnedPaths: ["/tmp/a.xlsx", "/tmp/b.csv"],
+      pinnedOrder: ["/tmp/a.xlsx", "/tmp/b.csv"],
+    });
+    await useWorkbookStore.getState().reorderPinned("/tmp/b.csv", "/tmp/a.xlsx");
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual(["/tmp/b.csv", "/tmp/a.xlsx"]);
   });
 });

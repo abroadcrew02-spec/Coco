@@ -51,6 +51,7 @@ function resetStore() {
     csvExportEncoding: "utf8-bom",
     csvImportEncoding: "auto",
     pinnedPaths: [],
+    pinnedOrder: [],
     suppressCsvPocWarning: false,
   });
 }

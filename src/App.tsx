@@ -37,6 +37,7 @@ export default function App() {
     loadCsvExportEncoding,
     loadCsvImportEncoding,
     loadPinnedPaths,
+    loadPinnedOrder,
     loadSuppressCsvPocWarning,
     dismissBlockingImport,
   } = useWorkbookStore();
@@ -76,6 +77,7 @@ export default function App() {
     loadCsvExportEncoding();
     loadCsvImportEncoding();
     loadPinnedPaths();
+    loadPinnedOrder();
     loadSuppressCsvPocWarning();
   }, [
     loadRecentFiles,
@@ -84,6 +86,7 @@ export default function App() {
     loadCsvExportEncoding,
     loadCsvImportEncoding,
     loadPinnedPaths,
+    loadPinnedOrder,
     loadSuppressCsvPocWarning,
   ]);
 

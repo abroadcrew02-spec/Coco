@@ -29,6 +29,8 @@ export default function HomeScreen() {
     dismissWarnings,
     pinnedPaths,
     togglePinned,
+    pinnedOrder,
+    reorderPinned,
   } = useWorkbookStore();
 
   // Inline filter — shown only when there are enough recents to make
@@ -36,14 +38,27 @@ export default function HomeScreen() {
   const FILTER_THRESHOLD = 6;
   const [filterQuery, setFilterQuery] = useState("");
   const [focusedRecentIdx, setFocusedRecentIdx] = useState(-1);
+  // Path the user is currently dragging over (for visual drop indicator).
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   const filterInputRef = useRef<HTMLInputElement | null>(null);
-  // Sort pinned entries to the top; otherwise preserve the backend's
-  // last_opened DESC order. Stable sort ensures non-pinned items keep their
-  // relative order from the backend response.
+  // Sort pinned entries to the top, ordered by pinnedOrder when present
+  // (paths not yet in pinnedOrder go at the end of the pinned group);
+  // unpinned entries preserve the backend's last_opened DESC order.
+  const orderIndex = (path: string): number => {
+    const i = pinnedOrder.indexOf(path);
+    // Unknown pinned paths sort after known ones (stable among themselves).
+    return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+  };
   const sortedRecents = [...recentFiles].sort((a, b) => {
     const ap = pinnedPaths.includes(a.path) ? 1 : 0;
     const bp = pinnedPaths.includes(b.path) ? 1 : 0;
-    return bp - ap;
+    if (ap !== bp) return bp - ap;
+    if (ap === 1) {
+      // Both pinned — order by pinnedOrder; unknown paths fall back to stable
+      // backend ordering via MAX_SAFE_INTEGER on both sides.
+      return orderIndex(a.path) - orderIndex(b.path);
+    }
+    return 0;
   });
   const filteredRecents = filterQuery.trim()
     ? sortedRecents.filter((f) =>
@@ -364,9 +379,37 @@ export default function HomeScreen() {
                     el.scrollIntoView({ block: "nearest", behavior: "auto" });
                   }
                 }}
-                className={`recent-item ${!f.exists ? "recent-item--missing" : ""} ${isPinned ? "recent-item--pinned" : ""} ${isFocused ? "recent-item--focused" : ""}`}
+                className={`recent-item ${!f.exists ? "recent-item--missing" : ""} ${isPinned ? "recent-item--pinned" : ""} ${isFocused ? "recent-item--focused" : ""} ${dragOverPath === f.path ? "recent-item--drag-over" : ""}`}
                 onClick={() => handleRecentFile(f)}
                 onMouseEnter={() => setFocusedRecentIdx(idx)}
+                draggable={isPinned}
+                onDragStart={(e) => {
+                  if (!isPinned) return;
+                  e.dataTransfer.setData("text/plain", f.path);
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(e) => {
+                  // Only allow drop onto another pinned row. Without this,
+                  // dragging a pinned item over an unpinned one would show
+                  // a drop cursor that resolves to a no-op.
+                  if (!isPinned) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (dragOverPath !== f.path) setDragOverPath(f.path);
+                }}
+                onDragLeave={() => {
+                  if (dragOverPath === f.path) setDragOverPath(null);
+                }}
+                onDrop={(e) => {
+                  if (!isPinned) return;
+                  e.preventDefault();
+                  const dragged = e.dataTransfer.getData("text/plain");
+                  setDragOverPath(null);
+                  if (dragged && dragged !== f.path && pinnedPaths.includes(dragged)) {
+                    void reorderPinned(dragged, f.path);
+                  }
+                }}
+                onDragEnd={() => setDragOverPath(null)}
               >
                 <span className="recent-name">
                   {isPinned && <span className="recent-pin-indicator" aria-hidden="true">📌</span>}

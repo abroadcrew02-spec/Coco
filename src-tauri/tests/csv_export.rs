@@ -378,8 +378,10 @@ fn date_cells_export_as_yyyy_mm_dd() {
 
 #[test]
 fn unrecognized_format_strings_fall_through_to_plain_number() {
-    // Currency / arbitrary _fmt that don't match date / datetime / percent
-    // patterns still render as plain numbers.
+    // Format codes that don't match any of the date / datetime / time /
+    // percent / currency / text branches still render as plain numbers.
+    // `0.00`, `0.0E+00`, `??/??` aren't yet honored by the format-aware
+    // renderer — they pass through unchanged.
     let dir = TempDir::new().unwrap();
     let path = path_in(&dir, "fmt.csv");
     let snapshot = r#"{
@@ -389,8 +391,8 @@ fn unrecognized_format_strings_fall_through_to_plain_number() {
                 "name": "S",
                 "cellData": {
                     "0": {
-                        "0": { "v": 1000.0, "_fmt": "¥#,##0" },
-                        "1": { "v": 1.5, "_fmt": "0.00" }
+                        "0": { "v": 1000.0, "_fmt": "0.00" },
+                        "1": { "v": 1.5, "_fmt": "0.0E+00" }
                     }
                 }
             }
@@ -510,6 +512,118 @@ fn percent_cells_export_with_percent_sign() {
     let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
     let first_line = s.split("\r\n").next().unwrap();
     assert_eq!(first_line, "50%,12.50%,-3%");
+}
+
+#[test]
+fn us_style_slash_date_format_emits_slash_separated() {
+    // `m/d/yyyy` is the canonical US locale date format. Per §4.7 FR-303 the
+    // exported representation must follow the format code, not be coerced to
+    // ISO 8601. 2024-01-31 = serial 45322.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "us.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": {
+                        "0": { "v": 45322.0, "_fmt": "m/d/yyyy" },
+                        "1": { "v": 45322.0, "_fmt": "mm/dd/yyyy" }
+                    }
+                }
+            }
+        }
+    }"#;
+    let _ = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    let bytes = fs::read(&path).unwrap();
+    let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
+    let first_line = s.split("\r\n").next().unwrap();
+    // m/d → no zero padding; mm/dd → zero-padded.
+    assert_eq!(first_line, "1/31/2024,01/31/2024");
+}
+
+#[test]
+fn text_format_at_emits_raw_number_without_grouping() {
+    // `@` is the Excel "text" format code: render the underlying value
+    // verbatim as text. We treat numeric cells with `_fmt: "@"` as plain
+    // numbers so the CSV value matches the displayed text.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "text.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": {
+                        "0": { "v": 12345.0, "_fmt": "@" },
+                        "1": { "v": "hello", "_fmt": "@" }
+                    }
+                }
+            }
+        }
+    }"#;
+    let _ = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    let bytes = fs::read(&path).unwrap();
+    let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
+    let first_line = s.split("\r\n").next().unwrap();
+    // No date interpretation, no thousands separators, string passes through.
+    assert_eq!(first_line, "12345,hello");
+}
+
+#[test]
+fn currency_format_emits_symbol_and_thousands_separators() {
+    // Excel currency formats: `$#,##0.00`, `¥#,##0`, locale-tagged variants.
+    // We honor the symbol + decimal precision + comma grouping.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "cur.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": {
+                        "0": { "v": 1234.5, "_fmt": "$#,##0.00" },
+                        "1": { "v": 1000000.0, "_fmt": "¥#,##0" },
+                        "2": { "v": -50.25, "_fmt": "$#,##0.00" }
+                    }
+                }
+            }
+        }
+    }"#;
+    let _ = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    let bytes = fs::read(&path).unwrap();
+    let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
+    let first_line = s.split("\r\n").next().unwrap();
+    // Comma escaping: each currency cell contains a comma, so the field is
+    // wrapped in double quotes per RFC 4180.
+    // Only fields containing the delimiter (",") need RFC4180 quoting; the
+    // negative cell "-$50.25" has no comma so it stays bare.
+    assert_eq!(first_line, "\"$1,234.50\",\"¥1,000,000\",-$50.25");
+}
+
+#[test]
+fn time_only_short_format_still_emits_hh_mm_ss() {
+    // The `h:mm` format on 0.5 (noon) — currently we always emit HH:MM:SS.
+    // Confirm the existing behavior is preserved alongside the new branches.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "hm.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": { "0": { "0": { "v": 0.5, "_fmt": "h:mm" } } }
+            }
+        }
+    }"#;
+    let _ = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    let bytes = fs::read(&path).unwrap();
+    let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
+    let first_line = s.split("\r\n").next().unwrap();
+    assert_eq!(first_line, "12:00:00");
 }
 
 #[test]

@@ -69,6 +69,7 @@ import InsertImageDialog, {
 import SortDialog, { type SortFormValue } from "./SortDialog";
 import SheetTabColorDialog from "./SheetTabColorDialog";
 import CommentIndicatorsPanel from "./CommentIndicatorsPanel";
+import ImagePreviewPanel from "./ImagePreviewPanel";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
@@ -78,6 +79,11 @@ import {
   computeCommentIndicators,
   type CommentIndicator,
 } from "../store/commentIndicators";
+import {
+  computeImagePreviews,
+  colRowToA1,
+  type ImagePreview,
+} from "../store/imagePreviews";
 import { validateMutation, extractCellWrites } from "../store/dataValidation";
 import "./EditorScreen.css";
 
@@ -723,6 +729,38 @@ export default function EditorScreen() {
   const commentIndicators: CommentIndicator[] = computeCommentIndicators(
     currentSnapshotJson,
   );
+
+  // Derive the embedded-image preview list from the live snapshot so the
+  // panel updates when an image is inserted (G4) or after an xlsx is
+  // freshly loaded (E1 stamped `_preservedParts`). Same pure-recompute
+  // approach as commentIndicators above — the snapshot mutation rate is
+  // human-paced, so re-parsing on every render is cheaper than memoizing.
+  const imagePreviews: ImagePreview[] = computeImagePreviews(currentSnapshotJson);
+
+  // Jump the Univer selection to an image's anchor cell when the user
+  // clicks a thumbnail. Mirrors jumpToCommentCell — switches sheets if
+  // needed, then activates the from-anchor cell. Best-effort: silent
+  // no-op if Univer's facade isn't ready.
+  const jumpToImageCell = useCallback((image: ImagePreview) => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    try {
+      const target = workbook.getSheetBySheetId(image.sheetId);
+      if (!target) return;
+      const active = workbook.getActiveSheet();
+      if (!active || active.getSheetId() !== image.sheetId) {
+        workbook.setActiveSheet(target);
+      }
+      const a1 = colRowToA1(image.fromCol, image.fromRow);
+      const range = target.getRange(a1);
+      if (range) range.activate();
+    } catch {
+      // Best-effort: swallow facade exceptions so a bad anchor doesn't
+      // crash the panel.
+    }
+  }, []);
 
   // Jump the Univer selection to a commented cell when the user clicks an
   // entry in CommentIndicatorsPanel. Switches sheets first if needed, then
@@ -2109,6 +2147,10 @@ export default function EditorScreen() {
         <CommentIndicatorsPanel
           indicators={commentIndicators}
           onSelect={jumpToCommentCell}
+        />
+        <ImagePreviewPanel
+          images={imagePreviews}
+          onSelect={jumpToImageCell}
         />
         {BUSY_LABELS[saveStatus] && (
           <BusyOverlay

@@ -16,3 +16,8 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Claude Code harness — session-local state that should never be committed
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+.claude/worktrees/

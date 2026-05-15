@@ -165,7 +165,6 @@ export default function EditorScreen() {
   const [sheetPicker, setSheetPicker] = useState<{ id: string; name: string }[] | null>(null);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
   const [editorInitError, setEditorInitError] = useState<string | null>(null);
-  const [editorReady, setEditorReady] = useState(false);
   const [editorOperationError, setEditorOperationError] = useState<string | null>(null);
   // Command palette (Ctrl+Shift+P / Cmd+Shift+P). Boolean state — the command
   // list is rebuilt on every render so the palette always sees the latest
@@ -270,7 +269,6 @@ export default function EditorScreen() {
       setEditorOperationError(`${label}: ${EDITOR_NOT_READY_MESSAGE}`);
       return null;
     }
-    setEditorReady(true);
     setEditorOperationError(null);
     return { fUniver, workbook };
   }, []);
@@ -1591,15 +1589,6 @@ export default function EditorScreen() {
     }, 220);
   }, [formatPainterMode, activateFormatPainter, deactivateFormatPainter]);
 
-  const handleFormatPainterDoubleClick = useCallback(() => {
-    // Cancel any pending single-click activation; the double click wins.
-    if (formatPainterClickTimerRef.current) {
-      clearTimeout(formatPainterClickTimerRef.current);
-      formatPainterClickTimerRef.current = null;
-    }
-    activateFormatPainter("sticky");
-  }, [activateFormatPainter]);
-
   // Wire the format-painter "apply on next selection" listener. Subscribes to
   // FWorkbook.onSelectionChange once the workbook is mounted; the listener
   // pulls the pending style + active sheet + new selection ranges and writes
@@ -2116,7 +2105,6 @@ export default function EditorScreen() {
   // Mount Univer
   useEffect(() => {
     if (!containerRef.current) return;
-    setEditorReady(false);
     setEditorOperationError(null);
 
     let univer: Univer | null = null;
@@ -2193,7 +2181,6 @@ export default function EditorScreen() {
       if (!fUniverRef.current.getActiveWorkbook()) {
         throw new Error("Active workbook is not available");
       }
-      setEditorReady(true);
 
       // Wire Coco-specific entries (Insert Comment / Hyperlink / Number Format)
       // into the cell context menu. We forward to the ref-held callbacks so
@@ -2208,7 +2195,6 @@ export default function EditorScreen() {
       univer?.dispose();
       univerRef.current = null;
       fUniverRef.current = null;
-      setEditorReady(false);
       setEditorInitError(String(e));
       return;
     }
@@ -2218,7 +2204,6 @@ export default function EditorScreen() {
       univer?.dispose();
       univerRef.current = null;
       fUniverRef.current = null;
-      setEditorReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2440,7 +2425,6 @@ export default function EditorScreen() {
   const isDirty = saveStatus === "unsaved";
   const fileLabel = isDirty ? `${fileName} •` : fileName;
   const isCocoFile = (currentHandle?.path ?? "").toLowerCase().endsWith(".coco");
-  const editorToolDisabled = !editorReady;
   const goHomeAfterConfirm = () => {
     if (!confirmDiscardIfUnsaved()) return;
     goHome();
@@ -2474,85 +2458,6 @@ export default function EditorScreen() {
           >
             {fileLabel}
           </span>
-        </div>
-        <div className="editor-toolbar__right">
-          <div className="toolbar-group" role="group" aria-label="クイック操作">
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={openNumberFormatDialog}
-              disabled={editorToolDisabled}
-              title="選択範囲の表示形式を変更 (Ctrl+1)"
-              aria-label="表示形式"
-            >
-              {t("toolbar.numberFormat")}
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={applyAutoSum}
-              disabled={editorToolDisabled}
-              title="オートSUM — 上または左の数値を集計 (Alt+=)"
-              aria-label="オートSUM"
-              data-testid="autosum"
-            >
-              Σ
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={() => applyQuickFormat(QUICK_FMT_CURRENCY)}
-              disabled={editorToolDisabled}
-              title="選択範囲を通貨書式に設定 ($#,##0.00)"
-              aria-label="通貨"
-              data-testid="quick-fmt-currency"
-            >
-              通貨
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={() => applyQuickFormat(QUICK_FMT_PERCENT)}
-              disabled={editorToolDisabled}
-              title="選択範囲をパーセント書式に設定 (0%)"
-              aria-label="パーセント"
-              data-testid="quick-fmt-percent"
-            >
-              %
-            </button>
-            <button
-              type="button"
-              className={
-                "toolbar-btn" +
-                (formatPainterMode !== "idle" ? " toolbar-btn--active" : "")
-              }
-              onClick={handleFormatPainterClick}
-              onDoubleClick={handleFormatPainterDoubleClick}
-              disabled={editorToolDisabled}
-              title={
-                formatPainterMode === "sticky"
-                  ? "書式コピー（連続適用中・ESCで終了）"
-                  : formatPainterMode === "single"
-                  ? "書式コピー（次の選択に1回適用・ESCで取消）"
-                  : "書式のコピー/貼り付け（ダブルクリックで連続適用）"
-              }
-              aria-label="書式コピー"
-              aria-pressed={formatPainterMode !== "idle"}
-              data-testid="format-painter"
-            >
-              {t("toolbar.formatPainter")}
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={openSortDialog}
-              disabled={editorToolDisabled}
-              title="選択範囲を並べ替え"
-              aria-label="並べ替え"
-            >
-              {t("toolbar.sort")}
-            </button>
-          </div>
         </div>
       </div>
       {sheetPicker && (

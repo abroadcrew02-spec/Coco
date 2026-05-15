@@ -1,5 +1,6 @@
 use chrono::Timelike;
 use serde_json::{json, Map, Value};
+use std::borrow::Cow;
 use std::fs::{self, File, OpenOptions};
 use std::io::ErrorKind;
 use std::io::{BufWriter, Write};
@@ -515,7 +516,10 @@ fn render_csv_cell(
 const CSV_MIN_ROWS: usize = 1000;
 const CSV_MIN_COLS: usize = 100;
 const CSV_MAX_CELLS: usize = 5_000_000;
-const CSV_MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
+const CSV_MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+const CSV_MAX_IMPORT_ROWS: usize = 1_000_000;
+const CSV_MAX_IMPORT_COLS: usize = 16_384;
+const CSV_MAX_SNAPSHOT_ESTIMATED_BYTES: usize = 256 * 1024 * 1024;
 const CSV_MAX_FIELD_CHARS: usize = 1_000_000;
 const CSV_MAX_RECORD_CHARS: usize = 5_000_000;
 const CSV_MAX_RECORD_BYTES: usize = 8 * 1024 * 1024;
@@ -958,7 +962,10 @@ fn infer_csv_cell(raw: &str) -> Option<Value> {
 /// When `override_enc` is Some, skip detection and force the given encoding:
 ///   - "utf8" / "utf-8" → UTF-8 (BOM stripped if present)
 ///   - "shift_jis" / "shift-jis" / "sjis" → Shift_JIS (lossy if not valid)
-fn detect_and_decode(bytes: &[u8], override_enc: Option<&str>) -> (String, &'static str) {
+fn detect_and_decode<'a>(
+    bytes: &'a [u8],
+    override_enc: Option<&str>,
+) -> (Cow<'a, str>, &'static str) {
     if let Some(raw) = override_enc {
         let normalized = raw.to_ascii_lowercase();
         match normalized.as_str() {
@@ -970,11 +977,11 @@ fn detect_and_decode(bytes: &[u8], override_enc: Option<&str>) -> (String, &'sta
                     } else {
                         bytes
                     };
-                return (String::from_utf8_lossy(body).into_owned(), "UTF-8 (forced)");
+                return (String::from_utf8_lossy(body), "UTF-8 (forced)");
             }
             "shift_jis" | "shift-jis" | "sjis" => {
                 let (cow, _enc, _) = encoding_rs::SHIFT_JIS.decode(bytes);
-                return (cow.into_owned(), "Shift_JIS (forced)");
+                return (Cow::Owned(cow.into_owned()), "Shift_JIS (forced)");
             }
             _ => {
                 // Unknown override — fall through to auto-detect.
@@ -983,22 +990,19 @@ fn detect_and_decode(bytes: &[u8], override_enc: Option<&str>) -> (String, &'sta
     }
     if bytes.len() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF {
         if let Ok(s) = std::str::from_utf8(&bytes[3..]) {
-            return (s.to_string(), "UTF-8 (BOM)");
+            return (Cow::Borrowed(s), "UTF-8 (BOM)");
         }
     }
     if let Ok(s) = std::str::from_utf8(bytes) {
-        return (s.to_string(), "UTF-8");
+        return (Cow::Borrowed(s), "UTF-8");
     }
     // Try Shift_JIS — if the result has zero replacement chars, accept it.
     let (cow, _enc, had_errors) = encoding_rs::SHIFT_JIS.decode(bytes);
     if !had_errors {
-        return (cow.into_owned(), "Shift_JIS");
+        return (Cow::Owned(cow.into_owned()), "Shift_JIS");
     }
     // Fallback: UTF-8 lossy. Replacement chars will appear as U+FFFD.
-    (
-        String::from_utf8_lossy(bytes).into_owned(),
-        "UTF-8 (lossy fallback)",
-    )
+    (String::from_utf8_lossy(bytes), "UTF-8 (lossy fallback)")
 }
 
 /// Pick the field delimiter from the file's extension and a quick scan of the
@@ -1059,16 +1063,38 @@ pub fn import_csv_core(
     let mut max_col: usize = 0;
     let mut any_cell = false;
     let mut total_cells: usize = 0;
+    let mut estimated_snapshot_bytes: usize = 0;
 
     for (row_idx, record_result) in rdr.records().enumerate() {
+        if row_idx >= CSV_MAX_IMPORT_ROWS {
+            return Err(format!(
+                "CSV_TOO_LARGE: more than {} rows",
+                CSV_MAX_IMPORT_ROWS
+            ));
+        }
         let record = record_result.map_err(|e| e.to_string())?;
         validate_csv_record_limits(row_idx, &record)?;
+        if record.len() > CSV_MAX_IMPORT_COLS {
+            return Err(format!(
+                "CSV_TOO_LARGE: row {} exceeds {} columns",
+                row_idx + 1,
+                CSV_MAX_IMPORT_COLS
+            ));
+        }
         let mut row_map: Map<String, Value> = Map::new();
         for (col_idx, field) in record.iter().enumerate() {
             let cell = match infer_csv_cell(field) {
                 Some(c) => c,
                 None => continue,
             };
+            estimated_snapshot_bytes = estimated_snapshot_bytes
+                .saturating_add(estimate_csv_cell_snapshot_bytes(row_idx, col_idx, &cell));
+            if estimated_snapshot_bytes > CSV_MAX_SNAPSHOT_ESTIMATED_BYTES {
+                return Err(format!(
+                    "CSV_TOO_LARGE: estimated snapshot exceeds {} bytes",
+                    CSV_MAX_SNAPSHOT_ESTIMATED_BYTES
+                ));
+            }
             row_map.insert(col_idx.to_string(), cell);
             total_cells += 1;
             if !any_cell {
@@ -1215,6 +1241,24 @@ fn validate_csv_record_limits(row_idx: usize, record: &csv::StringRecord) -> Res
     }
 
     Ok(())
+}
+
+fn estimate_csv_cell_snapshot_bytes(row_idx: usize, col_idx: usize, cell: &Value) -> usize {
+    // Conservative enough to catch expansion blowups before serializing the full snapshot.
+    let key_bytes = row_idx.to_string().len() + col_idx.to_string().len();
+    let value_bytes = match cell.get("v") {
+        Some(Value::String(s)) => s.len(),
+        Some(Value::Number(n)) => n.to_string().len(),
+        Some(Value::Bool(_)) => 5,
+        Some(Value::Null) | None => 0,
+        Some(other) => other.to_string().len(),
+    };
+    let fmt_bytes = cell
+        .get("_fmt")
+        .and_then(|fmt| fmt.as_str())
+        .map(|fmt| fmt.len() + 10)
+        .unwrap_or(0);
+    key_bytes + value_bytes + fmt_bytes + 40
 }
 
 /// Tauri command wrapper that records the file in recent_files.

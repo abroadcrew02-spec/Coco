@@ -20,8 +20,7 @@ pub fn run() {
         .setup(|app| {
             // req 7.2: native menu bar. Items emit a "menu-action" event with
             // their id; the frontend listens and routes to existing store
-            // actions. Edit menu items (undo/copy/find/etc.) are intentionally
-            // omitted — Univer's built-in chrome already handles them.
+            // actions or editor commands.
             let file_menu = SubmenuBuilder::new(app, "ファイル")
                 .text("new", format!("新規ワークブック\t{MOD}+N"))
                 .text("open", format!("開く...\t{MOD}+O"))
@@ -34,14 +33,53 @@ pub fn run() {
                 .separator()
                 .text("close", "終了")
                 .build()?;
+            let edit_menu = SubmenuBuilder::new(app, "編集")
+                .text(
+                    "edit-command-palette",
+                    format!("コマンドパレット...\t{MOD}+Shift+P"),
+                )
+                .build()?;
             let view_menu = SubmenuBuilder::new(app, "表示")
-                .text("settings", "設定...")
+                .text("view-snapshots", "スナップショット...")
                 .separator()
+                .text("settings", "設定...")
+                .build()?;
+            let insert_menu = SubmenuBuilder::new(app, "挿入")
+                .text("insert-hyperlink", "ハイパーリンク...")
+                .text("insert-comment", "コメント...")
+                .text("insert-chart", "グラフ...")
+                .text("insert-image", "画像...")
+                .build()?;
+            let format_menu = SubmenuBuilder::new(app, "書式")
+                .text("format-number", "表示形式...")
+                .text("format-currency", "通貨")
+                .text("format-percent", "パーセント")
+                .separator()
+                .text("format-conditional", "条件付き書式...")
+                .text("format-painter", "書式のコピー")
+                .text("format-tab-color", "シート見出しの色...")
+                .build()?;
+            let data_menu = SubmenuBuilder::new(app, "データ")
+                .text("data-sort", "並べ替え...")
+                .text("data-validation", "データの入力規則...")
+                .text("data-named-ranges", "名前付き範囲...")
+                .text("data-autosum", "オートSUM")
+                .build()?;
+            let tools_menu = SubmenuBuilder::new(app, "ツール")
+                .text("tools-sheet-protection", "シート保護...")
+                .build()?;
+            let help_menu = SubmenuBuilder::new(app, "ヘルプ")
                 .text("help", "ヘルプ\tF1")
                 .build()?;
             let menu = MenuBuilder::new(app)
                 .item(&file_menu)
+                .item(&edit_menu)
                 .item(&view_menu)
+                .item(&insert_menu)
+                .item(&format_menu)
+                .item(&data_menu)
+                .item(&tools_menu)
+                .item(&help_menu)
                 .build()?;
             app.set_menu(menu)?;
             Ok(())

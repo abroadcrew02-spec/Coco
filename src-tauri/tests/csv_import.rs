@@ -888,13 +888,31 @@ fn import_rejects_file_over_byte_cap_before_read() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("too_big.csv");
     let file = fs::File::create(&path).unwrap();
-    file.set_len(129 * 1024 * 1024).unwrap();
+    file.set_len(33 * 1024 * 1024).unwrap();
     drop(file);
 
     let err = import_csv_core(path.to_string_lossy().into_owned(), None).unwrap_err();
     assert!(
         err.contains("CSV_TOO_LARGE"),
         "expected CSV_TOO_LARGE, got {:?}",
+        err
+    );
+}
+
+#[test]
+fn import_rejects_row_over_column_cap_before_snapshot() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "too_wide.csv");
+    let row = std::iter::repeat("x")
+        .take(16_385)
+        .collect::<Vec<_>>()
+        .join(",");
+    fs::write(&path, format!("{}\n", row)).unwrap();
+
+    let err = import_csv_core(path, None).unwrap_err();
+    assert!(
+        err.contains("CSV_TOO_LARGE") && err.contains("columns"),
+        "expected column CSV_TOO_LARGE, got {:?}",
         err
     );
 }

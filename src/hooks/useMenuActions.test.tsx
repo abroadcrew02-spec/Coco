@@ -222,6 +222,44 @@ describe("useMenuActions", () => {
     });
   });
 
+  describe("editor commands", () => {
+    it("dispatches editor command ids to EditorScreen", async () => {
+      const ids = [
+        "edit-command-palette",
+        "view-snapshots",
+        "insert-hyperlink",
+        "insert-comment",
+        "insert-chart",
+        "insert-image",
+        "format-number",
+        "format-currency",
+        "format-percent",
+        "format-conditional",
+        "format-painter",
+        "format-tab-color",
+        "data-sort",
+        "data-validation",
+        "data-named-ranges",
+        "data-autosum",
+        "tools-sheet-protection",
+      ];
+      const received: string[] = [];
+      const listener = vi.fn((event: Event) => {
+        received.push((event as CustomEvent<string>).detail);
+      });
+      window.addEventListener("coco:editor-command", listener);
+      render(<Probe />);
+
+      for (const id of ids) {
+        await fireMenu(id);
+      }
+
+      expect(listener).toHaveBeenCalledTimes(ids.length);
+      expect(received).toEqual(ids);
+      window.removeEventListener("coco:editor-command", listener);
+    });
+  });
+
   describe("unknown action", () => {
     it("ignores an unknown id without crashing", async () => {
       render(<Probe />);

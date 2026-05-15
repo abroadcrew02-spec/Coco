@@ -43,17 +43,17 @@
   white-space: pre-wrap;
 }
 
-/* Top toolbar */
+/* Top quick toolbar */
 .editor-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 6px 12px;
+  gap: 10px;
+  padding: 4px 10px;
   background-color: #fafafa;
   border-bottom: 1px solid #e0e0e0;
   flex-shrink: 0;
-  min-height: 40px;
+  min-height: 34px;
   flex-wrap: wrap;
 }
 
@@ -96,8 +96,8 @@
 }
 
 .toolbar-btn {
-  padding: 6px 14px;
-  font-size: 13px;
+  padding: 4px 10px;
+  font-size: 12px;
   font-weight: 500;
   color: #424242;
   background-color: #fff;

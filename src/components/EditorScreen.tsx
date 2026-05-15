@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback, useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -808,19 +808,22 @@ export default function EditorScreen() {
   );
 
   // Derive the comment indicator list from the live snapshot so the panel
-  // updates whenever a comment is added, edited, or deleted. Re-derived on
-  // every render keyed off currentSnapshotJson — the helper is pure JSON
-  // parsing + a flatten and the snapshot churn rate is human-paced, so the
-  // cost is negligible vs. the simplicity gain over memoization.
-  const commentIndicators: CommentIndicator[] = computeCommentIndicators(
-    currentSnapshotJson,
+  // updates whenever a comment is added, edited, or deleted. #94: memoize on
+  // currentSnapshotJson — on large workbooks the JSON.parse + walk cost is
+  // measurable and gets paid on every unrelated re-render (toolbar mode
+  // toggles, focus changes, etc.) without it.
+  const commentIndicators: CommentIndicator[] = useMemo(
+    () => computeCommentIndicators(currentSnapshotJson),
+    [currentSnapshotJson],
   );
 
   // Derive the chart preview list from the live snapshot so the panel
   // updates whenever a chart is added/removed or its source data changes.
-  // Same shape rationale as commentIndicators above — pure JSON parsing
-  // plus an extract pass, cheap enough to re-run on every render.
-  const chartPreviews: ChartPreview[] = computeChartPreviews(currentSnapshotJson);
+  // #94: memoize for the same reason as commentIndicators.
+  const chartPreviews: ChartPreview[] = useMemo(
+    () => computeChartPreviews(currentSnapshotJson),
+    [currentSnapshotJson],
+  );
 
   // Jump the Univer selection to a chart's source range when the user
   // clicks an entry in ChartPreviewPanel. Same best-effort pattern as the
@@ -2415,11 +2418,20 @@ export default function EditorScreen() {
     });
 
     return () => disposable.dispose();
-  }, []);
+    // #88: re-register the listener whenever the underlying workbook changes
+    // (open/import/restore bump editorRevision). Without this dep, the
+    // listener stays bound to the first workbook for the lifetime of the
+    // component and later workbooks' clicks never fire.
+  }, [editorRevision]);
 
   const statusLabel = SAVE_STATUS_LABELS[saveStatus] ?? saveStatus;
   const statusClass = `status-bar__status status-bar__status--${saveStatus}`;
-  const statsLabel = formatSnapshotStats(computeSnapshotStats(currentSnapshotJson));
+  // #94: memoize the stats parse so unrelated re-renders don't pay the cost
+  // of re-parsing the full snapshot.
+  const statsLabel = useMemo(
+    () => formatSnapshotStats(computeSnapshotStats(currentSnapshotJson)),
+    [currentSnapshotJson],
+  );
 
   const fileName = currentHandle?.path
     ? currentHandle.path.split(/[\\/]/).pop()

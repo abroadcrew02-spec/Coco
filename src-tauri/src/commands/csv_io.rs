@@ -1110,7 +1110,43 @@ pub fn import_csv_core(
 
     // Read the whole file (CSV size capped at ~5M cells later anyway).
     let raw = std::fs::read(&path).map_err(|e| e.to_string())?;
-    let (text, encoding_name) = detect_and_decode(&raw, encoding_override.as_deref());
+    let (mut text, encoding_name) = detect_and_decode(&raw, encoding_override.as_deref());
+
+    // #91: csv::Reader's default terminator handles CRLF and LF; bare CR is
+    // not recognised, so a classic-Mac CSV becomes a single mega-record. Do
+    // a cheap pre-pass: if the text contains CRs that aren't followed by an
+    // LF, normalise them to LF so each "row" is preserved.
+    if text.contains('\r') && !text.contains("\r\n") {
+        text = text.replace('\r', "\n");
+    } else if text.contains('\r') {
+        // Mixed: keep CRLF intact, but convert lone CRs (rare but legal in
+        // some Excel exports). Convert by mapping CR-not-followed-by-LF → LF.
+        let mut out = String::with_capacity(text.len());
+        let bytes = text.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'\r' {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+                    out.push('\r');
+                    out.push('\n');
+                    i += 2;
+                    continue;
+                }
+                out.push('\n');
+                i += 1;
+                continue;
+            }
+            // Push the full UTF-8 char starting at i.
+            let ch_len = std::str::from_utf8(&bytes[i..])
+                .ok()
+                .and_then(|s| s.chars().next())
+                .map(|c| c.len_utf8())
+                .unwrap_or(1);
+            out.push_str(&text[i..i + ch_len]);
+            i += ch_len;
+        }
+        text = out;
+    }
 
     let delimiter = infer_delimiter(&lower, &text);
     let mut rdr = csv::ReaderBuilder::new()

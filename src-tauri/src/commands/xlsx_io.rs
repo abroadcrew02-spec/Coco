@@ -2540,14 +2540,20 @@ fn parse_comments_xml(xml: &str) -> Vec<CommentEntry> {
 /// author/comment ids in lockstep so author values round-trip correctly.
 fn build_comments_xml(notes: &[(String, String, String)]) -> String {
     use std::fmt::Write as _;
+    // #90: dedup authors in O(N) via a HashMap that also remembers each
+    // author's stable index — `commentList` below needs to look up the id by
+    // name. Previously both the `any` walk above and the `position` walk
+    // below were O(N), giving an overall O(N²) export.
     let mut authors: Vec<String> = Vec::new();
+    let mut author_index: HashMap<String, usize> = HashMap::new();
     for (_, author, _) in notes {
         let name = if author.is_empty() {
             "Author".to_string()
         } else {
             author.clone()
         };
-        if !authors.iter().any(|a| a == &name) {
+        if !author_index.contains_key(&name) {
+            author_index.insert(name.clone(), authors.len());
             authors.push(name);
         }
     }
@@ -2569,10 +2575,8 @@ fn build_comments_xml(notes: &[(String, String, String)]) -> String {
         } else {
             author.as_str()
         };
-        let author_id = authors
-            .iter()
-            .position(|a| a == display_author)
-            .unwrap_or(0);
+        // #90: HashMap lookup instead of linear scan.
+        let author_id = author_index.get(display_author).copied().unwrap_or(0);
         let _ = write!(
             out,
             "<comment ref=\"{}\" authorId=\"{}\"><text>",
@@ -4794,7 +4798,23 @@ fn dedup_sheet_name(candidate: &str, used: &HashSet<String>) -> String {
         if !used.contains(&candidate_n) {
             return candidate_n;
         }
-        n += 1;
+        // #93: defensive guard — Excel's hard cap of 200 sheets makes
+        // reaching `u32::MAX` unreachable in practice, but security harness
+        // and direct snapshot injection can push past the cap. checked_add
+        // turns an overflow into a fallback name instead of wrapping (and
+        // potentially colliding with `Sheet_0`).
+        match n.checked_add(1) {
+            Some(next) => n = next,
+            None => {
+                // Fall back to a uuid-suffixed name so we still return a
+                // unique value rather than looping forever.
+                return format!(
+                    "{}_{}",
+                    base_chars.iter().take(20).collect::<String>(),
+                    uuid::Uuid::new_v4().simple()
+                );
+            }
+        }
     }
 }
 
@@ -5024,13 +5044,23 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                             .map(|s| s.to_string()),
                     });
                 } else {
-                    let row = row_raw as u32;
-                    let col = col_raw as u16;
-                    if row > 0 || col > 0 {
-                        let _ = worksheet.set_freeze_panes(row, col);
-                        if let Some(tl) = fp.get("topLeft").and_then(|v| v.as_str()) {
-                            if let Some((tr, tc)) = parse_a1(tl) {
-                                let _ = worksheet.set_freeze_panes_top_cell(tr, tc as u16);
+                    // #85: checked conversion so out-of-range snapshot values
+                    // (corruption / hostile injection) don't wrap and freeze
+                    // an unintended row/col. OOXML caps row at 1048576 and
+                    // col at XFD (16384, fits u16); reject anything past
+                    // those bounds.
+                    let row = u32::try_from(row_raw).ok().filter(|r| *r <= 1_048_576);
+                    let col = u16::try_from(col_raw).ok().filter(|c| *c <= 16_384);
+                    if let (Some(row), Some(col)) = (row, col) {
+                        if row > 0 || col > 0 {
+                            let _ = worksheet.set_freeze_panes(row, col);
+                            if let Some(tl) = fp.get("topLeft").and_then(|v| v.as_str()) {
+                                if let Some((tr, tc)) = parse_a1(tl) {
+                                    if let Ok(tc_u16) = u16::try_from(tc) {
+                                        let _ = worksheet
+                                            .set_freeze_panes_top_cell(tr, tc_u16);
+                                    }
+                                }
                             }
                         }
                     }

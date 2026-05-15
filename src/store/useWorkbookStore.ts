@@ -116,6 +116,9 @@ export interface IntegrityCheckResult {
 
 const AUTOSAVE_KEY = "autosave.interval_ms";
 const DEFAULT_AUTOSAVE_MS = 30_000;
+/** Minimum positive autosave interval. 0 (disabled) is still allowed; any
+ *  non-zero value below this would peg the disk + main thread (#89). */
+const MIN_AUTOSAVE_MS = 5_000;
 const CSV_ENCODING_KEY = "csv.export_encoding";
 type CsvEncoding = "utf8-bom" | "utf8" | "shift_jis";
 const DEFAULT_CSV_ENCODING: CsvEncoding = "utf8-bom";
@@ -844,11 +847,16 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       const raw = await invoke<string | null>("get_setting", { key: AUTOSAVE_KEY });
       if (raw === null) return;
       const ms = Number.parseInt(raw, 10);
-      // #43: isFinite rejects NaN/Infinity/-Infinity, and we additionally cap
-      // at 24h so a malformed prior value can't disable autosave by setting
-      // an effectively-never interval.
+      // #43 / #89: isFinite rejects NaN/Infinity/-Infinity. 0 is the special
+      // "disabled" value (no autosave). Any positive interval is clamped to
+      // [MIN_AUTOSAVE_MS, 24h] so a malformed prior value can't either spam
+      // the disk (1ms) or effectively disable autosave (1 month).
       if (Number.isFinite(ms) && ms >= 0 && ms <= 24 * 60 * 60 * 1000) {
-        set({ autoSaveIntervalMs: ms });
+        if (ms === 0 || ms >= MIN_AUTOSAVE_MS) {
+          set({ autoSaveIntervalMs: ms });
+        } else {
+          set({ autoSaveIntervalMs: MIN_AUTOSAVE_MS });
+        }
       }
     } catch {
       // non-critical: default stays in effect
@@ -856,8 +864,11 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   },
 
   setAutoSaveInterval: async (ms: number) => {
-    // #43: reject NaN, Infinity, -Infinity, negatives, and absurd upper values.
+    // #43 / #89: reject NaN, Infinity, -Infinity, negatives, absurd upper
+    // values, AND positive values below MIN_AUTOSAVE_MS (a 1ms interval would
+    // peg the main thread + disk I/O on every tick).
     if (!Number.isFinite(ms) || ms < 0 || ms > 24 * 60 * 60 * 1000) return;
+    if (ms > 0 && ms < MIN_AUTOSAVE_MS) return;
     set({ autoSaveIntervalMs: ms });
     try {
       await invoke("set_setting", { key: AUTOSAVE_KEY, value: String(ms) });

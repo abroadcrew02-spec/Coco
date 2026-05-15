@@ -986,15 +986,13 @@ describe("loadAutoSaveInterval", () => {
 // --- Audit findings (T2) — items 14-17 -------------------------------------
 
 describe("audit item 14: concurrent open race", () => {
-  // TODO(store): request-token "newer wins" for concurrent open/import (see docs/TODOS.md#medium-concurrent-open-race)
-  // The store's openCoco / importXlsx have no request-token, so if the
-  // earlier-started invoke resolves AFTER the later-started one, the
-  // earlier result clobbers the newer state. Per the audit, the expected
-  // behavior is "newer wins" — until the store gains request-token logic
-  // this test pins the BUG as it stands today, marked `.skip` so the
-  // suite stays green. Flip to `.only` (or remove `.skip`) once the fix
-  // lands; the test is written so it will pass under "newer wins".
-  it.skip(
+  // The store's openCoco / importXlsx use a module-level `openSeq` request
+  // token: each call captures `++openSeq` on entry and discards its result
+  // if `openSeq` has moved on by the time the invoke resolves. This test
+  // verifies the "newer wins" contract by deliberately resolving the
+  // EARLIER call AFTER the LATER one — the earlier result must NOT
+  // overwrite the newer state.
+  it(
     "openCoco started first but resolved last must NOT clobber the later importXlsx",
     async () => {
       // Defer the two invoke responses manually so we control the ordering.

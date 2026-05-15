@@ -121,6 +121,14 @@ const PINNED_PATHS_KEY = "recents.pinned_paths";
 const PINNED_ORDER_KEY = "recents.pinned_order";
 const SUPPRESS_CSV_POC_KEY = "csv.suppress_poc_warning";
 
+// Request-token "newer wins" guard for concurrent open / import operations.
+// If the user fires off open A then open B before A's invoke resolves, A's
+// resolution must NOT clobber B's state. Each open action captures the
+// counter at start; if the counter has moved on by the time the invoke
+// resolves, the result is discarded. Applies to every action that ends in
+// switching `currentHandle` / `currentSnapshotJson` for a new workbook.
+let openSeq = 0;
+
 export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   screen: "home",
   currentHandle: null,
@@ -142,8 +150,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   suppressCsvPocWarning: false,
 
   newWorkbook: async () => {
+    const mySeq = ++openSeq;
     try {
       const handle = await invoke<WorkbookHandle>("workbook_new");
+      if (mySeq !== openSeq) return; // newer open started — discard stale result
       set({
         screen: "editor",
         currentHandle: handle,
@@ -155,14 +165,17 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         lastError: null,
       });
     } catch (e) {
+      if (mySeq !== openSeq) return;
       set({ lastError: friendlyError(String(e)) });
     }
   },
 
   openCoco: async (path: string) => {
+    const mySeq = ++openSeq;
     try {
       set({ saveStatus: "loading" });
       const result = await invoke<OpenWorkbookResult>("workbook_open_coco", { path });
+      if (mySeq !== openSeq) return; // newer open started — discard stale result
       set({
         screen: "editor",
         currentHandle: result.handle,
@@ -174,14 +187,17 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         lastError: null,
       });
     } catch (e) {
+      if (mySeq !== openSeq) return;
       set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
     }
   },
 
   importXlsx: async (path: string) => {
+    const mySeq = ++openSeq;
     try {
       set({ saveStatus: "loading" });
       const result = await invoke<ImportWorkbookResult>("workbook_import_xlsx", { path });
+      if (mySeq !== openSeq) return; // newer open started — discard stale result
       // If the import was blocked by security_scan (now folded into Rust), the result
       // has an empty snapshot + blocking warnings. Surface them on the home screen
       // (we never reached the editor in that case — keep screen at "home").
@@ -209,11 +225,13 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         lastError: null,
       });
     } catch (e) {
+      if (mySeq !== openSeq) return;
       set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
     }
   },
 
   importCsv: async (path: string) => {
+    const mySeq = ++openSeq;
     try {
       set({ saveStatus: "loading" });
       // "auto" → omit so Rust runs full auto-detect (UTF-8 BOM → UTF-8 → SJIS fallback).
@@ -221,6 +239,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       const enc = get().csvImportEncoding;
       const encoding = enc === "auto" ? undefined : enc;
       const result = await invoke<ImportWorkbookResult>("workbook_import_csv", { path, encoding });
+      if (mySeq !== openSeq) return; // newer open started — discard stale result
       // Optionally hide the always-fires "CSV PoC" info banner — power users
       // already know our type-detection scope and don't need the reminder.
       const filteredWarnings = get().suppressCsvPocWarning
@@ -237,6 +256,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         lastError: null,
       });
     } catch (e) {
+      if (mySeq !== openSeq) return;
       set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
     }
   },
@@ -527,9 +547,11 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   },
 
   restoreCandidate: async (candidateId: string) => {
+    const mySeq = ++openSeq;
     try {
       set({ saveStatus: "loading" });
       const result = await invoke<OpenWorkbookResult>("workbook_restore_backup", { candidateId });
+      if (mySeq !== openSeq) return; // newer open started — discard stale result
       // Restored copy opens with no path - first Ctrl+S will prompt Save As (req 6.5 step 4).
       set({
         screen: "editor",
@@ -540,6 +562,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         lastError: null,
       });
     } catch (e) {
+      if (mySeq !== openSeq) return;
       set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
     }
   },
@@ -752,12 +775,14 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   openSnapshot: async (snapshotId: number) => {
     const { currentHandle } = get();
     if (!currentHandle?.path) return;
+    const mySeq = ++openSeq;
     try {
       set({ saveStatus: "loading" });
       const result = await invoke<OpenWorkbookResult>("workbook_open_snapshot", {
         path: currentHandle.path,
         snapshotId,
       });
+      if (mySeq !== openSeq) return; // newer open started — discard stale result
       // The Rust side returns path=null so the next Ctrl+S goes through
       // Save As (req-style protection: don't let the user overwrite the
       // current file with an older version by accident).
@@ -770,6 +795,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         lastError: null,
       });
     } catch (e) {
+      if (mySeq !== openSeq) return;
       set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
     }
   },

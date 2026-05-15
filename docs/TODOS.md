@@ -94,11 +94,11 @@ None.
 - **Effort**: M
 - **Why deferred**: Currently emits the informational warning "Row/column/formula limits not yet checked (Phase 2)". Caps for file size / inflated size / entry count / per-XML size / sheet count are enforced.
 
-### medium-concurrent-open-race
+### medium-concurrent-open-race (closed)
 - **Title**: Request-token "newer wins" for `openCoco` / `importXlsx`
-- **Refs**: `src/store/useWorkbookStore.test.ts:996` (`it.skip`), `.claude/audit-findings.md` item 14
+- **Refs**: `src/store/useWorkbookStore.test.ts` audit-item-14 suite, `.claude/audit-findings.md` item 14
 - **Effort**: S
-- **Why deferred**: A skipped test pins the bug as it stands. Store has no request-token, so an earlier-started invoke resolving last clobbers the newer state.
+- **Resolution**: Module-level `openSeq` counter in `src/store/useWorkbookStore.ts`. Each open action (`newWorkbook`, `openCoco`, `importXlsx`, `importCsv`, `restoreCandidate`, `openSnapshot`) captures `++openSeq` on entry and discards its result if the counter has moved on by the time `invoke` resolves. Previously skipped test un-skipped and now passes.
 
 ---
 

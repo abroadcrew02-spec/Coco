@@ -147,6 +147,14 @@
   cursor: cell !important;
 }
 
+/* Univer のツールバーコンテナは既定で justify-content: center で、内容が
+   コンテナ幅より狭いと左右に余白が発生する (undo / redo の左に隙間ができる
+   原因)。業務用エディタとしては左詰めの方が視線移動が短く自然なので
+   flex-start に差し替える。 */
+.univer-toolbar-container {
+  justify-content: flex-start;
+}
+
 /* Warning banner */
 .warning-banner {
   display: flex;

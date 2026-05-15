@@ -77,6 +77,7 @@ import ImagePreviewPanel from "./ImagePreviewPanel";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
 import { confirmDiscardIfUnsaved } from "../store/dirtyGuard";
 import { routeOpenPath } from "../store/pathRouter";
+import { registerSnapshotFlush } from "../store/snapshotSync";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
 import { isSheetProtectedInSnapshot } from "../store/sheetProtection";
@@ -122,6 +123,11 @@ const SAVE_STATUS_LABELS: Record<string, string> = {
   recovery_available: "復元候補あり",
 };
 
+const EDITOR_NOT_READY_MESSAGE =
+  "エディタを初期化中です。少し待ってからもう一度実行してください。";
+const SNAPSHOT_UNAVAILABLE_MESSAGE =
+  "ワークブックの内容を取得できませんでした。ホームへ戻って、もう一度開き直してください。";
+
 export default function EditorScreen() {
   const containerRef = useRef<HTMLDivElement>(null);
   const univerRef = useRef<Univer | null>(null);
@@ -153,6 +159,7 @@ export default function EditorScreen() {
     dismissWarnings,
     dismissExportWarnings,
     updateSnapshot,
+    markDirty,
     newWorkbook,
     openCoco,
     importXlsx,
@@ -161,6 +168,9 @@ export default function EditorScreen() {
 
   const [sheetPicker, setSheetPicker] = useState<{ id: string; name: string }[] | null>(null);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  const [editorInitError, setEditorInitError] = useState<string | null>(null);
+  const [editorReady, setEditorReady] = useState(false);
+  const [editorOperationError, setEditorOperationError] = useState<string | null>(null);
   // Command palette (Ctrl+Shift+P / Cmd+Shift+P). Boolean state — the command
   // list is rebuilt on every render so the palette always sees the latest
   // handler closures and store actions.
@@ -252,6 +262,41 @@ export default function EditorScreen() {
   // emit one synchronously when the user clicks the button.
   const formatPainterArmedAtRef = useRef<number>(0);
 
+  const getReadyWorkbook = useCallback((label: string) => {
+    const fUniver = fUniverRef.current;
+    let workbook: ReturnType<FUniver["getActiveWorkbook"]> | null | undefined = null;
+    try {
+      workbook = fUniver?.getActiveWorkbook();
+    } catch {
+      workbook = null;
+    }
+    if (!fUniver || !workbook) {
+      setEditorOperationError(`${label}: ${EDITOR_NOT_READY_MESSAGE}`);
+      return null;
+    }
+    setEditorReady(true);
+    setEditorOperationError(null);
+    return { fUniver, workbook };
+  }, []);
+
+  const getSnapshotForTool = useCallback(
+    (label: string): Record<string, unknown> | null => {
+      if (!currentSnapshotJson) {
+        setEditorOperationError(`${label}: ${SNAPSHOT_UNAVAILABLE_MESSAGE}`);
+        return null;
+      }
+      try {
+        const snapshot = JSON.parse(currentSnapshotJson) as Record<string, unknown>;
+        setEditorOperationError(null);
+        return snapshot;
+      } catch {
+        setEditorOperationError(`${label}: ${SNAPSHOT_UNAVAILABLE_MESSAGE}`);
+        return null;
+      }
+    },
+    [currentSnapshotJson],
+  );
+
   // Read all named ranges from the live Univer workbook via the facade
   // (FWorkbook.getDefinedNames). Falls back to an empty list if the facade
   // hasn't initialized yet or the workbook isn't available.
@@ -326,8 +371,9 @@ export default function EditorScreen() {
   );
 
   const openNamedRangesDialog = useCallback(() => {
+    if (!getReadyWorkbook("名前付き範囲")) return;
     setNamedRanges(readNamedRanges());
-  }, [readNamedRanges]);
+  }, [getReadyWorkbook, readNamedRanges]);
 
   // Data-validation dialog plumbing. We work directly on the snapshot JSON
   // rather than going through Univer because the @univerjs/sheets-data
@@ -336,47 +382,47 @@ export default function EditorScreen() {
   // target sheetOrder[0] (the typical single-sheet xlsx); a future cut can
   // surface a sheet picker.
   const openDataValidationDialog = useCallback(() => {
-    if (!currentSnapshotJson) return;
-    try {
-      const snap = JSON.parse(currentSnapshotJson) as {
-        sheetOrder?: string[];
-        sheets?: Record<string, { name?: string; _dataValidations?: DataValidationEntry[] }>;
-      };
-      const sheetId = snap.sheetOrder?.[0];
-      if (!sheetId || !snap.sheets || !snap.sheets[sheetId]) return;
-      const sheet = snap.sheets[sheetId];
-      const rules = Array.isArray(sheet._dataValidations)
-        ? sheet._dataValidations.map((r) => ({ ...r }))
-        : [];
-      setDvDialog({ sheetId, sheetName: sheet.name ?? sheetId, rules });
-    } catch {
-      // Malformed snapshot — nothing we can edit; silently no-op.
+    if (!getReadyWorkbook("データの入力規則")) return;
+    const snap = getSnapshotForTool("データの入力規則") as {
+      sheetOrder?: string[];
+      sheets?: Record<string, { name?: string; _dataValidations?: DataValidationEntry[] }>;
+    } | null;
+    if (!snap) return;
+    const sheetId = snap.sheetOrder?.[0];
+    if (!sheetId || !snap.sheets || !snap.sheets[sheetId]) {
+      setEditorOperationError("データの入力規則: 編集できるシートがありません。");
+      return;
     }
-  }, [currentSnapshotJson]);
+    const sheet = snap.sheets[sheetId];
+    const rules = Array.isArray(sheet._dataValidations)
+      ? sheet._dataValidations.map((r) => ({ ...r }))
+      : [];
+    setDvDialog({ sheetId, sheetName: sheet.name ?? sheetId, rules });
+  }, [getReadyWorkbook, getSnapshotForTool]);
 
   const applyDataValidations = useCallback(
     (next: DataValidationEntry[]) => {
-      if (!dvDialog || !currentSnapshotJson) return;
-      try {
-        const snap = JSON.parse(currentSnapshotJson) as {
-          sheets?: Record<string, { _dataValidations?: DataValidationEntry[] }>;
-        };
-        if (!snap.sheets || !snap.sheets[dvDialog.sheetId]) return;
-        const sheet = snap.sheets[dvDialog.sheetId];
-        // Opt-in field: drop the key entirely when the list is empty so a
-        // sheet that never had DV doesn't gain an empty array on round-trip
-        // (mirrors the Rust side's emission policy in xlsx_io.rs).
-        if (next.length === 0) {
-          delete sheet._dataValidations;
-        } else {
-          sheet._dataValidations = next;
-        }
-        updateSnapshot(JSON.stringify(snap));
-      } catch {
-        // Snapshot got malformed between open and apply — discard the edit.
+      if (!dvDialog) return;
+      const snap = getSnapshotForTool("データの入力規則") as {
+        sheets?: Record<string, { _dataValidations?: DataValidationEntry[] }>;
+      } | null;
+      if (!snap) return;
+      if (!snap.sheets || !snap.sheets[dvDialog.sheetId]) {
+        setEditorOperationError("データの入力規則: 対象シートが見つかりません。");
+        return;
       }
+      const sheet = snap.sheets[dvDialog.sheetId];
+      // Opt-in field: drop the key entirely when the list is empty so a
+      // sheet that never had DV doesn't gain an empty array on round-trip
+      // (mirrors the Rust side's emission policy in xlsx_io.rs).
+      if (next.length === 0) {
+        delete sheet._dataValidations;
+      } else {
+        sheet._dataValidations = next;
+      }
+      updateSnapshot(JSON.stringify(snap));
     },
-    [dvDialog, currentSnapshotJson, updateSnapshot],
+    [dvDialog, getSnapshotForTool, updateSnapshot],
   );
 
   // TODO(cf): live in-grid CF highlighting (see docs/TODOS.md#high-cf-live-render)
@@ -386,10 +432,9 @@ export default function EditorScreen() {
   // this PoC we author into the snapshot directly: read → edit → write back via
   // updateSnapshot. Live highlighting is therefore deferred until save+reopen.
   const openCfDialog = useCallback(() => {
-    const fUniver = fUniverRef.current;
-    if (!fUniver) return;
-    const workbook = fUniver.getActiveWorkbook();
-    if (!workbook) return;
+    const ready = getReadyWorkbook("条件付き書式");
+    if (!ready) return;
+    const { workbook } = ready;
     const activeSheet = workbook.getActiveSheet();
     if (!activeSheet) return;
     const sheetId = activeSheet.getSheetId();
@@ -406,7 +451,7 @@ export default function EditorScreen() {
       rules = [];
     }
     setCfDialog({ sheetName, sheetId, rules });
-  }, [currentSnapshotJson]);
+  }, [currentSnapshotJson, getReadyWorkbook]);
 
   // Persist authored CF rules back into the workbook snapshot. We re-derive
   // the snapshot from the live Univer workbook (not the cached
@@ -415,15 +460,17 @@ export default function EditorScreen() {
   // sheet and push the result through updateSnapshot.
   const applyCfRules = useCallback(
     (sheetId: string, next: CfRule[]) => {
-      const fUniver = fUniverRef.current;
-      if (!fUniver) return;
-      const workbook = fUniver.getActiveWorkbook();
-      if (!workbook) return;
+      const ready = getReadyWorkbook("条件付き書式");
+      if (!ready) return;
+      const { workbook } = ready;
       const fresh = workbook.save() as unknown as {
         sheets: Record<string, Record<string, unknown>>;
       };
       const sheetObj = fresh.sheets?.[sheetId];
-      if (!sheetObj) return;
+      if (!sheetObj) {
+        setEditorOperationError("条件付き書式: 対象シートが見つかりません。");
+        return;
+      }
       if (next.length === 0) {
         // Mirror the Rust "omit when empty" convention on the export side so
         // a sheet that loses all its rules doesn't keep a stray empty array.
@@ -433,7 +480,7 @@ export default function EditorScreen() {
       }
       updateSnapshot(JSON.stringify(fresh));
     },
-    [updateSnapshot],
+    [getReadyWorkbook, updateSnapshot],
   );
 
   // Snapshot the active sheet + cell when the user invokes Insert Hyperlink.
@@ -441,10 +488,9 @@ export default function EditorScreen() {
   // even if focus moves while the dialog is up. Falls back to Sheet1!A1 when
   // there's no live selection.
   const openHyperlinkDialog = useCallback(() => {
-    const fUniver = fUniverRef.current;
-    if (!fUniver) return;
-    const workbook = fUniver.getActiveWorkbook();
-    if (!workbook) return;
+    const ready = getReadyWorkbook("ハイパーリンク");
+    if (!ready) return;
+    const { workbook } = ready;
     const sheet = workbook.getActiveSheet();
     if (!sheet) return;
     const sheetId = sheet.getSheetId();
@@ -466,7 +512,7 @@ export default function EditorScreen() {
       // Best-effort: fall back to the A1 default.
     }
     setHyperlinkCtx({ sheetId, cell, display });
-  }, []);
+  }, [getReadyWorkbook]);
 
   // Append the new hyperlink to `sheets.<id>._hyperlinks` in the snapshot and
   // reload Univer from it. We go snapshot-level because Univer 0.5.x's facade
@@ -484,14 +530,16 @@ export default function EditorScreen() {
   const applyHyperlink = useCallback(
     (value: HyperlinkFormValue) => {
       if (!hyperlinkCtx) return;
-      const fUniver = fUniverRef.current;
-      if (!fUniver) return;
-      const workbook = fUniver.getActiveWorkbook();
-      if (!workbook) return;
+      const ready = getReadyWorkbook("ハイパーリンク");
+      if (!ready) return;
+      const { workbook } = ready;
       const snapshot = workbook.save() as unknown as Record<string, unknown>;
       const sheets = (snapshot.sheets as Record<string, Record<string, unknown>> | undefined) ?? {};
       const sheetObj = sheets[hyperlinkCtx.sheetId];
-      if (!sheetObj) return;
+      if (!sheetObj) {
+        setEditorOperationError("ハイパーリンク: 対象シートが見つかりません。");
+        return;
+      }
       const existing = Array.isArray(sheetObj._hyperlinks)
         ? (sheetObj._hyperlinks as Array<Record<string, unknown>>)
         : [];
@@ -531,7 +579,7 @@ export default function EditorScreen() {
         // The snapshot path already succeeded so the link is still saved.
       }
     },
-    [hyperlinkCtx, updateSnapshot],
+    [getReadyWorkbook, hyperlinkCtx, updateSnapshot],
   );
 
   // Resolve a default author for new comments. localStorage > navigator hints
@@ -565,10 +613,9 @@ export default function EditorScreen() {
   // existing comment (if any) from the snapshot's `_comments` array for the
   // active sheet so editing pre-fills the form correctly.
   const openCommentDialog = useCallback(() => {
-    const fUniver = fUniverRef.current;
-    if (!fUniver) return;
-    const workbook = fUniver.getActiveWorkbook();
-    if (!workbook) return;
+    const ready = getReadyWorkbook("コメント");
+    if (!ready) return;
+    const { workbook } = ready;
     const worksheet = workbook.getActiveSheet();
     if (!worksheet) return;
     const selection = worksheet.getSelection();
@@ -594,7 +641,7 @@ export default function EditorScreen() {
       }
     }
     setCommentDialog({ sheetId, cellRef, existing });
-  }, [currentSnapshotJson]);
+  }, [currentSnapshotJson, getReadyWorkbook]);
 
   // Apply (insert or update) a comment in the snapshot's `sheets.<id>._comments`
   // array. Matches by cell ref — if one exists for this cell, replace it;
@@ -602,15 +649,10 @@ export default function EditorScreen() {
   // so the save button enables and the auto-save path picks up the change.
   const applyComment = useCallback(
     (sheetId: string, entry: CommentEntry) => {
-      if (!currentSnapshotJson) return;
-      let snap: {
+      const snap = getSnapshotForTool("コメント") as {
         sheets?: Record<string, { _comments?: CommentEntry[] }>;
-      };
-      try {
-        snap = JSON.parse(currentSnapshotJson);
-      } catch {
-        return;
-      }
+      } | null;
+      if (!snap) return;
       if (!snap.sheets) snap.sheets = {};
       if (!snap.sheets[sheetId]) snap.sheets[sheetId] = {};
       const list = snap.sheets[sheetId]._comments ?? [];
@@ -631,7 +673,7 @@ export default function EditorScreen() {
         }
       }
     },
-    [currentSnapshotJson, updateSnapshot],
+    [getSnapshotForTool, updateSnapshot],
   );
 
   // Toggle sheet protection (read-only marker) on the active sheet. Writes
@@ -641,10 +683,9 @@ export default function EditorScreen() {
   // sheet="1"/>`. Password isn't surfaced in the toolbar — the snapshot
   // schema supports `password?: string` for future expansion.
   const toggleSheetProtection = useCallback(() => {
-    const fUniver = fUniverRef.current;
-    if (!fUniver) return;
-    const workbook = fUniver.getActiveWorkbook();
-    if (!workbook) return;
+    const ready = getReadyWorkbook("シート保護");
+    if (!ready) return;
+    const { workbook } = ready;
     const activeSheet = workbook.getActiveSheet();
     if (!activeSheet) return;
     const sheetId = activeSheet.getSheetId();
@@ -662,16 +703,15 @@ export default function EditorScreen() {
       sheet._protected = { protected: true };
     }
     updateSnapshot(JSON.stringify(fresh));
-  }, [updateSnapshot]);
+  }, [getReadyWorkbook, updateSnapshot]);
 
   // Open the tab-color dialog targeting the active sheet. We re-derive the
   // snapshot from Univer so the dialog sees the current `_tabColor` even if
   // it was just changed in another flow. Display name comes from the facade.
   const openTabColorDialog = useCallback(() => {
-    const fUniver = fUniverRef.current;
-    if (!fUniver) return;
-    const workbook = fUniver.getActiveWorkbook();
-    if (!workbook) return;
+    const ready = getReadyWorkbook("シートタブの色");
+    if (!ready) return;
+    const { workbook } = ready;
     const activeSheet = workbook.getActiveSheet();
     if (!activeSheet) return;
     const sheetId = activeSheet.getSheetId();
@@ -685,7 +725,7 @@ export default function EditorScreen() {
       initialColor = raw.trim();
     }
     setTabColorDialog({ sheetId, sheetName, initialColor });
-  }, []);
+  }, [getReadyWorkbook]);
 
   // Apply (or clear) the chosen tab color to the snapshot. Sets
   // `sheets.<id>._tabColor = "#RRGGBB"` on apply, or deletes the key when the
@@ -872,10 +912,9 @@ export default function EditorScreen() {
   // but newly authored entries are data-only — re-emitting chart OOXML is
   // out of scope here. Falls back to A1 if there's no live selection.
   const openChartDialog = useCallback(() => {
-    const fUniver = fUniverRef.current;
-    if (!fUniver) return;
-    const workbook = fUniver.getActiveWorkbook();
-    if (!workbook) return;
+    const ready = getReadyWorkbook("グラフ");
+    if (!ready) return;
+    const { workbook } = ready;
     const sheet = workbook.getActiveSheet();
     if (!sheet) return;
     const sheetId = sheet.getSheetId();
@@ -888,7 +927,7 @@ export default function EditorScreen() {
       // Best-effort: keep the A1 default if Univer's selection API throws.
     }
     setChartDialog({ sheetId, range });
-  }, []);
+  }, [getReadyWorkbook]);
 
   // Append the authored chart to `sheets.<id>._charts` in the live workbook
   // snapshot. We re-derive from FWorkbook.save() (rather than the cached
@@ -925,10 +964,9 @@ export default function EditorScreen() {
   // a preset) and stashes them in state. We pin coords at open time so the
   // user can confirm later even if focus moves.
   const openNumberFormatDialog = useCallback(() => {
-    const fUniver = fUniverRef.current;
-    if (!fUniver) return;
-    const workbook = fUniver.getActiveWorkbook();
-    if (!workbook) return;
+    const ready = getReadyWorkbook("表示形式");
+    if (!ready) return;
+    const { workbook } = ready;
     const sheet = workbook.getActiveSheet();
     if (!sheet) return;
     const sheetId = sheet.getSheetId();
@@ -981,7 +1019,7 @@ export default function EditorScreen() {
       rangeLabel,
       initialCode,
     });
-  }, [currentSnapshotJson]);
+  }, [currentSnapshotJson, getReadyWorkbook]);
 
   // Apply a format code to every cell in the captured selection by walking
   // the snapshot directly: read → mutate cellData[r][c]._fmt → write back via
@@ -1047,10 +1085,9 @@ export default function EditorScreen() {
   // snapshot (not FRange.setValue("=SUM(...)")) because the snapshot path
   // composes with our other mutations and matches the rest of EditorScreen.
   const applyAutoSum = useCallback(() => {
-    const fUniver = fUniverRef.current;
-    if (!fUniver) return;
-    const workbook = fUniver.getActiveWorkbook();
-    if (!workbook) return;
+    const ready = getReadyWorkbook("オートSUM");
+    if (!ready) return;
+    const { workbook } = ready;
     const sheet = workbook.getActiveSheet();
     if (!sheet) return;
     const sheetId = sheet.getSheetId();
@@ -1093,17 +1130,16 @@ export default function EditorScreen() {
     delete cell.v;
     cellData[rowKey][String(col)] = cell;
     updateSnapshot(JSON.stringify(snapshot));
-  }, [updateSnapshot]);
+  }, [getReadyWorkbook, updateSnapshot]);
 
   // Quick-format buttons (通貨 / %). Reuses the same snapshot-level _fmt path
   // as the Number Format dialog but skips the dialog — one click applies a
   // preset. Range = current selection (multi-cell ok).
   const applyQuickFormat = useCallback(
     (code: string) => {
-      const fUniver = fUniverRef.current;
-      if (!fUniver) return;
-      const workbook = fUniver.getActiveWorkbook();
-      if (!workbook) return;
+      const ready = getReadyWorkbook("表示形式");
+      if (!ready) return;
+      const { workbook } = ready;
       const sheet = workbook.getActiveSheet();
       if (!sheet) return;
       const sheetId = sheet.getSheetId();
@@ -1137,16 +1173,15 @@ export default function EditorScreen() {
       );
       updateSnapshot(nextJson);
     },
-    [updateSnapshot],
+    [getReadyWorkbook, updateSnapshot],
   );
 
   // Insert-image dialog plumbing. Snapshots the active sheet + the top-left of
   // the active range so the image anchors at the user's actual cursor cell.
   const openImageDialog = useCallback(() => {
-    const fUniver = fUniverRef.current;
-    if (!fUniver) return;
-    const workbook = fUniver.getActiveWorkbook();
-    if (!workbook) return;
+    const ready = getReadyWorkbook("画像挿入");
+    if (!ready) return;
+    const { workbook } = ready;
     const sheet = workbook.getActiveSheet();
     if (!sheet) return;
     const sheetId = sheet.getSheetId();
@@ -1162,7 +1197,7 @@ export default function EditorScreen() {
       // fall back to A1
     }
     setImageDialog({ sheetId, cell });
-  }, []);
+  }, [getReadyWorkbook]);
 
   // Tauri-side file picker for the image dialog. Opens the OS open-dialog,
   // reads the chosen file via our `read_file_bytes_base64` command, and
@@ -1322,10 +1357,9 @@ export default function EditorScreen() {
   // Open the sort dialog with the active sheet + a default range derived from
   // the current selection. Falls back to A1:A1 when there's no live selection.
   const openSortDialog = useCallback(() => {
-    const fUniver = fUniverRef.current;
-    if (!fUniver) return;
-    const workbook = fUniver.getActiveWorkbook();
-    if (!workbook) return;
+    const ready = getReadyWorkbook("並べ替え");
+    if (!ready) return;
+    const { workbook } = ready;
     const sheet = workbook.getActiveSheet();
     if (!sheet) return;
     const sheetId = sheet.getSheetId();
@@ -1343,7 +1377,7 @@ export default function EditorScreen() {
       // Best-effort: keep the A1:A1 default.
     }
     setSortDialog({ sheetId, range });
-  }, []);
+  }, [getReadyWorkbook]);
 
   // Apply a sort by mutating the snapshot's cellData for the target sheet in
   // place. Univer 0.5.x doesn't expose a stable FRange.sort() in this build
@@ -1358,10 +1392,9 @@ export default function EditorScreen() {
   const applySort = useCallback(
     (value: SortFormValue) => {
       if (!sortDialog) return;
-      const fUniver = fUniverRef.current;
-      if (!fUniver) return;
-      const workbook = fUniver.getActiveWorkbook();
-      if (!workbook) return;
+      const ready = getReadyWorkbook("並べ替え");
+      if (!ready) return;
+      const { workbook } = ready;
       const snapshot = workbook.save() as unknown as {
         sheets?: Record<
           string,
@@ -1374,7 +1407,10 @@ export default function EditorScreen() {
         >;
       };
       const sheetObj = snapshot.sheets?.[sortDialog.sheetId];
-      if (!sheetObj) return;
+      if (!sheetObj) {
+        setEditorOperationError("並べ替え: 対象シートが見つかりません。");
+        return;
+      }
       if (!sheetObj.cellData) sheetObj.cellData = {};
       const cellData = sheetObj.cellData;
 
@@ -1479,7 +1515,7 @@ export default function EditorScreen() {
 
       updateSnapshot(JSON.stringify(snapshot));
     },
-    [sortDialog, updateSnapshot],
+    [getReadyWorkbook, sortDialog, updateSnapshot],
   );
 
   // Format Painter: capture the anchor cell's style from the live workbook
@@ -1487,10 +1523,9 @@ export default function EditorScreen() {
   // a fresh activation while already armed cycles through (single → sticky → idle).
   const activateFormatPainter = useCallback(
     (mode: "single" | "sticky") => {
-      const fUniver = fUniverRef.current;
-      if (!fUniver) return;
-      const workbook = fUniver.getActiveWorkbook();
-      if (!workbook) return;
+      const ready = getReadyWorkbook("書式コピー");
+      if (!ready) return;
+      const { workbook } = ready;
       const sheet = workbook.getActiveSheet();
       if (!sheet) return;
       const sheetId = sheet.getSheetId();
@@ -1527,7 +1562,7 @@ export default function EditorScreen() {
       formatPainterArmedAtRef.current = Date.now();
       setFormatPainterMode(mode);
     },
-    [],
+    [getReadyWorkbook],
   );
 
   const deactivateFormatPainter = useCallback(() => {
@@ -1917,14 +1952,19 @@ export default function EditorScreen() {
   );
 
   const handleCsvExport = useCallback(async () => {
+    if (!getReadyWorkbook("CSV エクスポート")) return;
     const sheets = await listSheetNames();
-    if (sheets.length === 0) return;
+    if (sheets.length === 0) {
+      setEditorOperationError("CSV エクスポート: エクスポートできるシートがまだありません。");
+      return;
+    }
+    setEditorOperationError(null);
     if (sheets.length === 1) {
       await runCsvExport(sheets[0]);
       return;
     }
     setSheetPicker(sheets);
-  }, [listSheetNames, runCsvExport]);
+  }, [getReadyWorkbook, listSheetNames, runCsvExport]);
 
   // Export every sheet in the workbook as a separate <sheetName>.csv file
   // inside a user-chosen directory. Multi-sheet workbooks only — the single
@@ -1938,11 +1978,34 @@ export default function EditorScreen() {
       // joining onto the directory; replace with "_" rather than reject so a
       // sheet named "Q1/2026" still produces a file.
       const sanitize = (n: string) => n.replace(/[\\/:*?"<>|]/g, "_");
-      for (const sheet of sheets) {
-        const fileName = `${sanitize(sheet.name)}.csv`;
+      const outputs = sheets.map((sheet) => {
+        const safeName = sanitize(sheet.name).trim() || "Sheet";
+        const fileName = `${safeName}.csv`;
         // Cross-platform path join: use forward slash; both Windows and Unix
         // accept it in Tauri command paths.
-        const path = `${dir}/${fileName}`;
+        return { sheet, path: `${dir}/${fileName}` };
+      });
+      const seen = new Set<string>();
+      const duplicate = outputs.find(({ path }) => {
+        const key = path.toLowerCase();
+        if (seen.has(key)) return true;
+        seen.add(key);
+        return false;
+      });
+      if (duplicate) {
+        setEditorOperationError("CSV エクスポート: シート名の変換後に同じファイル名になるため中止しました。");
+        return;
+      }
+      const existing = await invoke<string[]>("existing_csv_export_paths", {
+        paths: outputs.map((output) => output.path),
+      });
+      if (existing.length > 0) {
+        const ok = window.confirm(
+          `既存の CSV ファイル ${existing.length} 件を上書きします。続行しますか？`
+        );
+        if (!ok) return;
+      }
+      for (const { sheet, path } of outputs) {
         // Sequential — parallel writes would race on the rotate-backups
         // logic and confuse error reporting.
         await exportCsvToPath(path, sheet.id);
@@ -1977,97 +2040,117 @@ export default function EditorScreen() {
   // Mount Univer
   useEffect(() => {
     if (!containerRef.current) return;
+    setEditorReady(false);
+    setEditorOperationError(null);
 
-    const univer = new Univer({
-      theme: defaultTheme,
-      locale: LocaleType.EN_US,
-      locales: {
-        [LocaleType.EN_US]: {
-          ...SheetsEnUS,
-          ...SheetsUIEnUS,
-          ...UIEnUS,
-          ...DocsUIEnUS,
-          ...SheetsFormulaUIEnUS,
-          ...FindReplaceEnUS,
-          ...SheetsFindReplaceEnUS,
-        },
-      },
-      // FR-011: bump the per-unit undo stack from Univer's default 20 to 100.
-      override: undoRedoOverride,
-    });
+    let univer: Univer | null = null;
+    let contextMenuReg: ReturnType<typeof registerCocoContextMenu> | null = null;
 
-    univer.registerPlugin(UniverRenderEnginePlugin);
-    univer.registerPlugin(UniverFormulaEnginePlugin);
-    univer.registerPlugin(UniverUIPlugin, {
-      container: "univer-container",
-      header: true,
-      footer: true,
-    });
-    univer.registerPlugin(UniverDocsPlugin, { hasScroll: false });
-    univer.registerPlugin(UniverDocsUIPlugin);
-    univer.registerPlugin(UniverSheetsPlugin);
-    univer.registerPlugin(UniverSheetsUIPlugin);
-    univer.registerPlugin(UniverSheetsFormulaPlugin);
-    univer.registerPlugin(UniverSheetsFormulaUIPlugin);
-    // Find/Replace (Ctrl+F / Ctrl+H) — base plugin provides the dialog/services,
-    // the sheets adapter wires it to the active worksheet.
-    univer.registerPlugin(UniverFindReplacePlugin);
-    univer.registerPlugin(UniverSheetsFindReplacePlugin);
-    // FR-009: Sort + Filter.
-    // Sort is wired via the SortDialog (toolbar "↕ 並べ替え") which writes
-    // sorted rows back into the snapshot's cellData directly — this build
-    // doesn't include @univerjs/sheets-sort. Filter is now provided by
-    // @univerjs/sheets-filter (registered below); the snapshot round-trip for
-    // auto-filter is preserved by xlsx_io.rs (commit 74594d0). The filter
-    // package doesn't ship a separate -ui companion or locale bundle in
-    // 0.5.x, so there's nothing extra to merge into `locales`.
-    univer.registerPlugin(UniverSheetsFilterPlugin);
-
-    // Create workbook from snapshot or default empty workbook. We pipe the
-    // snapshot through `patchHyperlinkRenders` first so every cell listed in
-    // `_hyperlinks` arrives at Univer pre-styled (blue + underline) with the
-    // link label as its value. The patch is pure / idempotent — the round
-    // -trip writer ignores the inline style we add since the `_hyperlinks`
-    // array is its source of truth for re-emitting the actual <hyperlink>
-    // elements on xlsx export.
-    const initialData: Partial<IWorkbookData> = currentSnapshotJson
-      ? patchCfRenders(patchHyperlinkRenders(JSON.parse(currentSnapshotJson)))
-      : {
-          id: "coco-workbook",
-          name: "Coco Workbook",
-          appVersion: "0.1.0",
-          locale: LocaleType.EN_US,
-          styles: {},
-          sheetOrder: ["sheet-1"],
-          sheets: {
-            "sheet-1": {
-              id: "sheet-1",
-              name: "Sheet1",
-              cellData: {},
-              rowCount: 1000,
-              columnCount: 100,
-            },
+    try {
+      univer = new Univer({
+        theme: defaultTheme,
+        locale: LocaleType.EN_US,
+        locales: {
+          [LocaleType.EN_US]: {
+            ...SheetsEnUS,
+            ...SheetsUIEnUS,
+            ...UIEnUS,
+            ...DocsUIEnUS,
+            ...SheetsFormulaUIEnUS,
+            ...FindReplaceEnUS,
+            ...SheetsFindReplaceEnUS,
           },
-        };
-    univer.createUnit(UniverInstanceType.UNIVER_SHEET, initialData as IWorkbookData);
+        },
+        // FR-011: bump the per-unit undo stack from Univer's default 20 to 100.
+        override: undoRedoOverride,
+      });
 
-    univerRef.current = univer;
-    fUniverRef.current = FUniver.newAPI(univer);
+      univer.registerPlugin(UniverRenderEnginePlugin);
+      univer.registerPlugin(UniverFormulaEnginePlugin);
+      univer.registerPlugin(UniverUIPlugin, {
+        container: "univer-container",
+        header: true,
+        footer: true,
+      });
+      univer.registerPlugin(UniverDocsPlugin, { hasScroll: false });
+      univer.registerPlugin(UniverDocsUIPlugin);
+      univer.registerPlugin(UniverSheetsPlugin);
+      univer.registerPlugin(UniverSheetsUIPlugin);
+      univer.registerPlugin(UniverSheetsFormulaPlugin);
+      univer.registerPlugin(UniverSheetsFormulaUIPlugin);
+      // Find/Replace (Ctrl+F / Ctrl+H) — base plugin provides the dialog/services,
+      // the sheets adapter wires it to the active worksheet.
+      univer.registerPlugin(UniverFindReplacePlugin);
+      univer.registerPlugin(UniverSheetsFindReplacePlugin);
+      // FR-009: Sort + Filter.
+      // Sort is wired via the SortDialog (toolbar "↕ 並べ替え") which writes
+      // sorted rows back into the snapshot's cellData directly — this build
+      // doesn't include @univerjs/sheets-sort. Filter is now provided by
+      // @univerjs/sheets-filter (registered below); the snapshot round-trip for
+      // auto-filter is preserved by xlsx_io.rs (commit 74594d0). The filter
+      // package doesn't ship a separate -ui companion or locale bundle in
+      // 0.5.x, so there's nothing extra to merge into `locales`.
+      univer.registerPlugin(UniverSheetsFilterPlugin);
 
-    // Wire Coco-specific entries (Insert Comment / Hyperlink / Number Format)
-    // into the cell context menu. We forward to the ref-held callbacks so
-    // the menu always invokes the latest React-side dialog opener.
-    const contextMenuReg = registerCocoContextMenu(univer, {
-      openCommentDialog: () => openCommentDialogRef.current(),
-      openHyperlinkDialog: () => openHyperlinkDialogRef.current(),
-      openNumberFormatDialog: () => openNumberFormatDialogRef.current(),
-    });
+      // Create workbook from snapshot or default empty workbook. We pipe the
+      // snapshot through `patchHyperlinkRenders` first so every cell listed in
+      // `_hyperlinks` arrives at Univer pre-styled (blue + underline) with the
+      // link label as its value. The patch is pure / idempotent — the round
+      // -trip writer ignores the inline style we add since the `_hyperlinks`
+      // array is its source of truth for re-emitting the actual <hyperlink>
+      // elements on xlsx export.
+      const initialData: Partial<IWorkbookData> = currentSnapshotJson
+        ? patchCfRenders(patchHyperlinkRenders(JSON.parse(currentSnapshotJson)))
+        : {
+            id: "coco-workbook",
+            name: "Coco Workbook",
+            appVersion: "0.1.0",
+            locale: LocaleType.EN_US,
+            styles: {},
+            sheetOrder: ["sheet-1"],
+            sheets: {
+              "sheet-1": {
+                id: "sheet-1",
+                name: "Sheet1",
+                cellData: {},
+                rowCount: 1000,
+                columnCount: 100,
+              },
+            },
+          };
+      univer.createUnit(UniverInstanceType.UNIVER_SHEET, initialData as IWorkbookData);
 
-    return () => {
-      contextMenuReg.dispose();
-      univer.dispose();
+      univerRef.current = univer;
+      fUniverRef.current = FUniver.newAPI(univer);
+      if (!fUniverRef.current.getActiveWorkbook()) {
+        throw new Error("Active workbook is not available");
+      }
+      setEditorReady(true);
+
+      // Wire Coco-specific entries (Insert Comment / Hyperlink / Number Format)
+      // into the cell context menu. We forward to the ref-held callbacks so
+      // the menu always invokes the latest React-side dialog opener.
+      contextMenuReg = registerCocoContextMenu(univer, {
+        openCommentDialog: () => openCommentDialogRef.current(),
+        openHyperlinkDialog: () => openHyperlinkDialogRef.current(),
+        openNumberFormatDialog: () => openNumberFormatDialogRef.current(),
+      });
+    } catch (e) {
+      contextMenuReg?.dispose();
+      univer?.dispose();
       univerRef.current = null;
       fUniverRef.current = null;
+      setEditorReady(false);
+      setEditorInitError(String(e));
+      return;
+    }
+
+    return () => {
+      contextMenuReg?.dispose();
+      univer?.dispose();
+      univerRef.current = null;
+      fUniverRef.current = null;
+      setEditorReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2077,23 +2160,66 @@ export default function EditorScreen() {
   useEffect(() => {
     if (!fUniverRef.current) return;
     const fUniver = fUniverRef.current;
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let idleCallback: number | null = null;
+    let idleFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const syncSnapshot = () => {
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      updateSnapshot(JSON.stringify(workbook.save()));
+    };
+
+    const cancelPendingSnapshotSync = () => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+      if (idleCallback !== null) {
+        window.cancelIdleCallback(idleCallback);
+        idleCallback = null;
+      }
+      if (idleFallbackTimer) {
+        clearTimeout(idleFallbackTimer);
+        idleFallbackTimer = null;
+      }
+    };
+
+    const scheduleSnapshotSync = () => {
+      if (typeof window.requestIdleCallback === "function") {
+        idleCallback = window.requestIdleCallback(() => {
+          idleCallback = null;
+          syncSnapshot();
+        });
+        return;
+      }
+      idleFallbackTimer = setTimeout(() => {
+        idleFallbackTimer = null;
+        syncSnapshot();
+      }, 0);
+    };
+
+    const unregisterSnapshotFlush = registerSnapshotFlush(() => {
+      cancelPendingSnapshotSync();
+      syncSnapshot();
+    });
 
     const disposable = fUniver.onCommandExecuted((info) => {
       if (info.type !== CommandType.MUTATION) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        const workbook = fUniver.getActiveWorkbook();
-        if (!workbook) return;
-        updateSnapshot(JSON.stringify(workbook.save()));
+      markDirty();
+      cancelPendingSnapshotSync();
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        scheduleSnapshotSync();
       }, 300);
     });
 
     return () => {
-      if (timer) clearTimeout(timer);
+      cancelPendingSnapshotSync();
+      unregisterSnapshotFlush();
       disposable.dispose();
     };
-  }, [updateSnapshot]);
+  }, [markDirty, updateSnapshot]);
 
   // Live sheet-protection enforcement. G3 marks `_protected` in the snapshot
   // and round-trips it through xlsx, but Univer itself doesn't know about
@@ -2243,12 +2369,32 @@ export default function EditorScreen() {
   const isDirty = saveStatus === "unsaved";
   const fileLabel = isDirty ? `${fileName} •` : fileName;
   const isCocoFile = (currentHandle?.path ?? "").toLowerCase().endsWith(".coco");
+  const editorToolDisabled = !editorReady;
+  const goHomeAfterConfirm = () => {
+    if (!confirmDiscardIfUnsaved()) return;
+    goHome();
+  };
+
+  if (editorInitError) {
+    return (
+      <div className="editor-screen editor-screen--error">
+        <div className="editor-init-error" role="alert">
+          <h2>エディタを表示できません</h2>
+          <p>ファイルの内容を読み込めませんでした。</p>
+          <pre>{editorInitError}</pre>
+          <button type="button" className="toolbar-btn" onClick={goHomeAfterConfirm}>
+            ホームへ戻る
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="editor-screen">
       <div className="editor-toolbar">
         <div className="editor-toolbar__left">
-          <button type="button" className="toolbar-btn" onClick={goHome} title="ホームへ戻る">
+          <button type="button" className="toolbar-btn" onClick={goHomeAfterConfirm} title="ホームへ戻る">
             {t("toolbar.home")}
           </button>
           <span
@@ -2290,7 +2436,7 @@ export default function EditorScreen() {
             type="button"
             className="toolbar-btn"
             onClick={handleCsvExport}
-            disabled={isExporting}
+            disabled={isExporting || editorToolDisabled}
             title="シートを選んで CSV (UTF-8 BOM) として書き出す"
           >
             {isExporting ? "出力中..." : t("toolbar.exportCsv")}
@@ -2313,6 +2459,7 @@ export default function EditorScreen() {
               type="button"
               className="toolbar-btn"
               onClick={openDataValidationDialog}
+              disabled={editorToolDisabled}
               title="データの入力規則を追加・編集"
               aria-label="データの入力規則"
             >
@@ -2322,6 +2469,7 @@ export default function EditorScreen() {
               type="button"
               className="toolbar-btn"
               onClick={openCfDialog}
+              disabled={editorToolDisabled}
               title="条件付き書式を編集 (Ctrl+F8)"
               aria-label="条件付き書式"
             >
@@ -2331,6 +2479,7 @@ export default function EditorScreen() {
               type="button"
               className="toolbar-btn"
               onClick={openNumberFormatDialog}
+              disabled={editorToolDisabled}
               title="選択範囲の表示形式を変更 (Ctrl+1)"
               aria-label="表示形式"
             >
@@ -2340,6 +2489,7 @@ export default function EditorScreen() {
               type="button"
               className="toolbar-btn"
               onClick={applyAutoSum}
+              disabled={editorToolDisabled}
               title="オートSUM — 上または左の数値を集計 (Alt+=)"
               aria-label="オートSUM"
               data-testid="autosum"
@@ -2350,6 +2500,7 @@ export default function EditorScreen() {
               type="button"
               className="toolbar-btn"
               onClick={() => applyQuickFormat(QUICK_FMT_CURRENCY)}
+              disabled={editorToolDisabled}
               title="選択範囲を通貨書式に設定 ($#,##0.00)"
               aria-label="通貨"
               data-testid="quick-fmt-currency"
@@ -2360,6 +2511,7 @@ export default function EditorScreen() {
               type="button"
               className="toolbar-btn"
               onClick={() => applyQuickFormat(QUICK_FMT_PERCENT)}
+              disabled={editorToolDisabled}
               title="選択範囲をパーセント書式に設定 (0%)"
               aria-label="パーセント"
               data-testid="quick-fmt-percent"
@@ -2374,6 +2526,7 @@ export default function EditorScreen() {
               }
               onClick={handleFormatPainterClick}
               onDoubleClick={handleFormatPainterDoubleClick}
+              disabled={editorToolDisabled}
               title={
                 formatPainterMode === "sticky"
                   ? "書式コピー（連続適用中・ESCで終了）"
@@ -2391,6 +2544,7 @@ export default function EditorScreen() {
               type="button"
               className="toolbar-btn"
               onClick={toggleSheetProtection}
+              disabled={editorToolDisabled}
               title={
                 activeSheetProtected
                   ? "シート保護を解除（書き込み可に戻す）"
@@ -2406,6 +2560,7 @@ export default function EditorScreen() {
               type="button"
               className="toolbar-btn"
               onClick={openTabColorDialog}
+              disabled={editorToolDisabled}
               title="シートタブの色を変更"
               aria-label="シートタブの色"
               data-testid="sheet-tab-color"
@@ -2420,6 +2575,7 @@ export default function EditorScreen() {
               type="button"
               className="toolbar-btn"
               onClick={openNamedRangesDialog}
+              disabled={editorToolDisabled}
               title="名前付き範囲を編集 (Ctrl+F3)"
               aria-label="名前付き範囲"
             >
@@ -2429,6 +2585,7 @@ export default function EditorScreen() {
               type="button"
               className="toolbar-btn"
               onClick={openChartDialog}
+              disabled={editorToolDisabled}
               title="選択範囲からグラフを挿入"
               aria-label="グラフを挿入"
             >
@@ -2438,6 +2595,7 @@ export default function EditorScreen() {
               type="button"
               className="toolbar-btn"
               onClick={openImageDialog}
+              disabled={editorToolDisabled}
               title="画像をワークブックに挿入"
               aria-label="画像挿入"
             >
@@ -2449,6 +2607,7 @@ export default function EditorScreen() {
             type="button"
             className="toolbar-btn"
             onClick={openSortDialog}
+            disabled={editorToolDisabled}
             title="選択範囲を並べ替え"
             aria-label="並べ替え"
           >
@@ -2579,6 +2738,11 @@ export default function EditorScreen() {
       <div className="status-bar">
         {/* React key forces re-mount on status change so the CSS fade animation restarts. */}
         <span key={saveStatus} className={statusClass}>{statusLabel}</span>
+        {editorOperationError && (
+          <span className="status-bar__operation-error" role="status" aria-live="polite">
+            · {editorOperationError}
+          </span>
+        )}
         {lastSavedAt !== null && (
           isCocoFile ? (
             <button

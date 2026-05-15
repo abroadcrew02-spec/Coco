@@ -49,21 +49,99 @@ fn cases() -> Vec<FormulaCase> {
     // UPPER/LOWER/SUBSTITUTE.
     vec![
         // 条件集計
-        FormulaCase { row: 0,  col: 2, name: "SUMIF",       formula: "=SUMIF(A1:A6,\">15\",A1:A6)",                    markers: &["SUMIF", "A1", "15"] },
-        FormulaCase { row: 1,  col: 2, name: "COUNTIF",     formula: "=COUNTIF(B1:B6,\"apple\")",                       markers: &["COUNTIF", "B1", "apple"] },
-        FormulaCase { row: 2,  col: 2, name: "AVERAGEIF",   formula: "=AVERAGEIF(A1:A6,\">15\",A1:A6)",                markers: &["AVERAGEIF", "A1", "15"] },
-        FormulaCase { row: 3,  col: 2, name: "SUMIFS",      formula: "=SUMIFS(A1:A6,B1:B6,\"apple\",A1:A6,\">5\")",  markers: &["SUMIFS", "A1", "B1", "apple"] },
-        FormulaCase { row: 4,  col: 2, name: "COUNTIFS",    formula: "=COUNTIFS(B1:B6,\"apple\",A1:A6,\">5\")",       markers: &["COUNTIFS", "B1", "apple"] },
+        FormulaCase {
+            row: 0,
+            col: 2,
+            name: "SUMIF",
+            formula: "=SUMIF(A1:A6,\">15\",A1:A6)",
+            markers: &["SUMIF", "A1", "15"],
+        },
+        FormulaCase {
+            row: 1,
+            col: 2,
+            name: "COUNTIF",
+            formula: "=COUNTIF(B1:B6,\"apple\")",
+            markers: &["COUNTIF", "B1", "apple"],
+        },
+        FormulaCase {
+            row: 2,
+            col: 2,
+            name: "AVERAGEIF",
+            formula: "=AVERAGEIF(A1:A6,\">15\",A1:A6)",
+            markers: &["AVERAGEIF", "A1", "15"],
+        },
+        FormulaCase {
+            row: 3,
+            col: 2,
+            name: "SUMIFS",
+            formula: "=SUMIFS(A1:A6,B1:B6,\"apple\",A1:A6,\">5\")",
+            markers: &["SUMIFS", "A1", "B1", "apple"],
+        },
+        FormulaCase {
+            row: 4,
+            col: 2,
+            name: "COUNTIFS",
+            formula: "=COUNTIFS(B1:B6,\"apple\",A1:A6,\">5\")",
+            markers: &["COUNTIFS", "B1", "apple"],
+        },
         // エラー
-        FormulaCase { row: 5,  col: 2, name: "IFERROR",     formula: "=IFERROR(1/0,\"err\")",                          markers: &["IFERROR", "err"] },
-        FormulaCase { row: 6,  col: 2, name: "IFNA",        formula: "=IFNA(NA(),\"na\")",                              markers: &["IFNA", "na"] },
+        FormulaCase {
+            row: 5,
+            col: 2,
+            name: "IFERROR",
+            formula: "=IFERROR(1/0,\"err\")",
+            markers: &["IFERROR", "err"],
+        },
+        FormulaCase {
+            row: 6,
+            col: 2,
+            name: "IFNA",
+            formula: "=IFNA(NA(),\"na\")",
+            markers: &["IFNA", "na"],
+        },
         // 文字列
-        FormulaCase { row: 7,  col: 2, name: "CONCATENATE", formula: "=CONCATENATE(\"foo\",\"-\",\"bar\")",        markers: &["CONCATENATE", "foo", "bar"] },
-        FormulaCase { row: 8,  col: 2, name: "TEXT",        formula: "=TEXT(A1,\"0.00\")",                             markers: &["TEXT", "A1", "0.00"] },
-        FormulaCase { row: 9,  col: 2, name: "TRIM",        formula: "=TRIM(B10)",                                       markers: &["TRIM", "B10"] },
-        FormulaCase { row: 10, col: 2, name: "UPPER",       formula: "=UPPER(B11)",                                      markers: &["UPPER", "B11"] },
-        FormulaCase { row: 11, col: 2, name: "LOWER",       formula: "=LOWER(B11)",                                      markers: &["LOWER", "B11"] },
-        FormulaCase { row: 12, col: 2, name: "SUBSTITUTE",  formula: "=SUBSTITUTE(B11,\"Mixed\",\"Plain\")",         markers: &["SUBSTITUTE", "B11", "Mixed", "Plain"] },
+        FormulaCase {
+            row: 7,
+            col: 2,
+            name: "CONCATENATE",
+            formula: "=CONCATENATE(\"foo\",\"-\",\"bar\")",
+            markers: &["CONCATENATE", "foo", "bar"],
+        },
+        FormulaCase {
+            row: 8,
+            col: 2,
+            name: "TEXT",
+            formula: "=TEXT(A1,\"0.00\")",
+            markers: &["TEXT", "A1", "0.00"],
+        },
+        FormulaCase {
+            row: 9,
+            col: 2,
+            name: "TRIM",
+            formula: "=TRIM(B10)",
+            markers: &["TRIM", "B10"],
+        },
+        FormulaCase {
+            row: 10,
+            col: 2,
+            name: "UPPER",
+            formula: "=UPPER(B11)",
+            markers: &["UPPER", "B11"],
+        },
+        FormulaCase {
+            row: 11,
+            col: 2,
+            name: "LOWER",
+            formula: "=LOWER(B11)",
+            markers: &["LOWER", "B11"],
+        },
+        FormulaCase {
+            row: 12,
+            col: 2,
+            name: "SUBSTITUTE",
+            formula: "=SUBSTITUTE(B11,\"Mixed\",\"Plain\")",
+            markers: &["SUBSTITUTE", "B11", "Mixed", "Plain"],
+        },
     ]
 }
 
@@ -112,14 +190,12 @@ fn every_p1_formula_round_trips() {
         .snapshot_json
         .clone()
         .expect("snapshot present on import");
-    let snapshot: Value =
-        serde_json::from_str(&snapshot_json).expect("parse imported snapshot");
+    let snapshot: Value = serde_json::from_str(&snapshot_json).expect("parse imported snapshot");
 
     // Every formula must survive the IMPORT step.
     let mut import_failures: Vec<String> = Vec::new();
     for c in &cases {
-        let cell = &snapshot["sheets"]["sheet-1"]["cellData"]
-            [c.row.to_string()][c.col.to_string()];
+        let cell = &snapshot["sheets"]["sheet-1"]["cellData"][c.row.to_string()][c.col.to_string()];
         let f = cell.get("f").and_then(|v| v.as_str()).unwrap_or("");
         if f.is_empty() {
             import_failures.push(format!(
@@ -163,8 +239,8 @@ fn every_p1_formula_round_trips() {
 
     let mut snapshot_failures: Vec<String> = Vec::new();
     for c in &cases {
-        let cell = &final_snapshot["sheets"]["sheet-1"]["cellData"]
-            [c.row.to_string()][c.col.to_string()];
+        let cell =
+            &final_snapshot["sheets"]["sheet-1"]["cellData"][c.row.to_string()][c.col.to_string()];
         let f = cell.get("f").and_then(|v| v.as_str()).unwrap_or("");
         if f.is_empty() {
             snapshot_failures.push(format!(

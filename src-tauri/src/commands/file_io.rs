@@ -7,8 +7,32 @@
 // just shoves the string straight into `_preservedParts` anyway.
 
 use std::fs;
+use std::path::Path;
 
 const MAX_READ_BYTES: u64 = 32 * 1024 * 1024; // 32 MiB cap, matches preserved-parts aggregate cap.
+const ALLOWED_IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif"];
+const MAX_EXISTENCE_CHECK_PATHS: usize = 1000;
+
+fn is_allowed_image_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| ALLOWED_IMAGE_EXTS.contains(&e.to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+fn has_allowed_image_magic(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+        || bytes.starts_with(b"\xff\xd8\xff")
+        || bytes.starts_with(b"GIF87a")
+        || bytes.starts_with(b"GIF89a")
+}
+
+fn is_csv_export_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| matches!(e.to_ascii_lowercase().as_str(), "csv" | "tsv"))
+        .unwrap_or(false)
+}
 
 /// RFC 4648 base64 encoder. Duplicated here (rather than imported from
 /// `commands::xlsx_io`) because that module's helper is `pub(crate)` and the
@@ -47,7 +71,11 @@ fn b64_encode(input: &[u8]) -> String {
 /// Refuses files larger than 32 MiB to avoid OOM on a renderer post.
 #[tauri::command]
 pub fn read_file_bytes_base64(path: String) -> Result<String, String> {
-    let meta = fs::metadata(&path).map_err(|e| format!("READ_METADATA_FAILED: {e}"))?;
+    let path_ref = Path::new(&path);
+    if !is_allowed_image_path(path_ref) {
+        return Err("UNSUPPORTED_FILE_TYPE".to_string());
+    }
+    let meta = fs::metadata(path_ref).map_err(|e| format!("READ_METADATA_FAILED: {e}"))?;
     if meta.len() > MAX_READ_BYTES {
         return Err(format!(
             "FILE_TOO_LARGE: {} bytes (cap {} bytes)",
@@ -55,8 +83,29 @@ pub fn read_file_bytes_base64(path: String) -> Result<String, String> {
             MAX_READ_BYTES
         ));
     }
-    let bytes = fs::read(&path).map_err(|e| format!("READ_FAILED: {e}"))?;
+    let bytes = fs::read(path_ref).map_err(|e| format!("READ_FAILED: {e}"))?;
+    if !has_allowed_image_magic(&bytes) {
+        return Err("UNSUPPORTED_IMAGE_BYTES".to_string());
+    }
     Ok(b64_encode(&bytes))
+}
+
+#[tauri::command]
+pub fn existing_csv_export_paths(paths: Vec<String>) -> Result<Vec<String>, String> {
+    if paths.len() > MAX_EXISTENCE_CHECK_PATHS {
+        return Err("TOO_MANY_PATHS".to_string());
+    }
+    let mut existing = Vec::new();
+    for path in paths {
+        let path_ref = Path::new(&path);
+        if !is_csv_export_path(path_ref) {
+            return Err("UNSUPPORTED_FILE_TYPE".to_string());
+        }
+        if path_ref.exists() {
+            existing.push(path);
+        }
+    }
+    Ok(existing)
 }
 
 #[cfg(test)]
@@ -66,7 +115,7 @@ mod tests {
 
     #[test]
     fn reads_small_file_and_round_trips_via_base64() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         let payload: &[u8] = b"\x89PNG\r\n\x1a\n hello world";
         tmp.as_file().write_all(payload).unwrap();
         tmp.as_file().sync_all().unwrap();
@@ -86,7 +135,37 @@ mod tests {
         // command at a non-existent path to verify the error branch, since
         // the metadata check returns an Err before the read. The size-cap
         // branch is exercised in manual testing.
-        let res = read_file_bytes_base64("/nonexistent/path/to/file".to_string());
+        let res = read_file_bytes_base64("/nonexistent/path/to/file.png".to_string());
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn rejects_non_image_extension() {
+        let tmp = tempfile::Builder::new().suffix(".txt").tempfile().unwrap();
+        tmp.as_file().write_all(b"\x89PNG\r\n\x1a\n payload").unwrap();
+        let res = read_file_bytes_base64(tmp.path().to_string_lossy().to_string());
+        assert_eq!(res.unwrap_err(), "UNSUPPORTED_FILE_TYPE");
+    }
+
+    #[test]
+    fn rejects_non_image_bytes_even_with_image_extension() {
+        let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        tmp.as_file().write_all(b"not an image").unwrap();
+        let res = read_file_bytes_base64(tmp.path().to_string_lossy().to_string());
+        assert_eq!(res.unwrap_err(), "UNSUPPORTED_IMAGE_BYTES");
+    }
+
+    #[test]
+    fn returns_existing_csv_export_paths_only_for_csv_like_paths() {
+        let tmp = tempfile::Builder::new().suffix(".csv").tempfile().unwrap();
+        let existing = existing_csv_export_paths(vec![tmp.path().to_string_lossy().to_string()])
+            .unwrap();
+        assert_eq!(existing, vec![tmp.path().to_string_lossy().to_string()]);
+    }
+
+    #[test]
+    fn rejects_non_csv_export_path_checks() {
+        let res = existing_csv_export_paths(vec!["C:/tmp/secret.txt".to_string()]);
+        assert_eq!(res.unwrap_err(), "UNSUPPORTED_FILE_TYPE");
     }
 }

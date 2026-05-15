@@ -15,17 +15,41 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 }));
 
 import { useWorkbookStore } from "./useWorkbookStore";
+import { registerSnapshotFlush } from "./snapshotSync";
+import type { SaveResult } from "../types/workbook";
 
-const makeHandle = (overrides: Partial<{ workbookId: string; path: string | null }> = {}) => ({
+const EMPTY_WORKBOOK_SNAPSHOT =
+  "{\"sheetOrder\":[\"sheet-1\"],\"sheets\":{\"sheet-1\":{\"name\":\"Sheet1\",\"cellData\":{}}}}";
+
+const makeHandle = (
+  overrides: Partial<{
+    workbookId: string;
+    path: string | null;
+    sourceType: "new" | "coco" | "xlsx" | "csv";
+    requiresSaveAsOnFirstSave: boolean;
+  }> = {}
+) => ({
   workbookId: overrides.workbookId ?? "wb-test",
   path: overrides.path === undefined ? "/tmp/test.coco" : overrides.path,
-  sourceType: "coco" as const,
+  sourceType: overrides.sourceType ?? "coco",
   snapshotJson: "{}",
+  requiresSaveAsOnFirstSave: overrides.requiresSaveAsOnFirstSave ?? false,
 });
+
+const deferred = <T>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+};
 
 beforeEach(() => {
   invokeMock.mockReset();
   saveDialogMock.mockReset();
+  registerSnapshotFlush(null);
   // Reset the store to default state between tests.
   useWorkbookStore.setState({
     screen: "home",
@@ -35,6 +59,8 @@ beforeEach(() => {
     recentFiles: [],
     recoveryCandidates: [],
     currentSnapshotJson: null,
+    editorRevision: 0,
+    dirtyRevision: 0,
     isExporting: false,
     exportWarnings: [],
     blockingImport: null,
@@ -97,6 +123,7 @@ describe("autoSave race prevention", () => {
       path: "/tmp/test.coco",
       snapshotJson: "{\"v\":1}",
     }));
+    expect(useWorkbookStore.getState().saveStatus).toBe("auto_saved");
   });
 
   it("invokes workbook_autosave_temp when path is null (new workbook)", async () => {
@@ -111,6 +138,7 @@ describe("autoSave race prevention", () => {
       workbookId: "wb-test",
       snapshotJson: "{\"v\":1}",
     }));
+    expect(useWorkbookStore.getState().saveStatus).toBe("unsaved");
   });
 
   it("invokes workbook_autosave_temp when path is .xlsx (user file not touched)", async () => {
@@ -122,6 +150,46 @@ describe("autoSave race prevention", () => {
     });
     await useWorkbookStore.getState().autoSave();
     expect(invokeMock).toHaveBeenCalledWith("workbook_autosave_temp", expect.any(Object));
+    expect(useWorkbookStore.getState().saveStatus).toBe("unsaved");
+  });
+
+  it("waits for pending .coco autosave before manual save writes the same path", async () => {
+    const autoSaveResult = deferred<SaveResult>();
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "workbook_autosave_coco") return autoSaveResult.promise;
+      if (cmd === "workbook_save") {
+        return Promise.resolve({ success: true, path: "/tmp/data.coco", error: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+      saveStatus: "unsaved",
+      currentSnapshotJson: "{\"v\":\"old\"}",
+    });
+
+    const autoSavePromise = useWorkbookStore.getState().autoSave();
+    await Promise.resolve();
+    useWorkbookStore.setState({ currentSnapshotJson: "{\"v\":\"manual\"}" });
+    const savePromise = useWorkbookStore.getState().save();
+    await Promise.resolve();
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenNthCalledWith(
+      1,
+      "workbook_autosave_coco",
+      expect.objectContaining({ path: "/tmp/data.coco", snapshotJson: "{\"v\":\"old\"}" })
+    );
+
+    autoSaveResult.resolve({ success: true, path: "/tmp/data.coco" });
+    await Promise.all([autoSavePromise, savePromise]);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(
+      2,
+      "workbook_save",
+      expect.objectContaining({ path: "/tmp/data.coco", snapshotJson: "{\"v\":\"manual\"}" })
+    );
+    expect(useWorkbookStore.getState().saveStatus).toBe("saved");
   });
 });
 
@@ -170,6 +238,162 @@ describe("updateSnapshot", () => {
     const s = useWorkbookStore.getState();
     expect(s.currentSnapshotJson).toBe("{\"new\":1}");
     expect(s.saveStatus).toBe("unsaved");
+    expect(s.dirtyRevision).toBe(1);
+  });
+});
+
+describe("markDirty", () => {
+  it("marks saved workbooks as unsaved without changing the snapshot", () => {
+    useWorkbookStore.setState({ saveStatus: "saved", currentSnapshotJson: "{\"old\":1}" });
+    useWorkbookStore.getState().markDirty();
+    const s = useWorkbookStore.getState();
+    expect(s.saveStatus).toBe("unsaved");
+    expect(s.currentSnapshotJson).toBe("{\"old\":1}");
+    expect(s.dirtyRevision).toBe(1);
+  });
+
+  it("increments dirtyRevision even when already unsaved", () => {
+    useWorkbookStore.setState({ saveStatus: "unsaved", dirtyRevision: 3 });
+    useWorkbookStore.getState().markDirty();
+    const s = useWorkbookStore.getState();
+    expect(s.saveStatus).toBe("unsaved");
+    expect(s.dirtyRevision).toBe(4);
+  });
+
+  it("does not disturb loading, saving, or exporting states", () => {
+    for (const status of ["loading", "saving", "exporting"] as const) {
+      useWorkbookStore.setState({ saveStatus: status });
+      useWorkbookStore.getState().markDirty();
+      expect(useWorkbookStore.getState().saveStatus).toBe(status);
+    }
+  });
+});
+
+describe("pending snapshot flush", () => {
+  const registerFreshSnapshotFlush = () => {
+    registerSnapshotFlush(() => {
+      useWorkbookStore.setState({ currentSnapshotJson: "{\"v\":\"fresh\"}" });
+    });
+  };
+
+  it("flushes before save reads currentSnapshotJson", async () => {
+    invokeMock.mockResolvedValue({ success: true, path: "/tmp/data.coco", error: null });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+      currentSnapshotJson: "{\"v\":\"stale\"}",
+    });
+    registerFreshSnapshotFlush();
+
+    await useWorkbookStore.getState().save();
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_save",
+      expect.objectContaining({ snapshotJson: "{\"v\":\"fresh\"}" })
+    );
+  });
+
+  it("awaits an async flush before save reads currentSnapshotJson", async () => {
+    const flush = deferred<void>();
+    invokeMock.mockResolvedValue({ success: true, path: "/tmp/data.coco", error: null });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+      currentSnapshotJson: "{\"v\":\"stale\"}",
+    });
+    registerSnapshotFlush(async () => {
+      await flush.promise;
+      useWorkbookStore.setState({ currentSnapshotJson: "{\"v\":\"fresh\"}" });
+    });
+
+    const savePromise = useWorkbookStore.getState().save();
+    await Promise.resolve();
+    expect(invokeMock).not.toHaveBeenCalled();
+
+    flush.resolve();
+    await savePromise;
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_save",
+      expect.objectContaining({ snapshotJson: "{\"v\":\"fresh\"}" })
+    );
+  });
+
+  it("flushes before saveAs reads currentSnapshotJson", async () => {
+    invokeMock.mockResolvedValue({ success: true, path: "/tmp/data.xlsx", warnings: [] });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+      currentSnapshotJson: "{\"v\":\"stale\"}",
+    });
+    registerFreshSnapshotFlush();
+
+    await useWorkbookStore.getState().saveAs("/tmp/data.xlsx");
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_export_xlsx",
+      expect.objectContaining({ snapshotJson: "{\"v\":\"fresh\"}" })
+    );
+  });
+
+  it("flushes before autoSave reads currentSnapshotJson", async () => {
+    invokeMock.mockResolvedValue({ success: true, path: "/tmp/data.coco", error: null });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+      saveStatus: "unsaved",
+      currentSnapshotJson: "{\"v\":\"stale\"}",
+    });
+    registerFreshSnapshotFlush();
+
+    await useWorkbookStore.getState().autoSave();
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_autosave_coco",
+      expect.objectContaining({ snapshotJson: "{\"v\":\"fresh\"}" })
+    );
+  });
+
+  it("flushes before exportXlsx reads currentSnapshotJson", async () => {
+    saveDialogMock.mockResolvedValue("/tmp/out.xlsx");
+    invokeMock.mockResolvedValue({ success: true, path: "/tmp/out.xlsx", warnings: [] });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+      currentSnapshotJson: "{\"v\":\"stale\"}",
+    });
+    registerFreshSnapshotFlush();
+
+    await useWorkbookStore.getState().exportXlsx();
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_export_xlsx",
+      expect.objectContaining({ snapshotJson: "{\"v\":\"fresh\"}" })
+    );
+  });
+
+  it("flushes before listSheetNames reads currentSnapshotJson", async () => {
+    invokeMock.mockResolvedValue([{ id: "sheet-1", name: "Sheet1" }]);
+    useWorkbookStore.setState({ currentSnapshotJson: "{\"v\":\"stale\"}" });
+    registerFreshSnapshotFlush();
+
+    await useWorkbookStore.getState().listSheetNames();
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "list_sheet_names",
+      { snapshotJson: "{\"v\":\"fresh\"}" }
+    );
+  });
+
+  it("flushes before exportCsvToPath reads currentSnapshotJson", async () => {
+    invokeMock.mockResolvedValue({ success: true, path: "/tmp/out.csv", warnings: [] });
+    useWorkbookStore.setState({
+      currentSnapshotJson: "{\"v\":\"stale\"}",
+      csvExportEncoding: "utf8",
+    });
+    registerFreshSnapshotFlush();
+
+    await useWorkbookStore.getState().exportCsvToPath("/tmp/out.csv", "sheet-1");
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_export_csv",
+      expect.objectContaining({ snapshotJson: "{\"v\":\"fresh\"}", path: "/tmp/out.csv" })
+    );
   });
 });
 
@@ -257,6 +481,42 @@ describe("save flow", () => {
     expect(useWorkbookStore.getState().saveStatus).toBe("saved");
   });
 
+  it("clears stale temp recovery after successful .xlsx overwrite without blocking save", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "workbook_export_xlsx") {
+        return Promise.resolve({ success: true, path: "/tmp/data.xlsx", warnings: [] });
+      }
+      if (cmd === "workbook_clear_recovery") {
+        return Promise.reject("cleanup failed");
+      }
+      return Promise.resolve(undefined);
+    });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.xlsx", workbookId: "wb-xlsx" }),
+      currentSnapshotJson: "{\"v\":1}",
+    });
+    await useWorkbookStore.getState().save();
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_clear_recovery",
+      { candidateId: "wb-xlsx" }
+    );
+    expect(useWorkbookStore.getState().saveStatus).toBe("saved");
+    expect(useWorkbookStore.getState().lastError).toBeNull();
+  });
+
+  it("opens Save As for .xlsm paths instead of sending them to the xlsx writer", async () => {
+    saveDialogMock.mockResolvedValue(null);
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/macro.xlsm", sourceType: "xlsx" }),
+      currentSnapshotJson: "{\"v\":1}",
+    });
+    await useWorkbookStore.getState().save();
+    expect(saveDialogMock).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultPath: "macro.xlsx" })
+    );
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
   it("routes .coco paths to workbook_save", async () => {
     invokeMock.mockResolvedValue({ success: true, path: "/tmp/data.coco", error: null });
     useWorkbookStore.setState({
@@ -309,6 +569,57 @@ describe("save flow", () => {
     expect(saveDialogMock).toHaveBeenCalled();
     // saveAs should fire export_xlsx (default extension is xlsx).
     expect(invokeMock).toHaveBeenCalledWith("workbook_export_xlsx", expect.any(Object));
+  });
+
+  it("opens save dialog when requiresSaveAsOnFirstSave is true even with a path", async () => {
+    saveDialogMock.mockResolvedValue("/tmp/chosen.xlsx");
+    invokeMock.mockResolvedValue({ success: true, path: "/tmp/chosen.xlsx", warnings: [] });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({
+        path: "/tmp/imported.csv",
+        sourceType: "csv",
+        requiresSaveAsOnFirstSave: true,
+      }),
+      currentSnapshotJson: "{\"v\":1}",
+    });
+    await useWorkbookStore.getState().save();
+    expect(saveDialogMock).toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_export_xlsx",
+      expect.objectContaining({ path: "/tmp/chosen.xlsx" })
+    );
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_clear_recovery",
+      { candidateId: "wb-test" }
+    );
+    expect(useWorkbookStore.getState().currentHandle?.requiresSaveAsOnFirstSave).toBe(false);
+  });
+
+  it("uses the imported file stem as the Save As default when save-as is required", async () => {
+    saveDialogMock.mockResolvedValue(null);
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({
+        path: "C:\\tmp\\macros.xlsm",
+        sourceType: "xlsx",
+        requiresSaveAsOnFirstSave: true,
+      }),
+      currentSnapshotJson: "{\"v\":1}",
+    });
+    await useWorkbookStore.getState().save();
+    expect(saveDialogMock).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultPath: "macros.xlsx" })
+    );
+  });
+
+  it("fails instead of sending fallback snapshot when save snapshot is missing", async () => {
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.xlsx" }),
+      currentSnapshotJson: null,
+    });
+    await useWorkbookStore.getState().save();
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(useWorkbookStore.getState().saveStatus).toBe("save_failed");
+    expect(useWorkbookStore.getState().lastError).not.toBeNull();
   });
 });
 
@@ -413,13 +724,16 @@ describe("newWorkbook", () => {
       workbookId: "wb-new-1",
       path: null,
       sourceType: "new",
-      snapshotJson: null,
+      snapshotJson: EMPTY_WORKBOOK_SNAPSHOT,
+      requiresSaveAsOnFirstSave: true,
     });
     await useWorkbookStore.getState().newWorkbook();
     const s = useWorkbookStore.getState();
     expect(invokeMock).toHaveBeenCalledWith("workbook_new");
     expect(s.screen).toBe("editor");
     expect(s.currentHandle?.workbookId).toBe("wb-new-1");
+    expect(s.currentHandle?.requiresSaveAsOnFirstSave).toBe(true);
+    expect(s.currentSnapshotJson).toBe(EMPTY_WORKBOOK_SNAPSHOT);
     expect(s.saveStatus).toBe("unsaved");
     expect(s.importWarnings).toEqual([]);
     expect(s.exportWarnings).toEqual([]);
@@ -467,8 +781,9 @@ describe("importCsv", () => {
       handle: {
         workbookId: "wb-csv",
         path: "/tmp/data.csv",
-        sourceType: "xlsx",
+        sourceType: "csv",
         snapshotJson: "{}",
+        requiresSaveAsOnFirstSave: true,
       },
       warnings: [{ severity: "info", code: "CSV_POC_IMPORT", message: "..." }],
     });
@@ -482,6 +797,8 @@ describe("importCsv", () => {
     expect(s.screen).toBe("editor");
     expect(s.saveStatus).toBe("unsaved");
     expect(s.importWarnings).toHaveLength(1);
+    expect(s.currentHandle?.sourceType).toBe("csv");
+    expect(s.currentHandle?.requiresSaveAsOnFirstSave).toBe(true);
   });
 
   it("passes explicit shift_jis override to Rust", async () => {
@@ -698,6 +1015,19 @@ describe("exportXlsx", () => {
     expect(s.isExporting).toBe(false);
     expect(s.saveStatus).toBe("export_done");
     expect(s.exportWarnings).toHaveLength(1);
+  });
+
+  it("defaults non-xlsx source paths to an .xlsx export name", async () => {
+    saveDialogMock.mockResolvedValue(null);
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.csv", sourceType: "csv" }),
+      currentSnapshotJson: "{}",
+    });
+    await useWorkbookStore.getState().exportXlsx();
+    expect(saveDialogMock).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultPath: "data.xlsx" })
+    );
+    expect(invokeMock).not.toHaveBeenCalled();
   });
 
   it("flips to export_failed and uses friendlyError on failure", async () => {
@@ -937,7 +1267,13 @@ describe("suppressCsvPocWarning", () => {
   it("importCsv filters out CSV_POC_IMPORT when the suppress flag is on", async () => {
     useWorkbookStore.setState({ suppressCsvPocWarning: true });
     invokeMock.mockResolvedValue({
-      handle: { workbookId: "wb", path: "/tmp/x.csv", sourceType: "xlsx", snapshotJson: "{}" },
+      handle: {
+        workbookId: "wb",
+        path: "/tmp/x.csv",
+        sourceType: "csv",
+        snapshotJson: "{}",
+        requiresSaveAsOnFirstSave: true,
+      },
       warnings: [
         { severity: "info", code: "CSV_POC_IMPORT", message: "PoC" },
         { severity: "info", code: "CSV_ENCODING_DETECTED", message: "UTF-8" },
@@ -952,7 +1288,13 @@ describe("suppressCsvPocWarning", () => {
 
   it("importCsv keeps CSV_POC_IMPORT when the suppress flag is off (default)", async () => {
     invokeMock.mockResolvedValue({
-      handle: { workbookId: "wb", path: "/tmp/x.csv", sourceType: "xlsx", snapshotJson: "{}" },
+      handle: {
+        workbookId: "wb",
+        path: "/tmp/x.csv",
+        sourceType: "csv",
+        snapshotJson: "{}",
+        requiresSaveAsOnFirstSave: true,
+      },
       warnings: [{ severity: "info", code: "CSV_POC_IMPORT", message: "PoC" }],
     });
     await useWorkbookStore.getState().importCsv("/tmp/x.csv");
@@ -1112,7 +1454,7 @@ describe("exportCsvToPath error paths", () => {
     // Free-form error from Rust; friendlyError leaves it as-is.
     invokeMock.mockRejectedValue("disk full");
     useWorkbookStore.setState({
-      currentHandle: { workbookId: "wb", path: "/tmp/wb.coco", sourceType: "coco", snapshotJson: "{}" },
+      currentHandle: makeHandle({ path: "/tmp/wb.coco" }),
       currentSnapshotJson: "{}",
       csvExportEncoding: "utf8-bom",
     });
@@ -1131,7 +1473,7 @@ describe("exportCsvToPath error paths", () => {
       error: "CSV_EMPTY_WORKBOOK",
     });
     useWorkbookStore.setState({
-      currentHandle: { workbookId: "wb", path: "/tmp/wb.coco", sourceType: "coco", snapshotJson: "{}" },
+      currentHandle: makeHandle({ path: "/tmp/wb.coco" }),
       currentSnapshotJson: "{}",
       csvExportEncoding: "utf8-bom",
     });
@@ -1141,12 +1483,24 @@ describe("exportCsvToPath error paths", () => {
     // Friendly translation of CSV_EMPTY_WORKBOOK.
     expect(s.lastError).toContain("エクスポートできるシート");
   });
+
+  it("fails before invoke when snapshot is missing", async () => {
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/wb.coco" }),
+      currentSnapshotJson: null,
+      csvExportEncoding: "utf8-bom",
+    });
+    await useWorkbookStore.getState().exportCsvToPath("/tmp/out.csv", "sheet-1");
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(useWorkbookStore.getState().saveStatus).toBe("export_failed");
+    expect(useWorkbookStore.getState().lastError).not.toBeNull();
+  });
 });
 
 describe("openSnapshot / vacuum / checkIntegrity null-path guards", () => {
   it("openSnapshot is a no-op when currentHandle has no path", async () => {
     useWorkbookStore.setState({
-      currentHandle: { workbookId: "wb", path: null, sourceType: "new", snapshotJson: "{}" },
+      currentHandle: makeHandle({ path: null, sourceType: "new" }),
     });
     await useWorkbookStore.getState().openSnapshot(1);
     expect(invokeMock).not.toHaveBeenCalled();
@@ -1154,7 +1508,7 @@ describe("openSnapshot / vacuum / checkIntegrity null-path guards", () => {
 
   it("vacuumWorkbook returns null without invoking when path is null", async () => {
     useWorkbookStore.setState({
-      currentHandle: { workbookId: "wb", path: null, sourceType: "new", snapshotJson: "{}" },
+      currentHandle: makeHandle({ path: null, sourceType: "new" }),
     });
     const result = await useWorkbookStore.getState().vacuumWorkbook();
     expect(result).toBeNull();
@@ -1163,7 +1517,7 @@ describe("openSnapshot / vacuum / checkIntegrity null-path guards", () => {
 
   it("checkIntegrity returns null without invoking when path is null", async () => {
     useWorkbookStore.setState({
-      currentHandle: { workbookId: "wb", path: null, sourceType: "new", snapshotJson: "{}" },
+      currentHandle: makeHandle({ path: null, sourceType: "new" }),
     });
     const result = await useWorkbookStore.getState().checkIntegrity();
     expect(result).toBeNull();
@@ -1342,6 +1696,19 @@ describe("saveAs additional branches", () => {
     );
   });
 
+  it("normalizes explicit .xlsm Save As paths to .xlsx", async () => {
+    invokeMock.mockResolvedValue({ success: true, path: "/tmp/foo.xlsx", warnings: [] });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/foo.xlsx" }),
+      currentSnapshotJson: "{}",
+    });
+    await useWorkbookStore.getState().saveAs("/tmp/foo.xlsm");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_export_xlsx",
+      expect.objectContaining({ path: "/tmp/foo.xlsx" })
+    );
+  });
+
   it("clears recovery when path was previously null (wasUnsaved)", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "workbook_save_as") {
@@ -1359,6 +1726,31 @@ describe("saveAs additional branches", () => {
       "workbook_clear_recovery",
       { candidateId: "wb-untitled" }
     );
+  });
+
+  it("clears recovery after Save As succeeds for imported workbook with an existing path", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "workbook_export_xlsx") {
+        return Promise.resolve({ success: true, path: "/tmp/new.xlsx", warnings: [] });
+      }
+      if (cmd === "workbook_clear_recovery") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({
+        path: "/tmp/imported.csv",
+        workbookId: "wb-imported",
+        sourceType: "csv",
+        requiresSaveAsOnFirstSave: true,
+      }),
+      currentSnapshotJson: "{}",
+    });
+    await useWorkbookStore.getState().saveAs("/tmp/new.xlsx");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "workbook_clear_recovery",
+      { candidateId: "wb-imported" }
+    );
+    expect(useWorkbookStore.getState().saveStatus).toBe("saved");
   });
 
   it("flips to save_failed and surfaces friendly error when result.success=false", async () => {
@@ -1527,6 +1919,7 @@ describe("listSnapshots / openSnapshot / vacuum / checkIntegrity / diagnostic ha
     expect(s.currentHandle?.path).toBeNull();
     expect(s.saveStatus).toBe("unsaved");
     expect(s.currentSnapshotJson).toBe("{\"s\":1}");
+    expect(s.editorRevision).toBe(1);
   });
 
   it("openSnapshot sets friendly error on rejection", async () => {
@@ -1584,7 +1977,7 @@ describe("listSnapshots / openSnapshot / vacuum / checkIntegrity / diagnostic ha
 
   it("workbookDiagnosticInfo returns null when no path", async () => {
     useWorkbookStore.setState({
-      currentHandle: { workbookId: "wb", path: null, sourceType: "new", snapshotJson: "{}" },
+      currentHandle: makeHandle({ path: null, sourceType: "new" }),
     });
     const result = await useWorkbookStore.getState().workbookDiagnosticInfo();
     expect(result).toBeNull();

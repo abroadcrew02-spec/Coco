@@ -61,8 +61,12 @@ fn prunes_entries_beyond_recent_files_limit() {
     let conn = new_db();
     // Insert LIMIT + 5 entries with distinct timestamps.
     for i in 0..(RECENT_FILES_LIMIT + 5) {
-        record_recent_file(&conn, &format!("/tmp/file{}.xlsx", i), &format!("file{}.xlsx", i))
-            .unwrap();
+        record_recent_file(
+            &conn,
+            &format!("/tmp/file{}.xlsx", i),
+            &format!("file{}.xlsx", i),
+        )
+        .unwrap();
         // Tiny sleep keeps timestamps monotonically ascending.
         std::thread::sleep(std::time::Duration::from_millis(1));
     }

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { isDirtySaveStatus } from "../store/dirtyGuard";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 
 /** req 5.4.2: when the user attempts to close the window with an unsaved
@@ -26,7 +27,7 @@ export function useCloseGuard() {
       .onCloseRequested(async (event) => {
         // We can't read the store via hooks inside the closure (it captures
         // the saveStatus from when the listener was registered). Use getState.
-        const dirty = useWorkbookStore.getState().saveStatus === "unsaved";
+        const dirty = isDirtySaveStatus(useWorkbookStore.getState().saveStatus);
         if (!dirty) return; // allow normal close
 
         event.preventDefault();
@@ -48,7 +49,7 @@ export function useCloseGuard() {
           await save();
           // If save failed (e.g. user cancelled Save As dialog), stay open.
           const status = useWorkbookStore.getState().saveStatus;
-          if (status === "save_failed" || status === "unsaved") return;
+          if (isDirtySaveStatus(status)) return;
         }
         await getCurrentWindow().destroy();
       })

@@ -9,8 +9,8 @@ use coco_lib::commands::xlsx_io::{
 };
 use rust_xlsxwriter::{
     ConditionalFormatCell, ConditionalFormatCellRule, ConditionalFormatDuplicate,
-    ConditionalFormatText, ConditionalFormatTextRule, ConditionalFormatTop, ConditionalFormatTopRule,
-    Workbook,
+    ConditionalFormatText, ConditionalFormatTextRule, ConditionalFormatTop,
+    ConditionalFormatTopRule, Workbook,
 };
 use serde_json::Value;
 use std::io::Read;
@@ -24,7 +24,9 @@ fn path_str(p: &PathBuf) -> String {
 fn read_sheet1_xml(path: &PathBuf) -> String {
     let file = std::fs::File::open(path).expect("open xlsx");
     let mut archive = zip::ZipArchive::new(file).expect("zip");
-    let mut entry = archive.by_name("xl/worksheets/sheet1.xml").expect("sheet1.xml");
+    let mut entry = archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .expect("sheet1.xml");
     let mut xml = String::new();
     entry.read_to_string(&mut xml).expect("read xml");
     xml
@@ -49,8 +51,7 @@ fn cell_is_greater_than_round_trips() {
         let mut wb = Workbook::new();
         let ws = wb.add_worksheet();
         ws.set_name("Sheet1").unwrap();
-        let cf = ConditionalFormatCell::new()
-            .set_rule(ConditionalFormatCellRule::GreaterThan(100));
+        let cf = ConditionalFormatCell::new().set_rule(ConditionalFormatCellRule::GreaterThan(100));
         ws.add_conditional_format(0, 0, 9, 0, &cf).expect("add cf");
         wb.save(&fixture).expect("save");
     }
@@ -92,8 +93,7 @@ fn cell_is_greater_than_round_trips() {
     assert!(export.success, "export ok: {:?}", export.error);
 
     let re = import_xlsx_core(path_str(&exported)).expect("re-import");
-    let re_snap: Value =
-        serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_snap: Value = serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
     let re_cfs = re_snap["sheets"]["sheet-1"]["_conditionalFormatting"]
         .as_array()
         .expect("CF survives round-trip");
@@ -136,8 +136,7 @@ fn contains_text_round_trips() {
     assert!(export.success, "export ok: {:?}", export.error);
 
     let re = import_xlsx_core(path_str(&exported)).expect("re-import");
-    let re_snap: Value =
-        serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_snap: Value = serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
     let re_cfs = re_snap["sheets"]["sheet-1"]["_conditionalFormatting"]
         .as_array()
         .expect("CF survives round-trip");
@@ -180,8 +179,7 @@ fn top10_rule_round_trips() {
     assert!(export.success, "export ok: {:?}", export.error);
 
     let re = import_xlsx_core(path_str(&exported)).expect("re-import");
-    let re_snap: Value =
-        serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_snap: Value = serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
     let re_cfs = re_snap["sheets"]["sheet-1"]["_conditionalFormatting"]
         .as_array()
         .expect("CF survives round-trip");
@@ -219,8 +217,7 @@ fn duplicate_values_round_trips() {
     assert!(export.success, "export ok: {:?}", export.error);
 
     let re = import_xlsx_core(path_str(&exported)).expect("re-import");
-    let re_snap: Value =
-        serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_snap: Value = serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
     let re_cfs = re_snap["sheets"]["sheet-1"]["_conditionalFormatting"]
         .as_array()
         .expect("CF survives round-trip");
@@ -380,8 +377,7 @@ fn color_scale_round_trips() {
     // Re-import: verify both the type and a piece of the inner payload
     // (gradient stop color) survive byte-for-byte.
     let re = import_xlsx_core(path_str(&exported)).expect("re-import");
-    let re_snap: Value =
-        serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_snap: Value = serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
     let re_cfs = re_snap["sheets"]["sheet-1"]["_conditionalFormatting"]
         .as_array()
         .expect("CF survives round-trip");
@@ -438,8 +434,7 @@ fn data_bar_round_trips() {
     assert!(export.success, "export ok: {:?}", export.error);
 
     let re = import_xlsx_core(path_str(&exported)).expect("re-import");
-    let re_snap: Value =
-        serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_snap: Value = serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
     let re_cfs = re_snap["sheets"]["sheet-1"]["_conditionalFormatting"]
         .as_array()
         .expect("CF survives round-trip");
@@ -492,14 +487,16 @@ fn icon_set_round_trips() {
     assert!(export.success, "export ok: {:?}", export.error);
 
     let re = import_xlsx_core(path_str(&exported)).expect("re-import");
-    let re_snap: Value =
-        serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_snap: Value = serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
     let re_cfs = re_snap["sheets"]["sheet-1"]["_conditionalFormatting"]
         .as_array()
         .expect("CF survives round-trip");
     assert_eq!(re_cfs.len(), 1);
     assert_eq!(re_cfs[0]["type"].as_str(), Some("iconSet"));
-    assert!(re_cfs[0]["raw"].as_str().unwrap().contains("3TrafficLights1"));
+    assert!(re_cfs[0]["raw"]
+        .as_str()
+        .unwrap()
+        .contains("3TrafficLights1"));
 
     let sheet_xml = read_sheet1_xml(&exported);
     assert!(
@@ -518,13 +515,16 @@ fn inject_raw_cfrule(xlsx_path: &PathBuf, sqref: &str, cf_rule_xml: &str) {
     use std::io::{Cursor, Read, Write};
 
     let bytes = std::fs::read(xlsx_path).expect("read xlsx");
-    let mut archive =
-        zip::ZipArchive::new(Cursor::new(&bytes)).expect("open xlsx zip");
+    let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).expect("open xlsx zip");
 
     let mut sheet_xml = String::new();
     {
-        let mut entry = archive.by_name("xl/worksheets/sheet1.xml").expect("sheet1.xml");
-        entry.read_to_string(&mut sheet_xml).expect("read sheet xml");
+        let mut entry = archive
+            .by_name("xl/worksheets/sheet1.xml")
+            .expect("sheet1.xml");
+        entry
+            .read_to_string(&mut sheet_xml)
+            .expect("read sheet xml");
     }
 
     let block =
@@ -550,8 +550,8 @@ fn inject_raw_cfrule(xlsx_path: &PathBuf, sqref: &str, cf_rule_xml: &str) {
     let mut out_buf: Vec<u8> = Vec::with_capacity(bytes.len());
     {
         let mut writer = zip::ZipWriter::new(Cursor::new(&mut out_buf));
-        let opts = zip::write::FileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
+        let opts =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i).expect("entry");
             let name = entry.name().to_string();

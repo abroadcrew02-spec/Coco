@@ -1,6 +1,6 @@
 use coco_lib::commands::workbook::{
-    bak_path, enforce_backup_size_cap, rotate_backups, temp_save_path, total_backup_size,
-    MAX_BACKUPS,
+    bak_path, enforce_backup_size_cap, rotate_backups, save_core, temp_save_path,
+    total_backup_size, MAX_BACKUPS,
 };
 use std::fs;
 use std::path::Path;
@@ -16,11 +16,7 @@ fn test_rotate_when_target_missing_is_noop() {
     let any_bak = fs::read_dir(tmp.path())
         .expect("read tempdir")
         .filter_map(|e| e.ok())
-        .any(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .contains(".bak.")
-        });
+        .any(|e| e.file_name().to_string_lossy().contains(".bak."));
     assert!(!any_bak, "no .bak.* files should exist after no-op rotate");
 }
 
@@ -54,13 +50,7 @@ fn test_five_rotations_keep_max_five_with_shifting() {
         rotate_backups(&target).expect("rotate ok");
     }
 
-    let expectations = [
-        (1u32, "v7"),
-        (2, "v6"),
-        (3, "v5"),
-        (4, "v4"),
-        (5, "v3"),
-    ];
+    let expectations = [(1u32, "v7"), (2, "v6"), (3, "v5"), (4, "v4"), (5, "v3")];
     for (n, expected) in expectations {
         let p = tmp.path().join(format!("data.coco.bak.{n}"));
         assert!(p.exists(), "data.coco.bak.{n} should exist");
@@ -79,11 +69,7 @@ fn test_five_rotations_keep_max_five_with_shifting() {
     let bak_count = fs::read_dir(tmp.path())
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .contains(".bak.")
-        })
+        .filter(|e| e.file_name().to_string_lossy().contains(".bak."))
         .count();
     assert_eq!(
         bak_count, MAX_BACKUPS as usize,
@@ -107,9 +93,17 @@ fn test_temp_save_path_is_in_same_dir_with_dot_prefix() {
     let target = tmp.path().join("workbook.coco");
 
     let t = temp_save_path(&target);
-    assert_eq!(t.parent(), Some(tmp.path()), "tmp path should be in same dir");
+    assert_eq!(
+        t.parent(),
+        Some(tmp.path()),
+        "tmp path should be in same dir"
+    );
 
-    let name = t.file_name().expect("file name").to_string_lossy().into_owned();
+    let name = t
+        .file_name()
+        .expect("file name")
+        .to_string_lossy()
+        .into_owned();
     assert!(
         name.starts_with(".workbook.coco.tmp-"),
         "tmp filename should start with .workbook.coco.tmp-, got {name}"
@@ -159,11 +153,17 @@ fn enforce_cap_evicts_oldest_first() {
     // Cap at 250 bytes — should keep .bak.1 and .bak.2 (200 bytes), evict .bak.3..5.
     enforce_backup_size_cap(&target, 250).unwrap();
 
-    assert!(bak_path(&target, 1).exists(), ".bak.1 (newest) should survive");
+    assert!(
+        bak_path(&target, 1).exists(),
+        ".bak.1 (newest) should survive"
+    );
     assert!(bak_path(&target, 2).exists(), ".bak.2 should survive");
     assert!(!bak_path(&target, 3).exists(), ".bak.3 should be evicted");
     assert!(!bak_path(&target, 4).exists(), ".bak.4 should be evicted");
-    assert!(!bak_path(&target, 5).exists(), ".bak.5 (oldest) should be evicted");
+    assert!(
+        !bak_path(&target, 5).exists(),
+        ".bak.5 (oldest) should be evicted"
+    );
 }
 
 #[test]
@@ -198,5 +198,43 @@ fn rotate_backups_applies_size_cap_after_shift() {
     // Manually enforce a tight cap to verify the cap function works in
     // conjunction with rotate's output.
     enforce_backup_size_cap(&target, 3).unwrap(); // 3 bytes < "current" length 7
-    assert!(!bak_path(&target, 1).exists(), ".bak.1 should be evicted under tight cap");
+    assert!(
+        !bak_path(&target, 1).exists(),
+        ".bak.1 should be evicted under tight cap"
+    );
+}
+
+#[test]
+fn save_core_replaces_existing_coco_target() {
+    let tmp = TempDir::new().expect("tempdir");
+    let target = tmp.path().join("replace.coco");
+    let path = target.to_string_lossy().into_owned();
+
+    let first = save_core("wb".into(), Some(path.clone()), "{\"v\":1}".into()).unwrap();
+    assert!(
+        first.success,
+        "first save should succeed: {:?}",
+        first.error
+    );
+
+    let second = save_core("wb".into(), Some(path.clone()), "{\"v\":2}".into()).unwrap();
+    assert!(
+        second.success,
+        "second save should succeed: {:?}",
+        second.error
+    );
+
+    let conn = rusqlite::Connection::open(&target).expect("open saved db");
+    let latest: String = conn
+        .query_row(
+            "SELECT snapshot_json FROM workbook_snapshots ORDER BY snapshot_id DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("latest snapshot");
+    assert_eq!(latest, "{\"v\":2}");
+    assert!(
+        bak_path(&target, 1).exists(),
+        "second save should create bak.1"
+    );
 }

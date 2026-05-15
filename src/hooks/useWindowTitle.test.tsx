@@ -58,7 +58,13 @@ describe("useWindowTitle", () => {
   it("uses 'Untitled' when in the editor with no path", () => {
     useWorkbookStore.setState({
       screen: "editor",
-      currentHandle: { workbookId: "wb", path: null, sourceType: "new", snapshotJson: "{}" },
+      currentHandle: {
+        workbookId: "wb",
+        path: null,
+        sourceType: "new",
+        snapshotJson: "{}",
+        requiresSaveAsOnFirstSave: true,
+      },
     });
     render(<Probe />);
     expect(lastTitle()).toBe("Coco — Untitled");
@@ -72,6 +78,7 @@ describe("useWindowTitle", () => {
         path: "/home/user/Documents/quarterly.xlsx",
         sourceType: "xlsx",
         snapshotJson: "{}",
+        requiresSaveAsOnFirstSave: false,
       },
     });
     render(<Probe />);
@@ -86,6 +93,7 @@ describe("useWindowTitle", () => {
         path: "C:\\Users\\Foo\\Reports\\book.xlsx",
         sourceType: "xlsx",
         snapshotJson: "{}",
+        requiresSaveAsOnFirstSave: false,
       },
     });
     render(<Probe />);
@@ -100,6 +108,7 @@ describe("useWindowTitle", () => {
         path: "/tmp/book.xlsx",
         sourceType: "xlsx",
         snapshotJson: "{}",
+        requiresSaveAsOnFirstSave: false,
       },
       saveStatus: "unsaved",
     });
@@ -115,6 +124,7 @@ describe("useWindowTitle", () => {
         path: "/tmp/book.xlsx",
         sourceType: "xlsx",
         snapshotJson: "{}",
+        requiresSaveAsOnFirstSave: false,
       },
       saveStatus: "unsaved",
     });
@@ -132,6 +142,7 @@ describe("useWindowTitle", () => {
         path: "/tmp/book.xlsx",
         sourceType: "xlsx",
         snapshotJson: "{}",
+        requiresSaveAsOnFirstSave: false,
       },
       saveStatus: "saving",
     });
@@ -147,6 +158,7 @@ describe("useWindowTitle", () => {
         path: "/tmp/book.xlsx",
         sourceType: "xlsx",
         snapshotJson: "{}",
+        requiresSaveAsOnFirstSave: false,
       },
     });
     render(<Probe />);

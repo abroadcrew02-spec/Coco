@@ -99,8 +99,8 @@ fn rewrite_fixture_comments_xml(path: &PathBuf, notes: &[(&str, &str, &str)]) {
     let mut out_buf: Vec<u8> = Vec::with_capacity(bytes.len());
     {
         let mut writer = zip::ZipWriter::new(Cursor::new(&mut out_buf));
-        let opts = zip::write::FileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
+        let opts =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i).expect("entry");
             let name = entry.name().to_string();

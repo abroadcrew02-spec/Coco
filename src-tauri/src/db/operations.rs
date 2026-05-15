@@ -1,5 +1,5 @@
-use rusqlite::Connection;
 use crate::error::Result;
+use rusqlite::Connection;
 
 /// Cap on how many recent entries are persisted in the recent_files table.
 /// With the inline filter on the HomeScreen, a higher cap is now useful:
@@ -133,6 +133,9 @@ pub fn list_settings(conn: &Connection) -> Result<Vec<(String, String)>> {
 }
 
 pub fn delete_setting(conn: &Connection, key: &str) -> Result<()> {
-    conn.execute("DELETE FROM app_settings WHERE key = ?1", rusqlite::params![key])?;
+    conn.execute(
+        "DELETE FROM app_settings WHERE key = ?1",
+        rusqlite::params![key],
+    )?;
     Ok(())
 }

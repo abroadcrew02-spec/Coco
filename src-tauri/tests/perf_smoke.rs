@@ -178,11 +178,8 @@ fn smoke_xlsx_export_1mb_equivalent() {
     let snapshot_json = build_export_snapshot_250k();
 
     let start = Instant::now();
-    let result = export_xlsx_core(
-        out_path.to_string_lossy().into_owned(),
-        snapshot_json,
-    )
-    .expect("export_xlsx_core ok");
+    let result = export_xlsx_core(out_path.to_string_lossy().into_owned(), snapshot_json)
+        .expect("export_xlsx_core ok");
     let elapsed = start.elapsed();
 
     assert!(

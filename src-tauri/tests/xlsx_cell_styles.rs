@@ -1,4 +1,4 @@
-use coco_lib::commands::xlsx_io::{import_xlsx_core, export_xlsx_core};
+use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::{Color, Format, FormatAlign, FormatPattern, Workbook};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -134,9 +134,12 @@ fn bold_roundtrip() {
     );
 
     // Export and verify the resulting xlsx has a bold font entry referenced from cellXfs.
-    let export_res =
-        export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
-    assert!(export_res.success, "export should succeed: {:?}", export_res.error);
+    let export_res = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
+    assert!(
+        export_res.success,
+        "export should succeed: {:?}",
+        export_res.error
+    );
 
     let (styles_xml, xfs) = read_styles_artifacts(&exported);
     // The xf that A1 uses should have a fontId pointing to a font that has <b/>.
@@ -175,9 +178,7 @@ fn background_color_roundtrip() {
         .expect("A1 should have a style id");
 
     let style_obj = &snapshot["styles"][s_id];
-    let color = style_obj["fill"]["color"]
-        .as_str()
-        .unwrap_or("");
+    let color = style_obj["fill"]["color"].as_str().unwrap_or("");
     assert_eq!(
         color.to_ascii_uppercase(),
         "#FFFF00",
@@ -185,9 +186,12 @@ fn background_color_roundtrip() {
         color
     );
 
-    let export_res =
-        export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
-    assert!(export_res.success, "export should succeed: {:?}", export_res.error);
+    let export_res = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
+    assert!(
+        export_res.success,
+        "export should succeed: {:?}",
+        export_res.error
+    );
 
     let (styles_xml, _xfs) = read_styles_artifacts(&exported);
     // Excel solid fill stores color in <fgColor rgb="FFFFFF00"/>.
@@ -224,9 +228,12 @@ fn horizontal_alignment_roundtrip() {
         style_obj
     );
 
-    let export_res =
-        export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
-    assert!(export_res.success, "export should succeed: {:?}", export_res.error);
+    let export_res = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
+    assert!(
+        export_res.success,
+        "export should succeed: {:?}",
+        export_res.error
+    );
 
     let (styles_xml, _xfs) = read_styles_artifacts(&exported);
     assert!(
@@ -267,9 +274,21 @@ fn styleless_cells_have_no_s_field_and_styles_map_stays_small() {
     let cell00 = &snapshot["sheets"]["sheet-1"]["cellData"]["0"]["0"];
     let cell01 = &snapshot["sheets"]["sheet-1"]["cellData"]["0"]["1"];
     let cell10 = &snapshot["sheets"]["sheet-1"]["cellData"]["1"]["0"];
-    assert!(cell00.get("s").is_none(), "plain (0,0) should have no s field, got {}", cell00);
-    assert!(cell01.get("s").is_none(), "plain (0,1) should have no s field, got {}", cell01);
-    assert!(cell10.get("s").is_none(), "plain (1,0) should have no s field, got {}", cell10);
+    assert!(
+        cell00.get("s").is_none(),
+        "plain (0,0) should have no s field, got {}",
+        cell00
+    );
+    assert!(
+        cell01.get("s").is_none(),
+        "plain (0,1) should have no s field, got {}",
+        cell01
+    );
+    assert!(
+        cell10.get("s").is_none(),
+        "plain (1,0) should have no s field, got {}",
+        cell10
+    );
 
     // Bold cells should all share ONE style id.
     let b1_s = snapshot["sheets"]["sheet-1"]["cellData"]["2"]["0"]["s"]

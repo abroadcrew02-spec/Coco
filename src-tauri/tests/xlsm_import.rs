@@ -33,10 +33,15 @@ fn xlsm_import_derives_sibling_xlsx_working_path() {
     let result = import_xlsx_core(path_str(&xlsm)).unwrap();
     let working = result.handle.path.as_deref().unwrap();
 
+    assert!(result.handle.requires_save_as_on_first_save);
+
     // The working path should be the sibling .xlsx — same dir, .xlsx extension,
     // same stem. The original .xlsm is left untouched (we don't check the file
     // is unchanged here, but the working path being different is the contract).
-    assert!(working.ends_with(".xlsx"), "working path should be .xlsx, got {working}");
+    assert!(
+        working.ends_with(".xlsx"),
+        "working path should be .xlsx, got {working}"
+    );
     assert!(
         working.ends_with("macro_book.xlsx"),
         "working path should preserve stem, got {working}"
@@ -51,7 +56,10 @@ fn xlsm_import_emits_macros_discarded_warning() {
 
     let result = import_xlsx_core(path_str(&xlsm)).unwrap();
     assert!(
-        result.warnings.iter().any(|w| w.code == "XLSM_MACROS_DISCARDED"),
+        result
+            .warnings
+            .iter()
+            .any(|w| w.code == "XLSM_MACROS_DISCARDED"),
         "expected XLSM_MACROS_DISCARDED warning, got {:?}",
         result.warnings.iter().map(|w| &w.code).collect::<Vec<_>>()
     );
@@ -66,7 +74,10 @@ fn xlsm_import_warns_when_derived_xlsx_already_exists() {
 
     let result = import_xlsx_core(path_str(&xlsm)).unwrap();
     assert!(
-        result.warnings.iter().any(|w| w.code == "XLSM_DERIVED_XLSX_EXISTS"),
+        result
+            .warnings
+            .iter()
+            .any(|w| w.code == "XLSM_DERIVED_XLSX_EXISTS"),
         "expected XLSM_DERIVED_XLSX_EXISTS warning, got {:?}",
         result.warnings.iter().map(|w| &w.code).collect::<Vec<_>>()
     );

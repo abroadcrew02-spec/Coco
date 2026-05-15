@@ -1,7 +1,9 @@
 use chrono::Timelike;
 use serde_json::{json, Map, Value};
-use std::fs::File;
+use std::fs::{self, File, OpenOptions};
+use std::io::ErrorKind;
 use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
 
 use crate::commands::workbook::{CompatibilityWarning, ImportWorkbookResult, WorkbookHandle};
 
@@ -32,7 +34,10 @@ fn escape_csv_field(s: &str, delimiter: char) -> String {
 }
 
 fn needs_injection_guard(s: &str) -> bool {
-    matches!(s.chars().next(), Some('=') | Some('+') | Some('-') | Some('@'))
+    matches!(
+        s.chars().find(|c| !c.is_whitespace() && !c.is_control()),
+        Some('=') | Some('+') | Some('-') | Some('@')
+    )
 }
 
 fn format_number(n: f64) -> String {
@@ -159,7 +164,10 @@ pub fn workbook_export_csv(
         Some(id) => id.clone(),
         None => {
             let sheet_order = root.get("sheetOrder").and_then(|v| v.as_array());
-            match sheet_order.and_then(|arr| arr.first()).and_then(|v| v.as_str()) {
+            match sheet_order
+                .and_then(|arr| arr.first())
+                .and_then(|v| v.as_str())
+            {
                 Some(s) => s.to_string(),
                 None => {
                     return Ok(CsvExportResult {
@@ -227,165 +235,290 @@ pub fn workbook_export_csv(
         }
     }
 
-    let (n_rows, n_cols) = if any_cell { (max_row + 1, max_col + 1) } else { (0, 0) };
+    let (n_rows, n_cols) = if any_cell {
+        let rows = match max_row.checked_add(1) {
+            Some(n) => n,
+            None => {
+                return Ok(CsvExportResult {
+                    success: false,
+                    path,
+                    rows_written: 0,
+                    warnings,
+                    error: Some("CSV_EXPORT_TOO_LARGE".into()),
+                });
+            }
+        };
+        let cols = match max_col.checked_add(1) {
+            Some(n) => n,
+            None => {
+                return Ok(CsvExportResult {
+                    success: false,
+                    path,
+                    rows_written: 0,
+                    warnings,
+                    error: Some("CSV_EXPORT_TOO_LARGE".into()),
+                });
+            }
+        };
+        (rows, cols)
+    } else {
+        (0, 0)
+    };
+    let cell_count = match n_rows.checked_mul(n_cols) {
+        Some(n) => n,
+        None => CSV_MAX_CELLS + 1,
+    };
+    if cell_count > CSV_MAX_CELLS {
+        return Ok(CsvExportResult {
+            success: false,
+            path,
+            rows_written: 0,
+            warnings,
+            error: Some("CSV_EXPORT_TOO_LARGE".into()),
+        });
+    }
 
-    let mut rows: Vec<Vec<String>> = vec![vec![String::new(); n_cols]; n_rows];
+    let target_path = Path::new(&path);
+    let (temp_path, file) = create_csv_temp_file(target_path)?;
 
-    if let Some(rows_map) = cell_data {
-        for (r_key, r_val) in rows_map.iter() {
-            let r = match r_key.parse::<usize>() {
-                Ok(n) => n,
-                Err(_) => continue,
-            };
-            let cols_map = match r_val.as_object() {
-                Some(m) => m,
-                None => continue,
-            };
-            for (c_key, cell) in cols_map.iter() {
-                let c = match c_key.parse::<usize>() {
-                    Ok(n) => n,
-                    Err(_) => continue,
-                };
+    let write_result = (|| -> Result<(), String> {
+        let mut writer = BufWriter::new(file);
 
-                let v_field = cell.get("v");
-                let f_field = cell.get("f").and_then(|f| f.as_str());
-                let fmt_field = cell.get("_fmt").and_then(|f| f.as_str());
+        if encoding == CsvEncoding::Utf8Bom {
+            writer
+                .write_all(&[0xEF, 0xBB, 0xBF])
+                .map_err(|e| e.to_string())?;
+        }
 
-                let (raw, is_string_kind) = if let Some(v) = v_field {
-                    match v {
-                        Value::Null => (String::new(), false),
-                        Value::Bool(b) => (
-                            if *b { "TRUE".to_string() } else { "FALSE".to_string() },
-                            false,
-                        ),
-                        Value::Number(n) => {
-                            let serial = n.as_f64();
-                            // Format-aware rendering for known _fmt families
-                            // so import → export preserves the cell's meaning.
-                            // Checked in specificity order: datetime > date >
-                            // percent > plain numeric.
-                            let s = if let (Some(f), Some(fmt)) = (serial, fmt_field) {
-                                if is_text_format(fmt) {
-                                    // "@" text format: emit the number verbatim
-                                    // (no thousands separators, no formatting).
-                                    format_number(f)
-                                } else if is_datetime_format(fmt) {
-                                    match excel_serial_to_datetime(f) {
-                                        Some(dt) => format_date_or_datetime(dt, fmt, true),
-                                        None => format_number(f),
-                                    }
-                                } else if is_date_only_format(fmt) {
-                                    match excel_serial_to_date(f) {
-                                        Some(d) => format_date_or_datetime(
-                                            d.and_hms_opt(0, 0, 0).unwrap(),
-                                            fmt,
-                                            false,
-                                        ),
-                                        None => format_number(f),
-                                    }
-                                } else if is_time_only_format(fmt) {
-                                    format_time(f)
-                                } else if is_percent_format(fmt) {
-                                    format_percent(f, fmt)
-                                } else if is_currency_format(fmt) {
-                                    format_currency(f, fmt)
-                                } else {
-                                    format_number(f)
-                                }
-                            } else if let Some(f) = serial {
-                                format_number(f)
-                            } else {
-                                n.to_string()
-                            };
-                            (s, false)
-                        }
-                        Value::String(s) => (s.clone(), true),
-                        other => (other.to_string(), false),
-                    }
-                } else if let Some(f) = f_field {
-                    if !formula_warning_emitted {
+        let delim_char = field_separator.chars().next().unwrap_or(',');
+        let mut sjis_lossy_warning_emitted = false;
+        for r in 0..n_rows {
+            let r_key = r.to_string();
+            let row_map = cell_data
+                .and_then(|rows_map| rows_map.get(&r_key))
+                .and_then(|row| row.as_object());
+            let mut line = String::new();
+            for c in 0..n_cols {
+                if c > 0 {
+                    line.push_str(field_separator);
+                }
+                let c_key = c.to_string();
+                let rendered = row_map
+                    .and_then(|cols| cols.get(&c_key))
+                    .map(|cell| render_csv_cell(cell, &mut warnings, &mut formula_warning_emitted))
+                    .unwrap_or_default();
+                line.push_str(&escape_csv_field(&rendered, delim_char));
+            }
+            line.push_str("\r\n");
+
+            match encoding {
+                CsvEncoding::Utf8 | CsvEncoding::Utf8Bom => {
+                    writer
+                        .write_all(line.as_bytes())
+                        .map_err(|e| e.to_string())?;
+                }
+                CsvEncoding::ShiftJis => {
+                    // encoding_rs replaces un-encodable chars with the encoder's
+                    // fallback (usually "?"). had_errors == true tells us at least
+                    // one char was lossy.
+                    let (encoded, _enc, had_errors) = encoding_rs::SHIFT_JIS.encode(&line);
+                    writer.write_all(&encoded).map_err(|e| e.to_string())?;
+                    if had_errors && !sjis_lossy_warning_emitted {
                         warnings.push(CompatibilityWarning {
-                            severity: "info".to_string(),
-                            code: "CSV_FORMULA_FALLBACK".to_string(),
+                            severity: "warning".to_string(),
+                            code: "CSV_SJIS_LOSSY".to_string(),
                             message:
-                                "Some formula cells lack cached values; formula text exported instead"
+                                "Shift_JIS で表現できない文字が含まれていたため、一部が置換されました（通常 ? 等）。データ保全のためには UTF-8 BOM を推奨します。"
                                     .to_string(),
                             affected_sheets: None,
                         });
-                        formula_warning_emitted = true;
+                        sjis_lossy_warning_emitted = true;
                     }
-                    (f.to_string(), true)
-                } else {
-                    (String::new(), false)
-                };
-
-                let guarded = if is_string_kind && needs_injection_guard(&raw) {
-                    format!("'{}", raw)
-                } else {
-                    raw
-                };
-
-                if r < rows.len() && c < rows[r].len() {
-                    rows[r][c] = guarded;
                 }
             }
         }
+
+        writer.flush().map_err(|e| e.to_string())?;
+        writer.get_ref().sync_all().map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+
+    if let Err(err) = write_result {
+        let _ = fs::remove_file(&temp_path);
+        return Err(err);
     }
 
-    let file = File::create(&path).map_err(|e| e.to_string())?;
-    let mut writer = BufWriter::new(file);
-
-    if encoding == CsvEncoding::Utf8Bom {
-        writer.write_all(&[0xEF, 0xBB, 0xBF]).map_err(|e| e.to_string())?;
-    }
-
-    // Build the entire CSV body as UTF-8 first, then transcode to the chosen
-    // encoding on write. Keeps the escaping/newline logic in one place.
-    let delim_char = field_separator.chars().next().unwrap_or(',');
-    let mut body = String::new();
-    for row in rows.iter() {
-        let line: Vec<String> = row.iter().map(|s| escape_csv_field(s, delim_char)).collect();
-        body.push_str(&line.join(field_separator));
-        body.push_str("\r\n");
-    }
-
-    match encoding {
-        CsvEncoding::Utf8 | CsvEncoding::Utf8Bom => {
-            writer.write_all(body.as_bytes()).map_err(|e| e.to_string())?;
-        }
-        CsvEncoding::ShiftJis => {
-            // encoding_rs replaces un-encodable chars with the encoder's
-            // fallback (usually "?"). had_errors == true tells us at least
-            // one char was lossy.
-            let (encoded, _enc, had_errors) = encoding_rs::SHIFT_JIS.encode(&body);
-            writer.write_all(&encoded).map_err(|e| e.to_string())?;
-            if had_errors {
-                warnings.push(CompatibilityWarning {
-                    severity: "warning".to_string(),
-                    code: "CSV_SJIS_LOSSY".to_string(),
-                    message:
-                        "Shift_JIS で表現できない文字が含まれていたため、一部が置換されました（通常 ? 等）。データ保全のためには UTF-8 BOM を推奨します。"
-                            .to_string(),
-                    affected_sheets: None,
-                });
-            }
-        }
-    }
-
-    writer.flush().map_err(|e| e.to_string())?;
+    replace_csv_temp_file(&temp_path, target_path)?;
 
     Ok(CsvExportResult {
         success: true,
         path,
-        rows_written: rows.len() as u32,
+        rows_written: n_rows as u32,
         warnings,
         error: None,
     })
 }
 
+fn create_csv_temp_file(target_path: &Path) -> Result<(PathBuf, File), String> {
+    let parent = target_path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = target_path
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_else(|| "export.csv".into());
+
+    for _ in 0..16 {
+        let temp_path = parent.join(format!(
+            ".{}.{}.tmp",
+            file_name,
+            uuid::Uuid::new_v4().simple()
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+        {
+            Ok(file) => return Ok((temp_path, file)),
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err.to_string()),
+        }
+    }
+
+    Err("CSV_TEMP_CREATE_FAILED".into())
+}
+
+fn replace_csv_temp_file(temp_path: &Path, target_path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        };
+
+        let temp_wide: Vec<u16> = temp_path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let target_wide: Vec<u16> = target_path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let ok = unsafe {
+            MoveFileExW(
+                temp_wide.as_ptr(),
+                target_wide.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        if ok == 0 {
+            let err = std::io::Error::last_os_error();
+            let _ = fs::remove_file(temp_path);
+            Err(err.to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        fs::rename(temp_path, target_path).map_err(|err| {
+            let _ = fs::remove_file(temp_path);
+            err.to_string()
+        })
+    }
+}
+
+fn render_csv_cell(
+    cell: &Value,
+    warnings: &mut Vec<CompatibilityWarning>,
+    formula_warning_emitted: &mut bool,
+) -> String {
+    let v_field = cell.get("v");
+    let f_field = cell.get("f").and_then(|f| f.as_str());
+    let fmt_field = cell.get("_fmt").and_then(|f| f.as_str());
+
+    let (raw, is_string_kind) = if let Some(v) = v_field {
+        match v {
+            Value::Null => (String::new(), false),
+            Value::Bool(b) => (
+                if *b {
+                    "TRUE".to_string()
+                } else {
+                    "FALSE".to_string()
+                },
+                false,
+            ),
+            Value::Number(n) => {
+                let serial = n.as_f64();
+                let s = if let (Some(f), Some(fmt)) = (serial, fmt_field) {
+                    if is_text_format(fmt) {
+                        format_number(f)
+                    } else if is_datetime_format(fmt) {
+                        match excel_serial_to_datetime(f) {
+                            Some(dt) => format_date_or_datetime(dt, fmt, true),
+                            None => format_number(f),
+                        }
+                    } else if is_date_only_format(fmt) {
+                        match excel_serial_to_date(f) {
+                            Some(d) => {
+                                format_date_or_datetime(d.and_hms_opt(0, 0, 0).unwrap(), fmt, false)
+                            }
+                            None => format_number(f),
+                        }
+                    } else if is_time_only_format(fmt) {
+                        format_time(f)
+                    } else if is_percent_format(fmt) {
+                        format_percent(f, fmt)
+                    } else if is_currency_format(fmt) {
+                        format_currency(f, fmt)
+                    } else {
+                        format_number(f)
+                    }
+                } else if let Some(f) = serial {
+                    format_number(f)
+                } else {
+                    n.to_string()
+                };
+                (s, false)
+            }
+            Value::String(s) => (s.clone(), true),
+            other => (other.to_string(), false),
+        }
+    } else if let Some(f) = f_field {
+        if !*formula_warning_emitted {
+            warnings.push(CompatibilityWarning {
+                severity: "info".to_string(),
+                code: "CSV_FORMULA_FALLBACK".to_string(),
+                message: "Some formula cells lack cached values; formula text exported instead"
+                    .to_string(),
+                affected_sheets: None,
+            });
+            *formula_warning_emitted = true;
+        }
+        (f.to_string(), true)
+    } else {
+        (String::new(), false)
+    };
+
+    if is_string_kind && needs_injection_guard(&raw) {
+        format!("'{}", raw)
+    } else {
+        raw
+    }
+}
+
 const CSV_MIN_ROWS: usize = 1000;
 const CSV_MIN_COLS: usize = 100;
 const CSV_MAX_CELLS: usize = 5_000_000;
+const CSV_MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
+const CSV_MAX_FIELD_CHARS: usize = 1_000_000;
+const CSV_MAX_RECORD_CHARS: usize = 5_000_000;
+const CSV_MAX_RECORD_BYTES: usize = 8 * 1024 * 1024;
 
 /// Convert a calendar date to Excel's serial-date number system. Excel
 /// historically treats 1900 as a leap year (it isn't), so dates on or after
@@ -396,7 +529,11 @@ fn excel_serial_from_date(date: chrono::NaiveDate) -> f64 {
     let epoch = chrono::NaiveDate::from_ymd_opt(1899, 12, 31).unwrap();
     let days = (date - epoch).num_days();
     let leap_bug_threshold = chrono::NaiveDate::from_ymd_opt(1900, 3, 1).unwrap();
-    let adjusted = if date >= leap_bug_threshold { days + 1 } else { days };
+    let adjusted = if date >= leap_bug_threshold {
+        days + 1
+    } else {
+        days
+    };
     adjusted as f64
 }
 
@@ -461,10 +598,7 @@ fn excel_serial_to_datetime(serial: f64) -> Option<chrono::NaiveDateTime> {
 /// datetime from date-only formats on export.
 fn is_datetime_format(fmt: &str) -> bool {
     let lower = fmt.to_ascii_lowercase();
-    lower.contains('y')
-        && lower.contains('m')
-        && lower.contains('d')
-        && lower.contains('h')
+    lower.contains('y') && lower.contains('m') && lower.contains('d') && lower.contains('h')
 }
 
 /// Parses a time-only string into the Excel fractional-day representation:
@@ -478,7 +612,11 @@ fn parse_csv_time(s: &str) -> Option<f64> {
     }
     let h: u32 = parts[0].parse().ok()?;
     let m: u32 = parts[1].parse().ok()?;
-    let sec: u32 = if parts.len() == 3 { parts[2].parse().ok()? } else { 0 };
+    let sec: u32 = if parts.len() == 3 {
+        parts[2].parse().ok()?
+    } else {
+        0
+    };
     if h >= 24 || m >= 60 || sec >= 60 {
         return None;
     }
@@ -662,11 +800,7 @@ fn format_thousands(value: f64, decimals: usize) -> String {
 /// ISO 8601 if the format code doesn't yield any token replacements.
 /// `is_datetime` controls whether time tokens are emitted; when false we
 /// stop after the date portion so a pure date format stays date-only.
-fn format_date_or_datetime(
-    dt: chrono::NaiveDateTime,
-    fmt: &str,
-    is_datetime: bool,
-) -> String {
+fn format_date_or_datetime(dt: chrono::NaiveDateTime, fmt: &str, is_datetime: bool) -> String {
     use chrono::{Datelike, Timelike};
     let lower = fmt.to_ascii_lowercase();
     // Tokens are matched longest-first to avoid `m` swallowing `mm` etc.
@@ -746,16 +880,18 @@ fn infer_csv_cell(raw: &str) -> Option<Value> {
     }
 
     // CSV injection guard reversal: "'=foo" / "'+foo" / "'-foo" / "'@foo" -> strip leading '
-    let unescaped: String =
-        if let Some(rest) = raw.strip_prefix('\'') {
-            if matches!(rest.chars().next(), Some('=') | Some('+') | Some('-') | Some('@')) {
-                rest.to_string()
-            } else {
-                raw.to_string()
-            }
+    let unescaped: String = if let Some(rest) = raw.strip_prefix('\'') {
+        if matches!(
+            rest.chars().next(),
+            Some('=') | Some('+') | Some('-') | Some('@')
+        ) {
+            rest.to_string()
         } else {
             raw.to_string()
-        };
+        }
+    } else {
+        raw.to_string()
+    };
 
     // Preserve leading-zero strings as strings rather than parsing as ints:
     // account numbers, postal codes, phone numbers like "0001234" lose
@@ -827,15 +963,14 @@ fn detect_and_decode(bytes: &[u8], override_enc: Option<&str>) -> (String, &'sta
         let normalized = raw.to_ascii_lowercase();
         match normalized.as_str() {
             "utf8" | "utf-8" => {
-                let body = if bytes.len() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF {
-                    &bytes[3..]
-                } else {
-                    bytes
-                };
-                return (
-                    String::from_utf8_lossy(body).into_owned(),
-                    "UTF-8 (forced)",
-                );
+                let body =
+                    if bytes.len() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF
+                    {
+                        &bytes[3..]
+                    } else {
+                        bytes
+                    };
+                return (String::from_utf8_lossy(body).into_owned(), "UTF-8 (forced)");
             }
             "shift_jis" | "shift-jis" | "sjis" => {
                 let (cow, _enc, _) = encoding_rs::SHIFT_JIS.decode(bytes);
@@ -889,13 +1024,24 @@ fn infer_delimiter(path_lower: &str, text: &str) -> u8 {
 /// Pure-Rust CSV import. `encoding_override` is None for auto-detect.
 /// Accepts `.csv` and `.tsv` extensions; the delimiter is inferred from the
 /// extension first, then from the content as a fallback.
-pub fn import_csv_core(path: String, encoding_override: Option<String>) -> Result<ImportWorkbookResult, String> {
+pub fn import_csv_core(
+    path: String,
+    encoding_override: Option<String>,
+) -> Result<ImportWorkbookResult, String> {
     let lower = path.to_lowercase();
     if !lower.ends_with(".csv") && !lower.ends_with(".tsv") {
         return Err("CSV_INVALID_EXTENSION".into());
     }
 
     let workbook_id = uuid::Uuid::new_v4().to_string();
+
+    let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if metadata.len() > CSV_MAX_FILE_BYTES {
+        return Err(format!(
+            "CSV_TOO_LARGE: file exceeds {} bytes",
+            CSV_MAX_FILE_BYTES
+        ));
+    }
 
     // Read the whole file (CSV size capped at ~5M cells later anyway).
     let raw = std::fs::read(&path).map_err(|e| e.to_string())?;
@@ -916,6 +1062,7 @@ pub fn import_csv_core(path: String, encoding_override: Option<String>) -> Resul
 
     for (row_idx, record_result) in rdr.records().enumerate() {
         let record = record_result.map_err(|e| e.to_string())?;
+        validate_csv_record_limits(row_idx, &record)?;
         let mut row_map: Map<String, Value> = Map::new();
         for (col_idx, field) in record.iter().enumerate() {
             let cell = match infer_csv_cell(field) {
@@ -1028,9 +1175,46 @@ pub fn import_csv_core(path: String, encoding_override: Option<String>) -> Resul
             path: Some(path),
             source_type: "csv".to_string(),
             snapshot_json: Some(snapshot_json),
+            requires_save_as_on_first_save: true,
         },
         warnings,
     })
+}
+
+fn validate_csv_record_limits(row_idx: usize, record: &csv::StringRecord) -> Result<(), String> {
+    let mut record_chars = record.len().saturating_sub(1);
+    let mut record_bytes = record.len().saturating_sub(1);
+
+    for (col_idx, field) in record.iter().enumerate() {
+        let field_chars = field.chars().count();
+        if field_chars > CSV_MAX_FIELD_CHARS {
+            return Err(format!(
+                "CSV_FIELD_TOO_LARGE: row {}, field {} exceeds {} characters",
+                row_idx + 1,
+                col_idx + 1,
+                CSV_MAX_FIELD_CHARS
+            ));
+        }
+        record_chars = record_chars.saturating_add(field_chars);
+        record_bytes = record_bytes.saturating_add(field.len());
+    }
+
+    if record_bytes > CSV_MAX_RECORD_BYTES {
+        return Err(format!(
+            "CSV_RECORD_TOO_LARGE: row {} exceeds {} bytes",
+            row_idx + 1,
+            CSV_MAX_RECORD_BYTES
+        ));
+    }
+    if record_chars > CSV_MAX_RECORD_CHARS {
+        return Err(format!(
+            "CSV_RECORD_TOO_LARGE: row {} exceeds {} characters",
+            row_idx + 1,
+            CSV_MAX_RECORD_CHARS
+        ));
+    }
+
+    Ok(())
 }
 
 /// Tauri command wrapper that records the file in recent_files.

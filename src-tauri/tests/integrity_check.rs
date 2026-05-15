@@ -25,7 +25,11 @@ fn freshly_saved_file_passes_integrity_check() {
     save_core("wb1".into(), Some(path_str(&path)), "{\"v\":1}".into()).unwrap();
 
     let result = check_integrity_core(&path_str(&path)).unwrap();
-    assert!(result.ok, "expected ok=true, got issues: {:?}", result.issues);
+    assert!(
+        result.ok,
+        "expected ok=true, got issues: {:?}",
+        result.issues
+    );
     assert!(result.issues.is_empty());
 }
 
@@ -44,7 +48,11 @@ fn file_with_many_saves_still_passes() {
         .unwrap();
     }
     let result = check_integrity_core(&path_str(&path)).unwrap();
-    assert!(result.ok, "expected ok=true after 12 saves, got: {:?}", result.issues);
+    assert!(
+        result.ok,
+        "expected ok=true after 12 saves, got: {:?}",
+        result.issues
+    );
 }
 
 #[test]
@@ -58,10 +66,7 @@ fn corrupted_file_returns_ok_false_with_issues() {
 
     // Truncate the file to half its size to provoke a structural complaint.
     let original_size = std::fs::metadata(&path).unwrap().len();
-    let f = std::fs::OpenOptions::new()
-        .write(true)
-        .open(&path)
-        .unwrap();
+    let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
     f.set_len(original_size / 2).unwrap();
     drop(f);
 

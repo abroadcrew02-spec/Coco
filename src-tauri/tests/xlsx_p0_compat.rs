@@ -98,7 +98,8 @@ fn fixture_01_plain_values() {
         // A date (serial 44562 = 2022-01-01) with an explicit numFmt so the
         // import side flags it as a date.
         let date_fmt = Format::new().set_num_format("yyyy-mm-dd");
-        ws.write_number_with_format(3, 0, 44562.0, &date_fmt).unwrap();
+        ws.write_number_with_format(3, 0, 44562.0, &date_fmt)
+            .unwrap();
         wb.save(&fixture).unwrap();
     }
 
@@ -208,9 +209,11 @@ fn fixture_03_formulas_basic() {
         ws1.write_formula(0, 5, "=SUM(A1:A5)").unwrap();
         ws1.write_formula(1, 5, "=AVERAGE(A1:A5)").unwrap();
         // Conditional
-        ws1.write_formula(2, 5, "=IF(A1>0,\"pos\",\"neg\")").unwrap();
+        ws1.write_formula(2, 5, "=IF(A1>0,\"pos\",\"neg\")")
+            .unwrap();
         // VLOOKUP
-        ws1.write_formula(3, 5, "=VLOOKUP(2,C1:D2,2,FALSE)").unwrap();
+        ws1.write_formula(3, 5, "=VLOOKUP(2,C1:D2,2,FALSE)")
+            .unwrap();
 
         // Write the cross-sheet ref BEFORE adding the second sheet so we
         // don't hold two mutable worksheet refs at once.
@@ -288,8 +291,13 @@ fn fixture_04_mixed_styles() {
                 .set_pattern(FormatPattern::Solid),
         )
         .unwrap();
-        ws.write_string_with_format(0, 4, "Centered", &Format::new().set_align(FormatAlign::Center))
-            .unwrap();
+        ws.write_string_with_format(
+            0,
+            4,
+            "Centered",
+            &Format::new().set_align(FormatAlign::Center),
+        )
+        .unwrap();
         wb.save(&fixture).unwrap();
     }
 
@@ -317,7 +325,8 @@ fn fixture_04_mixed_styles() {
         .to_ascii_uppercase();
     assert_eq!(yellow, "#FFFF00", "Yellow fill");
     assert_eq!(
-        style_for(0, 4)["alignment"]["horizontal"], "center",
+        style_for(0, 4)["alignment"]["horizontal"],
+        "center",
         "Centered alignment"
     );
 }
@@ -338,20 +347,10 @@ fn fixture_05_number_formats() {
         ws.set_name("N").unwrap();
         ws.write_number_with_format(0, 0, 0.5, &Format::new().set_num_format("0%"))
             .unwrap();
-        ws.write_number_with_format(
-            1,
-            0,
-            1234.5,
-            &Format::new().set_num_format("$#,##0.00"),
-        )
-        .unwrap();
-        ws.write_number_with_format(
-            2,
-            0,
-            44562.0,
-            &Format::new().set_num_format("yyyy-mm-dd"),
-        )
-        .unwrap();
+        ws.write_number_with_format(1, 0, 1234.5, &Format::new().set_num_format("$#,##0.00"))
+            .unwrap();
+        ws.write_number_with_format(2, 0, 44562.0, &Format::new().set_num_format("yyyy-mm-dd"))
+            .unwrap();
         ws.write_number_with_format(3, 0, 9876.5432, &Format::new().set_num_format("#,##0.00"))
             .unwrap();
         wb.save(&fixture).unwrap();
@@ -386,9 +385,9 @@ fn fixture_06_merged_cells() {
         let ws = wb.add_worksheet();
         ws.set_name("M").unwrap();
         let fmt = Format::new();
-        ws.merge_range(0, 0, 1, 2, "Title", &fmt).unwrap();      // A1:C2
-        ws.merge_range(3, 0, 3, 4, "Subtitle", &fmt).unwrap();   // A4:E4
-        ws.merge_range(5, 1, 7, 2, "Block", &fmt).unwrap();      // B6:C8
+        ws.merge_range(0, 0, 1, 2, "Title", &fmt).unwrap(); // A1:C2
+        ws.merge_range(3, 0, 3, 4, "Subtitle", &fmt).unwrap(); // A4:E4
+        ws.merge_range(5, 1, 7, 2, "Block", &fmt).unwrap(); // B6:C8
         wb.save(&fixture).unwrap();
     }
 
@@ -466,8 +465,14 @@ fn fixture_07_column_row_sizing() {
 
     let h1 = row_data["1"]["h"].as_f64().unwrap_or(0.0);
     let h4 = row_data["4"]["h"].as_f64().unwrap_or(0.0);
-    assert!((h1 - 25.0).abs() < 0.01, "row 1 height should be 25, got {h1}");
-    assert!((h4 - 40.0).abs() < 0.01, "row 4 height should be 40, got {h4}");
+    assert!(
+        (h1 - 25.0).abs() < 0.01,
+        "row 1 height should be 25, got {h1}"
+    );
+    assert!(
+        (h4 - 40.0).abs() < 0.01,
+        "row 4 height should be 40, got {h4}"
+    );
 }
 
 // --------------------------------------------------------------------------
@@ -606,7 +611,8 @@ fn fixture_10_everything() {
             .set_background_color(Color::RGB(0xFFFF00))
             .set_pattern(FormatPattern::Solid)
             .set_border(FormatBorder::Thin);
-        s1.merge_range(0, 0, 0, 2, "Quarterly Sales", &header_fmt).unwrap();
+        s1.merge_range(0, 0, 0, 2, "Quarterly Sales", &header_fmt)
+            .unwrap();
         s1.write_string(1, 0, "Quarter").unwrap();
         s1.write_string(1, 1, "Revenue").unwrap();
         s1.write_string(1, 2, "Date").unwrap();
@@ -614,17 +620,22 @@ fn fixture_10_everything() {
         let date_fmt = Format::new().set_num_format("yyyy-mm-dd");
         let date_val = ExcelDateTime::parse_from_str("2024-01-31").unwrap();
         s1.write_string(2, 0, "Q1").unwrap();
-        s1.write_number_with_format(2, 1, 12345.67, &currency).unwrap();
-        s1.write_datetime_with_format(2, 2, &date_val, &date_fmt).unwrap();
+        s1.write_number_with_format(2, 1, 12345.67, &currency)
+            .unwrap();
+        s1.write_datetime_with_format(2, 2, &date_val, &date_fmt)
+            .unwrap();
         s1.write_string(3, 0, "Q2").unwrap();
-        s1.write_number_with_format(3, 1, 23456.78, &currency).unwrap();
+        s1.write_number_with_format(3, 1, 23456.78, &currency)
+            .unwrap();
         s1.write_string(4, 0, "Total").unwrap();
-        s1.write_formula_with_format(4, 1, "=SUM(B3:B4)", &currency).unwrap();
+        s1.write_formula_with_format(4, 1, "=SUM(B3:B4)", &currency)
+            .unwrap();
 
         // Write the cross-sheet ref on s1 BEFORE adding s2 so we don't hold
         // two mutable worksheet refs at once.
         s1.write_string(6, 0, "LookupTest").unwrap();
-        s1.write_formula(6, 1, "=VLOOKUP(2,Lookup!A2:B3,2,FALSE)").unwrap();
+        s1.write_formula(6, 1, "=VLOOKUP(2,Lookup!A2:B3,2,FALSE)")
+            .unwrap();
 
         // ---- Sheet 2: Lookup — VLOOKUP source ----
         let s2 = wb.add_worksheet();
@@ -647,9 +658,17 @@ fn fixture_10_everything() {
     let order = snap["sheetOrder"].as_array().unwrap();
     let names: Vec<&str> = order
         .iter()
-        .map(|id| snap["sheets"][id.as_str().unwrap()]["name"].as_str().unwrap())
+        .map(|id| {
+            snap["sheets"][id.as_str().unwrap()]["name"]
+                .as_str()
+                .unwrap()
+        })
         .collect();
-    assert_eq!(names, vec!["Sales", "Lookup"], "sheet order should be preserved");
+    assert_eq!(
+        names,
+        vec!["Sales", "Lookup"],
+        "sheet order should be preserved"
+    );
 
     // --- Merge survives on Sales ---
     let merges = snap["sheets"]["sheet-1"]["mergeData"]
@@ -672,7 +691,10 @@ fn fixture_10_everything() {
         .and_then(|v| v.as_str())
         .unwrap_or_else(|| panic!("Sales!A1 header should have style id, got {header}"));
     let style = &snap["styles"][s_id];
-    assert_eq!(style["font"]["bold"], true, "header bold; full style={style}");
+    assert_eq!(
+        style["font"]["bold"], true,
+        "header bold; full style={style}"
+    );
     assert_eq!(
         style["alignment"]["horizontal"], "center",
         "header centered; style={style}"
@@ -703,7 +725,10 @@ fn fixture_10_everything() {
         .get("f")
         .and_then(|v| v.as_str())
         .expect("total formula");
-    assert!(total_f.contains("SUM"), "total should be SUM, got {total_f}");
+    assert!(
+        total_f.contains("SUM"),
+        "total should be SUM, got {total_f}"
+    );
 
     let vlookup = cell(&snap, "sheet-1", 6, 1);
     let vlookup_f = vlookup
@@ -718,9 +743,7 @@ fn fixture_10_everything() {
     // --- Named range Revenue survived ---
     let named = snap["namedRanges"].as_array().expect("namedRanges");
     assert!(
-        named
-            .iter()
-            .any(|e| e["name"].as_str() == Some("Revenue")),
+        named.iter().any(|e| e["name"].as_str() == Some("Revenue")),
         "Revenue named range should round-trip, got {named:?}"
     );
 

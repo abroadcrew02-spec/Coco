@@ -66,8 +66,7 @@ pub fn security_scan_xlsx(path: String) -> Result<SecurityScanResult, String> {
     }
 
     let file = File::open(&path).map_err(|e| e.to_string())?;
-    let mut archive =
-        ZipArchive::new(file).map_err(|e| format!("Invalid xlsx (zip): {e}"))?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("Invalid xlsx (zip): {e}"))?;
 
     let entry_count = archive.len();
     if entry_count > MAX_ENTRY_COUNT {

@@ -88,11 +88,11 @@ None.
 - **Effort**: M
 - **Why deferred**: `CellStyle` scope is font / fill / alignment / borders. Number formats and rich text round-trip via separate paths (`_fmt`, rich-text runs B1) but are not deduplicated through the same style hash.
 
-### medium-security-row-col-formula-caps
+### medium-security-row-col-formula-caps (closed)
 - **Title**: §5.3.2 row / column / formula limit checks in `security_scan_xlsx`
 - **Refs**: `src-tauri/src/commands/security.rs:44`, `src-tauri/src/commands/security.rs:113`, COVERAGE.md FR-104
 - **Effort**: M
-- **Why deferred**: Currently emits the informational warning "Row/column/formula limits not yet checked (Phase 2)". Caps for file size / inflated size / entry count / per-XML size / sheet count are enforced.
+- **Resolution**: `security_scan_xlsx` now streams worksheet XML to enforce the 1,000,000 row and 16,384 column hard caps before import, and emits a soft warning when formula count exceeds 1,000,000. Tests in `src-tauri/tests/xlsx_security_caps.rs` cover dimension-based caps, boundary values, formula-heavy warnings, and streaming fallback without `<dimension>`.
 
 ### medium-concurrent-open-race (closed)
 - **Title**: Request-token "newer wins" for `openCoco` / `importXlsx`

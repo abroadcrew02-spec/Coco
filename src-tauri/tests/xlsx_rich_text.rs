@@ -60,7 +60,8 @@ fn bold_run_plus_plain_run_round_trips() {
     }
 
     let imported = import_xlsx_core(path_str(&fixture)).expect("import");
-    let snap: Value = serde_json::from_str(&imported.handle.snapshot_json.clone().unwrap()).unwrap();
+    let snap: Value =
+        serde_json::from_str(&imported.handle.snapshot_json.clone().unwrap()).unwrap();
     let cell = &snap["sheets"]["sheet-1"]["cellData"]["0"]["0"];
     let runs = cell
         .get("_richRuns")
@@ -98,7 +99,10 @@ fn bold_run_plus_plain_run_round_trips() {
         ss
     );
     assert!(
-        ss.contains("<b/>") || ss.contains("<b val=\"true\"") || ss.contains("<b ") || ss.contains("<b>"),
+        ss.contains("<b/>")
+            || ss.contains("<b val=\"true\"")
+            || ss.contains("<b ")
+            || ss.contains("<b>"),
         "exported sharedStrings should mark a bold run: {}",
         ss
     );
@@ -123,17 +127,14 @@ fn three_runs_bold_italic_colored() {
         let bold = Format::new().set_bold();
         let italic = Format::new().set_italic();
         let red = Format::new().set_font_color(Color::RGB(0xFF0000));
-        let segments = [
-            (&bold, "Bold"),
-            (&italic, "Italic"),
-            (&red, "Red"),
-        ];
+        let segments = [(&bold, "Bold"), (&italic, "Italic"), (&red, "Red")];
         ws.write_rich_string(0, 0, &segments).expect("rich_string");
         wb.save(&fixture).expect("save fixture");
     }
 
     let imported = import_xlsx_core(path_str(&fixture)).expect("import");
-    let snap: Value = serde_json::from_str(&imported.handle.snapshot_json.clone().unwrap()).unwrap();
+    let snap: Value =
+        serde_json::from_str(&imported.handle.snapshot_json.clone().unwrap()).unwrap();
     let cell = &snap["sheets"]["sheet-1"]["cellData"]["0"]["0"];
     let runs = cell
         .get("_richRuns")
@@ -243,14 +244,18 @@ fn inline_string_rich_runs() {
     }
 
     let imported = import_xlsx_core(path_str(&fixture)).expect("import");
-    let snap: Value =
-        serde_json::from_str(&imported.handle.snapshot_json.unwrap()).unwrap();
+    let snap: Value = serde_json::from_str(&imported.handle.snapshot_json.unwrap()).unwrap();
     let cell = &snap["sheets"]["sheet-1"]["cellData"]["0"]["0"];
     let runs = cell
         .get("_richRuns")
         .and_then(|v| v.as_array())
         .expect("expected _richRuns on inline cell");
-    assert_eq!(runs.len(), 2, "expected 2 runs from inline string, got {}", cell);
+    assert_eq!(
+        runs.len(),
+        2,
+        "expected 2 runs from inline string, got {}",
+        cell
+    );
     assert_eq!(runs[0]["text"], "Bold ");
     assert_eq!(runs[0]["bold"], true);
     assert_eq!(runs[1]["text"], "plain");
@@ -273,7 +278,8 @@ fn plain_string_has_no_rich_runs() {
     }
 
     let imported = import_xlsx_core(path_str(&fixture)).expect("import");
-    let snap: Value = serde_json::from_str(&imported.handle.snapshot_json.clone().unwrap()).unwrap();
+    let snap: Value =
+        serde_json::from_str(&imported.handle.snapshot_json.clone().unwrap()).unwrap();
     let cell = &snap["sheets"]["sheet-1"]["cellData"]["0"]["0"];
     assert_eq!(cell["v"], "just text");
     assert!(
@@ -322,11 +328,7 @@ fn poc_banner_lists_rich_text_as_preserved() {
         .expect("PoC banner present");
     // The not-yet-preserved list (everything before "are not yet preserved" /
     // "is not yet preserved") must NOT contain "rich text" anymore.
-    let lead = poc
-        .message
-        .split("not yet preserved")
-        .next()
-        .unwrap_or("");
+    let lead = poc.message.split("not yet preserved").next().unwrap_or("");
     assert!(
         !lead.contains("rich text"),
         "import banner should no longer list rich text as not preserved: {}",

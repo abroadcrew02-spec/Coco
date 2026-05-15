@@ -1,6 +1,6 @@
 use tauri::Manager;
 
-use crate::commands::workbook::SaveResult;
+use crate::commands::workbook::{SaveResult, MAX_SNAPSHOTS_PER_WORKBOOK};
 
 pub fn autosave_temp_core(
     data_dir: &std::path::Path,
@@ -29,6 +29,19 @@ pub fn autosave_temp_core(
         rusqlite::params![workbook_id, snapshot_json, now],
     ).map_err(|e| e.to_string())?;
 
+    conn.execute(
+        "DELETE FROM workbook_snapshots
+         WHERE workbook_id = ?1
+           AND snapshot_id NOT IN (
+             SELECT snapshot_id FROM workbook_snapshots
+             WHERE workbook_id = ?1
+             ORDER BY snapshot_id DESC
+             LIMIT ?2
+           )",
+        rusqlite::params![workbook_id, MAX_SNAPSHOTS_PER_WORKBOOK],
+    )
+    .map_err(|e| e.to_string())?;
+
     let ok: String = conn
         .query_row("PRAGMA integrity_check", [], |row| row.get(0))
         .map_err(|e| e.to_string())?;
@@ -52,7 +65,8 @@ pub fn autosave_temp_core(
         None,
         &temp_path_str,
         "auto_save",
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(SaveResult {
         success: true,
@@ -61,10 +75,7 @@ pub fn autosave_temp_core(
     })
 }
 
-pub fn clear_recovery_core(
-    data_dir: &std::path::Path,
-    candidate_id: &str,
-) -> Result<(), String> {
+pub fn clear_recovery_core(data_dir: &std::path::Path, candidate_id: &str) -> Result<(), String> {
     let conn = crate::db::app_db::open_app_db_at(data_dir)?;
     let temp_path: Option<String> = conn
         .query_row(
@@ -95,10 +106,7 @@ pub fn workbook_autosave_temp(
 }
 
 #[tauri::command]
-pub fn workbook_clear_recovery(
-    app: tauri::AppHandle,
-    candidate_id: String,
-) -> Result<(), String> {
+pub fn workbook_clear_recovery(app: tauri::AppHandle, candidate_id: String) -> Result<(), String> {
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     clear_recovery_core(&data_dir, &candidate_id)
 }

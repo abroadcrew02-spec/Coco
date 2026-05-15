@@ -57,7 +57,12 @@ fn vacuum_after_many_saves_reduces_or_holds_size() {
 fn vacuum_preserves_existing_data() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("data.coco");
-    save_core("wb1".into(), Some(path_str(&path)), "{\"keep\":\"yes\"}".into()).unwrap();
+    save_core(
+        "wb1".into(),
+        Some(path_str(&path)),
+        "{\"keep\":\"yes\"}".into(),
+    )
+    .unwrap();
     vacuum_core(&path_str(&path)).unwrap();
     // The file should still be a valid SQLite DB with the saved snapshot.
     let conn = rusqlite::Connection::open(&path).unwrap();

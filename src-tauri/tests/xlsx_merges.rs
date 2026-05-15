@@ -28,13 +28,11 @@ fn build_fixture(path: &PathBuf, merges: &[&str]) {
     let fmt = Format::new();
     for m in merges {
         // Parse "A1:B2" → (sr, sc, er, ec) via calamine-free split.
-        let (lhs, rhs) = m
-            .split_once(':')
-            .map(|(a, b)| (a, b))
-            .unwrap_or((*m, *m));
+        let (lhs, rhs) = m.split_once(':').map(|(a, b)| (a, b)).unwrap_or((*m, *m));
         let (sr, sc) = a1_to_rc(lhs);
         let (er, ec) = a1_to_rc(rhs);
-        ws.merge_range(sr, sc, er, ec, "M", &fmt).expect("merge_range");
+        ws.merge_range(sr, sc, er, ec, "M", &fmt)
+            .expect("merge_range");
     }
     wb.save(path).expect("save");
 }
@@ -209,8 +207,7 @@ fn single_cell_merge_is_filtered_out() {
 
     // Unzip → patch sheet1.xml → re-zip.
     let src_bytes = fs::read(&fixture).expect("read seed");
-    let mut src_archive =
-        ZipArchive::new(std::io::Cursor::new(src_bytes)).expect("seed zip");
+    let mut src_archive = ZipArchive::new(std::io::Cursor::new(src_bytes)).expect("seed zip");
 
     let out = fs::File::create(&patched).expect("create patched");
     let mut zip = zip::ZipWriter::new(out);
@@ -227,11 +224,10 @@ fn single_cell_merge_is_filtered_out() {
             let xml = String::from_utf8(data).expect("utf8");
             // Inject an A1:A1 merge alongside the existing B2:C3 entry. Bump
             // the count attr so consumers that trust it still parse cleanly.
-            let patched_xml = xml
-                .replace(
-                    "<mergeCells count=\"1\">",
-                    "<mergeCells count=\"2\"><mergeCell ref=\"A1:A1\"/>",
-                );
+            let patched_xml = xml.replace(
+                "<mergeCells count=\"1\">",
+                "<mergeCells count=\"2\"><mergeCell ref=\"A1:A1\"/>",
+            );
             assert!(
                 patched_xml != xml,
                 "expected to find the seed mergeCells block to patch; original was:\n{xml}"

@@ -33,6 +33,7 @@ function resetStore() {
       path: "/tmp/wb.coco",
       sourceType: "coco",
       snapshotJson: "{}",
+      requiresSaveAsOnFirstSave: false,
     },
     saveStatus: "saved",
     importWarnings: [],

@@ -1,5 +1,5 @@
-use rusqlite::Connection;
 use crate::error::Result;
+use rusqlite::Connection;
 
 pub const CURRENT_SCHEMA_VERSION: i64 = 1;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -21,7 +21,7 @@ pub fn initialize(conn: &Connection) -> Result<()> {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             source_path TEXT,
-            source_type TEXT NOT NULL CHECK (source_type IN ('new', 'coco', 'xlsx')),
+            source_type TEXT NOT NULL CHECK (source_type IN ('new', 'coco', 'xlsx', 'csv')),
             calc_mode TEXT NOT NULL CHECK (calc_mode IN ('auto', 'manual')),
             locale TEXT NOT NULL DEFAULT 'ja-JP',
             encrypted INTEGER NOT NULL DEFAULT 0
@@ -171,11 +171,9 @@ pub fn initialize(conn: &Connection) -> Result<()> {
 /// for tests that need to assert the database has been stamped.
 pub fn current_schema_version(conn: &Connection) -> Result<Option<i64>> {
     let v: Option<i64> = conn
-        .query_row(
-            "SELECT MAX(version) FROM schema_version",
-            [],
-            |row| row.get::<_, Option<i64>>(0),
-        )
+        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+            row.get::<_, Option<i64>>(0)
+        })
         .ok()
         .flatten();
     Ok(v)

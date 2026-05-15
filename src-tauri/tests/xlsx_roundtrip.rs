@@ -621,3 +621,219 @@ fn sheet_with_31_char_name_not_truncated() {
     let expected_truncated: String = too_long_32.chars().take(31).collect();
     assert_eq!(names32[0], expected_truncated);
 }
+
+// ---- Low tier edge cases (low-xlsx-roundtrip-edge-cases) ----
+
+#[test]
+fn max_corner_cell_xfd1048576_roundtrip() {
+    // Excel's max corner is XFD1048576 — col 16383, row 1048575 (zero-indexed).
+    // Forging this via JSON sidesteps any API-level row/col validation and
+    // exercises the writer's index handling at the boundary. The cell must
+    // survive an export → re-open with calamine.
+    let tmp = TempDir::new().expect("tempdir");
+    let exported = tmp.path().join("max_corner.xlsx");
+
+    let snapshot = serde_json::json!({
+        "id": "wb",
+        "name": "MaxCorner",
+        "appVersion": "0.1.0",
+        "locale": "enUS",
+        "styles": {},
+        "sheetOrder": ["sheet-1"],
+        "sheets": {
+            "sheet-1": {
+                "id": "sheet-1",
+                "name": "Corner",
+                "rowCount": 1_048_576,
+                "columnCount": 16_384,
+                "cellData": {
+                    "1048575": { "16383": { "v": "corner" } }
+                }
+            }
+        },
+        "namedRanges": [],
+    });
+
+    let result = export_xlsx_core(
+        path_str(&exported),
+        serde_json::to_string(&snapshot).unwrap(),
+    )
+    .expect("core call returns Ok");
+    assert!(
+        result.success,
+        "export at max corner should succeed; got error={:?}",
+        result.error
+    );
+
+    let mut wb: Xlsx<_> = open_workbook(&exported).expect("open exported");
+    let range = wb.worksheet_range("Corner").expect("Corner sheet exists");
+    // calamine returns positions relative to the dimension start, so use
+    // get_value with the absolute (row, col).
+    let v = range.get_value((1_048_575, 16_383));
+    assert_eq!(
+        v,
+        Some(&Data::String("corner".into())),
+        "value at XFD1048576 should round-trip"
+    );
+}
+
+#[test]
+fn number_as_text_format_preserved_through_roundtrip() {
+    // A cell stored as a string "123" with the text format ("@") must NOT
+    // become numeric on export. Excel distinguishes between `<v>123</v>`
+    // (number) and `<v>123</v>` under `t="s"` / shared-strings (text). We
+    // round-trip via the snapshot's `_fmt: "@"` marker.
+    let tmp = TempDir::new().expect("tempdir");
+    let exported = tmp.path().join("num_as_text.xlsx");
+
+    let snapshot = serde_json::json!({
+        "id": "wb",
+        "name": "NumAsText",
+        "appVersion": "0.1.0",
+        "locale": "enUS",
+        "styles": {},
+        "sheetOrder": ["sheet-1"],
+        "sheets": {
+            "sheet-1": {
+                "id": "sheet-1",
+                "name": "S",
+                "rowCount": 10,
+                "columnCount": 5,
+                "cellData": {
+                    "0": {
+                        "0": { "v": "123", "_fmt": "@" },
+                        "1": { "v": 123 }
+                    }
+                }
+            }
+        },
+        "namedRanges": [],
+    });
+
+    let result = export_xlsx_core(
+        path_str(&exported),
+        serde_json::to_string(&snapshot).unwrap(),
+    )
+    .expect("core call returns Ok");
+    assert!(result.success, "export should succeed: {:?}", result.error);
+
+    let mut wb: Xlsx<_> = open_workbook(&exported).expect("open exported");
+    let range = wb.worksheet_range("S").expect("S sheet exists");
+    // A1: the text-typed "123" must come back as a String, NOT a number.
+    let a1 = range.get_value((0, 0));
+    assert_eq!(
+        a1,
+        Some(&Data::String("123".into())),
+        "text-typed '123' must round-trip as String, not Float; got {:?}",
+        a1
+    );
+    // B1: real number 123 stays numeric.
+    let b1 = range.get_value((0, 1));
+    assert!(
+        matches!(b1, Some(Data::Float(f)) if (*f - 123.0).abs() < f64::EPSILON)
+            || matches!(b1, Some(Data::Int(123))),
+        "numeric 123 should round-trip as a number; got {:?}",
+        b1
+    );
+}
+
+#[test]
+fn formula_referencing_missing_sheet_preserves_formula_text() {
+    // A formula like `=Ghost!A1` references a sheet that doesn't exist in
+    // the workbook. The formula text must round-trip verbatim — Excel will
+    // show #REF! on open but the SOURCE TEXT must be preserved so the user
+    // can edit/repair it. This guards against silent rewrite-to-#REF! on
+    // export.
+    let tmp = TempDir::new().expect("tempdir");
+    let exported = tmp.path().join("missing_sheet_ref.xlsx");
+
+    let snapshot = serde_json::json!({
+        "id": "wb",
+        "name": "MissingRef",
+        "appVersion": "0.1.0",
+        "locale": "enUS",
+        "styles": {},
+        "sheetOrder": ["sheet-1"],
+        "sheets": {
+            "sheet-1": {
+                "id": "sheet-1",
+                "name": "Main",
+                "rowCount": 10,
+                "columnCount": 5,
+                // B1 references Ghost!A1 with a cached value of 42 from the
+                // last time Ghost existed. Both `f` and `v` must survive.
+                "cellData": {
+                    "0": {
+                        "0": { "v": "anchor" },
+                        "1": { "f": "=Ghost!A1", "v": 42 }
+                    }
+                }
+            }
+        },
+        "namedRanges": [],
+    });
+
+    let result = export_xlsx_core(
+        path_str(&exported),
+        serde_json::to_string(&snapshot).unwrap(),
+    )
+    .expect("core call returns Ok");
+    assert!(
+        result.success,
+        "export with dangling sheet ref should succeed: {:?}",
+        result.error
+    );
+
+    let mut wb: Xlsx<_> = open_workbook(&exported).expect("open exported");
+    let formulas = wb.worksheet_formula("Main").expect("formula range");
+    let cell = formulas
+        .get_value((0, 1))
+        .expect("Main!B1 should exist in formula range");
+    assert!(!cell.is_empty(), "formula text must be preserved");
+    assert!(
+        cell.contains("Ghost") && cell.contains("A1"),
+        "formula must still reference Ghost!A1, got: {cell}"
+    );
+}
+
+#[test]
+fn unicode_sheet_name_japanese_chinese_emoji_roundtrip() {
+    // Sheet name combining Japanese (日本語), Chinese (中文), and an emoji
+    // (🚀). All non-illegal-OOXML chars should survive sanitization and
+    // round-trip byte-for-byte through export + re-open.
+    let tmp = TempDir::new().expect("tempdir");
+    let fixture = tmp.path().join("unicode_name.xlsx");
+    let exported = tmp.path().join("unicode_name_out.xlsx");
+
+    let raw_name = "日本語_中文_🚀";
+    // Make sure it's within Excel's 31-char limit (char count, not byte count).
+    assert!(raw_name.chars().count() <= 31, "name must fit Excel's 31-char limit");
+
+    {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name(raw_name)
+            .expect("rust_xlsxwriter accepts unicode sheet names");
+        ws.write_string(0, 0, "v").unwrap();
+        wb.save(&fixture).expect("save unicode fixture");
+    }
+
+    let result = import_xlsx_core(path_str(&fixture)).expect("import");
+    let snapshot_json = result.handle.snapshot_json.clone().expect("snap");
+    let snapshot: Value = serde_json::from_str(&snapshot_json).expect("parse");
+    assert_eq!(
+        snapshot["sheets"]["sheet-1"]["name"], raw_name,
+        "unicode name must survive import unchanged"
+    );
+
+    let export_result = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
+    assert!(export_result.success, "unicode-name export should succeed: {:?}", export_result.error);
+
+    let wb_out: Xlsx<_> = open_workbook(&exported).expect("open exported");
+    let names = wb_out.sheet_names();
+    assert_eq!(
+        names,
+        vec![raw_name.to_string()],
+        "unicode sheet name must survive export unchanged"
+    );
+}

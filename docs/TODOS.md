@@ -135,16 +135,15 @@ None.
 - **Refs**: `.claude/audit-findings.md` items 18-19
 - **Effort**: S
 
-### low-csv-import-edge-cases
+### low-csv-import-edge-cases (closed)
 - **Title**: Missing CSV import edge-case tests (full-width digits, Excel 1900 leap bug, mixed line endings, RFC4180 quoting…)
 - **Refs**: `.claude/audit-findings.md` items 1-9
-- **Effort**: M
-- **Why deferred**: Per feedback_feature_first memory: ship MVP features, file issues for testing later.
+- **Resolution**: Audit items 1-9 are covered by tests in `src-tauri/tests/csv_import.rs` (`iso_date_with_trailing_whitespace_stays_string`, `fullwidth_digit_percentage_stays_string`, `excel_1900_leap_bug_serial_60_handled`, `extreme_dates_9999_and_1900_01_01`, `percent_minus_100_and_tiny_fraction`, `time_out_of_range_rejected`, `cr_only_line_endings_old_mac_csv`, `mixed_crlf_and_lf_in_same_file`, `quoted_field_with_internal_doublequote_and_newline`). Additional boundary edge cases now in `src-tauri/tests/csv_io.rs`: single-cell without trailing newline, BOM-only file, zero-byte file, RFC 4180 hardest case (quote+comma+newline combined), locale decimal comma stays text (bare + quoted), 32,767-char field at the Excel cell-text cap.
 
-### low-xlsx-roundtrip-edge-cases
+### low-xlsx-roundtrip-edge-cases (closed)
 - **Title**: Missing xlsx round-trip tests (empty workbook export rejected, name-collision after sanitization, cross-sheet formula, 31-char sheet name)
 - **Refs**: `.claude/audit-findings.md` items 10-13
-- **Effort**: S
+- **Resolution**: Audit items 10-13 covered in `src-tauri/tests/xlsx_roundtrip.rs` (`empty_workbook_export_rejected`, `sheet_name_collision_after_sanitization` + three-way + dedup-skips-existing-suffix, `cross_sheet_formula_round_trip`, `sheet_with_31_char_name_not_truncated`). Additional boundary cases added: `max_corner_cell_xfd1048576_roundtrip` (last cell at the Excel grid corner), `number_as_text_format_preserved_through_roundtrip` (text "123" stays text vs numeric 123), `formula_referencing_missing_sheet_preserves_formula_text` (dangling `=Ghost!A1` keeps formula text + cached value), `unicode_sheet_name_japanese_chinese_emoji_roundtrip`.
 
 ---
 

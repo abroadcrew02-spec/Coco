@@ -20,6 +20,7 @@ function makeHandle(path: string | null = "/tmp/wb.coco") {
     path,
     sourceType: "coco" as const,
     snapshotJson: "{}",
+    requiresSaveAsOnFirstSave: false,
   };
 }
 
@@ -32,6 +33,7 @@ function resetStore() {
     recentFiles: [],
     recoveryCandidates: [],
     currentSnapshotJson: "{}",
+    dirtyRevision: 0,
     isExporting: false,
     exportWarnings: [],
     blockingImport: null,
@@ -96,6 +98,28 @@ describe("useAutoSave", () => {
     // xlsx path → autosave_temp (not autosave_coco)
     expect(invokeMock.mock.calls.find((c) => c[0] === "workbook_autosave_temp")).toBeTruthy();
     expect(invokeMock.mock.calls.find((c) => c[0] === "workbook_autosave_coco")).toBeFalsy();
+    expect(useWorkbookStore.getState().saveStatus).toBe("unsaved");
+  });
+
+  it("re-arms xlsx temp autosave when a new edit arrives while still unsaved", async () => {
+    useWorkbookStore.setState({ currentHandle: makeHandle("/tmp/book.xlsx") });
+    render(<Probe />);
+    act(() => useWorkbookStore.setState({ saveStatus: "unsaved" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    const callsAfterFirst = invokeMock.mock.calls.filter((c) =>
+      String(c[0]).startsWith("workbook_autosave")
+    ).length;
+
+    act(() => useWorkbookStore.getState().markDirty());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    const callsAfterSecond = invokeMock.mock.calls.filter((c) =>
+      String(c[0]).startsWith("workbook_autosave")
+    ).length;
+    expect(callsAfterSecond).toBe(callsAfterFirst + 1);
   });
 
   it("does not autosave twice in a row when no new edits arrive", async () => {

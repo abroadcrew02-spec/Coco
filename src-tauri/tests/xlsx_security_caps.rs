@@ -34,8 +34,7 @@ fn build_zip(tmp: &TempDir, name: &str, entries: &[(&str, &[u8])]) -> std::path:
 fn row_limit_exceeded_via_dimension_blocks_import() {
     let tmp = TempDir::new().expect("tempdir");
     // Dimension declares row 1,000,001 — one past the §5.3.2 cap.
-    let sheet_xml =
-        b"<worksheet><dimension ref=\"A1:A1000001\"/><sheetData/></worksheet>";
+    let sheet_xml = b"<worksheet><dimension ref=\"A1:A1000001\"/><sheetData/></worksheet>";
     let path = build_zip(
         &tmp,
         "rowcap.xlsx",
@@ -46,7 +45,11 @@ fn row_limit_exceeded_via_dimension_blocks_import() {
     );
 
     let r = security_scan_xlsx(path_str(&path)).expect("scan ok");
-    assert!(r.blocked, "1,000,001-row sheet should be blocked, got {:?}", r);
+    assert!(
+        r.blocked,
+        "1,000,001-row sheet should be blocked, got {:?}",
+        r
+    );
     assert!(
         r.issues.iter().any(|m| m.contains("XLSX_ROW_LIMIT")),
         "expected XLSX_ROW_LIMIT issue, got {:?}",
@@ -121,8 +124,7 @@ fn formula_heavy_sheet_warns_but_does_not_block() {
 fn row_limit_exactly_at_cap_is_allowed() {
     // 1,000,000 rows is the cap itself — must NOT block. Boundary check.
     let tmp = TempDir::new().expect("tempdir");
-    let sheet_xml =
-        b"<worksheet><dimension ref=\"A1:A1000000\"/><sheetData/></worksheet>";
+    let sheet_xml = b"<worksheet><dimension ref=\"A1:A1000000\"/><sheetData/></worksheet>";
     let path = build_zip(
         &tmp,
         "rowboundary.xlsx",
@@ -149,7 +151,11 @@ fn col_limit_exactly_at_cap_is_allowed() {
         ],
     );
     let r = security_scan_xlsx(path_str(&path)).expect("scan ok");
-    assert!(!r.blocked, "exactly 16,384 cols should be allowed, got {:?}", r);
+    assert!(
+        !r.blocked,
+        "exactly 16,384 cols should be allowed, got {:?}",
+        r
+    );
 }
 
 #[test]

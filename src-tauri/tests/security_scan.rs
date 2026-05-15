@@ -79,14 +79,19 @@ fn test_zip_with_too_many_entries_blocked() {
         let mut zip = zip::ZipWriter::new(file);
         let opts: FileOptions = FileOptions::default();
         for i in 0..2001 {
-            zip.start_file(format!("entry_{i}.bin"), opts).expect("start_file");
+            zip.start_file(format!("entry_{i}.bin"), opts)
+                .expect("start_file");
             zip.write_all(b"x").expect("write entry");
         }
         zip.finish().expect("finish zip");
     }
 
     let result = security_scan_xlsx(path_str(&path)).expect("scan should succeed (valid zip)");
-    assert!(result.blocked, "too many entries should be blocked, got {:?}", result);
+    assert!(
+        result.blocked,
+        "too many entries should be blocked, got {:?}",
+        result
+    );
     assert!(
         result
             .issues
@@ -123,9 +128,10 @@ fn test_zip_with_many_sheets_warns_then_blocks() {
         r_warn
     );
     assert!(
-        r_warn.warnings.iter().any(|m| m.contains("Sheet count")
-            || m.contains("101")
-            || m.contains("soft limit")),
+        r_warn
+            .warnings
+            .iter()
+            .any(|m| m.contains("Sheet count") || m.contains("101") || m.contains("soft limit")),
         "expected sheet-count soft warning, got {:?}",
         r_warn.warnings
     );

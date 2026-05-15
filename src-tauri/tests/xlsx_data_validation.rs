@@ -23,7 +23,9 @@ fn path_str(p: &PathBuf) -> String {
 fn read_sheet1_xml(path: &PathBuf) -> String {
     let file = std::fs::File::open(path).expect("open xlsx");
     let mut archive = zip::ZipArchive::new(file).expect("zip");
-    let mut entry = archive.by_name("xl/worksheets/sheet1.xml").expect("sheet1.xml");
+    let mut entry = archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .expect("sheet1.xml");
     let mut xml = String::new();
     entry.read_to_string(&mut xml).expect("read xml");
     xml
@@ -71,8 +73,7 @@ fn list_validation_round_trips() {
 
     // Re-import the exported file and confirm the rule is still there.
     let re = import_xlsx_core(path_str(&exported)).expect("re-import");
-    let re_snap: Value =
-        serde_json::from_str(&re.handle.snapshot_json.unwrap()).expect("parse");
+    let re_snap: Value = serde_json::from_str(&re.handle.snapshot_json.unwrap()).expect("parse");
     let re_dvs = re_snap["sheets"]["sheet-1"]["_dataValidations"]
         .as_array()
         .expect("_dataValidations after round-trip");
@@ -95,8 +96,8 @@ fn decimal_between_validation_round_trips() {
         let mut wb = Workbook::new();
         let ws = wb.add_worksheet();
         ws.set_name("Sheet1").unwrap();
-        let dv = DataValidation::new()
-            .allow_decimal_number(DataValidationRule::Between(0.0, 100.5));
+        let dv =
+            DataValidation::new().allow_decimal_number(DataValidationRule::Between(0.0, 100.5));
         ws.add_data_validation(0, 1, 0, 1, &dv).expect("add dv");
         wb.save(&fixture).expect("save");
     }
@@ -115,16 +116,12 @@ fn decimal_between_validation_round_trips() {
     assert_eq!(dvs[0]["formula1"].as_str(), Some("0"));
     assert_eq!(dvs[0]["formula2"].as_str(), Some("100.5"));
 
-    let export = export_xlsx_core(
-        path_str(&exported),
-        imported.handle.snapshot_json.unwrap(),
-    )
-    .expect("export");
+    let export = export_xlsx_core(path_str(&exported), imported.handle.snapshot_json.unwrap())
+        .expect("export");
     assert!(export.success, "export ok: {:?}", export.error);
 
     let re = import_xlsx_core(path_str(&exported)).expect("re-import");
-    let re_snap: Value =
-        serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_snap: Value = serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
     let re_dvs = re_snap["sheets"]["sheet-1"]["_dataValidations"]
         .as_array()
         .expect("dv survives round-trip");
@@ -172,16 +169,12 @@ fn error_title_and_message_preserved() {
     assert_eq!(dvs[0]["promptTitle"].as_str(), Some("Star rating"));
     assert_eq!(dvs[0]["promptMessage"].as_str(), Some("Enter 1-5"));
 
-    let export = export_xlsx_core(
-        path_str(&exported),
-        imported.handle.snapshot_json.unwrap(),
-    )
-    .expect("export");
+    let export = export_xlsx_core(path_str(&exported), imported.handle.snapshot_json.unwrap())
+        .expect("export");
     assert!(export.success);
 
     let re = import_xlsx_core(path_str(&exported)).expect("re-import");
-    let re_snap: Value =
-        serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_snap: Value = serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
     let re_dvs = re_snap["sheets"]["sheet-1"]["_dataValidations"]
         .as_array()
         .expect("dv survives");

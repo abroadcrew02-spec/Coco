@@ -15,8 +15,9 @@ pub const MAX_TOTAL_BACKUP_BYTES: u64 = 1024 * 1024 * 1024; // 1 GB
 pub struct WorkbookHandle {
     pub workbook_id: String,
     pub path: Option<String>,
-    pub source_type: String, // "new" | "coco" | "xlsx"
+    pub source_type: String, // "new" | "coco" | "xlsx" | "csv"
     pub snapshot_json: Option<String>,
+    pub requires_save_as_on_first_save: bool,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -119,6 +120,23 @@ pub fn rotate_backups(target: &Path) -> io::Result<()> {
     Ok(())
 }
 
+pub fn checkpoint_existing_wal(target: &Path) -> Result<(), String> {
+    if !target.exists() {
+        return Ok(());
+    }
+
+    let conn = Connection::open(target).map_err(|e| e.to_string())?;
+    let busy: i64 = conn
+        .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+
+    if busy != 0 {
+        return Err("WAL checkpoint could not complete because the database is busy".to_string());
+    }
+
+    Ok(())
+}
+
 /// Sum of all existing .bak.* file sizes for the given target. Missing files
 /// contribute zero.
 pub fn total_backup_size(target: &Path) -> u64 {
@@ -184,6 +202,7 @@ fn do_save(
     let tmp_path = temp_save_path(&target);
 
     if target.exists() {
+        checkpoint_existing_wal(&target).map_err(|e| format!("WAL checkpoint failed: {e}"))?;
         rotate_backups(&target).map_err(|e| format!("backup rotation failed: {e}"))?;
         // Seed the tmp DB from the existing target so that prior workbook_snapshots
         // rows are preserved across saves. Without this, every save rewrites a fresh
@@ -249,7 +268,7 @@ fn do_save(
     // rename a file that still has an open handle.
     drop(conn);
 
-    if let Err(e) = std::fs::rename(&tmp_path, &target) {
+    if let Err(e) = crate::commands::file_replace::replace_temp_file(&tmp_path, &target) {
         let _ = std::fs::remove_file(&tmp_path);
         return Ok(SaveResult {
             success: false,
@@ -278,11 +297,29 @@ fn do_save(
 #[tauri::command]
 pub fn workbook_new() -> Result<WorkbookHandle, String> {
     let workbook_id = uuid::Uuid::new_v4().to_string();
+    let snapshot_json = serde_json::json!({
+        "id": workbook_id.clone(),
+        "name": "Untitled",
+        "appVersion": env!("CARGO_PKG_VERSION"),
+        "locale": "enUS",
+        "styles": {},
+        "sheetOrder": ["sheet-1"],
+        "sheets": {
+            "sheet-1": {
+                "id": "sheet-1",
+                "name": "Sheet1",
+                "rowCount": 1000,
+                "columnCount": 100,
+                "cellData": {},
+            },
+        },
+    });
     Ok(WorkbookHandle {
         workbook_id,
         path: None,
         source_type: "new".to_string(),
-        snapshot_json: None,
+        snapshot_json: Some(serde_json::to_string(&snapshot_json).map_err(|e| e.to_string())?),
+        requires_save_as_on_first_save: true,
     })
 }
 
@@ -324,13 +361,17 @@ pub fn open_coco_core(
             path: Some(path.to_string()),
             source_type: "coco".to_string(),
             snapshot_json: Some(snapshot_json),
+            requires_save_as_on_first_save: false,
         },
         warnings: vec![],
     })
 }
 
 #[tauri::command]
-pub fn workbook_open_coco(app: tauri::AppHandle, path: String) -> Result<OpenWorkbookResult, String> {
+pub fn workbook_open_coco(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<OpenWorkbookResult, String> {
     use tauri::Manager;
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     open_coco_core(&data_dir, &path)
@@ -419,7 +460,12 @@ pub fn list_recent_core(data_dir: &std::path::Path) -> Result<Vec<RecentFile>, S
         .into_iter()
         .map(|(path, name, last_opened)| {
             let exists = std::path::Path::new(&path).exists();
-            RecentFile { path, name, last_opened, exists }
+            RecentFile {
+                path,
+                name,
+                last_opened,
+                exists,
+            }
         })
         .collect();
     Ok(result)
@@ -458,16 +504,17 @@ pub fn workbook_clear_recent(app: tauri::AppHandle) -> Result<(), String> {
 
 pub fn list_recovery_core(data_dir: &std::path::Path) -> Result<Vec<RecoveryCandidate>, String> {
     let conn = crate::db::app_db::open_app_db_at(data_dir)?;
-    let rows =
-        crate::db::operations::list_recovery_candidates(&conn).map_err(|e| e.to_string())?;
+    let rows = crate::db::operations::list_recovery_candidates(&conn).map_err(|e| e.to_string())?;
     let result = rows
         .into_iter()
-        .map(|(candidate_id, original_path, saved_at, reason, _temp_path)| RecoveryCandidate {
-            candidate_id,
-            original_path,
-            saved_at,
-            reason,
-        })
+        .map(
+            |(candidate_id, original_path, saved_at, reason, _temp_path)| RecoveryCandidate {
+                candidate_id,
+                original_path,
+                saved_at,
+                reason,
+            },
+        )
         .collect();
     Ok(result)
 }
@@ -484,8 +531,7 @@ pub fn restore_backup_core(
     candidate_id: &str,
 ) -> Result<OpenWorkbookResult, String> {
     let conn = crate::db::app_db::open_app_db_at(data_dir)?;
-    let rows =
-        crate::db::operations::list_recovery_candidates(&conn).map_err(|e| e.to_string())?;
+    let rows = crate::db::operations::list_recovery_candidates(&conn).map_err(|e| e.to_string())?;
 
     let entry = rows
         .into_iter()
@@ -516,6 +562,7 @@ pub fn restore_backup_core(
             path: Some(temp_path),
             source_type: "coco".to_string(),
             snapshot_json: Some(snapshot_json),
+            requires_save_as_on_first_save: false,
         },
         warnings: vec![],
     })
@@ -612,6 +659,7 @@ pub fn open_snapshot_core(path: &str, snapshot_id: i64) -> Result<OpenWorkbookRe
             path: None,
             source_type: "coco".to_string(),
             snapshot_json: Some(snapshot_json),
+            requires_save_as_on_first_save: true,
         },
         warnings: vec![],
     })
@@ -764,4 +812,3 @@ pub fn diagnostic_info_core(path: &str) -> Result<DiagnosticInfo, String> {
 pub fn workbook_diagnostic_info(path: String) -> Result<DiagnosticInfo, String> {
     diagnostic_info_core(&path)
 }
-

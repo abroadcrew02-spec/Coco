@@ -1,5 +1,5 @@
-use std::path::Path;
 use crate::db::app_db::{open_app_db, open_app_db_at};
+use std::path::Path;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,7 +22,10 @@ pub fn set_setting_core(data_dir: &Path, key: &str, value: &str) -> Result<(), S
 pub fn list_settings_core(data_dir: &Path) -> Result<Vec<SettingEntry>, String> {
     let conn = open_app_db_at(data_dir)?;
     let rows = crate::db::operations::list_settings(&conn).map_err(|e| e.to_string())?;
-    Ok(rows.into_iter().map(|(k, v)| SettingEntry { key: k, value: v }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|(k, v)| SettingEntry { key: k, value: v })
+        .collect())
 }
 
 pub fn delete_setting_core(data_dir: &Path, key: &str) -> Result<(), String> {
@@ -47,7 +50,10 @@ pub fn set_setting(app: tauri::AppHandle, key: String, value: String) -> Result<
 pub fn list_settings(app: tauri::AppHandle) -> Result<Vec<SettingEntry>, String> {
     let conn = open_app_db(&app)?;
     let rows = crate::db::operations::list_settings(&conn).map_err(|e| e.to_string())?;
-    Ok(rows.into_iter().map(|(k, v)| SettingEntry { key: k, value: v }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|(k, v)| SettingEntry { key: k, value: v })
+        .collect())
 }
 
 #[tauri::command]

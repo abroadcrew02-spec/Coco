@@ -37,6 +37,7 @@ function resetStore() {
       path: "/tmp/wb.coco",
       sourceType: "coco",
       snapshotJson: "{}",
+      requiresSaveAsOnFirstSave: false,
     },
     saveStatus: "saved",
     importWarnings: [],
@@ -139,6 +140,17 @@ describe("useCloseGuard", () => {
       await done;
     });
 
+    it("treats save_failed as dirty and asks the registered dialog", async () => {
+      useWorkbookStore.setState({ saveStatus: "save_failed" });
+      render(<Probe />);
+      const { event, done } = await startClose();
+      await waitFor(() => expect(resolveDialog).not.toBeNull());
+      expect(event.preventDefault).toHaveBeenCalled();
+      resolveDialog!("cancel");
+      await done;
+      expect(destroyMock).not.toHaveBeenCalled();
+    });
+
     it("'cancel' keeps the window open (no destroy)", async () => {
       render(<Probe />);
       const { done } = await startClose();
@@ -223,6 +235,16 @@ describe("useCloseGuard", () => {
       await fireClose();
       expect(window.confirm).toHaveBeenCalled();
       expect(destroyMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("treats save_failed as dirty and falls back to window.confirm", async () => {
+      useWorkbookStore.setState({ saveStatus: "save_failed" });
+      window.confirm = vi.fn().mockReturnValue(false);
+      render(<Probe />);
+      const event = await fireClose();
+      expect(event.preventDefault).toHaveBeenCalled();
+      expect(window.confirm).toHaveBeenCalled();
+      expect(destroyMock).not.toHaveBeenCalled();
     });
 
     it("falls back to window.confirm and cancels on reject", async () => {

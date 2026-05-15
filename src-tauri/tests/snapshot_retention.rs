@@ -1,4 +1,4 @@
-use coco_lib::commands::workbook::{workbook_autosave_coco, save_core, MAX_SNAPSHOTS_PER_WORKBOOK};
+use coco_lib::commands::workbook::{save_core, workbook_autosave_coco, MAX_SNAPSHOTS_PER_WORKBOOK};
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -12,7 +12,8 @@ fn count_snapshots(coco_path: &std::path::Path, workbook_id: &str) -> i64 {
         "SELECT COUNT(*) FROM workbook_snapshots WHERE workbook_id = ?1",
         rusqlite::params![workbook_id],
         |row| row.get::<_, i64>(0),
-    ).unwrap()
+    )
+    .unwrap()
 }
 
 fn count_with_reason(coco_path: &std::path::Path, workbook_id: &str, reason: &str) -> i64 {
@@ -21,7 +22,8 @@ fn count_with_reason(coco_path: &std::path::Path, workbook_id: &str, reason: &st
         "SELECT COUNT(*) FROM workbook_snapshots WHERE workbook_id = ?1 AND reason = ?2",
         rusqlite::params![workbook_id, reason],
         |row| row.get::<_, i64>(0),
-    ).unwrap()
+    )
+    .unwrap()
 }
 
 #[test]
@@ -104,11 +106,75 @@ fn retention_is_per_workbook_not_global() {
 
     // Save 7 snapshots for wb-A and 7 for wb-B in the same file.
     for i in 0..7 {
-        save_core("wb-A".into(), Some(path_str(&path)), format!("{{\"a\":{i}}}")).unwrap();
-        save_core("wb-B".into(), Some(path_str(&path)), format!("{{\"b\":{i}}}")).unwrap();
+        save_core(
+            "wb-A".into(),
+            Some(path_str(&path)),
+            format!("{{\"a\":{i}}}"),
+        )
+        .unwrap();
+        save_core(
+            "wb-B".into(),
+            Some(path_str(&path)),
+            format!("{{\"b\":{i}}}"),
+        )
+        .unwrap();
     }
 
     // Each workbook should independently have exactly MAX_SNAPSHOTS_PER_WORKBOOK rows.
     assert_eq!(count_snapshots(&path, "wb-A"), MAX_SNAPSHOTS_PER_WORKBOOK);
     assert_eq!(count_snapshots(&path, "wb-B"), MAX_SNAPSHOTS_PER_WORKBOOK);
+}
+
+#[test]
+fn save_preserves_snapshot_waiting_in_wal_sidecar() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("wal.coco");
+    let wb_id = "test-wb-wal";
+
+    save_core(wb_id.into(), Some(path_str(&path)), "{\"v\":1}".into()).unwrap();
+
+    {
+        let conn = Connection::open(&path).unwrap();
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode.to_lowercase(), "wal");
+        conn.execute_batch("PRAGMA wal_autocheckpoint=0").unwrap();
+        conn.execute(
+            "INSERT INTO workbook_snapshots (workbook_id, snapshot_json, created_at, reason)
+             VALUES (?1, ?2, ?3, 'manual_save')",
+            rusqlite::params![wb_id, "{\"v\":2}", "2026-05-15T00:00:00Z"],
+        )
+        .unwrap();
+        assert!(
+            path.with_extension("coco-wal").exists(),
+            "fixture should leave a WAL sidecar before save"
+        );
+    }
+
+    let result = save_core(wb_id.into(), Some(path_str(&path)), "{\"v\":3}".into()).unwrap();
+    assert!(result.success);
+
+    let conn = Connection::open(&path).unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT snapshot_json FROM workbook_snapshots
+             WHERE workbook_id = ?1
+             ORDER BY snapshot_id ASC",
+        )
+        .unwrap();
+    let rows: Vec<String> = stmt
+        .query_map(rusqlite::params![wb_id], |row| row.get::<_, String>(0))
+        .unwrap()
+        .map(|row| row.unwrap())
+        .collect();
+
+    assert!(
+        rows.contains(&"{\"v\":2}".to_string()),
+        "save should preserve the snapshot that was only present in the WAL sidecar"
+    );
+    assert!(
+        rows.contains(&"{\"v\":3}".to_string()),
+        "save should still write the new snapshot"
+    );
 }

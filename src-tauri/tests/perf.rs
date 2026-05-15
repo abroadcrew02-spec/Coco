@@ -11,7 +11,7 @@
 
 use coco_lib::commands::csv_io::import_csv_core;
 use coco_lib::commands::workbook::save_core;
-use coco_lib::commands::xlsx_io::{import_xlsx_core, export_xlsx_core};
+use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::{Formula, Workbook};
 use serde_json::{json, Map, Value};
 use std::io::Write;
@@ -212,10 +212,7 @@ fn build_export_snapshot_250k() -> String {
                 json!({ "f": format!("=SUM(F{}:H{})", r + 1, r + 1) }),
             );
             // col 9 string
-            row_map.insert(
-                "9".to_string(),
-                json!({ "v": format!("row_{r}_tail") }),
-            );
+            row_map.insert("9".to_string(), json!({ "v": format!("row_{r}_tail") }));
             cell_data.insert(r.to_string(), Value::Object(row_map));
         }
 
@@ -265,10 +262,12 @@ fn xlsx_export_1mb_equivalent() {
         snapshot_json.clone(),
     )
     .expect("warmup export ok");
-    assert!(warm.success, "warmup export should succeed: {:?}", warm.error);
-    let produced_size = std::fs::metadata(&warm_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    assert!(
+        warm.success,
+        "warmup export should succeed: {:?}",
+        warm.error
+    );
+    let produced_size = std::fs::metadata(&warm_path).map(|m| m.len()).unwrap_or(0);
     println!(
         "  produced .xlsx size: {:.2} MB ({} bytes)",
         produced_size as f64 / 1024.0 / 1024.0,
@@ -364,8 +363,8 @@ fn coco_save_50k_cells() {
         let path_str = path.to_string_lossy().into_owned();
 
         let t = Instant::now();
-        let r = save_core("perf-wb".into(), Some(path_str), snapshot_json.clone())
-            .expect("save ok");
+        let r =
+            save_core("perf-wb".into(), Some(path_str), snapshot_json.clone()).expect("save ok");
         let elapsed = t.elapsed();
         assert!(r.success, "iter {i}: save should succeed: {:?}", r.error);
         samples.push(elapsed);

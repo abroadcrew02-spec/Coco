@@ -35,7 +35,11 @@ fn import_then_export_preserves_basic_values() {
     let dir = TempDir::new().unwrap();
     let in_path = path_in(&dir, "in.csv");
     let out_path = path_in(&dir, "out.csv");
-    fs::write(&in_path, "Name,Score,Pass\r\nAlice,92.5,TRUE\r\nBob,58,FALSE\r\n").unwrap();
+    fs::write(
+        &in_path,
+        "Name,Score,Pass\r\nAlice,92.5,TRUE\r\nBob,58,FALSE\r\n",
+    )
+    .unwrap();
 
     let result = import_csv_core(in_path, None).unwrap();
     let snapshot_json = result.handle.snapshot_json.unwrap();
@@ -126,7 +130,10 @@ fn utf8_bom_default_export_then_import_strips_bom_back() {
     let reimport = import_csv_core(out_path, None).unwrap();
     let snap: serde_json::Value =
         serde_json::from_str(&reimport.handle.snapshot_json.unwrap()).unwrap();
-    assert_eq!(snap["sheets"]["sheet-1"]["cellData"]["0"]["0"]["v"], "héllo");
+    assert_eq!(
+        snap["sheets"]["sheet-1"]["cellData"]["0"]["0"]["v"],
+        "héllo"
+    );
 }
 
 #[test]
@@ -183,7 +190,10 @@ fn single_cell_file_imports_and_exports() {
     let out_path = path_in(&dir, "one_out.csv");
     let export = workbook_export_csv(out_path.clone(), snapshot_json, None, None).unwrap();
     assert!(export.success);
-    assert_eq!(export.rows_written, 1, "single-cell sheet → exactly one row written");
+    assert_eq!(
+        export.rows_written, 1,
+        "single-cell sheet → exactly one row written"
+    );
 
     let raw = fs::read(&out_path).unwrap();
     let body = std::str::from_utf8(strip_bom(&raw)).unwrap();
@@ -266,7 +276,12 @@ fn trailing_empty_cells_in_row_are_sparse_on_import_and_padded_on_export() {
     let body_bytes = fs::read(&out_path).unwrap();
     let body = std::str::from_utf8(strip_bom(&body_bytes)).unwrap();
     let lines: Vec<&str> = body.split("\r\n").filter(|l| !l.is_empty()).collect();
-    assert_eq!(lines.len(), 2, "should have exactly two rows, got: {:?}", lines);
+    assert_eq!(
+        lines.len(),
+        2,
+        "should have exactly two rows, got: {:?}",
+        lines
+    );
     // Each line must have exactly 4 fields (= max_col + 1 = 4) including blanks.
     for line in &lines {
         assert_eq!(
@@ -329,8 +344,16 @@ fn mixed_crlf_and_lf_import_preserves_row_separation() {
     let body = std::str::from_utf8(strip_bom(&raw)).unwrap();
     // strip CRLFs and confirm no stragglers.
     let no_crlf = body.replace("\r\n", "");
-    assert!(!no_crlf.contains('\r'), "lone CR found in export: {:?}", body);
-    assert!(!no_crlf.contains('\n'), "lone LF found in export: {:?}", body);
+    assert!(
+        !no_crlf.contains('\r'),
+        "lone CR found in export: {:?}",
+        body
+    );
+    assert!(
+        !no_crlf.contains('\n'),
+        "lone LF found in export: {:?}",
+        body
+    );
 }
 
 // ---------- Error paths ----------
@@ -341,8 +364,7 @@ fn empty_workbook_export_returns_csv_empty_workbook() {
     let dir = TempDir::new().unwrap();
     let out_path = path_in(&dir, "empty.csv");
     let snapshot = r#"{ "sheets": {} }"#;
-    let result =
-        workbook_export_csv(out_path.clone(), snapshot.to_string(), None, None).unwrap();
+    let result = workbook_export_csv(out_path.clone(), snapshot.to_string(), None, None).unwrap();
     assert!(!result.success);
     assert_eq!(result.error.as_deref(), Some("CSV_EMPTY_WORKBOOK"));
     assert!(
@@ -361,9 +383,12 @@ fn export_with_no_cells_writes_zero_rows() {
         "sheetOrder": ["s1"],
         "sheets": { "s1": { "name": "S", "cellData": {} } }
     }"#;
-    let result =
-        workbook_export_csv(out_path.clone(), snapshot.to_string(), None, None).unwrap();
-    assert!(result.success, "expected success even with no rows; got error: {:?}", result.error);
+    let result = workbook_export_csv(out_path.clone(), snapshot.to_string(), None, None).unwrap();
+    assert!(
+        result.success,
+        "expected success even with no rows; got error: {:?}",
+        result.error
+    );
     assert_eq!(result.rows_written, 0);
 
     let raw = fs::read(&out_path).unwrap();
@@ -545,8 +570,7 @@ fn quoted_field_with_quotes_comma_and_newline_combined() {
         serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
     let cd = &snap["sheets"]["sheet-1"]["cellData"];
     assert_eq!(
-        cd["0"]["0"]["v"],
-        "He said: \"hi, world\",\nand left.",
+        cd["0"]["0"]["v"], "He said: \"hi, world\",\nand left.",
         "quoted field must contain literal comma, escaped quotes, and embedded newline"
     );
     assert_eq!(cd["0"]["1"]["v"], "tail");
@@ -588,7 +612,10 @@ fn locale_decimal_comma_in_quoted_field_stays_text() {
     let snap: serde_json::Value =
         serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
     let cd = &snap["sheets"]["sheet-1"]["cellData"];
-    assert_eq!(cd["1"]["0"]["v"], "1,23", "decimal-comma string must not be coerced to float");
+    assert_eq!(
+        cd["1"]["0"]["v"], "1,23",
+        "decimal-comma string must not be coerced to float"
+    );
     assert_eq!(cd["2"]["0"]["v"], "3,14");
     // Only one column populated.
     assert!(cd["1"].as_object().unwrap().get("1").is_none());
@@ -610,6 +637,10 @@ fn field_at_32k_chars_imports_intact() {
         serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
     let cd = &snap["sheets"]["sheet-1"]["cellData"];
     let v = cd["0"]["0"]["v"].as_str().expect("string cell");
-    assert_eq!(v.len(), 32_767, "value at the 32,767 Excel cap must survive intact");
+    assert_eq!(
+        v.len(),
+        32_767,
+        "value at the 32,767 Excel cap must survive intact"
+    );
     assert_eq!(cd["0"]["1"]["v"], "next");
 }

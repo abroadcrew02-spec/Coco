@@ -1,5 +1,5 @@
 use calamine::{open_workbook, Data, Reader, Xlsx};
-use coco_lib::commands::xlsx_io::{import_xlsx_core, export_xlsx_core};
+use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::{Format, Workbook};
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -18,7 +18,8 @@ fn date_cell_imports_with_fmt_hint() {
         let ws = wb.add_worksheet();
         ws.set_name("D").unwrap();
         let date_fmt = Format::new().set_num_format("yyyy-mm-dd");
-        ws.write_number_with_format(0, 0, 44562.0, &date_fmt).unwrap();
+        ws.write_number_with_format(0, 0, 44562.0, &date_fmt)
+            .unwrap();
         wb.save(&fixture).unwrap();
     }
 
@@ -45,7 +46,8 @@ fn date_round_trip_preserves_visual_format() {
         let ws = wb.add_worksheet();
         ws.set_name("D").unwrap();
         let date_fmt = Format::new().set_num_format("yyyy-mm-dd");
-        ws.write_number_with_format(0, 0, 44562.0, &date_fmt).unwrap();
+        ws.write_number_with_format(0, 0, 44562.0, &date_fmt)
+            .unwrap();
         wb.save(&fixture).unwrap();
     }
 

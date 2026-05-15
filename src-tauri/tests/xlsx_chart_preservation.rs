@@ -90,8 +90,8 @@ fn build_chart_fixture(tmp: &TempDir) -> PathBuf {
     let mut src = ZipArchive::new(std::io::Cursor::new(&src_bytes)).unwrap();
     let out_file = std::fs::File::create(&fixture_path).unwrap();
     let mut out = zip::ZipWriter::new(out_file);
-    let opts: FileOptions = FileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let opts: FileOptions =
+        FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     // Track names we'll rewrite so we skip them on copy.
     let rewrites: &[&str] = &["xl/worksheets/sheet1.xml", "[Content_Types].xml"];
@@ -170,8 +170,7 @@ fn chart_blob_survives_roundtrip() {
     // Import the fixture. Snapshot should contain `_preservedParts`.
     let import = import_xlsx_core(path_str(&fixture)).expect("import ok");
     let snapshot_json = import.handle.snapshot_json.expect("snapshot present");
-    let snapshot: serde_json::Value =
-        serde_json::from_str(&snapshot_json).expect("parse snapshot");
+    let snapshot: serde_json::Value = serde_json::from_str(&snapshot_json).expect("parse snapshot");
     let preserved = snapshot
         .get("_preservedParts")
         .expect("_preservedParts should be on snapshot");

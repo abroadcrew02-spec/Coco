@@ -325,6 +325,7 @@ describe("recovery flow §6.5 (クラッシュ復元) — end to end", () => {
         path: null,
         sourceType: "coco",
         snapshotJson: "{\"restored\":true}",
+        requiresSaveAsOnFirstSave: true,
       },
       currentSnapshotJson: "{\"restored\":true}",
       screen: "editor",

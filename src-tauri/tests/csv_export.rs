@@ -43,6 +43,80 @@ fn bom_and_crlf_format() {
 }
 
 #[test]
+fn sparse_far_cell_export_returns_too_large_error() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "far.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "1048575": { "16383": { "v": "far" } }
+                }
+            }
+        }
+    }"#;
+
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    assert!(!result.success);
+    assert_eq!(result.rows_written, 0);
+    assert_eq!(result.error, Some("CSV_EXPORT_TOO_LARGE".to_string()));
+    assert!(
+        !std::path::Path::new(&path).exists(),
+        "file should not be created"
+    );
+}
+
+#[test]
+fn failed_export_preserves_existing_file() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "existing.csv");
+    fs::write(&path, b"keep me\r\n").unwrap();
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "1048575": { "16383": { "v": "far" } }
+                }
+            }
+        }
+    }"#;
+
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    assert!(!result.success);
+    assert_eq!(result.error, Some("CSV_EXPORT_TOO_LARGE".to_string()));
+    assert_eq!(fs::read(&path).unwrap(), b"keep me\r\n");
+}
+
+#[test]
+fn successful_export_replaces_existing_file() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "existing.csv");
+    fs::write(&path, b"old\r\n").unwrap();
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": { "0": { "v": "new" } }
+                }
+            }
+        }
+    }"#;
+
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    assert!(result.success, "export failed: {:?}", result.error);
+
+    let bytes = fs::read(&path).unwrap();
+    let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
+    assert_eq!(s, "new\r\n");
+}
+
+#[test]
 fn csv_injection_escape() {
     let dir = TempDir::new().unwrap();
     let path = path_in(&dir, "out.csv");
@@ -71,7 +145,47 @@ fn csv_injection_escape() {
     let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
     let first_line = s.split("\r\n").next().unwrap();
     let cells: Vec<&str> = first_line.split(',').collect();
-    assert_eq!(cells, vec!["'=cmd()", "'+ATTACK", "'-DROP", "'@HOST", "safe"]);
+    assert_eq!(
+        cells,
+        vec!["'=cmd()", "'+ATTACK", "'-DROP", "'@HOST", "safe"]
+    );
+}
+
+#[test]
+fn csv_injection_escape_ignores_leading_whitespace_and_control() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "out.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": {
+                        "0": { "v": " \t=cmd()" },
+                        "1": { "v": "\u0001+ATTACK" },
+                        "2": { "v": "\r\n-DROP" },
+                        "3": { "v": "\u0000@HOST" },
+                        "4": { "v": " safe" }
+                    }
+                }
+            }
+        }
+    }"#;
+
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    assert!(result.success);
+
+    let bytes = fs::read(&path).unwrap();
+    let mut rdr = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .from_reader(strip_bom(&bytes));
+    let row = rdr.records().next().unwrap().unwrap();
+    assert_eq!(row.get(0), Some("' \t=cmd()"));
+    assert_eq!(row.get(1), Some("'\u{0001}+ATTACK"));
+    assert_eq!(row.get(2), Some("'\r\n-DROP"));
+    assert_eq!(row.get(3), Some("'\u{0000}@HOST"));
+    assert_eq!(row.get(4), Some(" safe"));
 }
 
 #[test]
@@ -102,8 +216,16 @@ fn rfc4180_escaping() {
     let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
 
     assert!(s.contains("\"has, comma\""), "comma not quoted: {:?}", s);
-    assert!(s.contains("\"has \"\"quote\"\"\""), "quote not doubled: {:?}", s);
-    assert!(s.contains("\"has\nnewline\""), "newline not quoted: {:?}", s);
+    assert!(
+        s.contains("\"has \"\"quote\"\"\""),
+        "quote not doubled: {:?}",
+        s
+    );
+    assert!(
+        s.contains("\"has\nnewline\""),
+        "newline not quoted: {:?}",
+        s
+    );
     assert!(s.contains(",safe"), "safe missing or modified: {:?}", s);
 }
 
@@ -186,19 +308,29 @@ fn formula_fallback_warning() {
     assert!(result.success);
     assert!(!result.warnings.is_empty(), "expected formula warning");
     assert!(
-        result.warnings.iter().any(|w| w.message.to_lowercase().contains("formula")),
+        result
+            .warnings
+            .iter()
+            .any(|w| w.message.to_lowercase().contains("formula")),
         "expected formula-related warning, got: {:?}",
         result.warnings
     );
     assert!(
-        result.warnings.iter().any(|w| w.code == "CSV_FORMULA_FALLBACK"),
+        result
+            .warnings
+            .iter()
+            .any(|w| w.code == "CSV_FORMULA_FALLBACK"),
         "expected CSV_FORMULA_FALLBACK code, got: {:?}",
         result.warnings
     );
 
     let bytes = fs::read(&path).unwrap();
     let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
-    assert!(s.contains("'=SUM(A1:A3)"), "missing escaped formula text: {:?}", s);
+    assert!(
+        s.contains("'=SUM(A1:A3)"),
+        "missing escaped formula text: {:?}",
+        s
+    );
 }
 
 #[test]
@@ -220,8 +352,13 @@ fn multi_sheet_select() {
     assert_eq!(sheets[1].name, "Second");
 
     let p1 = path_in(&dir, "second.csv");
-    let result =
-        workbook_export_csv(p1.clone(), snapshot.to_string(), Some("sheet-2".to_string()), None).unwrap();
+    let result = workbook_export_csv(
+        p1.clone(),
+        snapshot.to_string(),
+        Some("sheet-2".to_string()),
+        None,
+    )
+    .unwrap();
     assert!(result.success, "export failed: {:?}", result.error);
     let bytes = fs::read(&p1).unwrap();
     let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
@@ -247,10 +384,14 @@ fn multi_sheet_select() {
 
 #[test]
 fn bad_extension_rejected() {
-    let result = workbook_export_csv("output.xlsx".to_string(), "{}".to_string(), None, None).unwrap();
+    let result =
+        workbook_export_csv("output.xlsx".to_string(), "{}".to_string(), None, None).unwrap();
     assert!(!result.success);
     assert_eq!(result.error, Some("CSV_INVALID_EXTENSION".to_string()));
-    assert!(!std::path::Path::new("output.xlsx").exists(), "file should not be created");
+    assert!(
+        !std::path::Path::new("output.xlsx").exists(),
+        "file should not be created"
+    );
 }
 
 #[test]
@@ -283,7 +424,8 @@ fn shift_jis_export_writes_sjis_bytes() {
     // No BOM in SJIS output.
     assert_ne!(&bytes[..3.min(bytes.len())], &[0xEF, 0xBB, 0xBF]);
     // "名前" in SJIS = 0x96 0xBC 0x91 0x4F. Verify a known prefix.
-    assert!(bytes.starts_with(&[0x96, 0xBC, 0x91, 0x4F]),
+    assert!(
+        bytes.starts_with(&[0x96, 0xBC, 0x91, 0x4F]),
         "expected SJIS '名前' prefix, got first bytes {:?}",
         &bytes[..bytes.len().min(8)]
     );
@@ -314,7 +456,11 @@ fn utf8_no_bom_export_skips_bom() {
     assert!(result.success);
 
     let bytes = fs::read(&path).unwrap();
-    assert_ne!(&bytes[..3.min(bytes.len())], &[0xEF, 0xBB, 0xBF], "should not have BOM");
+    assert_ne!(
+        &bytes[..3.min(bytes.len())],
+        &[0xEF, 0xBB, 0xBF],
+        "should not have BOM"
+    );
     assert!(bytes.starts_with(b"hello"));
 }
 
@@ -364,8 +510,7 @@ fn date_cells_export_as_yyyy_mm_dd() {
             }
         }
     }"#;
-    let result =
-        workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
     assert!(result.success, "export failed: {:?}", result.error);
 
     let bytes = fs::read(&path).unwrap();

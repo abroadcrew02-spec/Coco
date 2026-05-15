@@ -51,6 +51,13 @@ describe("confirmDiscardIfUnsaved", () => {
     expect(confirmFn).toHaveBeenCalledTimes(2);
   });
 
+  it("prompts in editor after a save failure", () => {
+    useWorkbookStore.setState({ screen: "editor", saveStatus: "save_failed" });
+    confirmFn.mockReturnValue(false);
+    expect(confirmDiscardIfUnsaved()).toBe(false);
+    expect(confirmFn).toHaveBeenCalledTimes(1);
+  });
+
   it("uses the custom message when provided", () => {
     useWorkbookStore.setState({ screen: "editor", saveStatus: "unsaved" });
     confirmFn.mockReturnValue(true);

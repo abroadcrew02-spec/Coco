@@ -1,3 +1,3 @@
 pub mod app_db;
-pub mod schema;
 pub mod operations;
+pub mod schema;

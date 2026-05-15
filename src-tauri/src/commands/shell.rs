@@ -65,28 +65,11 @@ pub fn reveal_in_file_manager(path: String) -> Result<(), String> {
 /// file so a malicious workbook can't ship a `javascript:` payload or coerce
 /// us into running an arbitrary OS handler.
 pub fn open_url_core(url: &str) -> Result<(), String> {
-    let trimmed = url.trim();
-    if trimmed.is_empty() {
-        return Err("OPEN_URL_EMPTY".to_string());
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    let allowed = lower.starts_with("http://")
-        || lower.starts_with("https://")
-        || lower.starts_with("mailto:")
-        || lower.starts_with("file:");
-    if !allowed {
-        return Err("OPEN_URL_DISALLOWED_SCHEME".to_string());
-    }
+    let trimmed = validate_open_url(url)?;
 
     #[cfg(target_os = "windows")]
     {
-        // `cmd /c start "" <url>` — the empty title prevents start from
-        // misinterpreting a URL with spaces as the window title. Detached so
-        // closing the app doesn't kill the browser.
-        Command::new("cmd")
-            .args(["/c", "start", "", trimmed])
-            .spawn()
-            .map_err(|e| format!("OPEN_URL_SPAWN_FAILED: {}", e))?;
+        shell_execute_open(trimmed)?;
         return Ok(());
     }
 
@@ -109,6 +92,66 @@ pub fn open_url_core(url: &str) -> Result<(), String> {
     }
 }
 
+fn validate_open_url(url: &str) -> Result<&str, String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err("OPEN_URL_EMPTY".to_string());
+    }
+    if trimmed.len() != url.len() {
+        return Err("OPEN_URL_AMBIGUOUS".to_string());
+    }
+    if trimmed.chars().any(char::is_control) {
+        return Err("OPEN_URL_CONTROL_CHAR".to_string());
+    }
+
+    let (scheme, rest) = trimmed
+        .split_once(':')
+        .ok_or_else(|| "OPEN_URL_DISALLOWED_SCHEME".to_string())?;
+    if rest.is_empty() || !scheme.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("OPEN_URL_AMBIGUOUS".to_string());
+    }
+
+    match scheme.to_ascii_lowercase().as_str() {
+        "http" | "https" | "mailto" | "file" => Ok(trimmed),
+        _ => Err("OPEN_URL_DISALLOWED_SCHEME".to_string()),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn shell_execute_open(url: &str) -> Result<(), String> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::null;
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: isize,
+            lp_operation: *const u16,
+            lp_file: *const u16,
+            lp_parameters: *const u16,
+            lp_directory: *const u16,
+            n_show_cmd: i32,
+        ) -> isize;
+    }
+
+    let operation: Vec<u16> = OsStr::new("open")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let file: Vec<u16> = OsStr::new(url)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let result = unsafe { ShellExecuteW(0, operation.as_ptr(), file.as_ptr(), null(), null(), 1) };
+    if result <= 32 {
+        Err(format!("OPEN_URL_SPAWN_FAILED: ShellExecuteW {}", result))
+    } else {
+        Ok(())
+    }
+}
+
 #[tauri::command]
 pub fn open_url(url: String) -> Result<(), String> {
     open_url_core(&url)
@@ -120,26 +163,43 @@ mod tests {
 
     #[test]
     fn rejects_empty_url() {
-        assert_eq!(open_url_core(""), Err("OPEN_URL_EMPTY".to_string()));
-        assert_eq!(open_url_core("   "), Err("OPEN_URL_EMPTY".to_string()));
+        assert_eq!(validate_open_url(""), Err("OPEN_URL_EMPTY".to_string()));
+        assert_eq!(validate_open_url("   "), Err("OPEN_URL_EMPTY".to_string()));
     }
 
     #[test]
     fn rejects_disallowed_schemes() {
-        assert!(open_url_core("javascript:alert(1)").is_err());
-        assert!(open_url_core("data:text/html,<script>").is_err());
+        assert!(validate_open_url("javascript:alert(1)").is_err());
+        assert!(validate_open_url("data:text/html,<script>").is_err());
         // No scheme at all is also rejected.
-        assert!(open_url_core("example.com").is_err());
+        assert!(validate_open_url("example.com").is_err());
+    }
+
+    #[test]
+    fn rejects_control_chars_and_ambiguous_urls() {
+        assert_eq!(
+            validate_open_url("https://example.com/\r\ncalc"),
+            Err("OPEN_URL_CONTROL_CHAR".to_string())
+        );
+        assert_eq!(
+            validate_open_url(" https://example.com"),
+            Err("OPEN_URL_AMBIGUOUS".to_string())
+        );
+        assert_eq!(
+            validate_open_url("https://example.com "),
+            Err("OPEN_URL_AMBIGUOUS".to_string())
+        );
     }
 
     #[test]
     fn accepts_http_and_https() {
-        // We can't actually verify the spawn here without polluting the
-        // test runner's process tree, so only assert the validation gate
-        // accepts these by running on a platform where spawn fails fast
-        // (any cfg block is exercised). To keep CI hermetic, just test the
-        // pure validation path indirectly via casing.
-        assert!("HTTP://EXAMPLE.COM".to_ascii_lowercase().starts_with("http://"));
-        assert!("https://example.com".to_ascii_lowercase().starts_with("https://"));
+        assert_eq!(
+            validate_open_url("HTTP://EXAMPLE.COM").unwrap(),
+            "HTTP://EXAMPLE.COM"
+        );
+        assert_eq!(
+            validate_open_url("https://example.com").unwrap(),
+            "https://example.com"
+        );
     }
 }

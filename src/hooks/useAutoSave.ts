@@ -11,6 +11,7 @@ export function useAutoSave() {
   const saveStatus = useWorkbookStore((s) => s.saveStatus);
   const autoSave = useWorkbookStore((s) => s.autoSave);
   const intervalMs = useWorkbookStore((s) => s.autoSaveIntervalMs);
+  const dirtyRevision = useWorkbookStore((s) => s.dirtyRevision);
   const dirtyRef = useRef(false);
 
   useEffect(() => {
@@ -22,7 +23,7 @@ export function useAutoSave() {
       // would fire redundantly seconds after a manual Ctrl+S.
       dirtyRef.current = false;
     }
-  }, [saveStatus]);
+  }, [dirtyRevision, saveStatus]);
 
   useEffect(() => {
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;

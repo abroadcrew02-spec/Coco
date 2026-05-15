@@ -468,3 +468,148 @@ fn import_with_explicit_utf8_when_file_actually_sjis_produces_replacement_chars(
         .expect("CSV_ENCODING_DETECTED missing");
     assert!(enc.message.contains("forced"));
 }
+
+// ---------- Low tier edge cases (low-csv-import-edge-cases) ----------
+
+#[test]
+fn single_cell_without_trailing_newline_imports_one_row() {
+    // RFC 4180 doesn't require a trailing newline. Excel and Numbers both
+    // accept a single cell with no line terminator. Our import path must
+    // surface this as exactly one row, one column.
+    let dir = TempDir::new().unwrap();
+    let in_path = path_in(&dir, "noeol.csv");
+    fs::write(&in_path, b"solo").unwrap();
+
+    let result = import_csv_core(in_path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cd = &snap["sheets"]["sheet-1"]["cellData"];
+    assert_eq!(cd["0"]["0"]["v"], "solo");
+    // No second row.
+    assert!(cd.as_object().unwrap().get("1").is_none());
+}
+
+#[test]
+fn bom_only_file_imports_as_empty_sheet() {
+    // A file consisting solely of the UTF-8 BOM has no cell content. The
+    // import must not crash and must produce an empty cellData object —
+    // exporting the snapshot back out should round-trip cleanly.
+    let dir = TempDir::new().unwrap();
+    let in_path = path_in(&dir, "bomonly.csv");
+    fs::write(&in_path, [0xEFu8, 0xBB, 0xBF]).unwrap();
+
+    let result = import_csv_core(in_path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cd = &snap["sheets"]["sheet-1"]["cellData"];
+    assert!(
+        cd.as_object().map(|o| o.is_empty()).unwrap_or(false),
+        "cellData should be empty, got: {:?}",
+        cd
+    );
+}
+
+#[test]
+fn truly_empty_file_imports_as_empty_sheet() {
+    // Zero-byte input. The import path must not panic or treat the file as
+    // an error — an empty CSV is a valid (degenerate) workbook with one
+    // empty sheet.
+    let dir = TempDir::new().unwrap();
+    let in_path = path_in(&dir, "empty.csv");
+    fs::write(&in_path, b"").unwrap();
+
+    let result = import_csv_core(in_path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cd = &snap["sheets"]["sheet-1"]["cellData"];
+    assert!(cd.as_object().map(|o| o.is_empty()).unwrap_or(false));
+    // SheetOrder still produced so the workbook can be displayed in the UI.
+    assert_eq!(snap["sheetOrder"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn quoted_field_with_quotes_comma_and_newline_combined() {
+    // RFC 4180 hardest case: a single quoted field that contains the
+    // delimiter (,), an escaped quote (""), AND an embedded newline.
+    // All three must be unescaped/preserved correctly inside one cell.
+    let dir = TempDir::new().unwrap();
+    let in_path = path_in(&dir, "rfc4180.csv");
+    fs::write(
+        &in_path,
+        b"\"He said: \"\"hi, world\"\",\nand left.\",tail\n",
+    )
+    .unwrap();
+
+    let result = import_csv_core(in_path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cd = &snap["sheets"]["sheet-1"]["cellData"];
+    assert_eq!(
+        cd["0"]["0"]["v"],
+        "He said: \"hi, world\",\nand left.",
+        "quoted field must contain literal comma, escaped quotes, and embedded newline"
+    );
+    assert_eq!(cd["0"]["1"]["v"], "tail");
+    // Critically: one logical row, not two (the embedded \n was inside quotes).
+    assert!(!cd.as_object().unwrap().contains_key("1"));
+}
+
+#[test]
+fn locale_decimal_comma_stays_as_string() {
+    // We DO NOT implement locale-aware decimal-comma parsing. A value like
+    // "1,23" should NOT silently be coerced to 1.23 — it's two CSV fields
+    // ("1" and "23") under the default comma delimiter. Pin the current
+    // behavior so a future change is forced through a deliberate review.
+    let dir = TempDir::new().unwrap();
+    let in_path = path_in(&dir, "locale.csv");
+    fs::write(&in_path, b"price\n1,23\n3,14\n").unwrap();
+
+    let result = import_csv_core(in_path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cd = &snap["sheets"]["sheet-1"]["cellData"];
+    // Two separate integer columns, NOT one float.
+    assert_eq!(cd["1"]["0"]["v"], 1);
+    assert_eq!(cd["1"]["1"]["v"], 23);
+    assert_eq!(cd["2"]["0"]["v"], 3);
+    assert_eq!(cd["2"]["1"]["v"], 14);
+}
+
+#[test]
+fn locale_decimal_comma_in_quoted_field_stays_text() {
+    // A quoted "1,23" is one field. We must NOT parse it as 1.23 — the
+    // period-vs-comma convention is locale-specific and we don't track
+    // locale. The value stays as the literal string "1,23".
+    let dir = TempDir::new().unwrap();
+    let in_path = path_in(&dir, "locale_quoted.csv");
+    fs::write(&in_path, b"price\n\"1,23\"\n\"3,14\"\n").unwrap();
+
+    let result = import_csv_core(in_path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cd = &snap["sheets"]["sheet-1"]["cellData"];
+    assert_eq!(cd["1"]["0"]["v"], "1,23", "decimal-comma string must not be coerced to float");
+    assert_eq!(cd["2"]["0"]["v"], "3,14");
+    // Only one column populated.
+    assert!(cd["1"].as_object().unwrap().get("1").is_none());
+}
+
+#[test]
+fn field_at_32k_chars_imports_intact() {
+    // Excel's per-cell text cap is 32,767 chars. Exactly at the cap must
+    // import without truncation. (The 100k version is already tested in
+    // very_long_single_field_imports_intact; this fixes the boundary at
+    // the Excel-documented limit.)
+    let dir = TempDir::new().unwrap();
+    let in_path = path_in(&dir, "32k.csv");
+    let big: String = "x".repeat(32_767);
+    fs::write(&in_path, format!("{},next\n", big)).unwrap();
+
+    let result = import_csv_core(in_path, None).unwrap();
+    let snap: serde_json::Value =
+        serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
+    let cd = &snap["sheets"]["sheet-1"]["cellData"];
+    let v = cd["0"]["0"]["v"].as_str().expect("string cell");
+    assert_eq!(v.len(), 32_767, "value at the 32,767 Excel cap must survive intact");
+    assert_eq!(cd["0"]["1"]["v"], "next");
+}

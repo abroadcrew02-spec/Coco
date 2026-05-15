@@ -71,11 +71,10 @@ None.
 - **Refs**: `.claude/audit-findings.md` MINOR-1
 - **Resolution**: `worksheet_contains_marker` in `src-tauri/src/commands/xlsx_io.rs` now drives a small `<!-- ... -->`-aware state machine instead of a flat substring search. `in_comment` state is carried across the 64 KiB chunk boundary via a tracked overlap-start mirror so a comment that straddles a chunk still suppresses the match. Tests in `src-tauri/tests/xlsx_feature_detection.rs` cover commented CF, commented DV, mixed commented + real CF, and a chunk-straddling commented CF.
 
-### medium-detect-streaming
+### medium-detect-streaming (closed)
 - **Title**: Stream `detect_unsupported_features` worksheet XML instead of `read_to_string`
-- **Refs**: `.claude/audit-findings.md` CRITICAL-1, `src-tauri/src/commands/xlsx_io.rs:~94`
-- **Effort**: S
-- **Why deferred**: 50 MB compressed sheet can exceed 500 MB decompressed; current `is_ok()` short-circuit silently swallows OOM/decode errors. Use BufReader + read_until or cap reads at ~5 MB per sheet.
+- **Refs**: `.claude/audit-findings.md` CRITICAL-1, `src-tauri/src/commands/xlsx_io.rs:~1437`
+- **Resolution**: Per-sheet body scan was already streamed via `worksheet_contains_marker` (64 KiB chunks, 16 MiB cap). The remaining slurp — `std::fs::read` into a `Vec<u8>` before `ZipArchive::new` — is now replaced with `BufReader<File>` in the public `detect_unsupported_features` wrapper. `detect_unsupported_features_in` is generalized to `R: Read + Seek` so both the BufReader and the in-memory `Cursor` call-site from `import_xlsx_core` continue to work.
 
 ### medium-split-panes
 - **Title**: Round-trip split panes (live-drag variant), not just frozen

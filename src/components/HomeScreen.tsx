@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkbookStore } from "../store/useWorkbookStore";
@@ -10,6 +10,17 @@ import { friendlyError } from "../store/errorMessages";
 import { timeAgoJa } from "./timeAgo";
 import type { RecentFile, RecoveryCandidate } from "../types/workbook";
 import "./HomeScreen.css";
+
+// Pool of small, low-stakes hints rotated for returning users. Each one is
+// reachable through a built-in shortcut that already works today — the
+// command-palette tip is deliberately omitted until that lands (T1).
+const RETURNING_USER_TIPS: ReadonlyArray<string> = [
+  "Ctrl+F3 で名前付き範囲",
+  "Ctrl+1 で表示形式",
+  "Shift+F2 でコメント追加",
+  "Ctrl+K でハイパーリンク",
+  "Ctrl+F でセル内検索",
+];
 
 export default function HomeScreen() {
   const {
@@ -146,6 +157,22 @@ export default function HomeScreen() {
   });
 
   useEditorPreload();
+
+  // First-run detection: no recents AND no recovery candidates. We show the
+  // welcome hero only in that state — once anything lands in either bucket
+  // the user is past the onboarding moment.
+  const isFirstRun =
+    recentFiles.length === 0 && recoveryCandidates.length === 0;
+
+  // Pick a random tip per mount so it varies between sessions without
+  // re-shuffling on every render (which would feel jittery).
+  const tip = useMemo(
+    () =>
+      RETURNING_USER_TIPS[
+        Math.floor(Math.random() * RETURNING_USER_TIPS.length)
+      ],
+    [],
+  );
 
   const handleOpenFile = async () => {
     const selected = await open({
@@ -468,8 +495,29 @@ export default function HomeScreen() {
           </ul>
         </div>
       )}
-      {recentFiles.length === 0 && recoveryCandidates.length === 0 && (
-        <p className="home-empty">最近使ったファイルはありません</p>
+      {isFirstRun && (
+        <section className="home-welcome" aria-labelledby="home-welcome-title">
+          <h2 id="home-welcome-title" className="home-welcome__title">
+            Coco へようこそ
+          </h2>
+          <p className="home-welcome__tagline">
+            ローカルファーストの xlsx スプレッドシート。
+            <br />
+            オフラインで安全に編集できます。
+          </p>
+          <ol className="home-welcome__steps">
+            <li>ファイルを開く / ドロップ</li>
+            <li>編集 / 保存 (Ctrl+S)</li>
+            <li>シートタブで複数シート</li>
+          </ol>
+        </section>
+      )}
+      {recentFiles.length > 0 && (
+        <p className="home-tip" role="note">
+          <span className="home-tip__icon" aria-hidden="true">💡</span>
+          <span className="home-tip__label">ヒント:</span>
+          <span className="home-tip__body">{tip}</span>
+        </p>
       )}
     </div>
   );

@@ -16,6 +16,25 @@ const MOD: &str = "Ctrl";
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            // #46: runtime diagnostic logging to a rotating file under the
+            // app data dir (Windows: %APPDATA%/com.coco.app/logs/Coco.log,
+            // macOS: ~/Library/Logs/com.coco.app/, Linux: $XDG_DATA_HOME/com.coco.app/logs/).
+            // Levels are info by default; set RUST_LOG=debug for verbose
+            // capture. Limited to 2 MiB per file with 5 rotated copies so
+            // crash diagnostics never grow unbounded.
+            tauri_plugin_log::Builder::default()
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::LogDir { file_name: Some("Coco".into()) },
+                ))
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Stdout,
+                ))
+                .level(log::LevelFilter::Info)
+                .max_file_size(2 * 1024 * 1024)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // req 7.2: native menu bar. Items emit a "menu-action" event with

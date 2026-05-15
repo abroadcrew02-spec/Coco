@@ -34,11 +34,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Type check
-        run: npx tsc --noEmit
+      - name: Type check (src + vite.config)
+        run: |
+          npx tsc --noEmit
+          npx tsc -p tsconfig.node.json
 
       - name: Run tests
         run: npm test
+
+      - name: Production build (vite build smoke)
+        # #58: catches breakages that tsc + vitest can miss — minification
+        # quirks, manualChunks regressions, modulePreload filter typos, etc.
+        run: npm run build
 
   rust:
     name: Rust (cargo build + test)

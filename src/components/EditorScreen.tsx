@@ -78,6 +78,12 @@ import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
 import { isSheetProtectedInSnapshot } from "../store/sheetProtection";
 import { extractCellStyle, applyCellStyle } from "../store/formatPainter";
+import { inferAutoSumRange, buildSumFormula } from "../store/autoSum";
+import {
+  applyQuickNumberFormat,
+  QUICK_FMT_CURRENCY,
+  QUICK_FMT_PERCENT,
+} from "../store/quickNumberFormat";
 import {
   computeCommentIndicators,
   type CommentIndicator,
@@ -1023,6 +1029,106 @@ export default function EditorScreen() {
     [numFmtDialog, updateSnapshot],
   );
 
+  // AutoSum (Σ / Alt+=). Excel's heuristic: look for a contiguous run of
+  // numeric cells *above* the active cell, fall back to *left* if none. Write
+  // `=SUM(start:end)` into the active cell via the snapshot's cellData.f so
+  // Univer's formula engine evaluates it on next paint. We route through the
+  // snapshot (not FRange.setValue("=SUM(...)")) because the snapshot path
+  // composes with our other mutations and matches the rest of EditorScreen.
+  const applyAutoSum = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let row = 0;
+    let col = 0;
+    try {
+      const sel = sheet.getSelection();
+      const r = sel?.getActiveRange();
+      if (r) {
+        row = r.getRow();
+        col = r.getColumn();
+      }
+    } catch {
+      // Fall back to A1.
+    }
+    // Re-derive the snapshot from Univer so we see the latest edits.
+    const snapshot = workbook.save() as unknown as {
+      sheets?: Record<
+        string,
+        {
+          cellData?: Record<
+            string,
+            Record<string, Record<string, unknown> | undefined>
+          >;
+        }
+      >;
+    };
+    const inferred = inferAutoSumRange(JSON.stringify(snapshot), sheetId, row, col);
+    if (!inferred) return; // No numeric neighbours — no-op.
+    const formula = buildSumFormula(inferred);
+    const sheetObj = snapshot.sheets?.[sheetId];
+    if (!sheetObj) return;
+    if (!sheetObj.cellData) sheetObj.cellData = {};
+    const cellData = sheetObj.cellData;
+    const rowKey = String(row);
+    if (!cellData[rowKey]) cellData[rowKey] = {};
+    const cell = cellData[rowKey][String(col)] ?? {};
+    cell.f = formula;
+    // Drop any stale literal value — Univer will recompute via the formula.
+    delete cell.v;
+    cellData[rowKey][String(col)] = cell;
+    updateSnapshot(JSON.stringify(snapshot));
+  }, [updateSnapshot]);
+
+  // Quick-format buttons (通貨 / %). Reuses the same snapshot-level _fmt path
+  // as the Number Format dialog but skips the dialog — one click applies a
+  // preset. Range = current selection (multi-cell ok).
+  const applyQuickFormat = useCallback(
+    (code: string) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const sheet = workbook.getActiveSheet();
+      if (!sheet) return;
+      const sheetId = sheet.getSheetId();
+      let startRow = 0;
+      let endRow = 0;
+      let startCol = 0;
+      let endCol = 0;
+      try {
+        const sel = sheet.getSelection();
+        const range = sel?.getActiveRange();
+        if (range) {
+          startRow = range.getRow();
+          startCol = range.getColumn();
+          const height =
+            (range as unknown as { getHeight?: () => number }).getHeight?.() ?? 1;
+          const width =
+            (range as unknown as { getWidth?: () => number }).getWidth?.() ?? 1;
+          endRow = startRow + Math.max(0, height - 1);
+          endCol = startCol + Math.max(0, width - 1);
+        }
+      } catch {
+        // Fall back to single A1 cell.
+      }
+      // Re-derive the snapshot so we don't clobber concurrent edits.
+      const snapshot = workbook.save() as unknown as Record<string, unknown>;
+      const nextJson = applyQuickNumberFormat(
+        JSON.stringify(snapshot),
+        sheetId,
+        { startRow, endRow, startCol, endCol },
+        code,
+      );
+      updateSnapshot(nextJson);
+    },
+    [updateSnapshot],
+  );
+
   // Insert-image dialog plumbing. Snapshots the active sheet + the top-left of
   // the active range so the image anchors at the user's actual cursor cell.
   const openImageDialog = useCallback(() => {
@@ -1558,6 +1664,11 @@ export default function EditorScreen() {
         // ESC exits the Format Painter tool (matches Excel's UX).
         e.preventDefault();
         deactivateFormatPainter();
+      } else if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === "=") {
+        // Alt+= — Excel's AutoSum shortcut. Writes =SUM(...) into the active
+        // cell, inferring the range from numeric neighbours.
+        e.preventDefault();
+        applyAutoSum();
       }
     },
     [
@@ -1570,6 +1681,7 @@ export default function EditorScreen() {
       openNumberFormatDialog,
       formatPainterMode,
       deactivateFormatPainter,
+      applyAutoSum,
     ]
   );
 
@@ -2012,6 +2124,36 @@ export default function EditorScreen() {
               aria-label="表示形式"
             >
               {t("toolbar.numberFormat")}
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={applyAutoSum}
+              title="オートSUM — 上または左の数値を集計 (Alt+=)"
+              aria-label="オートSUM"
+              data-testid="autosum"
+            >
+              Σ
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={() => applyQuickFormat(QUICK_FMT_CURRENCY)}
+              title="選択範囲を通貨書式に設定 ($#,##0.00)"
+              aria-label="通貨"
+              data-testid="quick-fmt-currency"
+            >
+              通貨
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={() => applyQuickFormat(QUICK_FMT_PERCENT)}
+              title="選択範囲をパーセント書式に設定 (0%)"
+              aria-label="パーセント"
+              data-testid="quick-fmt-percent"
+            >
+              %
             </button>
             <button
               type="button"

@@ -68,19 +68,32 @@ fn thin_black_border_all_four_sides_roundtrip() {
         .expect("B2 should have a style id");
 
     let borders = &snapshot["styles"][s_id]["borders"];
-    assert!(borders.is_object(), "borders should be present, got: {snapshot}");
+    assert!(
+        borders.is_object(),
+        "borders should be present, got: {snapshot}"
+    );
     for side in ["top", "bottom", "left", "right"] {
         assert_eq!(
             borders[side]["style"], "thin",
             "side {side} should be thin, got {borders}"
         );
-        let color = borders[side]["color"].as_str().unwrap_or("").to_ascii_uppercase();
-        assert_eq!(color, "#000000", "side {side} color should be black, got {color}");
+        let color = borders[side]["color"]
+            .as_str()
+            .unwrap_or("")
+            .to_ascii_uppercase();
+        assert_eq!(
+            color, "#000000",
+            "side {side} color should be black, got {color}"
+        );
     }
 
     // Round-trip
     let export_res = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
-    assert!(export_res.success, "export should succeed: {:?}", export_res.error);
+    assert!(
+        export_res.success,
+        "export should succeed: {:?}",
+        export_res.error
+    );
 
     let styles_xml = read_styles_xml(&exported);
     // After export, styles.xml should contain a <borders> block with a thin
@@ -133,7 +146,11 @@ fn only_top_border_one_sided() {
     );
 
     let export_res = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
-    assert!(export_res.success, "export should succeed: {:?}", export_res.error);
+    assert!(
+        export_res.success,
+        "export should succeed: {:?}",
+        export_res.error
+    );
 
     let styles_xml = read_styles_xml(&exported);
     assert!(
@@ -205,7 +222,11 @@ fn mixed_border_styles_per_side() {
     assert_eq!(borders["right"]["style"], "dashed", "got {borders}");
 
     let export_res = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
-    assert!(export_res.success, "export should succeed: {:?}", export_res.error);
+    assert!(
+        export_res.success,
+        "export should succeed: {:?}",
+        export_res.error
+    );
 
     let styles_xml = read_styles_xml(&exported);
     assert!(

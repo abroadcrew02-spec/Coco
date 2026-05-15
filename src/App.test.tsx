@@ -2,12 +2,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
-const { invokeMock, openMock, listenMock, onDragDropEventMock, onCloseRequestedMock } = vi.hoisted(() => ({
+const {
+  invokeMock,
+  openMock,
+  listenMock,
+  onDragDropEventMock,
+  onCloseRequestedMock,
+  editorScreenMock,
+} = vi.hoisted(() => ({
   invokeMock: vi.fn(),
   openMock: vi.fn(),
   listenMock: vi.fn(),
   onDragDropEventMock: vi.fn(),
   onCloseRequestedMock: vi.fn(),
+  editorScreenMock: { shouldThrow: false },
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
@@ -24,7 +32,10 @@ vi.mock("@tauri-apps/api/window", () => ({
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn().mockResolvedValue("0.1.0") }));
 // Stub the heavy lazy chunk so the test doesn't pull in Univer.
 vi.mock("./components/EditorScreen", () => ({
-  default: () => <div data-testid="editor-screen-stub">EditorScreen stub</div>,
+  default: () => {
+    if (editorScreenMock.shouldThrow) throw new Error("Editor render failed");
+    return <div data-testid="editor-screen-stub">EditorScreen stub</div>;
+  },
 }));
 // useEditorPreload registers requestIdleCallback work that does nothing in tests.
 vi.mock("./hooks/useEditorPreload", () => ({ useEditorPreload: () => {} }));
@@ -42,6 +53,7 @@ function resetStore() {
     recentFiles: [],
     recoveryCandidates: [],
     currentSnapshotJson: null,
+    editorRevision: 0,
     isExporting: false,
     exportWarnings: [],
     blockingImport: null,
@@ -74,6 +86,8 @@ beforeEach(() => {
   listenMock.mockReset();
   onDragDropEventMock.mockReset();
   onCloseRequestedMock.mockReset();
+  editorScreenMock.shouldThrow = false;
+  window.confirm = vi.fn().mockReturnValue(true);
   listenMock.mockResolvedValue(() => undefined);
   onDragDropEventMock.mockResolvedValue(() => undefined);
   onCloseRequestedMock.mockResolvedValue(() => undefined);
@@ -99,6 +113,7 @@ describe("App", () => {
           path: "/tmp/wb.coco",
           sourceType: "coco",
           snapshotJson: "{}",
+          requiresSaveAsOnFirstSave: false,
         },
         currentSnapshotJson: "{}",
       });
@@ -107,6 +122,120 @@ describe("App", () => {
       await waitFor(() => {
         expect(screen.getByTestId("editor-screen-stub")).toBeTruthy();
       });
+    });
+
+    it("shows an editor error fallback and returns home when EditorScreen throws", async () => {
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      editorScreenMock.shouldThrow = true;
+      useWorkbookStore.setState({
+        screen: "editor",
+        currentHandle: {
+          workbookId: "wb-error",
+          path: "/tmp/broken.coco",
+          sourceType: "coco",
+          snapshotJson: "{}",
+          requiresSaveAsOnFirstSave: false,
+        },
+        currentSnapshotJson: "{}",
+      });
+
+      try {
+        render(<App />);
+        await waitFor(() => {
+          expect(screen.getByText("エディタを表示できませんでした")).toBeTruthy();
+        });
+
+        fireEvent.click(screen.getByRole("button", { name: "ホームへ戻る" }));
+
+        await waitFor(() => {
+          expect(screen.getByText("新規ワークブック")).toBeTruthy();
+          expect(screen.queryByText("エディタを表示できませんでした")).toBeNull();
+        });
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
+    it("keeps the open workbook when cancelling home from the editor error fallback", async () => {
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      const confirmMock = vi.fn().mockReturnValue(false);
+      window.confirm = confirmMock;
+      editorScreenMock.shouldThrow = true;
+      const currentHandle = {
+        workbookId: "wb-unsaved-error",
+        path: "/tmp/unsaved.coco",
+        sourceType: "coco" as const,
+        snapshotJson: "{\"fromHandle\":true}",
+        requiresSaveAsOnFirstSave: false,
+      };
+      const currentSnapshotJson = "{\"unsaved\":true}";
+      useWorkbookStore.setState({
+        screen: "editor",
+        currentHandle,
+        currentSnapshotJson,
+        saveStatus: "unsaved",
+      });
+
+      try {
+        render(<App />);
+        await waitFor(() => {
+          expect(screen.getByText("エディタを表示できませんでした")).toBeTruthy();
+        });
+
+        fireEvent.click(screen.getByRole("button", { name: "ホームへ戻る" }));
+
+        expect(confirmMock).toHaveBeenCalled();
+        expect(useWorkbookStore.getState().screen).toBe("editor");
+        expect(useWorkbookStore.getState().currentHandle).toBe(currentHandle);
+        expect(useWorkbookStore.getState().currentSnapshotJson).toBe(currentSnapshotJson);
+        expect(screen.getByText("エディタを表示できませんでした")).toBeTruthy();
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
+    it("resets the editor boundary when editorRevision changes for the same workbook", async () => {
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      editorScreenMock.shouldThrow = true;
+      useWorkbookStore.setState({
+        screen: "editor",
+        currentHandle: {
+          workbookId: "wb-same",
+          path: "/tmp/wb.coco",
+          sourceType: "coco",
+          snapshotJson: "{}",
+          requiresSaveAsOnFirstSave: false,
+        },
+        currentSnapshotJson: "{}",
+        editorRevision: 1,
+      });
+
+      try {
+        render(<App />);
+        await waitFor(() => {
+          expect(screen.getByText("エディタを表示できませんでした")).toBeTruthy();
+        });
+
+        editorScreenMock.shouldThrow = false;
+        useWorkbookStore.setState({
+          currentHandle: {
+            workbookId: "wb-same",
+            path: null,
+            sourceType: "coco",
+            snapshotJson: "{\"snapshot\":true}",
+            requiresSaveAsOnFirstSave: false,
+          },
+          currentSnapshotJson: "{\"snapshot\":true}",
+          editorRevision: 2,
+        });
+
+        await waitFor(() => {
+          expect(screen.getByTestId("editor-screen-stub")).toBeTruthy();
+          expect(screen.queryByText("エディタを表示できませんでした")).toBeNull();
+        });
+      } finally {
+        consoleError.mockRestore();
+      }
     });
   });
 
@@ -161,6 +290,7 @@ describe("App", () => {
           path: "/tmp/macros.xlsm",
           sourceType: "xlsx",
           snapshotJson: "{}",
+          requiresSaveAsOnFirstSave: false,
         },
         currentSnapshotJson: "{}",
         blockingImport: null,
@@ -186,6 +316,7 @@ describe("App", () => {
           path: "/tmp/macros.xlsm",
           sourceType: "xlsx",
           snapshotJson: "{}",
+          requiresSaveAsOnFirstSave: false,
         },
         currentSnapshotJson: "{}",
         blockingImport: [
@@ -267,6 +398,7 @@ describe("App", () => {
           path: "/tmp/wb.coco",
           sourceType: "coco",
           snapshotJson: "{}",
+          requiresSaveAsOnFirstSave: false,
         },
         currentSnapshotJson: "{}",
       });

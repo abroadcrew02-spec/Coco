@@ -12,8 +12,8 @@ export type SaveStatus =
   | "export_failed"
   | "recovery_available";
 
-// Whether current workbook came from new/coco/xlsx
-export type WorkbookSourceType = "new" | "coco" | "xlsx";
+// Whether current workbook came from new/coco/xlsx/csv
+export type WorkbookSourceType = "new" | "coco" | "xlsx" | "csv";
 
 // Compatibility warning from xlsx import/export
 export interface CompatibilityWarning {
@@ -48,6 +48,7 @@ export interface WorkbookHandle {
   path: string | null;
   sourceType: WorkbookSourceType;
   snapshotJson: string | null;
+  requiresSaveAsOnFirstSave: boolean;
 }
 
 // Full open result with warnings

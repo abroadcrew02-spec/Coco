@@ -1,4 +1,5 @@
 use coco_lib::commands::recovery::{autosave_temp_core, clear_recovery_core};
+use coco_lib::commands::workbook::MAX_SNAPSHOTS_PER_WORKBOOK;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -24,7 +25,11 @@ fn autosave_creates_temp_coco_and_candidate_row() {
 
     // Temp .coco exists at the expected path.
     let expected_path = tmp.path().join("recovery").join("wb-1.coco");
-    assert!(expected_path.exists(), "expected {:?} to exist", expected_path);
+    assert!(
+        expected_path.exists(),
+        "expected {:?} to exist",
+        expected_path
+    );
     assert_eq!(result.path, expected_path.to_string_lossy());
 
     // The .coco contains the snapshot we wrote.
@@ -71,6 +76,35 @@ fn second_autosave_overwrites_candidate_row_not_creating_duplicates() {
 }
 
 #[test]
+fn repeated_autosave_prunes_snapshots_to_cap_and_keeps_latest() {
+    let tmp = TempDir::new().unwrap();
+    let iterations = MAX_SNAPSHOTS_PER_WORKBOOK + 3;
+    for i in 0..iterations {
+        autosave_temp_core(tmp.path(), "wb-retention", &format!("{{\"v\":{i}}}")).unwrap();
+    }
+
+    let coco_path = tmp.path().join("recovery").join("wb-retention.coco");
+    let conn = Connection::open(&coco_path).unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM workbook_snapshots WHERE workbook_id = ?1",
+            rusqlite::params!["wb-retention"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, MAX_SNAPSHOTS_PER_WORKBOOK);
+
+    let latest_snapshot: String = conn
+        .query_row(
+            "SELECT snapshot_json FROM workbook_snapshots WHERE workbook_id = ?1 ORDER BY snapshot_id DESC LIMIT 1",
+            rusqlite::params!["wb-retention"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(latest_snapshot, format!("{{\"v\":{}}}", iterations - 1));
+}
+
+#[test]
 fn clear_recovery_removes_file_and_row() {
     let tmp = TempDir::new().unwrap();
     autosave_temp_core(tmp.path(), "wb-4", "{}").unwrap();
@@ -90,7 +124,11 @@ fn clear_recovery_on_missing_candidate_is_noop() {
     let tmp = TempDir::new().unwrap();
     // No prior autosave — there's nothing to clear.
     let result = clear_recovery_core(tmp.path(), "does-not-exist");
-    assert!(result.is_ok(), "clear on missing candidate should be Ok, got {:?}", result);
+    assert!(
+        result.is_ok(),
+        "clear on missing candidate should be Ok, got {:?}",
+        result
+    );
 }
 
 #[test]

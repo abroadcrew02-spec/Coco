@@ -1,4 +1,13 @@
-import { useEffect, useRef, useState, lazy, Suspense } from "react";
+import {
+  Component,
+  useEffect,
+  useRef,
+  useState,
+  lazy,
+  Suspense,
+  type ErrorInfo,
+  type ReactNode,
+} from "react";
 import { useWorkbookStore } from "./store/useWorkbookStore";
 import {
   useGlobalShortcuts,
@@ -16,6 +25,7 @@ import DropOverlay from "./components/DropOverlay";
 import SettingsDialog from "./components/SettingsDialog";
 import CloseConfirmDialog from "./components/CloseConfirmDialog";
 import XlsmMacroLossDialog from "./components/XlsmMacroLossDialog";
+import { confirmDiscardIfUnsaved } from "./store/dirtyGuard";
 
 // EditorScreen pulls in the ~10MB Univer bundle. Lazy-load it so the Home
 // screen renders instantly without waiting for Univer to parse.
@@ -25,10 +35,46 @@ function EditorLoadingFallback() {
   return <div className="editor-loading">エディタを読み込んでいます...</div>;
 }
 
+class EditorErrorBoundary extends Component<
+  { children: ReactNode; onGoHome: () => void },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("EditorScreen failed to render", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="editor-error" role="alert">
+          <div className="editor-error__panel">
+            <h1>エディタを表示できませんでした</h1>
+            <p>
+              ワークブックの読み込み中に問題が発生しました。ホームへ戻って、もう一度開き直してください。
+            </p>
+            <button type="button" className="editor-error__button" onClick={this.props.onGoHome}>
+              ホームへ戻る
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const {
     screen,
     currentHandle,
+    editorRevision,
     blockingImport,
     importWarnings,
     loadRecentFiles,
@@ -40,6 +86,7 @@ export default function App() {
     loadPinnedOrder,
     loadSuppressCsvPocWarning,
     dismissBlockingImport,
+    goHome,
   } = useWorkbookStore();
 
   const [helpOpen, setHelpOpen] = useState(false);
@@ -106,15 +153,24 @@ export default function App() {
   const closeFileName = currentHandle?.path
     ? currentHandle.path.split(/[\\/]/).pop() ?? "Untitled"
     : "無題のワークブック";
+  const goHomeAfterConfirm = () => {
+    if (!confirmDiscardIfUnsaved()) return;
+    goHome();
+  };
 
   return (
     <div className="app">
       {screen === "home" ? (
         <HomeScreen />
       ) : (
-        <Suspense fallback={<EditorLoadingFallback />}>
-          <EditorScreen key={currentHandle?.workbookId ?? "no-workbook"} />
-        </Suspense>
+        <EditorErrorBoundary
+          key={`${currentHandle?.workbookId ?? "no-workbook"}:${editorRevision}`}
+          onGoHome={goHomeAfterConfirm}
+        >
+          <Suspense fallback={<EditorLoadingFallback />}>
+            <EditorScreen />
+          </Suspense>
+        </EditorErrorBoundary>
       )}
       {blockingImport && (
         <SecurityBlockDialog

@@ -75,8 +75,8 @@ fn build_pivot_fixture(tmp: &TempDir) -> PathBuf {
     let mut src = ZipArchive::new(std::io::Cursor::new(&src_bytes)).unwrap();
     let out_file = std::fs::File::create(&fixture_path).unwrap();
     let mut out = zip::ZipWriter::new(out_file);
-    let opts: FileOptions = FileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let opts: FileOptions =
+        FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     let rewrites: &[&str] = &["[Content_Types].xml"];
 
@@ -115,7 +115,8 @@ fn build_pivot_fixture(tmp: &TempDir) -> PathBuf {
     out.write_all(patched_ct.as_bytes()).unwrap();
 
     // New parts: pivotTable, pivotCacheDefinition, pivotCacheRecords + their rels.
-    out.start_file("xl/pivotTables/pivotTable1.xml", opts).unwrap();
+    out.start_file("xl/pivotTables/pivotTable1.xml", opts)
+        .unwrap();
     out.write_all(PIVOT_TABLE_XML.as_bytes()).unwrap();
 
     out.start_file("xl/pivotTables/_rels/pivotTable1.xml.rels", opts)
@@ -148,8 +149,7 @@ fn pivot_blob_survives_roundtrip() {
     // Import: snapshot should carry `_preservedParts` with the pivot blobs.
     let import = import_xlsx_core(path_str(&fixture)).expect("import ok");
     let snapshot_json = import.handle.snapshot_json.expect("snapshot present");
-    let snapshot: serde_json::Value =
-        serde_json::from_str(&snapshot_json).expect("parse snapshot");
+    let snapshot: serde_json::Value = serde_json::from_str(&snapshot_json).expect("parse snapshot");
     let preserved = snapshot
         .get("_preservedParts")
         .expect("_preservedParts should be on snapshot");
@@ -248,14 +248,14 @@ fn no_pivot_means_no_preservation_noise() {
 
     let import = import_xlsx_core(path_str(&plain_path)).expect("import ok");
     let snapshot_json = import.handle.snapshot_json.expect("snapshot present");
-    let snapshot: serde_json::Value =
-        serde_json::from_str(&snapshot_json).expect("parse snapshot");
+    let snapshot: serde_json::Value = serde_json::from_str(&snapshot_json).expect("parse snapshot");
     // Either no _preservedParts, or its parts map has no pivot keys.
     if let Some(preserved) = snapshot.get("_preservedParts") {
         if let Some(parts) = preserved.get("parts").and_then(|v| v.as_object()) {
             assert!(
-                parts.keys().all(|k| !k.starts_with("xl/pivotTables/")
-                    && !k.starts_with("xl/pivotCache/")),
+                parts
+                    .keys()
+                    .all(|k| !k.starts_with("xl/pivotTables/") && !k.starts_with("xl/pivotCache/")),
                 "plain workbook should not preserve pivot entries: {:?}",
                 parts.keys().collect::<Vec<_>>()
             );

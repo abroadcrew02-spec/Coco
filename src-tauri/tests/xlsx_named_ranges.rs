@@ -1,5 +1,5 @@
 use calamine::{open_workbook, Reader, Xlsx};
-use coco_lib::commands::xlsx_io::{import_xlsx_core, export_xlsx_core};
+use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -40,7 +40,12 @@ fn workbook_scoped_named_range_round_trips() {
     let named = snapshot["namedRanges"]
         .as_array()
         .expect("namedRanges should be an array");
-    assert_eq!(named.len(), 1, "expected one named range, got {}", named.len());
+    assert_eq!(
+        named.len(),
+        1,
+        "expected one named range, got {}",
+        named.len()
+    );
     assert_eq!(named[0]["name"].as_str().unwrap(), "Sales");
     let formula = named[0]["formula"].as_str().unwrap();
     assert!(
@@ -80,10 +85,7 @@ fn multiple_named_ranges_round_trip() {
 
     let named = snapshot["namedRanges"].as_array().expect("array");
     assert_eq!(named.len(), inputs.len(), "all names should round-trip");
-    let got_names: Vec<&str> = named
-        .iter()
-        .map(|e| e["name"].as_str().unwrap())
-        .collect();
+    let got_names: Vec<&str> = named.iter().map(|e| e["name"].as_str().unwrap()).collect();
     for (expected, _) in inputs {
         assert!(
             got_names.contains(expected),
@@ -95,11 +97,7 @@ fn multiple_named_ranges_round_trip() {
     assert!(export.success, "export ok");
 
     let wb: Xlsx<_> = open_workbook(&exported).expect("re-open");
-    let exported_names: Vec<&str> = wb
-        .defined_names()
-        .iter()
-        .map(|(n, _)| n.as_str())
-        .collect();
+    let exported_names: Vec<&str> = wb.defined_names().iter().map(|(n, _)| n.as_str()).collect();
     for (expected, _) in inputs {
         assert!(
             exported_names.contains(expected),
@@ -122,7 +120,10 @@ fn missing_named_ranges_section_yields_empty_array() {
     let named = snapshot["namedRanges"]
         .as_array()
         .expect("namedRanges should always be present as an array");
-    assert!(named.is_empty(), "expected empty namedRanges array, got {named:?}");
+    assert!(
+        named.is_empty(),
+        "expected empty namedRanges array, got {named:?}"
+    );
 }
 
 #[test]
@@ -171,11 +172,7 @@ fn malformed_named_range_entries_are_ignored() {
     );
 
     let wb: Xlsx<_> = open_workbook(&exported).expect("re-open");
-    let names: Vec<&str> = wb
-        .defined_names()
-        .iter()
-        .map(|(n, _)| n.as_str())
-        .collect();
+    let names: Vec<&str> = wb.defined_names().iter().map(|(n, _)| n.as_str()).collect();
     assert!(
         names.contains(&"Good_Name"),
         "the one valid entry should survive; got {names:?}"

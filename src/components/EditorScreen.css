@@ -6,6 +6,43 @@
   overflow: hidden;
 }
 
+.editor-screen--error {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #f7f7f5;
+}
+
+.editor-init-error {
+  width: min(560px, 100%);
+  border: 1px solid #d8d6d0;
+  border-radius: 6px;
+  background: #fff;
+  padding: 20px;
+  color: #2f2f2f;
+}
+
+.editor-init-error h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.editor-init-error p {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.editor-init-error pre {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0 0 14px;
+  padding: 10px;
+  border-radius: 4px;
+  background: #f3f3f3;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
 /* Top toolbar */
 .editor-toolbar {
   display: flex;
@@ -237,6 +274,12 @@
 .status-bar__status--exporting,
 .status-bar__status--loading {
   color: #c8e6c9;
+}
+
+.status-bar__operation-error {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffd6a5;
 }
 
 /* Idle success messages fade after a few seconds so the bar isn't permanently

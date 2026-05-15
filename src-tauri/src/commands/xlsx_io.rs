@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::path::PathBuf;
 
 use calamine::{open_workbook, Data, Reader, Xlsx};
@@ -29,10 +29,10 @@ const LARGE_SHEET_THRESHOLD: usize = 100_000;
 struct CellStyle {
     bold: bool,
     italic: bool,
-    font_color: Option<String>,    // "#RRGGBB"
-    fill_color: Option<String>,    // "#RRGGBB"
-    h_align: Option<String>,       // "left" | "center" | "right" | "fill" | "justify"
-    v_align: Option<String>,       // "top" | "middle" | "bottom"
+    font_color: Option<String>, // "#RRGGBB"
+    fill_color: Option<String>, // "#RRGGBB"
+    h_align: Option<String>,    // "left" | "center" | "right" | "fill" | "justify"
+    v_align: Option<String>,    // "top" | "middle" | "bottom"
     borders: Option<CellBorders>,
 }
 
@@ -46,17 +46,14 @@ struct CellBorders {
 
 impl CellBorders {
     fn is_empty(&self) -> bool {
-        self.top.is_none()
-            && self.bottom.is_none()
-            && self.left.is_none()
-            && self.right.is_none()
+        self.top.is_none() && self.bottom.is_none() && self.left.is_none() && self.right.is_none()
     }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct BorderSide {
-    style: String,           // "thin" | "medium" | "thick" | "double" | "dotted" | "dashed"
-    color: Option<String>,   // "#RRGGBB"
+    style: String,         // "thin" | "medium" | "thick" | "double" | "dotted" | "dashed"
+    color: Option<String>, // "#RRGGBB"
 }
 
 /// One formatting run inside a rich-text cell. Mirrors the subset of OOXML
@@ -67,8 +64,8 @@ struct RichRun {
     text: String,
     bold: bool,
     italic: bool,
-    color: Option<String>,   // "#RRGGBB"
-    font_size: Option<f64>,  // point size (xlsx `sz val="..."`)
+    color: Option<String>,  // "#RRGGBB"
+    font_size: Option<f64>, // point size (xlsx `sz val="..."`)
     font_name: Option<String>,
 }
 
@@ -101,7 +98,10 @@ impl RichRun {
             text,
             bold: obj.get("bold").and_then(|x| x.as_bool()).unwrap_or(false),
             italic: obj.get("italic").and_then(|x| x.as_bool()).unwrap_or(false),
-            color: obj.get("color").and_then(|x| x.as_str()).map(|s| s.to_string()),
+            color: obj
+                .get("color")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string()),
             font_size: obj.get("fontSize").and_then(|x| x.as_f64()),
             font_name: obj
                 .get("fontName")
@@ -180,14 +180,26 @@ impl CellStyle {
         if let Some(f) = obj.get("font").and_then(|x| x.as_object()) {
             s.bold = f.get("bold").and_then(|x| x.as_bool()).unwrap_or(false);
             s.italic = f.get("italic").and_then(|x| x.as_bool()).unwrap_or(false);
-            s.font_color = f.get("color").and_then(|x| x.as_str()).map(|s| s.to_string());
+            s.font_color = f
+                .get("color")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string());
         }
         if let Some(fl) = obj.get("fill").and_then(|x| x.as_object()) {
-            s.fill_color = fl.get("color").and_then(|x| x.as_str()).map(|s| s.to_string());
+            s.fill_color = fl
+                .get("color")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string());
         }
         if let Some(a) = obj.get("alignment").and_then(|x| x.as_object()) {
-            s.h_align = a.get("horizontal").and_then(|x| x.as_str()).map(|s| s.to_string());
-            s.v_align = a.get("vertical").and_then(|x| x.as_str()).map(|s| s.to_string());
+            s.h_align = a
+                .get("horizontal")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string());
+            s.v_align = a
+                .get("vertical")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string());
         }
         if let Some(b) = obj.get("borders").and_then(|x| x.as_object()) {
             let read_side = |key: &str| -> Option<BorderSide> {
@@ -244,16 +256,17 @@ fn builtin_num_format(id: u32) -> Option<&'static str> {
     }
 }
 
-fn parse_xlsx_styles(
-    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
-    sheet_xmls: &HashMap<String, String>,
+fn parse_xlsx_styles<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
 ) -> Result<ParsedStyles, String> {
     use std::io::Read;
 
     // 1. styles.xml: fonts, fills, cellXfs
     let mut styles_xml = String::new();
     if let Ok(mut entry) = archive.by_name("xl/styles.xml") {
-        entry.read_to_string(&mut styles_xml).map_err(|e| e.to_string())?;
+        entry
+            .read_to_string(&mut styles_xml)
+            .map_err(|e| e.to_string())?;
     }
     let (fonts, fills, borders, cell_xfs_raw, custom_num_fmts) = parse_styles_xml(&styles_xml);
 
@@ -267,19 +280,10 @@ fn parse_xlsx_styles(
         .map(|x| resolve_num_format(x, &custom_num_fmts))
         .collect();
 
-    // 3. for each sheet, extract per-cell `s` attributes from the cached XML.
-    let mut per_sheet: HashMap<String, HashMap<(u32, u32), usize>> = HashMap::new();
-    for (sheet_name, sheet_xml) in sheet_xmls {
-        let cell_map = parse_sheet_cell_styles(sheet_xml);
-        if !cell_map.is_empty() {
-            per_sheet.insert(sheet_name.clone(), cell_map);
-        }
-    }
-
     Ok(ParsedStyles {
         cell_xfs,
         cell_num_formats,
-        per_sheet,
+        per_sheet: HashMap::new(),
     })
 }
 
@@ -289,43 +293,29 @@ type SheetRichTextMap = HashMap<(u32, u32), Vec<RichRun>>;
 
 /// Parsed rich-text data for a workbook. Only the per-sheet map is consumed
 /// downstream; the shared-strings vec is kept as an intermediate during
-/// `parse_xlsx_rich_text` (used to resolve `<c t="s">` lookups) and isn't
+/// the per-sheet import pass (used to resolve `<c t="s">` lookups) and isn't
 /// read further once `per_sheet` is built.
 struct ParsedRichText {
     per_sheet: HashMap<String, SheetRichTextMap>,
 }
 
-/// Parse `xl/sharedStrings.xml` + each sheet to find rich-text cells.
-///
-/// Two sources of rich text:
-/// - `<si><r><rPr>...</rPr><t>...</t></r>...<si>` in sharedStrings.xml. Cells
-///   referencing the index via `<c t="s"><v>N</v></c>` inherit the runs.
-/// - `<c t="inlineStr"><is><r>...</r>...</is></c>` directly in the sheet XML.
-fn parse_xlsx_rich_text(
-    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
-    sheet_xmls: &HashMap<String, String>,
-) -> Result<ParsedRichText, String> {
+/// Parse `xl/sharedStrings.xml` rich-text entries. Per-sheet rich-text cells
+/// are resolved during the one-sheet-at-a-time worksheet XML pass.
+fn parse_xlsx_shared_rich_text<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<Vec<Option<Vec<RichRun>>>, String> {
     use std::io::Read;
 
     // 1. sharedStrings.xml — optional (workbooks with only inline strings omit it)
     let mut ss_xml = String::new();
     if let Ok(mut entry) = archive.by_name("xl/sharedStrings.xml") {
-        entry.read_to_string(&mut ss_xml).map_err(|e| e.to_string())?;
+        entry
+            .read_to_string(&mut ss_xml)
+            .map_err(|e| e.to_string())?;
     }
     let shared = parse_shared_strings_xml(&ss_xml);
 
-    // 2. Walk each sheet's cached XML for shared-string refs pointing to rich
-    //    entries and for inline rich strings.
-    let mut per_sheet: HashMap<String, SheetRichTextMap> = HashMap::new();
-    for (sheet_name, sheet_xml) in sheet_xmls {
-        let map = parse_sheet_rich_text(sheet_xml, &shared);
-        if !map.is_empty() {
-            per_sheet.insert(sheet_name.clone(), map);
-        }
-    }
-
-    let _ = shared; // explicitly drop — only per_sheet is consumed by callers.
-    Ok(ParsedRichText { per_sheet })
+    Ok(shared)
 }
 
 /// Parse `xl/sharedStrings.xml` into one entry per `<si>`. Entries are
@@ -358,11 +348,7 @@ fn parse_shared_strings_xml(xml: &str) -> Vec<Option<Vec<RichRun>>> {
 /// True when a run carries any visible formatting (i.e. should be kept as a
 /// rich run rather than collapsed into the plain string).
 fn run_has_formatting(r: &RichRun) -> bool {
-    r.bold
-        || r.italic
-        || r.color.is_some()
-        || r.font_size.is_some()
-        || r.font_name.is_some()
+    r.bold || r.italic || r.color.is_some() || r.font_size.is_some() || r.font_name.is_some()
 }
 
 /// Extract all `<r>...</r>` runs inside the given element body (works for
@@ -433,10 +419,7 @@ fn extract_t_text(run_xml: &str) -> Option<String> {
 /// For one sheet's XML, find every `<c>` that points to a rich shared string
 /// or carries an inline rich string. Returns a (row, col) -> runs map. The
 /// `shared` argument is the workbook's parsed sharedStrings table.
-fn parse_sheet_rich_text(
-    xml: &str,
-    shared: &[Option<Vec<RichRun>>],
-) -> SheetRichTextMap {
+fn parse_sheet_rich_text(xml: &str, shared: &[Option<Vec<RichRun>>]) -> SheetRichTextMap {
     let mut out: SheetRichTextMap = HashMap::new();
     let bytes = xml.as_bytes();
     let mut i: usize = 0;
@@ -491,8 +474,7 @@ fn parse_sheet_rich_text(
                             let runs = parse_rich_runs(&is_block);
                             // Only treat as rich when at least one run has
                             // formatting (or the cell has multiple runs).
-                            let keep = runs.len() > 1
-                                || runs.iter().any(run_has_formatting);
+                            let keep = runs.len() > 1 || runs.iter().any(run_has_formatting);
                             if keep && !runs.is_empty() {
                                 out.insert(coord, runs);
                             }
@@ -515,7 +497,13 @@ fn parse_sheet_rich_text(
 /// `numFmtId -> formatCode` for `<numFmt>` entries (typically id >= 164).
 fn parse_styles_xml(
     xml: &str,
-) -> (Vec<RawFont>, Vec<RawFill>, Vec<RawBorder>, Vec<RawXf>, HashMap<u32, String>) {
+) -> (
+    Vec<RawFont>,
+    Vec<RawFill>,
+    Vec<RawBorder>,
+    Vec<RawXf>,
+    HashMap<u32, String>,
+) {
     let mut fonts: Vec<RawFont> = Vec::new();
     let mut fills: Vec<RawFill> = Vec::new();
     let mut borders: Vec<RawBorder> = Vec::new();
@@ -588,8 +576,7 @@ fn parse_styles_xml(
             x.apply_font = parse_attr(&xf_el, "applyFont").as_deref() == Some("1");
             x.apply_fill = parse_attr(&xf_el, "applyFill").as_deref() == Some("1");
             x.apply_border = parse_attr(&xf_el, "applyBorder").as_deref() == Some("1");
-            x.apply_number_format =
-                parse_attr(&xf_el, "applyNumberFormat").as_deref() == Some("1");
+            x.apply_number_format = parse_attr(&xf_el, "applyNumberFormat").as_deref() == Some("1");
             x.apply_alignment = parse_attr(&xf_el, "applyAlignment").as_deref() == Some("1");
             if let Some(align) = find_tag(&xf_el, "<alignment") {
                 x.h_align = parse_attr(&align, "horizontal");
@@ -673,10 +660,7 @@ struct RawBorder {
 
 impl RawBorder {
     fn is_empty(&self) -> bool {
-        self.top.is_none()
-            && self.bottom.is_none()
-            && self.left.is_none()
-            && self.right.is_none()
+        self.top.is_none() && self.bottom.is_none() && self.left.is_none() && self.right.is_none()
     }
 }
 
@@ -711,7 +695,12 @@ fn resolve_num_format(xf: &RawXf, custom: &HashMap<u32, String>) -> Option<Strin
     builtin_num_format(id).map(|s| s.to_string())
 }
 
-fn resolve_xf(xf: &RawXf, fonts: &[RawFont], fills: &[RawFill], borders: &[RawBorder]) -> CellStyle {
+fn resolve_xf(
+    xf: &RawXf,
+    fonts: &[RawFont],
+    fills: &[RawFill],
+    borders: &[RawBorder],
+) -> CellStyle {
     let mut s = CellStyle::default();
     // Font: honor regardless of applyFont — many writers omit the apply* flag.
     if let Some(idx) = xf.font_id {
@@ -843,6 +832,7 @@ fn parse_sheet_freeze_pane(xml: &str) -> Option<FreezePaneEntry> {
 /// Walk every sheet in an xlsx and pull out its freeze-pane declaration.
 /// Returns `sheet name -> FreezePaneEntry`; sheets without a frozen pane are
 /// omitted.
+#[allow(dead_code)]
 pub(crate) fn parse_xlsx_freeze_panes(
     sheet_xmls: &HashMap<String, String>,
 ) -> HashMap<String, FreezePaneEntry> {
@@ -857,8 +847,8 @@ pub(crate) fn parse_xlsx_freeze_panes(
 
 /// Read `xl/workbook.xml` from an xlsx and return the sheet-visibility map.
 /// Best-effort: returns empty on read or parse failure.
-pub(crate) fn parse_xlsx_sheet_visibility(
-    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+pub(crate) fn parse_xlsx_sheet_visibility<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
 ) -> HashMap<String, String> {
     let mut wb_xml = String::new();
     if let Ok(mut entry) = archive.by_name("xl/workbook.xml") {
@@ -895,6 +885,7 @@ fn parse_sheet_protection(xml: &str) -> Option<SheetProtectionEntry> {
 /// Walk every sheet in an xlsx and pull out its sheet-protection declaration.
 /// Returns `sheet name -> SheetProtectionEntry`; sheets without protection are
 /// omitted.
+#[allow(dead_code)]
 pub(crate) fn parse_xlsx_sheet_protection(
     sheet_xmls: &HashMap<String, String>,
 ) -> HashMap<String, SheetProtectionEntry> {
@@ -925,7 +916,10 @@ fn parse_sheet_cell_styles(xml: &str) -> HashMap<(u32, u32), usize> {
     let bytes = xml.as_bytes();
     let mut i = 0;
     while i + 2 < bytes.len() {
-        if bytes[i] == b'<' && bytes[i + 1] == b'c' && (bytes[i + 2] == b' ' || bytes[i + 2] == b'>' || bytes[i + 2] == b'/') {
+        if bytes[i] == b'<'
+            && bytes[i + 1] == b'c'
+            && (bytes[i + 2] == b' ' || bytes[i + 2] == b'>' || bytes[i + 2] == b'/')
+        {
             // find end of opening tag '>'
             let mut j = i + 2;
             while j < bytes.len() && bytes[j] != b'>' {
@@ -1064,7 +1058,10 @@ fn extract_self_closing_or_paired(xml: &str, name: &str) -> Vec<String> {
 fn find_tag(xml: &str, open_prefix: &str) -> Option<String> {
     let idx = xml.find(open_prefix)?;
     let after = idx + open_prefix.len();
-    if !matches!(xml.as_bytes().get(after), Some(b' ') | Some(b'>') | Some(b'/')) {
+    if !matches!(
+        xml.as_bytes().get(after),
+        Some(b' ') | Some(b'>') | Some(b'/')
+    ) {
         // collision; try further
         return find_tag(&xml[after..], open_prefix);
     }
@@ -1158,7 +1155,9 @@ fn build_format(style: &CellStyle, num_format: Option<&str>) -> Format {
     }
     if let Some(c) = style.fill_color.as_deref().and_then(parse_color) {
         // Need both pattern=Solid and bg color for a visible fill.
-        fmt = fmt.set_background_color(c).set_pattern(FormatPattern::Solid);
+        fmt = fmt
+            .set_background_color(c)
+            .set_pattern(FormatPattern::Solid);
     }
     if let Some(h) = style.h_align.as_deref() {
         let align = match h {
@@ -1439,8 +1438,8 @@ pub fn detect_unsupported_features(path: &str) -> Result<Vec<CompatibilityWarnin
     use std::io::BufReader;
     use zip::ZipArchive;
     let file = File::open(path).map_err(|e| e.to_string())?;
-    let mut archive = ZipArchive::new(BufReader::new(file))
-        .map_err(|e| format!("Invalid xlsx (zip): {e}"))?;
+    let mut archive =
+        ZipArchive::new(BufReader::new(file)).map_err(|e| format!("Invalid xlsx (zip): {e}"))?;
     detect_unsupported_features_in(&mut archive)
 }
 
@@ -1528,7 +1527,9 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
             code: "XLSX_PIVOT_DISCARDED".to_string(),
-            message: "ピボットテーブルが含まれていますが、Coco では保持されません。保存時に失われます。".to_string(),
+            message:
+                "ピボットテーブルが含まれていますが、Coco では保持されません。保存時に失われます。"
+                    .to_string(),
             affected_sheets: None,
         });
     }
@@ -1552,7 +1553,8 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
             code: "XLSX_EMBEDDED_OBJECTS_DISCARDED".to_string(),
-            message: "埋め込みオブジェクト（OLE 等）が含まれていますが、Coco では保持されません。".to_string(),
+            message: "埋め込みオブジェクト（OLE 等）が含まれていますが、Coco では保持されません。"
+                .to_string(),
             affected_sheets: None,
         });
     }
@@ -1560,7 +1562,8 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
             code: "XLSX_DRAWINGS_DISCARDED".to_string(),
-            message: "図形・画像が含まれていますが、Coco では保持されません。保存時に失われます。".to_string(),
+            message: "図形・画像が含まれていますが、Coco では保持されません。保存時に失われます。"
+                .to_string(),
             affected_sheets: None,
         });
     }
@@ -1568,7 +1571,8 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
             code: "XLSX_CONDITIONAL_FORMATTING".to_string(),
-            message: "条件付き書式が検出されました。Coco では編集できず、保存時に失われます。".to_string(),
+            message: "条件付き書式が検出されました。Coco では編集できず、保存時に失われます。"
+                .to_string(),
             affected_sheets: None,
         });
     }
@@ -1598,15 +1602,10 @@ pub(crate) struct SheetDimensions {
 /// Read `xl/workbook.xml` and the rels file to build a `sheet name -> worksheet
 /// xml zip-path` mapping. Returns an empty map on any parse error (callers
 /// should treat the absence of dimensions as "no custom widths/heights").
-fn parse_sheet_path_map(archive_bytes: &[u8]) -> HashMap<String, String> {
-    use std::io::Cursor;
-    use zip::ZipArchive;
-
+fn parse_sheet_path_map_from_archive<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> HashMap<String, String> {
     let mut out: HashMap<String, String> = HashMap::new();
-
-    let Ok(mut archive) = ZipArchive::new(Cursor::new(archive_bytes)) else {
-        return out;
-    };
 
     // Pull workbook.xml — list of <sheet name="..." sheetId="..." r:id="rIdN"/>
     let mut workbook_xml = String::new();
@@ -1640,6 +1639,17 @@ fn parse_sheet_path_map(archive_bytes: &[u8]) -> HashMap<String, String> {
     }
 
     out
+}
+
+fn parse_sheet_path_map(archive_bytes: &[u8]) -> HashMap<String, String> {
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let Ok(mut archive) = ZipArchive::new(Cursor::new(archive_bytes)) else {
+        return HashMap::new();
+    };
+
+    parse_sheet_path_map_from_archive(&mut archive)
 }
 
 /// Pull a `key="value"` attribute out of a substring. Naive but adequate for
@@ -1720,6 +1730,7 @@ fn parse_sheet_dimensions_xml(xml: &str) -> SheetDimensions {
 /// Parse per-sheet column widths and row heights out of an xlsx. Returns a map
 /// keyed by sheet name. Quietly returns an empty map if anything is malformed
 /// — dimensions are best-effort metadata, not load-bearing.
+#[allow(dead_code)]
 pub(crate) fn parse_xlsx_dimensions(
     sheet_xmls: &HashMap<String, String>,
 ) -> HashMap<String, SheetDimensions> {
@@ -1790,8 +1801,12 @@ fn find_opening_tag<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
     // The char immediately after the name must be whitespace, '/', or '>'.
     // This rejects e.g. `<pageSetupPr` when searching for `<pageSetup`.
     let after = xml.as_bytes().get(start + needle.len()).copied()?;
-    if !(after == b' ' || after == b'\t' || after == b'\r' || after == b'\n'
-        || after == b'/' || after == b'>')
+    if !(after == b' '
+        || after == b'\t'
+        || after == b'\r'
+        || after == b'\n'
+        || after == b'/'
+        || after == b'>')
     {
         // Probe further along the string for a non-prefix match.
         let mut cursor = start + needle.len();
@@ -1800,8 +1815,12 @@ fn find_opening_tag<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
             let rel = rest.find(&needle)?;
             let abs = cursor + rel;
             let after2 = xml.as_bytes().get(abs + needle.len()).copied()?;
-            if after2 == b' ' || after2 == b'\t' || after2 == b'\r' || after2 == b'\n'
-                || after2 == b'/' || after2 == b'>'
+            if after2 == b' '
+                || after2 == b'\t'
+                || after2 == b'\r'
+                || after2 == b'\n'
+                || after2 == b'/'
+                || after2 == b'>'
             {
                 let end = xml[abs..].find('>')? + abs;
                 return Some(&xml[abs..=end]);
@@ -1906,6 +1925,7 @@ fn parse_sheet_page_setup_xml(xml: &str) -> SheetPageSetup {
 /// Parse per-sheet print / page-setup metadata out of an xlsx. Returns a map
 /// keyed by sheet name. Returns an empty map on I/O or parse errors — page
 /// setup is best-effort decoration, not load-bearing.
+#[allow(dead_code)]
 pub(crate) fn parse_xlsx_page_setup(
     sheet_xmls: &HashMap<String, String>,
 ) -> HashMap<String, SheetPageSetup> {
@@ -1968,6 +1988,7 @@ fn parse_sheet_merge_cells(xml: &str) -> Vec<(u32, u32, u32, u32)> {
 /// Parse per-sheet merged-cell ranges out of an xlsx. Returns a map keyed by
 /// sheet name. Returns an empty map on any I/O / structure error — merges are
 /// best-effort metadata, not load-bearing.
+#[allow(dead_code)]
 pub(crate) fn parse_xlsx_merges(
     sheet_xmls: &HashMap<String, String>,
 ) -> HashMap<String, Vec<(u32, u32, u32, u32)>> {
@@ -2020,6 +2041,7 @@ fn parse_sheet_auto_filter(xml: &str) -> Option<String> {
 /// Parse per-sheet tab colors out of an xlsx. Returns a map keyed by sheet name
 /// — sheets without a tab color are simply absent from the map. Best-effort:
 /// returns an empty map on any I/O / structure error.
+#[allow(dead_code)]
 pub(crate) fn parse_xlsx_tab_colors(
     sheet_xmls: &HashMap<String, String>,
 ) -> HashMap<String, String> {
@@ -2036,6 +2058,7 @@ pub(crate) fn parse_xlsx_tab_colors(
 /// Parse per-sheet auto-filter ranges out of an xlsx. Returns a map keyed by
 /// sheet name — sheets without an auto-filter are simply absent. Best-effort:
 /// returns an empty map on any I/O / structure error.
+#[allow(dead_code)]
 pub(crate) fn parse_xlsx_auto_filters(
     sheet_xmls: &HashMap<String, String>,
 ) -> HashMap<String, String> {
@@ -2102,10 +2125,12 @@ fn parse_sheet_data_validations(xml: &str) -> Vec<DataValidationEntry> {
             continue;
         }
 
-        let validation_type =
-            parse_attr(head, "type").map(|s| decode_xml_entities(&s)).unwrap_or_default();
-        let operator =
-            parse_attr(head, "operator").map(|s| decode_xml_entities(&s)).unwrap_or_default();
+        let validation_type = parse_attr(head, "type")
+            .map(|s| decode_xml_entities(&s))
+            .unwrap_or_default();
+        let operator = parse_attr(head, "operator")
+            .map(|s| decode_xml_entities(&s))
+            .unwrap_or_default();
 
         let bool_attr = |name: &str| -> bool {
             parse_attr(head, name)
@@ -2115,16 +2140,21 @@ fn parse_sheet_data_validations(xml: &str) -> Vec<DataValidationEntry> {
         let allow_blank = bool_attr("allowBlank");
         let show_error_message = bool_attr("showErrorMessage");
         let show_input_message = bool_attr("showInputMessage");
-        let error_style =
-            parse_attr(head, "errorStyle").map(|s| decode_xml_entities(&s)).unwrap_or_default();
-        let error_title =
-            parse_attr(head, "errorTitle").map(|s| decode_xml_entities(&s)).unwrap_or_default();
-        let error_message =
-            parse_attr(head, "error").map(|s| decode_xml_entities(&s)).unwrap_or_default();
-        let prompt_title =
-            parse_attr(head, "promptTitle").map(|s| decode_xml_entities(&s)).unwrap_or_default();
-        let prompt_message =
-            parse_attr(head, "prompt").map(|s| decode_xml_entities(&s)).unwrap_or_default();
+        let error_style = parse_attr(head, "errorStyle")
+            .map(|s| decode_xml_entities(&s))
+            .unwrap_or_default();
+        let error_title = parse_attr(head, "errorTitle")
+            .map(|s| decode_xml_entities(&s))
+            .unwrap_or_default();
+        let error_message = parse_attr(head, "error")
+            .map(|s| decode_xml_entities(&s))
+            .unwrap_or_default();
+        let prompt_title = parse_attr(head, "promptTitle")
+            .map(|s| decode_xml_entities(&s))
+            .unwrap_or_default();
+        let prompt_message = parse_attr(head, "prompt")
+            .map(|s| decode_xml_entities(&s))
+            .unwrap_or_default();
 
         // Strip the head; the rest holds <formula1>...</formula1>[<formula2>...</formula2>].
         let body = if head_end < el.len() {
@@ -2170,6 +2200,7 @@ fn extract_inner_text(xml: &str, open_prefix: &str, close_tag: &str) -> Option<S
 /// Parse per-sheet `<dataValidations>` ranges out of an xlsx. Returns a map
 /// keyed by sheet name. Returns an empty map on I/O / structure error — like
 /// the other per-sheet parsers, data validations are best-effort metadata.
+#[allow(dead_code)]
 pub(crate) fn parse_xlsx_data_validations(
     sheet_xmls: &HashMap<String, String>,
 ) -> HashMap<String, Vec<DataValidationEntry>> {
@@ -2210,10 +2241,7 @@ pub(crate) struct HyperlinkEntry {
 /// Parse one sheet's `<hyperlinks>...</hyperlinks>` block. `rels` maps the
 /// per-sheet rId → Target string (for external hyperlinks). Returns an empty
 /// vec when the sheet has no hyperlinks.
-fn parse_sheet_hyperlinks(
-    xml: &str,
-    rels: &HashMap<String, String>,
-) -> Vec<HyperlinkEntry> {
+fn parse_sheet_hyperlinks(xml: &str, rels: &HashMap<String, String>) -> Vec<HyperlinkEntry> {
     let mut out = Vec::new();
     let Some(block) = extract_block(xml, "<hyperlinks", "</hyperlinks>") else {
         return out;
@@ -2295,12 +2323,37 @@ fn sheet_rels_path(sheet_entry_path: &str) -> Option<String> {
     Some(format!("{dir}/_rels/{file}.rels"))
 }
 
+fn read_sheet_rels<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    sheet_entry_path: &str,
+) -> HashMap<String, String> {
+    sheet_rels_path(sheet_entry_path)
+        .and_then(|rels_path| {
+            let mut s = String::new();
+            archive
+                .by_name(&rels_path)
+                .ok()?
+                .read_to_string(&mut s)
+                .ok()?;
+            Some(parse_rels(&s))
+        })
+        .unwrap_or_default()
+}
+
+fn parse_sheet_drawing_rid(xml: &str) -> Option<String> {
+    xml.find("<drawing")
+        .map(|s| &xml[s..])
+        .and_then(|chunk| chunk.find("/>").map(|e| &chunk[..e]))
+        .and_then(|tag| parse_attr(tag, "r:id"))
+}
+
 /// Parse per-sheet hyperlinks out of an xlsx, joining each sheet's
 /// `<hyperlinks>` block with its dedicated rels file. Returns a map keyed by
 /// sheet name. Empty map on I/O / structure error — hyperlinks are best-effort
 /// metadata, same policy as merges and data validations.
-pub(crate) fn parse_xlsx_hyperlinks(
-    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+#[allow(dead_code)]
+pub(crate) fn parse_xlsx_hyperlinks<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
     sheet_paths: &HashMap<String, String>,
     sheet_xmls: &HashMap<String, String>,
 ) -> HashMap<String, Vec<HyperlinkEntry>> {
@@ -2316,17 +2369,7 @@ pub(crate) fn parse_xlsx_hyperlinks(
             continue;
         }
         // Read the per-sheet rels file (may be absent — internal-only links).
-        let rels: HashMap<String, String> = sheet_rels_path(entry_path)
-            .and_then(|rels_path| {
-                let mut s = String::new();
-                archive
-                    .by_name(&rels_path)
-                    .ok()?
-                    .read_to_string(&mut s)
-                    .ok()?;
-                Some(parse_rels(&s))
-            })
-            .unwrap_or_default();
+        let rels = read_sheet_rels(archive, entry_path);
 
         let links = parse_sheet_hyperlinks(xml, &rels);
         if !links.is_empty() {
@@ -2386,8 +2429,7 @@ fn parse_comments_xml(xml: &str) -> Vec<CommentEntry> {
             continue;
         };
         let cell = decode_xml_entities(&cell);
-        let author_id: Option<usize> =
-            parse_attr(head, "authorId").and_then(|s| s.parse().ok());
+        let author_id: Option<usize> = parse_attr(head, "authorId").and_then(|s| s.parse().ok());
         let author = author_id
             .and_then(|i| authors.get(i).cloned())
             .unwrap_or_default();
@@ -2427,7 +2469,9 @@ fn parse_comments_xml(xml: &str) -> Vec<CommentEntry> {
 
         let text = if !author.is_empty() {
             let prefix = format!("{author}:\n");
-            text.strip_prefix(&prefix).map(|s| s.to_string()).unwrap_or(text)
+            text.strip_prefix(&prefix)
+                .map(|s| s.to_string())
+                .unwrap_or(text)
         } else {
             text
         };
@@ -2446,7 +2490,11 @@ fn build_comments_xml(notes: &[(String, String, String)]) -> String {
     use std::fmt::Write as _;
     let mut authors: Vec<String> = Vec::new();
     for (_, author, _) in notes {
-        let name = if author.is_empty() { "Author".to_string() } else { author.clone() };
+        let name = if author.is_empty() {
+            "Author".to_string()
+        } else {
+            author.clone()
+        };
         if !authors.iter().any(|a| a == &name) {
             authors.push(name);
         }
@@ -2464,9 +2512,21 @@ fn build_comments_xml(notes: &[(String, String, String)]) -> String {
     }
     out.push_str("<commentList>");
     for (cell, author, text) in notes {
-        let display_author = if author.is_empty() { "Author" } else { author.as_str() };
-        let author_id = authors.iter().position(|a| a == display_author).unwrap_or(0);
-        let _ = write!(out, "<comment ref=\"{}\" authorId=\"{}\"><text>", encode_xml_text(cell), author_id);
+        let display_author = if author.is_empty() {
+            "Author"
+        } else {
+            author.as_str()
+        };
+        let author_id = authors
+            .iter()
+            .position(|a| a == display_author)
+            .unwrap_or(0);
+        let _ = write!(
+            out,
+            "<comment ref=\"{}\" authorId=\"{}\"><text>",
+            encode_xml_text(cell),
+            author_id
+        );
         let _ = write!(
             out,
             "<r><rPr><b/><sz val=\"8\"/><color indexed=\"81\"/><rFont val=\"Tahoma\"/><family val=\"2\"/></rPr><t xml:space=\"preserve\">{}:</t></r>",
@@ -2530,8 +2590,8 @@ fn rewrite_split_panes_in_zip(
 
     let bytes = std::fs::read(xlsx_path).map_err(|e| format!("read xlsx: {e}"))?;
     let sheet_paths = parse_sheet_path_map(&bytes);
-    let mut archive = zip::ZipArchive::new(Cursor::new(&bytes))
-        .map_err(|e| format!("open xlsx zip: {e}"))?;
+    let mut archive =
+        zip::ZipArchive::new(Cursor::new(&bytes)).map_err(|e| format!("open xlsx zip: {e}"))?;
 
     // Build entry-path -> new XML map for sheets that need a split-pane swap.
     let mut replacements: HashMap<String, Vec<u8>> = HashMap::new();
@@ -2560,10 +2620,7 @@ fn rewrite_split_panes_in_zip(
         let end = start + end_rel + 2;
         // Replicate rust_xlsxwriter's attribute order so diffs stay minimal:
         // xSplit, ySplit, topLeftCell, activePane, state.
-        let top_left = spec
-            .top_left
-            .clone()
-            .unwrap_or_else(|| "A1".to_string());
+        let top_left = spec.top_left.clone().unwrap_or_else(|| "A1".to_string());
         let new_pane = format!(
             r#"<pane xSplit="{x}" ySplit="{y}" topLeftCell="{tl}" activePane="bottomRight" state="split"/>"#,
             x = spec.x_split,
@@ -2584,8 +2641,8 @@ fn rewrite_split_panes_in_zip(
     let mut out_buf: Vec<u8> = Vec::with_capacity(bytes.len());
     {
         let mut writer = zip::ZipWriter::new(Cursor::new(&mut out_buf));
-        let opts = zip::write::FileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
+        let opts =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         for i in 0..archive.len() {
             let mut entry = archive
                 .by_index(i)
@@ -2637,8 +2694,8 @@ fn rewrite_extra_cf_in_zip(
 
     let bytes = std::fs::read(xlsx_path).map_err(|e| format!("read xlsx: {e}"))?;
     let sheet_paths = parse_sheet_path_map(&bytes);
-    let mut archive = zip::ZipArchive::new(Cursor::new(&bytes))
-        .map_err(|e| format!("open xlsx zip: {e}"))?;
+    let mut archive =
+        zip::ZipArchive::new(Cursor::new(&bytes)).map_err(|e| format!("open xlsx zip: {e}"))?;
 
     // Group: sheet_name -> Vec<(sqref, raw_cfRule_xml)>
     let mut by_sheet: HashMap<String, Vec<(String, String)>> = HashMap::new();
@@ -2729,8 +2786,8 @@ fn rewrite_extra_cf_in_zip(
     let mut out_buf: Vec<u8> = Vec::with_capacity(bytes.len());
     {
         let mut writer = zip::ZipWriter::new(Cursor::new(&mut out_buf));
-        let opts = zip::write::FileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
+        let opts =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         for i in 0..archive.len() {
             let mut entry = archive
                 .by_index(i)
@@ -2774,8 +2831,8 @@ fn rewrite_comments_in_zip(
     let bytes = std::fs::read(xlsx_path).map_err(|e| format!("read xlsx: {e}"))?;
 
     let sheet_paths = parse_sheet_path_map(&bytes);
-    let mut archive = zip::ZipArchive::new(Cursor::new(&bytes))
-        .map_err(|e| format!("open xlsx zip: {e}"))?;
+    let mut archive =
+        zip::ZipArchive::new(Cursor::new(&bytes)).map_err(|e| format!("open xlsx zip: {e}"))?;
 
     let mut sheet_to_comments_path: HashMap<String, String> = HashMap::new();
     for (sheet_name, entry_path) in &sheet_paths {
@@ -2830,19 +2887,25 @@ fn rewrite_comments_in_zip(
     let mut out_buf: Vec<u8> = Vec::with_capacity(bytes.len());
     {
         let mut writer = zip::ZipWriter::new(Cursor::new(&mut out_buf));
-        let opts = zip::write::FileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
+        let opts =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         for i in 0..archive.len() {
             let mut entry = archive
                 .by_index(i)
                 .map_err(|e| format!("read entry {i}: {e}"))?;
             let name = entry.name().to_string();
-            writer.start_file(name.clone(), opts).map_err(|e| format!("start_file: {e}"))?;
+            writer
+                .start_file(name.clone(), opts)
+                .map_err(|e| format!("start_file: {e}"))?;
             if let Some(replacement) = replacements.get(&name) {
-                writer.write_all(replacement).map_err(|e| format!("write: {e}"))?;
+                writer
+                    .write_all(replacement)
+                    .map_err(|e| format!("write: {e}"))?;
             } else {
                 let mut data = Vec::new();
-                entry.read_to_end(&mut data).map_err(|e| format!("read: {e}"))?;
+                entry
+                    .read_to_end(&mut data)
+                    .map_err(|e| format!("read: {e}"))?;
                 writer.write_all(&data).map_err(|e| format!("write: {e}"))?;
             }
         }
@@ -2855,8 +2918,8 @@ fn rewrite_comments_in_zip(
 
 /// Parse cell comments from an xlsx ZIP, grouped by sheet name. Empty map on
 /// I/O / parse error — comments are best-effort metadata.
-pub(crate) fn parse_xlsx_comments(
-    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+pub(crate) fn parse_xlsx_comments<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
     sheet_paths: &HashMap<String, String>,
 ) -> HashMap<String, Vec<CommentEntry>> {
     let mut out: HashMap<String, Vec<CommentEntry>> = HashMap::new();
@@ -2974,14 +3037,8 @@ fn build_data_validation_from_snapshot(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .trim();
-    let formula1 = entry
-        .get("formula1")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let formula2 = entry
-        .get("formula2")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let formula1 = entry.get("formula1").and_then(|v| v.as_str()).unwrap_or("");
+    let formula2 = entry.get("formula2").and_then(|v| v.as_str()).unwrap_or("");
     // OOXML quirk: rust_xlsxwriter (and Excel) omit the `operator` attribute
     // on `between` rules because it's the implicit default. Reconstruct it
     // from formula2's presence so we can pick the right typed rule.
@@ -3271,6 +3328,7 @@ fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEnt
 
 /// Parse per-sheet `<conditionalFormatting>` rules out of an xlsx. Mirrors the
 /// data-validation parser: best-effort, empty map on any structural error.
+#[allow(dead_code)]
 pub(crate) fn parse_xlsx_conditional_formatting(
     sheet_xmls: &HashMap<String, String>,
 ) -> HashMap<String, Vec<ConditionalFormattingEntry>> {
@@ -3298,8 +3356,14 @@ fn build_cf_rule_format(style: Option<&Value>) -> Option<Format> {
     let obj = style?.as_object()?;
     let bold = obj.get("bold").and_then(|v| v.as_bool()).unwrap_or(false);
     let italic = obj.get("italic").and_then(|v| v.as_bool()).unwrap_or(false);
-    let font_color = obj.get("fontColor").and_then(|v| v.as_str()).and_then(parse_color);
-    let bg_color = obj.get("bgColor").and_then(|v| v.as_str()).and_then(parse_color);
+    let font_color = obj
+        .get("fontColor")
+        .and_then(|v| v.as_str())
+        .and_then(parse_color);
+    let bg_color = obj
+        .get("bgColor")
+        .and_then(|v| v.as_str())
+        .and_then(parse_color);
     if !bold && !italic && font_color.is_none() && bg_color.is_none() {
         return None;
     }
@@ -3314,7 +3378,9 @@ fn build_cf_rule_format(style: Option<&Value>) -> Option<Format> {
         fmt = fmt.set_font_color(c);
     }
     if let Some(c) = bg_color {
-        fmt = fmt.set_background_color(c).set_pattern(FormatPattern::Solid);
+        fmt = fmt
+            .set_background_color(c)
+            .set_pattern(FormatPattern::Solid);
     }
     Some(fmt)
 }
@@ -3550,8 +3616,12 @@ fn apply_numeric_rule_i32(
     let formula_rule = |op: &str| -> Option<DataValidationRule<Formula>> {
         match op {
             "equal" => Some(DataValidationRule::EqualTo(Formula::new(f1_owned.clone()))),
-            "notEqual" => Some(DataValidationRule::NotEqualTo(Formula::new(f1_owned.clone()))),
-            "greaterThan" => Some(DataValidationRule::GreaterThan(Formula::new(f1_owned.clone()))),
+            "notEqual" => Some(DataValidationRule::NotEqualTo(Formula::new(
+                f1_owned.clone(),
+            ))),
+            "greaterThan" => Some(DataValidationRule::GreaterThan(Formula::new(
+                f1_owned.clone(),
+            ))),
             "greaterThanOrEqual" => Some(DataValidationRule::GreaterThanOrEqualTo(Formula::new(
                 f1_owned.clone(),
             ))),
@@ -3607,8 +3677,12 @@ fn apply_numeric_rule_f64(
     let formula_rule = |op: &str| -> Option<DataValidationRule<Formula>> {
         match op {
             "equal" => Some(DataValidationRule::EqualTo(Formula::new(f1_owned.clone()))),
-            "notEqual" => Some(DataValidationRule::NotEqualTo(Formula::new(f1_owned.clone()))),
-            "greaterThan" => Some(DataValidationRule::GreaterThan(Formula::new(f1_owned.clone()))),
+            "notEqual" => Some(DataValidationRule::NotEqualTo(Formula::new(
+                f1_owned.clone(),
+            ))),
+            "greaterThan" => Some(DataValidationRule::GreaterThan(Formula::new(
+                f1_owned.clone(),
+            ))),
             "greaterThanOrEqual" => Some(DataValidationRule::GreaterThanOrEqualTo(Formula::new(
                 f1_owned.clone(),
             ))),
@@ -3629,7 +3703,9 @@ fn apply_numeric_rule_f64(
     };
     match (operator, lit1, lit2) {
         ("equal", Some(a), _) => Some(dv.allow_decimal_number(DataValidationRule::EqualTo(a))),
-        ("notEqual", Some(a), _) => Some(dv.allow_decimal_number(DataValidationRule::NotEqualTo(a))),
+        ("notEqual", Some(a), _) => {
+            Some(dv.allow_decimal_number(DataValidationRule::NotEqualTo(a)))
+        }
         ("greaterThan", Some(a), _) => {
             Some(dv.allow_decimal_number(DataValidationRule::GreaterThan(a)))
         }
@@ -3664,8 +3740,12 @@ fn apply_text_length_rule(
     let formula_rule = |op: &str| -> Option<DataValidationRule<Formula>> {
         match op {
             "equal" => Some(DataValidationRule::EqualTo(Formula::new(f1_owned.clone()))),
-            "notEqual" => Some(DataValidationRule::NotEqualTo(Formula::new(f1_owned.clone()))),
-            "greaterThan" => Some(DataValidationRule::GreaterThan(Formula::new(f1_owned.clone()))),
+            "notEqual" => Some(DataValidationRule::NotEqualTo(Formula::new(
+                f1_owned.clone(),
+            ))),
+            "greaterThan" => Some(DataValidationRule::GreaterThan(Formula::new(
+                f1_owned.clone(),
+            ))),
             "greaterThanOrEqual" => Some(DataValidationRule::GreaterThanOrEqualTo(Formula::new(
                 f1_owned.clone(),
             ))),
@@ -3773,6 +3853,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                 snapshot_json: Some(
                     serde_json::to_string(&empty_snapshot).map_err(|e| e.to_string())?,
                 ),
+                requires_save_as_on_first_save: false,
             },
             warnings: vec![CompatibilityWarning {
                 severity: "blocking".to_string(),
@@ -3822,6 +3903,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                 snapshot_json: Some(
                     serde_json::to_string(&empty_snapshot).map_err(|e| e.to_string())?,
                 ),
+                requires_save_as_on_first_save: false,
             },
             warnings,
         });
@@ -3838,36 +3920,111 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         })
         .collect();
 
-    // Read the file once into memory, open the zip once, build the sheet-path
-    // map once, and decompress every sheet XML once. All per-helper passes
-    // below share these so we don't pay 16x for the same file I/O,
-    // central-directory parse, and per-sheet XML decompression. (§5.1 perf.)
-    let archive_bytes = std::fs::read(&path)
-        .map_err(|e| format!("Failed to read xlsx: {e}"))?;
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(archive_bytes.as_slice()))
+    let file = std::fs::File::open(&path).map_err(|e| format!("Failed to read xlsx: {e}"))?;
+    let mut archive = zip::ZipArchive::new(std::io::BufReader::new(file))
         .map_err(|e| format!("Invalid xlsx (zip): {e}"))?;
-    let sheet_paths = parse_sheet_path_map(&archive_bytes);
-    let mut sheet_xmls: HashMap<String, String> = HashMap::with_capacity(sheet_paths.len());
+    let sheet_paths = parse_sheet_path_map_from_archive(&mut archive);
+
+    // Workbook-level XML parts are parsed once. Worksheet XML is streamed one
+    // sheet at a time below, then dropped after each sheet's metadata is merged.
+    let mut parsed_styles = parse_xlsx_styles(&mut archive).ok();
+    let shared_rich_strings = parse_xlsx_shared_rich_text(&mut archive).ok();
+    let mut rich_text = shared_rich_strings.as_ref().map(|_| ParsedRichText {
+        per_sheet: HashMap::new(),
+    });
+
+    let mut data_validations_by_sheet: HashMap<String, Vec<DataValidationEntry>> = HashMap::new();
+    let mut conditional_formats_by_sheet: HashMap<String, Vec<ConditionalFormattingEntry>> =
+        HashMap::new();
+    let mut dimensions_by_sheet: HashMap<String, SheetDimensions> = HashMap::new();
+    let mut merges_by_sheet: HashMap<String, Vec<(u32, u32, u32, u32)>> = HashMap::new();
+    let mut freeze_panes_by_sheet: HashMap<String, FreezePaneEntry> = HashMap::new();
+    let mut sheet_protection_by_sheet: HashMap<String, SheetProtectionEntry> = HashMap::new();
+    let mut tab_colors_by_sheet: HashMap<String, String> = HashMap::new();
+    let mut auto_filters_by_sheet: HashMap<String, String> = HashMap::new();
+    let mut hyperlinks_by_sheet: HashMap<String, Vec<HyperlinkEntry>> = HashMap::new();
+    let mut page_setup_by_sheet: HashMap<String, SheetPageSetup> = HashMap::new();
+    let mut sheet_drawing_rids: HashMap<String, String> = HashMap::new();
+
     for (sheet_name, zip_path) in &sheet_paths {
         let mut xml = String::new();
-        if let Ok(mut entry) = archive.by_name(zip_path) {
-            if entry.read_to_string(&mut xml).is_ok() {
-                sheet_xmls.insert(sheet_name.clone(), xml);
+        let sheet_read = match archive.by_name(zip_path) {
+            Ok(mut entry) => entry.read_to_string(&mut xml).is_ok(),
+            Err(_) => false,
+        };
+        if !sheet_read {
+            continue;
+        }
+
+        let dvs = parse_sheet_data_validations(&xml);
+        if !dvs.is_empty() {
+            data_validations_by_sheet.insert(sheet_name.clone(), dvs);
+        }
+
+        let cfs = parse_sheet_conditional_formatting(&xml);
+        if !cfs.is_empty() {
+            conditional_formats_by_sheet.insert(sheet_name.clone(), cfs);
+        }
+
+        if let Some(ps) = parsed_styles.as_mut() {
+            let cell_map = parse_sheet_cell_styles(&xml);
+            if !cell_map.is_empty() {
+                ps.per_sheet.insert(sheet_name.clone(), cell_map);
             }
+        }
+
+        let dims = parse_sheet_dimensions_xml(&xml);
+        if !dims.columns.is_empty() || !dims.rows.is_empty() {
+            dimensions_by_sheet.insert(sheet_name.clone(), dims);
+        }
+
+        let merges = parse_sheet_merge_cells(&xml);
+        if !merges.is_empty() {
+            merges_by_sheet.insert(sheet_name.clone(), merges);
+        }
+
+        if let Some(fp) = parse_sheet_freeze_pane(&xml) {
+            freeze_panes_by_sheet.insert(sheet_name.clone(), fp);
+        }
+
+        if let Some(sp) = parse_sheet_protection(&xml) {
+            sheet_protection_by_sheet.insert(sheet_name.clone(), sp);
+        }
+
+        if let Some(color) = parse_sheet_tab_color(&xml) {
+            tab_colors_by_sheet.insert(sheet_name.clone(), color);
+        }
+
+        if let Some(reference) = parse_sheet_auto_filter(&xml) {
+            auto_filters_by_sheet.insert(sheet_name.clone(), reference);
+        }
+
+        if xml.contains("<hyperlinks") {
+            let rels = read_sheet_rels(&mut archive, zip_path);
+            let links = parse_sheet_hyperlinks(&xml, &rels);
+            if !links.is_empty() {
+                hyperlinks_by_sheet.insert(sheet_name.clone(), links);
+            }
+        }
+
+        if let (Some(shared), Some(rt)) = (shared_rich_strings.as_ref(), rich_text.as_mut()) {
+            let map = parse_sheet_rich_text(&xml, shared);
+            if !map.is_empty() {
+                rt.per_sheet.insert(sheet_name.clone(), map);
+            }
+        }
+
+        let page_setup = parse_sheet_page_setup_xml(&xml);
+        if !page_setup.is_empty() {
+            page_setup_by_sheet.insert(sheet_name.clone(), page_setup);
+        }
+
+        if let Some(rid) = parse_sheet_drawing_rid(&xml) {
+            sheet_drawing_rids.insert(sheet_name.clone(), rid);
         }
     }
 
-    // Pre-parse per-sheet data validations so they can round-trip through the
-    // snapshot. calamine doesn't expose them, and rust_xlsxwriter's high-level
-    // API handles re-emission on export. Must happen BEFORE feature_warnings
-    // so we can suppress the generic "DV will be lost" warning once we know
-    // the rules will round-trip.
-    let data_validations_by_sheet = parse_xlsx_data_validations(&sheet_xmls);
-    // Same pattern for conditional formatting rules.
-    let conditional_formats_by_sheet = parse_xlsx_conditional_formatting(&sheet_xmls);
-
-    let mut feature_warnings =
-        detect_unsupported_features_in(&mut archive).unwrap_or_default();
+    let mut feature_warnings = detect_unsupported_features_in(&mut archive).unwrap_or_default();
     // We now preserve data validations through the snapshot, so the generic
     // "data validation will be lost on save" warning is misleading once we've
     // captured at least one rule from the source file. Drop it in that case.
@@ -3888,46 +4045,14 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         feature_warnings.retain(|w| w.code != "XLSX_CONDITIONAL_FORMATTING");
     }
 
-    // Per-cell styles: parsed straight from the xlsx ZIP (calamine 0.24 doesn't
-    // expose them). Tolerant of failure — missing styles just degrade to "no styles".
-    let parsed_styles = parse_xlsx_styles(&mut archive, &sheet_xmls).ok();
-    // Pre-parse per-sheet column widths and row heights (calamine doesn't
-    // expose this). Best-effort: silently no-op if the structure is unusual.
-    let dimensions_by_sheet = parse_xlsx_dimensions(&sheet_xmls);
-    // Pre-parse per-sheet merged-cell ranges (calamine doesn't expose these).
-    let merges_by_sheet = parse_xlsx_merges(&sheet_xmls);
-    // Pre-parse per-sheet frozen-pane declarations (only `state="frozen"`).
-    let freeze_panes_by_sheet = parse_xlsx_freeze_panes(&sheet_xmls);
     // Pre-parse workbook-level sheet visibility (`state="hidden"` / `"veryHidden"`).
     let sheet_visibility = parse_xlsx_sheet_visibility(&mut archive);
-    // Pre-parse per-sheet `<sheetProtection sheet="1"/>` (read-only marker).
-    let sheet_protection_by_sheet = parse_xlsx_sheet_protection(&sheet_xmls);
-    // Pre-parse per-sheet tab colors (`<sheetPr><tabColor .../></sheetPr>`).
-    // calamine doesn't surface these; we re-emit on export via
-    // `worksheet.set_tab_color`.
-    let tab_colors_by_sheet = parse_xlsx_tab_colors(&sheet_xmls);
-    // Pre-parse per-sheet auto-filter ranges (`<autoFilter ref="..."/>`).
-    // calamine doesn't surface these; we re-emit on export via
-    // `worksheet.autofilter`.
-    let auto_filters_by_sheet = parse_xlsx_auto_filters(&sheet_xmls);
-    // Pre-parse per-sheet hyperlinks. Joins the `<hyperlinks>` block in
-    // sheetN.xml with the per-sheet rels file so external URLs are resolved.
-    let hyperlinks_by_sheet =
-        parse_xlsx_hyperlinks(&mut archive, &sheet_paths, &sheet_xmls);
     // Pre-parse per-sheet cell comments / notes. Each sheet's rels file points
     // to its `xl/commentsN.xml`; we read author + plain text and stash on the
     // snapshot for re-emission via rust_xlsxwriter's insert_note on export.
     let comments_by_sheet = parse_xlsx_comments(&mut archive, &sheet_paths);
-    // Pre-parse rich-text runs from sharedStrings.xml + inline `<is>` strings.
-    // calamine flattens rich strings to plain — we re-attach the runs here.
-    let rich_text = parse_xlsx_rich_text(&mut archive, &sheet_xmls).ok();
-    // Pre-parse per-sheet print / page-setup metadata (orientation, margins,
-    // headers/footers, gridline display, zoom...). Best-effort: missing or
-    // unparseable values just degrade to "no page setup recorded".
-    let page_setup_by_sheet = parse_xlsx_page_setup(&sheet_xmls);
 
-    let mut wb: Xlsx<_> =
-        open_workbook(&path).map_err(|e| format!("Failed to open xlsx: {e}"))?;
+    let mut wb: Xlsx<_> = open_workbook(&path).map_err(|e| format!("Failed to open xlsx: {e}"))?;
 
     // Capture workbook-level named ranges. calamine's defined_names() returns a
     // flat [(name, formula)] slice — sheet-scope (localSheetId) is not exposed,
@@ -3982,18 +4107,20 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                 let formula_str = formula_range
                     .as_ref()
                     .and_then(|fr| fr.get_value((abs_r, abs_c)))
-                    .and_then(|s: &String| {
-                        if s.is_empty() {
-                            None
-                        } else {
-                            Some(s.clone())
-                        }
-                    });
+                    .and_then(
+                        |s: &String| {
+                            if s.is_empty() {
+                                None
+                            } else {
+                                Some(s.clone())
+                            }
+                        },
+                    );
 
                 // Look up the xf index for this cell once; reuse it for both
                 // the visual style id and the number-format string.
-                let xf_idx: Option<usize> = sheet_style_lookup
-                    .and_then(|m| m.get(&(abs_r, abs_c)).copied());
+                let xf_idx: Option<usize> =
+                    sheet_style_lookup.and_then(|m| m.get(&(abs_r, abs_c)).copied());
 
                 // Resolve a style id (if any) for this cell.
                 let style_id: Option<String> = xf_idx
@@ -4199,10 +4326,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                             );
                         }
                         if !e.prompt_title.is_empty() {
-                            obj.insert(
-                                "promptTitle".into(),
-                                Value::String(e.prompt_title.clone()),
-                            );
+                            obj.insert("promptTitle".into(), Value::String(e.prompt_title.clone()));
                         }
                         if !e.prompt_message.is_empty() {
                             obj.insert(
@@ -4433,7 +4557,8 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
 
     // Chart-preservation: capture chart/drawing/theme parts byte-for-byte so
     // they survive a save round-trip even though we don't render them.
-    let preserved_parts = parse_xlsx_preserved_parts(&mut archive, &sheet_paths, &sheet_xmls);
+    let preserved_parts =
+        parse_xlsx_preserved_parts(&mut archive, &sheet_paths, &sheet_drawing_rids);
 
     let mut snapshot = json!({
         "id": workbook_id,
@@ -4457,7 +4582,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         severity: "info".to_string(),
         code: "XLSX_POC_IMPORT".to_string(),
         message:
-            "xlsx PoC import: threaded comments are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights + rich text + data validations + conditional formatting + charts (blob-preserved) + pivot tables (blob-preserved) + images/drawings (blob-preserved) are preserved)"
+            "xlsx import compatibility notice: threaded comments are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights + rich text + data validations + conditional formatting + charts (blob-preserved) + pivot tables (blob-preserved) + images/drawings (blob-preserved) are preserved)"
                 .to_string(),
         affected_sheets: None,
     });
@@ -4519,6 +4644,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             path: Some(working_path),
             source_type: "xlsx".to_string(),
             snapshot_json: Some(snapshot_json),
+            requires_save_as_on_first_save: is_xlsm,
         },
         warnings,
     })
@@ -4583,10 +4709,7 @@ pub fn workbook_export_xlsx(
 }
 
 /// Pure-Rust export core. Directly callable from cargo tests.
-pub fn export_xlsx_core(
-    path: String,
-    snapshot_json: String,
-) -> Result<ExportResult, String> {
+pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportResult, String> {
     // Step 1: extension check
     let ext_ok = std::path::Path::new(&path)
         .extension()
@@ -4718,9 +4841,7 @@ pub fn export_xlsx_core(
             used_sheet_names.insert(safe_name.clone());
 
             let worksheet = workbook.add_worksheet();
-            worksheet
-                .set_name(&safe_name)
-                .map_err(|e| e.to_string())?;
+            worksheet.set_name(&safe_name).map_err(|e| e.to_string())?;
 
             // Apply sheet visibility from `_sheetState`. Anything other than
             // "hidden" / "veryHidden" leaves the default (visible).
@@ -4754,10 +4875,7 @@ pub fn export_xlsx_core(
             {
                 let row_raw = fp.get("row").and_then(|v| v.as_u64()).unwrap_or(0);
                 let col_raw = fp.get("col").and_then(|v| v.as_u64()).unwrap_or(0);
-                let state = fp
-                    .get("state")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("frozen");
+                let state = fp.get("state").and_then(|v| v.as_str()).unwrap_or("frozen");
                 if state == "split" {
                     // For split panes, the row/col are pixel/twip offsets and
                     // may be much larger than rust_xlsxwriter's row/col limits.
@@ -4797,7 +4915,10 @@ pub fn export_xlsx_core(
                 .and_then(|s| s.get("_protected"))
                 .and_then(|v| v.as_object())
             {
-                let on = prot.get("protected").and_then(|v| v.as_bool()).unwrap_or(false);
+                let on = prot
+                    .get("protected")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 if on {
                     let pw = prot.get("password").and_then(|v| v.as_str()).unwrap_or("");
                     if pw.is_empty() {
@@ -4891,10 +5012,7 @@ pub fn export_xlsx_core(
                     // -1.0 signals "use Excel default" for each axis in
                     // rust_xlsxwriter, so missing fields are skipped that way.
                     let g = |k: &str| -> f64 {
-                        margins
-                            .get(k)
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(-1.0)
+                        margins.get(k).and_then(|v| v.as_f64()).unwrap_or(-1.0)
                     };
                     worksheet.set_margins(
                         g("left"),
@@ -4984,11 +5102,15 @@ pub fn export_xlsx_core(
                     if sr == er && sc == ec {
                         continue;
                     }
-                    let (sr32, sc32, er32, ec32) =
-                        match (u32::try_from(sr), u16::try_from(sc), u32::try_from(er), u16::try_from(ec)) {
-                            (Ok(a), Ok(b), Ok(c), Ok(d)) => (a, b, c, d),
-                            _ => continue,
-                        };
+                    let (sr32, sc32, er32, ec32) = match (
+                        u32::try_from(sr),
+                        u16::try_from(sc),
+                        u32::try_from(er),
+                        u16::try_from(ec),
+                    ) {
+                        (Ok(a), Ok(b), Ok(c), Ok(d)) => (a, b, c, d),
+                        _ => continue,
+                    };
                     let _ = worksheet.merge_range(sr32, sc32, er32, ec32, "", &empty_format);
                 }
             }
@@ -5040,11 +5162,7 @@ pub fn export_xlsx_core(
                             .unwrap_or("")
                             .to_string();
                         if !sqref.trim().is_empty() {
-                            sheets_with_extra_cf.push((
-                                safe_name.clone(),
-                                sqref,
-                                raw.to_string(),
-                            ));
+                            sheets_with_extra_cf.push((safe_name.clone(), sqref, raw.to_string()));
                         }
                         continue;
                     }
@@ -5077,24 +5195,23 @@ pub fn export_xlsx_core(
                         let style_obj = style_id.and_then(|id| resolved_styles.get(id));
 
                         // Build (or reuse) a Format combining the cell style + num format.
-                        let fmt_obj: Option<Format> =
-                            if style_obj.is_some() || fmt_str.is_some() {
-                                let key = (
-                                    style_id.unwrap_or("").to_string(),
-                                    fmt_str.unwrap_or("").to_string(),
-                                );
-                                Some(
-                                    format_cache
-                                        .entry(key)
-                                        .or_insert_with(|| {
-                                            let s = style_obj.cloned().unwrap_or_default();
-                                            build_format(&s, fmt_str)
-                                        })
-                                        .clone(),
-                                )
-                            } else {
-                                None
-                            };
+                        let fmt_obj: Option<Format> = if style_obj.is_some() || fmt_str.is_some() {
+                            let key = (
+                                style_id.unwrap_or("").to_string(),
+                                fmt_str.unwrap_or("").to_string(),
+                            );
+                            Some(
+                                format_cache
+                                    .entry(key)
+                                    .or_insert_with(|| {
+                                        let s = style_obj.cloned().unwrap_or_default();
+                                        build_format(&s, fmt_str)
+                                    })
+                                    .clone(),
+                            )
+                        } else {
+                            None
+                        };
 
                         // Formula takes precedence
                         if let Some(f) = cell_val.get("f").and_then(|f| f.as_str()) {
@@ -5115,8 +5232,7 @@ pub fn export_xlsx_core(
                         // Rich-text cells: write each run with its own Format.
                         // rust_xlsxwriter's write_rich_string takes &[(&Format, &str)]
                         // and rejects empty segments, so build the Vec carefully.
-                        if let Some(runs_arr) =
-                            cell_val.get("_richRuns").and_then(|v| v.as_array())
+                        if let Some(runs_arr) = cell_val.get("_richRuns").and_then(|v| v.as_array())
                         {
                             let parsed_runs: Vec<RichRun> = runs_arr
                                 .iter()
@@ -5124,10 +5240,8 @@ pub fn export_xlsx_core(
                                 .filter(|r| !r.text.is_empty())
                                 .collect();
                             if !parsed_runs.is_empty() {
-                                let formats: Vec<Format> = parsed_runs
-                                    .iter()
-                                    .map(build_run_format)
-                                    .collect();
+                                let formats: Vec<Format> =
+                                    parsed_runs.iter().map(build_run_format).collect();
                                 let segments: Vec<(&Format, &str)> = parsed_runs
                                     .iter()
                                     .zip(formats.iter())
@@ -5263,14 +5377,8 @@ pub fn export_xlsx_core(
                     let Ok(col_u16) = u16::try_from(col) else {
                         continue;
                     };
-                    let text = entry
-                        .get("text")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    let author = entry
-                        .get("author")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let text = entry.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                    let author = entry.get("author").and_then(|v| v.as_str()).unwrap_or("");
                     let mut note = rust_xlsxwriter::Note::new(text).add_author_prefix(false);
                     if !author.is_empty() {
                         note = note.set_author(author);
@@ -5438,16 +5546,26 @@ pub fn export_xlsx_core(
 
     // Chart-preservation: if the snapshot carried `_preservedParts`, reopen
     // the temp xlsx and splice the preserved chart/drawing/theme parts back
-    // in. Best-effort: a failure here leaves the rust_xlsxwriter-written file
-    // in place so the user at least gets their cells + styles.
-    let mut chart_injection_failed: Option<String> = None;
+    // in. Failure is blocking because the temp file may now be incomplete or
+    // corrupt and must not be promoted over the target.
     if let Some(preserved) = snapshot.get("_preservedParts") {
         if let Err(e) = inject_preserved_parts(&tmp_path, preserved, sheet_order.len()) {
-            chart_injection_failed = Some(e);
+            let _ = std::fs::remove_file(&tmp_path);
+            return Ok(ExportResult {
+                success: false,
+                path: path.clone(),
+                warnings: vec![CompatibilityWarning {
+                    severity: "blocking".to_string(),
+                    code: "XLSX_PRESERVED_PARTS_INJECTION_FAILED".to_string(),
+                    message: format!("preserved parts injection failed: {e}"),
+                    affected_sheets: None,
+                }],
+                error: Some(format!("XLSX_PRESERVED_PARTS_INJECTION_FAILED: {e}")),
+            });
         }
     }
 
-    if let Err(e) = std::fs::rename(&tmp_path, &target_path) {
+    if let Err(e) = crate::commands::file_replace::replace_temp_file(&tmp_path, &target_path) {
         let msg = e.to_string();
         let _ = std::fs::remove_file(&tmp_path);
         return Ok(ExportResult {
@@ -5469,21 +5587,10 @@ pub fn export_xlsx_core(
         severity: "info".to_string(),
         code: "XLSX_POC_EXPORT".to_string(),
         message: format!(
-            "xlsx PoC export: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Threaded comments are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats + rich text + data validations + conditional formatting + charts (blob-preserved) + pivot tables (blob-preserved) + images/drawings (blob-preserved) are preserved)."
+            "xlsx export compatibility notice: {sheet_count} sheets, {cell_count} cells, {formula_count} formulas. Threaded comments are not yet preserved (named ranges + font/fill/alignment/border styles + column widths + row heights + merged cells + number formats + rich text + data validations + conditional formatting + charts (blob-preserved) + pivot tables (blob-preserved) + images/drawings (blob-preserved) are preserved)."
         ),
         affected_sheets: None,
     });
-
-    if let Some(err) = chart_injection_failed {
-        warnings.push(CompatibilityWarning {
-            severity: "warning".to_string(),
-            code: "XLSX_CHART_INJECTION_FAILED".to_string(),
-            message: format!(
-                "Preserved chart parts could not be re-injected into the saved file: {err}"
-            ),
-            affected_sheets: None,
-        });
-    }
 
     if !sanitized_names.is_empty() {
         warnings.push(CompatibilityWarning {
@@ -5544,9 +5651,9 @@ pub fn export_xlsx_core(
 // On export: after `rust_xlsxwriter` writes the new xlsx to `tmp_path`,
 // `inject_preserved_parts` reopens that zip and rewrites it with every
 // preserved blob added, the `[Content_Types].xml` overrides merged in, and
-// a `<drawing>` ref plus a fresh `_rels/sheetN.xml.rels` (containing the
-// drawing relationship and every pivot-table relationship) inserted into
-// the matching (by sheet-order position) worksheet.
+// a `<drawing>` ref plus merged `_rels/sheetN.xml.rels` entries for the
+// drawing relationship and every pivot-table relationship inserted into the
+// matching (by sheet-order position) worksheet.
 //
 // Limits:
 //   - Per-part cap: 16 MiB.
@@ -5655,10 +5762,10 @@ fn b64_decode(input: &str) -> Option<Vec<u8>> {
 /// Walk the source xlsx zip and return preserved parts + per-sheet drawing
 /// refs. Returns `None` when there's nothing to preserve so callers can skip
 /// stamping an empty `_preservedParts` block into the snapshot.
-pub(crate) fn parse_xlsx_preserved_parts(
-    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+pub(crate) fn parse_xlsx_preserved_parts<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
     sheet_paths: &HashMap<String, String>,
-    sheet_xmls: &HashMap<String, String>,
+    sheet_drawing_rids: &HashMap<String, String>,
 ) -> Option<Value> {
     let mut parts: Map<String, Value> = Map::new();
     let mut total_size: usize = 0;
@@ -5699,11 +5806,11 @@ pub(crate) fn parse_xlsx_preserved_parts(
         return None;
     }
 
-    // Pass 2: capture per-sheet drawing references. For each worksheet, pull
-    // its `<drawing r:id="..."/>` element from the body and the corresponding
-    // target from its `_rels/sheetN.xml.rels`. Indexed by position in
-    // `workbook.xml`'s `<sheets>` list so we can re-link on export — the
-    // export side uses the snapshot's `sheetOrder` position.
+    // Pass 2: capture per-sheet drawing references. The import pass already
+    // pulled each worksheet's `<drawing r:id="..."/>`; here we resolve that
+    // rId to the corresponding target from `_rels/sheetN.xml.rels`. Indexed by
+    // position in `workbook.xml`'s `<sheets>` list so we can re-link on export
+    // — the export side uses the snapshot's `sheetOrder` position.
     // Reuse the canonical ordering from workbook.xml (calamine returns sheets
     // in this order too).
     let workbook_xml = {
@@ -5721,14 +5828,9 @@ pub(crate) fn parse_xlsx_preserved_parts(
             sheet_refs.push(Value::Null);
             continue;
         };
-        // Find a `<drawing r:id="rdN"/>` element in the cached worksheet body.
-        let empty_body = String::new();
-        let body = sheet_xmls.get(sheet_name).unwrap_or(&empty_body);
-        let drawing_rid: Option<String> = body
-            .find("<drawing")
-            .map(|s| &body[s..])
-            .and_then(|chunk| chunk.find("/>").map(|e| &chunk[..e]))
-            .and_then(|tag| parse_attr(tag, "r:id"));
+        // The worksheet body was already scanned during the per-sheet import
+        // pass, so avoid retaining or rereading every sheet XML here.
+        let drawing_rid = sheet_drawing_rids.get(sheet_name).cloned();
 
         // Look up the rId in the per-sheet rels.
         let sheet_rels_path = sheet_part_to_rels_path(sheet_part);
@@ -5804,13 +5906,11 @@ pub(crate) fn parse_xlsx_preserved_parts(
     // Extract `<externalReferences>...</externalReferences>` verbatim from
     // workbook.xml. rust_xlsxwriter does not emit this block on export, so we
     // splice it back in after the saved file is written.
-    let ext_refs_block: Option<String> = workbook_xml
-        .find("<externalReferences")
-        .and_then(|s| {
-            let rest = &workbook_xml[s..];
-            rest.find("</externalReferences>")
-                .map(|e| workbook_xml[s..s + e + "</externalReferences>".len()].to_string())
-        });
+    let ext_refs_block: Option<String> = workbook_xml.find("<externalReferences").and_then(|s| {
+        let rest = &workbook_xml[s..];
+        rest.find("</externalReferences>")
+            .map(|e| workbook_xml[s..s + e + "</externalReferences>".len()].to_string())
+    });
 
     let mut result = json!({
         "parts": Value::Object(parts),
@@ -5834,6 +5934,122 @@ fn sheet_part_to_rels_path(sheet_part: &str) -> String {
     } else {
         format!("_rels/{sheet_part}.rels")
     }
+}
+
+#[derive(Clone)]
+struct PreservedSheetRel {
+    id: String,
+    ty: String,
+    target: String,
+    raw: String,
+}
+
+impl PreservedSheetRel {
+    fn from_xml(el: &str) -> Option<Self> {
+        let id = parse_attr(el, "Id")?;
+        let ty = parse_attr(el, "Type")?;
+        let target = parse_attr(el, "Target")?;
+        Some(Self {
+            id,
+            ty,
+            target,
+            raw: el.to_string(),
+        })
+    }
+
+    fn new(id: String, ty: &str, target: String) -> Self {
+        let raw = format!(
+            "<Relationship Id=\"{}\" Type=\"{}\" Target=\"{}\"/>",
+            encode_xml_text(&id),
+            encode_xml_text(ty),
+            encode_xml_text(&target)
+        );
+        Self {
+            id,
+            ty: ty.to_string(),
+            target,
+            raw,
+        }
+    }
+}
+
+fn next_available_rid(used: &HashSet<String>) -> String {
+    let mut n = 1usize;
+    loop {
+        let rid = format!("rId{n}");
+        if !used.contains(&rid) {
+            return rid;
+        }
+        n += 1;
+    }
+}
+
+fn merge_one_sheet_rel(
+    rels: &mut Vec<PreservedSheetRel>,
+    used: &mut HashSet<String>,
+    preferred_id: &str,
+    ty: &str,
+    target: &str,
+) -> String {
+    if let Some(existing) = rels
+        .iter()
+        .find(|rel| rel.id == preferred_id && rel.ty == ty && rel.target == target)
+    {
+        return existing.id.clone();
+    }
+
+    let id = if used.contains(preferred_id) {
+        next_available_rid(used)
+    } else {
+        preferred_id.to_string()
+    };
+    used.insert(id.clone());
+    rels.push(PreservedSheetRel::new(id.clone(), ty, target.to_string()));
+    id
+}
+
+fn merge_sheet_rels(
+    existing_xml: &str,
+    drawing: Option<&(String, String)>,
+    pivots: &[(String, String)],
+) -> (String, Option<String>) {
+    let mut rels: Vec<PreservedSheetRel> =
+        extract_self_closing_or_paired(existing_xml, "Relationship")
+            .into_iter()
+            .filter_map(|el| PreservedSheetRel::from_xml(&el))
+            .collect();
+    let mut used: HashSet<String> = rels.iter().map(|rel| rel.id.clone()).collect();
+
+    let drawing_rid = drawing.map(|(rid, target)| {
+        merge_one_sheet_rel(
+            &mut rels,
+            &mut used,
+            rid,
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
+            target,
+        )
+    });
+    for (rid, target) in pivots {
+        merge_one_sheet_rel(
+            &mut rels,
+            &mut used,
+            rid,
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable",
+            target,
+        );
+    }
+
+    let mut xml = String::new();
+    xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
+    xml.push_str(
+        "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n",
+    );
+    for rel in rels {
+        xml.push_str(&rel.raw);
+        xml.push('\n');
+    }
+    xml.push_str("</Relationships>");
+    (xml, drawing_rid)
 }
 
 /// Reopen the freshly-written xlsx zip at `tmp_path`, append every preserved
@@ -5892,8 +6108,8 @@ pub(crate) fn inject_preserved_parts(
     let mut out_buf: Vec<u8> = Vec::with_capacity(original_bytes.len() + 4096);
     {
         let mut out = ZipWriter::new(Cursor::new(&mut out_buf));
-        let opts: FileOptions = FileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
+        let opts: FileOptions =
+            FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
         // Track entries we will skip on copy because we're rewriting them.
         // Up to `sheet_order_len` sheet XMLs may need a `<drawing>` injection,
@@ -5982,13 +6198,12 @@ pub(crate) fn inject_preserved_parts(
         }
 
         // Rewrite each affected worksheet XML with a `<drawing r:id="..."/>`
-        // tail (when a drawing was preserved). Also write a fresh
-        // `_rels/sheetN.xml.rels` carrying the drawing relationship plus any
-        // pivot-table relationships we captured. We must reopen src fresh
-        // because we already exhausted the iterator above on the borrow that
-        // got moved into the loop. Re-create archive.
-        let mut src2 =
-            ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+        // tail (when a drawing was preserved). Also merge drawing/pivot
+        // relationships into any sheet rels that rust_xlsxwriter emitted
+        // for hyperlinks, comments, etc. We must reopen src fresh because
+        // we already exhausted the iterator above on the borrow that got
+        // moved into the loop. Re-create archive.
+        let mut src2 = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
         for (idx, refs) in &sheet_to_refs {
             let n = idx + 1;
             let sheet_name = format!("xl/worksheets/sheet{n}.xml");
@@ -5999,10 +6214,18 @@ pub(crate) fn inject_preserved_parts(
             if sheet_xml.is_empty() {
                 continue;
             }
+            let rels_name = format!("xl/worksheets/_rels/sheet{n}.xml.rels");
+            let mut existing_rels_xml = String::new();
+            if let Ok(mut e) = src2.by_name(&rels_name) {
+                let _ = std::io::Read::read_to_string(&mut e, &mut existing_rels_xml);
+            }
+            let (rels, drawing_rid) =
+                merge_sheet_rels(&existing_rels_xml, refs.drawing.as_ref(), &refs.pivots);
+
             // Inject `<drawing r:id="..."/>` just before `</worksheet>` when we
             // have a drawing ref. Pivot tables are referenced only through the
             // sheet rels, so no sheet-body element is needed for them.
-            let injected = if let Some((rid, _)) = &refs.drawing {
+            let injected = if let Some(rid) = &drawing_rid {
                 if let Some(pos) = sheet_xml.rfind("</worksheet>") {
                     let mut s = String::with_capacity(sheet_xml.len() + 64);
                     s.push_str(&sheet_xml[..pos]);
@@ -6015,29 +6238,12 @@ pub(crate) fn inject_preserved_parts(
             } else {
                 sheet_xml
             };
-            out.start_file(&sheet_name, opts).map_err(|e| e.to_string())?;
+            out.start_file(&sheet_name, opts)
+                .map_err(|e| e.to_string())?;
             std::io::Write::write_all(&mut out, injected.as_bytes()).map_err(|e| e.to_string())?;
 
-            // Compose a minimal `_rels/sheetN.xml.rels` with the drawing
-            // relationship (if any) plus every preserved pivot-table
-            // relationship. If rust_xlsxwriter wrote one with other rels
-            // (hyperlinks, etc.) we lose them — acceptable for the PoC.
-            let mut rels = String::new();
-            rels.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
-            rels.push_str("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n");
-            if let Some((rid, target)) = &refs.drawing {
-                rels.push_str(&format!(
-                    "<Relationship Id=\"{rid}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"{target}\"/>\n"
-                ));
-            }
-            for (rid, target) in &refs.pivots {
-                rels.push_str(&format!(
-                    "<Relationship Id=\"{rid}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable\" Target=\"{target}\"/>\n"
-                ));
-            }
-            rels.push_str("</Relationships>");
-            let rels_name = format!("xl/worksheets/_rels/sheet{n}.xml.rels");
-            out.start_file(&rels_name, opts).map_err(|e| e.to_string())?;
+            out.start_file(&rels_name, opts)
+                .map_err(|e| e.to_string())?;
             std::io::Write::write_all(&mut out, rels.as_bytes()).map_err(|e| e.to_string())?;
         }
 
@@ -6054,7 +6260,8 @@ pub(crate) fn inject_preserved_parts(
             } else {
                 wb_xml
             };
-            out.start_file("xl/workbook.xml", opts).map_err(|e| e.to_string())?;
+            out.start_file("xl/workbook.xml", opts)
+                .map_err(|e| e.to_string())?;
             std::io::Write::write_all(&mut out, new_wb_xml.as_bytes())
                 .map_err(|e| e.to_string())?;
         }
@@ -6134,7 +6341,9 @@ fn merge_content_type_overrides(new_ct: &str, original_ct: &str) -> String {
         let Some(end) = rest.find("/>") else { break };
         let tag = &original_ct[start..start + end + 2];
         cursor = start + end + 2;
-        let ext = parse_attr(tag, "Extension").unwrap_or_default().to_lowercase();
+        let ext = parse_attr(tag, "Extension")
+            .unwrap_or_default()
+            .to_lowercase();
         if !IMAGE_EXTS.contains(&ext.as_str()) {
             continue;
         }
@@ -6151,7 +6360,8 @@ fn merge_content_type_overrides(new_ct: &str, original_ct: &str) -> String {
     }
     // Inject right before the closing </Types>.
     if let Some(pos) = new_ct.rfind("</Types>") {
-        let mut out = String::with_capacity(new_ct.len() + adds.iter().map(|s| s.len()).sum::<usize>() + 16);
+        let mut out =
+            String::with_capacity(new_ct.len() + adds.iter().map(|s| s.len()).sum::<usize>() + 16);
         out.push_str(&new_ct[..pos]);
         for tag in &adds {
             out.push_str(tag);

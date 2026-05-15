@@ -1,5 +1,5 @@
 use calamine::{open_workbook, Data, Reader, Xlsx};
-use coco_lib::commands::xlsx_io::{import_xlsx_core, export_xlsx_core};
+use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -35,20 +35,29 @@ fn simple_values_roundtrip() {
     // Import
     let result = import_xlsx_core(path_str(&fixture_path)).expect("import ok");
     assert!(
-        result
-            .warnings
-            .iter()
-            .any(|w| w.code == "XLSX_POC_IMPORT"),
+        result.warnings.iter().any(|w| w.code == "XLSX_POC_IMPORT"),
         "expected XLSX_POC_IMPORT info warning"
     );
-    assert_eq!(result.handle.source_type, "xlsx", "source_type should be xlsx");
-    assert!(result.handle.snapshot_json.is_some(), "snapshot_json should be Some");
+    assert_eq!(
+        result.handle.source_type, "xlsx",
+        "source_type should be xlsx"
+    );
+    assert!(!result.handle.requires_save_as_on_first_save);
+    assert!(
+        result.handle.snapshot_json.is_some(),
+        "snapshot_json should be Some"
+    );
 
     let snapshot_json = result.handle.snapshot_json.clone().unwrap();
     let snapshot: Value = serde_json::from_str(&snapshot_json).expect("parse snapshot");
 
     let sheet_order = snapshot["sheetOrder"].as_array().expect("sheetOrder array");
-    assert_eq!(sheet_order.len(), 1, "expected 1 sheet, got {}", sheet_order.len());
+    assert_eq!(
+        sheet_order.len(),
+        1,
+        "expected 1 sheet, got {}",
+        sheet_order.len()
+    );
     assert_eq!(
         snapshot["sheets"]["sheet-1"]["name"], "Data",
         "sheet name should be Data"
@@ -141,10 +150,7 @@ fn formula_preserved_through_roundtrip() {
     let cell = formulas
         .get_value((0, 1))
         .expect("cell (0,1) should exist in formula range");
-    assert!(
-        !cell.is_empty(),
-        "formula at (0,1) should be non-empty"
-    );
+    assert!(!cell.is_empty(), "formula at (0,1) should be non-empty");
     assert!(
         cell.contains("SUM"),
         "formula at (0,1) should contain 'SUM', got: {cell}"
@@ -182,8 +188,10 @@ fn formula_cell_imports_with_cached_value() {
 
     let b1 = &snapshot["sheets"]["sheet-1"]["cellData"]["0"]["1"];
     // The formula must be present.
-    assert!(b1.get("f").and_then(|v| v.as_str()).is_some(),
-        "expected formula `f` on B1, got: {b1}");
+    assert!(
+        b1.get("f").and_then(|v| v.as_str()).is_some(),
+        "expected formula `f` on B1, got: {b1}"
+    );
     // calamine returns whatever cached value Excel stored; rust_xlsxwriter
     // may store 0 by default (and the user's Excel would replace it on open).
     // The test just verifies we preserve SOMETHING — the exact value depends
@@ -220,7 +228,12 @@ fn multi_sheet_order_preserved() {
     let snapshot: Value = serde_json::from_str(&snapshot_json).expect("parse snapshot");
 
     let sheet_order = snapshot["sheetOrder"].as_array().expect("sheetOrder array");
-    assert_eq!(sheet_order.len(), 3, "expected 3 sheets, got {}", sheet_order.len());
+    assert_eq!(
+        sheet_order.len(),
+        3,
+        "expected 3 sheets, got {}",
+        sheet_order.len()
+    );
     assert_eq!(
         snapshot["sheets"]["sheet-1"]["name"], "First",
         "sheet-1 should be 'First'"
@@ -246,7 +259,11 @@ fn multi_sheet_order_preserved() {
     let names = wb.sheet_names();
     assert_eq!(
         names,
-        vec!["First".to_string(), "Second".to_string(), "Third".to_string()],
+        vec![
+            "First".to_string(),
+            "Second".to_string(),
+            "Third".to_string()
+        ],
         "sheet names order should be preserved"
     );
 }
@@ -346,12 +363,22 @@ fn sheet_name_collision_after_sanitization() {
 
     let wb: Xlsx<_> = open_workbook(&exported_path).expect("open exported");
     let names = wb.sheet_names();
-    assert_eq!(names.len(), 2, "both sheets must survive dedup, got {:?}", names);
+    assert_eq!(
+        names.len(),
+        2,
+        "both sheets must survive dedup, got {:?}",
+        names
+    );
     // Names must be unique after sanitize+dedup.
     let mut sorted = names.clone();
     sorted.sort();
     sorted.dedup();
-    assert_eq!(sorted.len(), 2, "sheet names must be unique post-export, got {:?}", names);
+    assert_eq!(
+        sorted.len(),
+        2,
+        "sheet names must be unique post-export, got {:?}",
+        names
+    );
 }
 
 #[test]
@@ -399,7 +426,11 @@ fn sheet_name_collision_three_way() {
         serde_json::to_string(&snapshot).unwrap(),
     )
     .expect("core call returns Ok");
-    assert!(result.success, "export should succeed via dedup, got error={:?}", result.error);
+    assert!(
+        result.success,
+        "export should succeed via dedup, got error={:?}",
+        result.error
+    );
 
     let wb: Xlsx<_> = open_workbook(&exported_path).expect("open exported");
     let names = wb.sheet_names();
@@ -407,7 +438,12 @@ fn sheet_name_collision_three_way() {
     let mut sorted = names.clone();
     sorted.sort();
     sorted.dedup();
-    assert_eq!(sorted.len(), 3, "sheet names must be unique post-export, got {:?}", names);
+    assert_eq!(
+        sorted.len(),
+        3,
+        "sheet names must be unique post-export, got {:?}",
+        names
+    );
 }
 
 #[test]
@@ -457,7 +493,11 @@ fn sheet_name_dedup_skips_existing_suffix() {
         serde_json::to_string(&snapshot).unwrap(),
     )
     .expect("core call returns Ok");
-    assert!(result.success, "export should succeed via dedup, got error={:?}", result.error);
+    assert!(
+        result.success,
+        "export should succeed via dedup, got error={:?}",
+        result.error
+    );
 
     let wb: Xlsx<_> = open_workbook(&exported_path).expect("open exported");
     let names = wb.sheet_names();
@@ -465,7 +505,12 @@ fn sheet_name_dedup_skips_existing_suffix() {
     let mut sorted = names.clone();
     sorted.sort();
     sorted.dedup();
-    assert_eq!(sorted.len(), 3, "sheet names must be unique post-export, got {:?}", names);
+    assert_eq!(
+        sorted.len(),
+        3,
+        "sheet names must be unique post-export, got {:?}",
+        names
+    );
     // The user-supplied "a_b__2" must be preserved verbatim — the auto-suffix
     // path must skip it and pick something else (e.g. "a_b__3") for s3.
     assert!(
@@ -493,7 +538,8 @@ fn cross_sheet_formula_round_trip() {
         // would skip B1 entirely.
         ws1.write_string(0, 0, "anchor").expect("anchor A1");
         // B1 on Sheet1 references A1 on Sheet2.
-        ws1.write_formula(0, 1, "=Sheet2!A1").expect("cross-sheet formula");
+        ws1.write_formula(0, 1, "=Sheet2!A1")
+            .expect("cross-sheet formula");
         let ws2 = wb.add_worksheet();
         ws2.set_name("Sheet2").expect("name 2");
         ws2.write_number(0, 0, 42.0).expect("Sheet2 A1");
@@ -506,16 +552,16 @@ fn cross_sheet_formula_round_trip() {
 
     // Locate the formula cell — it's on sheet-1 (Sheet1), B1.
     let b1 = &snapshot["sheets"]["sheet-1"]["cellData"]["0"]["1"];
-    let f_in = b1.get("f").and_then(|v| v.as_str()).unwrap_or_else(|| {
-        panic!("expected formula on Sheet1!B1, got: {b1}")
-    });
+    let f_in = b1
+        .get("f")
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| panic!("expected formula on Sheet1!B1, got: {b1}"));
     assert!(
         f_in.contains("Sheet2") && f_in.contains("A1"),
         "imported formula must reference Sheet2 and A1, got: {f_in}"
     );
 
-    let export_result =
-        export_xlsx_core(path_str(&exported_path), snapshot_json).expect("export");
+    let export_result = export_xlsx_core(path_str(&exported_path), snapshot_json).expect("export");
     assert!(
         export_result.success,
         "export should succeed; error={:?}",
@@ -572,11 +618,19 @@ fn sheet_with_31_char_name_not_truncated() {
 
     let export_result =
         export_xlsx_core(path_str(&exported_31_path), snapshot_json).expect("export 31");
-    assert!(export_result.success, "31-char export should succeed: {:?}", export_result.error);
+    assert!(
+        export_result.success,
+        "31-char export should succeed: {:?}",
+        export_result.error
+    );
 
     let wb_out: Xlsx<_> = open_workbook(&exported_31_path).expect("open exported 31");
     let names = wb_out.sheet_names();
-    assert_eq!(names, vec![exact_31.clone()], "31-char name must survive export unchanged");
+    assert_eq!(
+        names,
+        vec![exact_31.clone()],
+        "31-char name must survive export unchanged"
+    );
 
     // ----- 32-char synthetic snapshot: must be truncated to 31 on export -----
     // We can't build a 32-char-name fixture with rust_xlsxwriter (it rejects),
@@ -605,7 +659,11 @@ fn sheet_with_31_char_name_not_truncated() {
         serde_json::to_string(&snapshot_32).unwrap(),
     )
     .expect("export 32");
-    assert!(res32.success, "32-char export should succeed via truncation: {:?}", res32.error);
+    assert!(
+        res32.success,
+        "32-char export should succeed via truncation: {:?}",
+        res32.error
+    );
 
     let wb32: Xlsx<_> = open_workbook(&exported_32_path).expect("open exported 32");
     let names32 = wb32.sheet_names();
@@ -807,7 +865,10 @@ fn unicode_sheet_name_japanese_chinese_emoji_roundtrip() {
 
     let raw_name = "日本語_中文_🚀";
     // Make sure it's within Excel's 31-char limit (char count, not byte count).
-    assert!(raw_name.chars().count() <= 31, "name must fit Excel's 31-char limit");
+    assert!(
+        raw_name.chars().count() <= 31,
+        "name must fit Excel's 31-char limit"
+    );
 
     {
         let mut wb = Workbook::new();
@@ -827,7 +888,11 @@ fn unicode_sheet_name_japanese_chinese_emoji_roundtrip() {
     );
 
     let export_result = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
-    assert!(export_result.success, "unicode-name export should succeed: {:?}", export_result.error);
+    assert!(
+        export_result.success,
+        "unicode-name export should succeed: {:?}",
+        export_result.error
+    );
 
     let wb_out: Xlsx<_> = open_workbook(&exported).expect("open exported");
     let names = wb_out.sheet_names();

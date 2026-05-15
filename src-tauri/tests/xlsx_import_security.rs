@@ -21,7 +21,11 @@ fn oversize_xlsx_returns_blocking_warning_not_panic() {
         .iter()
         .filter(|w| w.severity == "blocking")
         .collect();
-    assert!(!blocking.is_empty(), "expected blocking warning, got {:?}", result.warnings);
+    assert!(
+        !blocking.is_empty(),
+        "expected blocking warning, got {:?}",
+        result.warnings
+    );
     assert!(
         blocking.iter().any(|w| w.code == "XLSX_SECURITY_BLOCKED"),
         "expected XLSX_SECURITY_BLOCKED code, got {:?}",
@@ -52,7 +56,10 @@ fn many_entries_xlsx_blocked() {
         .iter()
         .filter(|w| w.severity == "blocking")
         .collect();
-    assert!(!blocking.is_empty(), "expected blocking warning for 2,001 entries");
+    assert!(
+        !blocking.is_empty(),
+        "expected blocking warning for 2,001 entries"
+    );
 }
 
 #[test]
@@ -72,12 +79,19 @@ fn valid_small_xlsx_imports_without_security_block() {
         .iter()
         .filter(|w| w.severity == "blocking")
         .collect();
-    assert!(blocking.is_empty(), "valid file should not be blocked, got {:?}", result.warnings);
+    assert!(
+        blocking.is_empty(),
+        "valid file should not be blocked, got {:?}",
+        result.warnings
+    );
     // §5.3.2 caps are now enforced inline, so the legacy "Phase 2 limits not yet
     // checked" XLSX_SECURITY_WARNING is gone. A clean small file should produce
     // no XLSX_SECURITY_WARNING entries.
     assert!(
-        !result.warnings.iter().any(|w| w.code == "XLSX_SECURITY_WARNING"),
+        !result
+            .warnings
+            .iter()
+            .any(|w| w.code == "XLSX_SECURITY_WARNING"),
         "valid small xlsx should not surface any XLSX_SECURITY_WARNING entries, got {:?}",
         result.warnings
     );

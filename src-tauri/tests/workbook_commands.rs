@@ -1,13 +1,7 @@
 use coco_lib::commands::recovery::autosave_temp_core;
 use coco_lib::commands::workbook::{
-    clear_recent_core,
-    list_recent_core,
-    list_recovery_core,
-    open_coco_core,
-    remove_recent_core,
-    restore_backup_core,
-    workbook_new,
-    save_core,
+    clear_recent_core, list_recent_core, list_recovery_core, open_coco_core, remove_recent_core,
+    restore_backup_core, save_core, workbook_new,
 };
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -61,7 +55,21 @@ fn workbook_new_produces_unique_ids() {
     assert_ne!(b.workbook_id, c.workbook_id);
     assert_eq!(a.source_type, "new");
     assert_eq!(a.path, None);
-    assert_eq!(a.snapshot_json, None);
+    assert!(a.requires_save_as_on_first_save);
+
+    let snapshot: serde_json::Value =
+        serde_json::from_str(a.snapshot_json.as_ref().unwrap()).unwrap();
+    assert_eq!(snapshot["id"], a.workbook_id);
+    assert_eq!(snapshot["sheetOrder"][0], "sheet-1");
+    assert_eq!(snapshot["sheets"]["sheet-1"]["name"], "Sheet1");
+}
+
+#[test]
+fn workbook_handle_serializes_requires_save_as_in_camel_case() {
+    let handle = workbook_new().unwrap();
+    let json = serde_json::to_value(&handle).unwrap();
+    assert_eq!(json["requiresSaveAsOnFirstSave"], true);
+    assert!(json.get("requires_save_as_on_first_save").is_none());
 }
 
 #[test]
@@ -85,8 +93,12 @@ fn open_coco_reads_latest_snapshot() {
 
     let result = open_coco_core(app_dir.path(), &path_str(&wb_path)).unwrap();
     assert_eq!(result.handle.workbook_id, "wb-test");
-    assert_eq!(result.handle.path.as_deref(), Some(path_str(&wb_path).as_str()));
+    assert_eq!(
+        result.handle.path.as_deref(),
+        Some(path_str(&wb_path).as_str())
+    );
     assert_eq!(result.handle.source_type, "coco");
+    assert!(!result.handle.requires_save_as_on_first_save);
     assert_eq!(
         result.handle.snapshot_json.as_deref(),
         Some("{\"v\":2}"),

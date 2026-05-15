@@ -51,38 +51,200 @@ fn cases() -> Vec<FormulaCase> {
     // Lookup table planted at A20:B21 for VLOOKUP / INDEX / MATCH.
     vec![
         // 集計
-        FormulaCase { row: 0,  col: 2, name: "SUM",       formula: "=SUM(A1:A6)",                  markers: &["SUM", "A1"] },
-        FormulaCase { row: 1,  col: 2, name: "AVERAGE",   formula: "=AVERAGE(A1:A6)",              markers: &["AVERAGE", "A1"] },
-        FormulaCase { row: 2,  col: 2, name: "COUNT",     formula: "=COUNT(A1:A6)",                markers: &["COUNT", "A1"] },
-        FormulaCase { row: 3,  col: 2, name: "COUNTA",    formula: "=COUNTA(B1:B6)",               markers: &["COUNTA", "B1"] },
-        FormulaCase { row: 4,  col: 2, name: "MIN",       formula: "=MIN(A1:A6)",                  markers: &["MIN", "A1"] },
-        FormulaCase { row: 5,  col: 2, name: "MAX",       formula: "=MAX(A1:A6)",                  markers: &["MAX", "A1"] },
+        FormulaCase {
+            row: 0,
+            col: 2,
+            name: "SUM",
+            formula: "=SUM(A1:A6)",
+            markers: &["SUM", "A1"],
+        },
+        FormulaCase {
+            row: 1,
+            col: 2,
+            name: "AVERAGE",
+            formula: "=AVERAGE(A1:A6)",
+            markers: &["AVERAGE", "A1"],
+        },
+        FormulaCase {
+            row: 2,
+            col: 2,
+            name: "COUNT",
+            formula: "=COUNT(A1:A6)",
+            markers: &["COUNT", "A1"],
+        },
+        FormulaCase {
+            row: 3,
+            col: 2,
+            name: "COUNTA",
+            formula: "=COUNTA(B1:B6)",
+            markers: &["COUNTA", "B1"],
+        },
+        FormulaCase {
+            row: 4,
+            col: 2,
+            name: "MIN",
+            formula: "=MIN(A1:A6)",
+            markers: &["MIN", "A1"],
+        },
+        FormulaCase {
+            row: 5,
+            col: 2,
+            name: "MAX",
+            formula: "=MAX(A1:A6)",
+            markers: &["MAX", "A1"],
+        },
         // 条件
-        FormulaCase { row: 6,  col: 2, name: "IF",        formula: "=IF(A1>0,\"pos\",\"neg\")",  markers: &["IF", "pos", "neg"] },
-        FormulaCase { row: 7,  col: 2, name: "AND",       formula: "=AND(A1>0,A2>0)",              markers: &["AND", "A1", "A2"] },
-        FormulaCase { row: 8,  col: 2, name: "OR",        formula: "=OR(A1>0,A2<0)",               markers: &["OR", "A1", "A2"] },
-        FormulaCase { row: 9,  col: 2, name: "NOT",       formula: "=NOT(A1>0)",                   markers: &["NOT", "A1"] },
+        FormulaCase {
+            row: 6,
+            col: 2,
+            name: "IF",
+            formula: "=IF(A1>0,\"pos\",\"neg\")",
+            markers: &["IF", "pos", "neg"],
+        },
+        FormulaCase {
+            row: 7,
+            col: 2,
+            name: "AND",
+            formula: "=AND(A1>0,A2>0)",
+            markers: &["AND", "A1", "A2"],
+        },
+        FormulaCase {
+            row: 8,
+            col: 2,
+            name: "OR",
+            formula: "=OR(A1>0,A2<0)",
+            markers: &["OR", "A1", "A2"],
+        },
+        FormulaCase {
+            row: 9,
+            col: 2,
+            name: "NOT",
+            formula: "=NOT(A1>0)",
+            markers: &["NOT", "A1"],
+        },
         // 参照
-        FormulaCase { row: 10, col: 2, name: "VLOOKUP",   formula: "=VLOOKUP(2,A20:B21,2,FALSE)",  markers: &["VLOOKUP", "A20"] },
-        FormulaCase { row: 11, col: 2, name: "INDEX",     formula: "=INDEX(A20:B21,2,2)",          markers: &["INDEX", "A20"] },
-        FormulaCase { row: 12, col: 2, name: "MATCH",     formula: "=MATCH(2,A20:A21,0)",          markers: &["MATCH", "A20"] },
+        FormulaCase {
+            row: 10,
+            col: 2,
+            name: "VLOOKUP",
+            formula: "=VLOOKUP(2,A20:B21,2,FALSE)",
+            markers: &["VLOOKUP", "A20"],
+        },
+        FormulaCase {
+            row: 11,
+            col: 2,
+            name: "INDEX",
+            formula: "=INDEX(A20:B21,2,2)",
+            markers: &["INDEX", "A20"],
+        },
+        FormulaCase {
+            row: 12,
+            col: 2,
+            name: "MATCH",
+            formula: "=MATCH(2,A20:A21,0)",
+            markers: &["MATCH", "A20"],
+        },
         // 文字列
-        FormulaCase { row: 13, col: 2, name: "CONCAT",    formula: "=CONCAT(\"foo\",\"bar\")",   markers: &["CONCAT", "foo", "bar"] },
-        FormulaCase { row: 14, col: 2, name: "LEFT",      formula: "=LEFT(\"abcdef\",3)",        markers: &["LEFT", "abcdef"] },
-        FormulaCase { row: 15, col: 2, name: "RIGHT",     formula: "=RIGHT(\"abcdef\",3)",       markers: &["RIGHT", "abcdef"] },
-        FormulaCase { row: 16, col: 2, name: "MID",       formula: "=MID(\"abcdef\",2,3)",       markers: &["MID", "abcdef"] },
-        FormulaCase { row: 17, col: 2, name: "LEN",       formula: "=LEN(\"abcdef\")",           markers: &["LEN", "abcdef"] },
+        FormulaCase {
+            row: 13,
+            col: 2,
+            name: "CONCAT",
+            formula: "=CONCAT(\"foo\",\"bar\")",
+            markers: &["CONCAT", "foo", "bar"],
+        },
+        FormulaCase {
+            row: 14,
+            col: 2,
+            name: "LEFT",
+            formula: "=LEFT(\"abcdef\",3)",
+            markers: &["LEFT", "abcdef"],
+        },
+        FormulaCase {
+            row: 15,
+            col: 2,
+            name: "RIGHT",
+            formula: "=RIGHT(\"abcdef\",3)",
+            markers: &["RIGHT", "abcdef"],
+        },
+        FormulaCase {
+            row: 16,
+            col: 2,
+            name: "MID",
+            formula: "=MID(\"abcdef\",2,3)",
+            markers: &["MID", "abcdef"],
+        },
+        FormulaCase {
+            row: 17,
+            col: 2,
+            name: "LEN",
+            formula: "=LEN(\"abcdef\")",
+            markers: &["LEN", "abcdef"],
+        },
         // 日付
-        FormulaCase { row: 18, col: 2, name: "TODAY",     formula: "=TODAY()",                     markers: &["TODAY"] },
-        FormulaCase { row: 19, col: 2, name: "DATE",      formula: "=DATE(2024,1,31)",             markers: &["DATE", "2024"] },
-        FormulaCase { row: 20, col: 2, name: "YEAR",      formula: "=YEAR(DATE(2024,1,31))",       markers: &["YEAR", "2024"] },
-        FormulaCase { row: 21, col: 2, name: "MONTH",     formula: "=MONTH(DATE(2024,1,31))",      markers: &["MONTH", "2024"] },
-        FormulaCase { row: 22, col: 2, name: "DAY",       formula: "=DAY(DATE(2024,1,31))",        markers: &["DAY", "2024"] },
+        FormulaCase {
+            row: 18,
+            col: 2,
+            name: "TODAY",
+            formula: "=TODAY()",
+            markers: &["TODAY"],
+        },
+        FormulaCase {
+            row: 19,
+            col: 2,
+            name: "DATE",
+            formula: "=DATE(2024,1,31)",
+            markers: &["DATE", "2024"],
+        },
+        FormulaCase {
+            row: 20,
+            col: 2,
+            name: "YEAR",
+            formula: "=YEAR(DATE(2024,1,31))",
+            markers: &["YEAR", "2024"],
+        },
+        FormulaCase {
+            row: 21,
+            col: 2,
+            name: "MONTH",
+            formula: "=MONTH(DATE(2024,1,31))",
+            markers: &["MONTH", "2024"],
+        },
+        FormulaCase {
+            row: 22,
+            col: 2,
+            name: "DAY",
+            formula: "=DAY(DATE(2024,1,31))",
+            markers: &["DAY", "2024"],
+        },
         // 数値
-        FormulaCase { row: 23, col: 2, name: "ROUND",     formula: "=ROUND(1.2345,2)",             markers: &["ROUND", "1.2345"] },
-        FormulaCase { row: 24, col: 2, name: "ROUNDUP",   formula: "=ROUNDUP(1.2345,2)",           markers: &["ROUNDUP", "1.2345"] },
-        FormulaCase { row: 25, col: 2, name: "ROUNDDOWN", formula: "=ROUNDDOWN(1.2345,2)",         markers: &["ROUNDDOWN", "1.2345"] },
-        FormulaCase { row: 26, col: 2, name: "ABS",       formula: "=ABS(-3.14)",                  markers: &["ABS", "3.14"] },
+        FormulaCase {
+            row: 23,
+            col: 2,
+            name: "ROUND",
+            formula: "=ROUND(1.2345,2)",
+            markers: &["ROUND", "1.2345"],
+        },
+        FormulaCase {
+            row: 24,
+            col: 2,
+            name: "ROUNDUP",
+            formula: "=ROUNDUP(1.2345,2)",
+            markers: &["ROUNDUP", "1.2345"],
+        },
+        FormulaCase {
+            row: 25,
+            col: 2,
+            name: "ROUNDDOWN",
+            formula: "=ROUNDDOWN(1.2345,2)",
+            markers: &["ROUNDDOWN", "1.2345"],
+        },
+        FormulaCase {
+            row: 26,
+            col: 2,
+            name: "ABS",
+            formula: "=ABS(-3.14)",
+            markers: &["ABS", "3.14"],
+        },
     ]
 }
 
@@ -132,14 +294,12 @@ fn every_p0_formula_round_trips() {
         .snapshot_json
         .clone()
         .expect("snapshot present on import");
-    let snapshot: Value =
-        serde_json::from_str(&snapshot_json).expect("parse imported snapshot");
+    let snapshot: Value = serde_json::from_str(&snapshot_json).expect("parse imported snapshot");
 
     // Every formula must survive the IMPORT step.
     let mut import_failures: Vec<String> = Vec::new();
     for c in &cases {
-        let cell = &snapshot["sheets"]["sheet-1"]["cellData"]
-            [c.row.to_string()][c.col.to_string()];
+        let cell = &snapshot["sheets"]["sheet-1"]["cellData"][c.row.to_string()][c.col.to_string()];
         let f = cell.get("f").and_then(|v| v.as_str()).unwrap_or("");
         if f.is_empty() {
             import_failures.push(format!(
@@ -183,8 +343,8 @@ fn every_p0_formula_round_trips() {
 
     let mut snapshot_failures: Vec<String> = Vec::new();
     for c in &cases {
-        let cell = &final_snapshot["sheets"]["sheet-1"]["cellData"]
-            [c.row.to_string()][c.col.to_string()];
+        let cell =
+            &final_snapshot["sheets"]["sheet-1"]["cellData"][c.row.to_string()][c.col.to_string()];
         let f = cell.get("f").and_then(|v| v.as_str()).unwrap_or("");
         if f.is_empty() {
             snapshot_failures.push(format!(

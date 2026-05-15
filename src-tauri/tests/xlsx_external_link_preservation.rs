@@ -67,8 +67,8 @@ fn build_external_link_fixture(tmp: &TempDir) -> PathBuf {
     let mut src = ZipArchive::new(std::io::Cursor::new(&src_bytes)).unwrap();
     let out_file = std::fs::File::create(&fixture_path).unwrap();
     let mut out = zip::ZipWriter::new(out_file);
-    let opts: FileOptions = FileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let opts: FileOptions =
+        FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     let rewrites: &[&str] = &[
         "[Content_Types].xml",
@@ -159,8 +159,7 @@ fn external_link_blob_and_cached_value_survive_roundtrip() {
     // blob plus the workbook-level rels/references metadata.
     let import = import_xlsx_core(path_str(&fixture)).expect("import ok");
     let snapshot_json = import.handle.snapshot_json.expect("snapshot present");
-    let snapshot: serde_json::Value =
-        serde_json::from_str(&snapshot_json).expect("parse snapshot");
+    let snapshot: serde_json::Value = serde_json::from_str(&snapshot_json).expect("parse snapshot");
     let preserved = snapshot
         .get("_preservedParts")
         .expect("_preservedParts should be on snapshot");
@@ -284,5 +283,8 @@ fn external_link_blob_and_cached_value_survive_roundtrip() {
         found = true;
         break;
     }
-    assert!(found, "Main sheet should be present in re-imported workbook");
+    assert!(
+        found,
+        "Main sheet should be present in re-imported workbook"
+    );
 }

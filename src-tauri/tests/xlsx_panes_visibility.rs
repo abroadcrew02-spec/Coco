@@ -123,7 +123,10 @@ fn freeze_panes_rows_and_cols_round_trip() {
     let snap: Value = serde_json::from_str(&snap_json).expect("parse snap");
 
     let fp = &snap["sheets"]["sheet-1"]["_freezePane"];
-    assert!(fp.is_object(), "expected _freezePane on sheet-1, got {snap}");
+    assert!(
+        fp.is_object(),
+        "expected _freezePane on sheet-1, got {snap}"
+    );
     assert_eq!(fp["row"].as_u64(), Some(2));
     assert_eq!(fp["col"].as_u64(), Some(3));
     assert_eq!(fp["topLeft"].as_str(), Some("D3"));
@@ -239,7 +242,10 @@ fn split_panes_round_trip() {
     let snap: Value = serde_json::from_str(&snap_json).expect("parse snap");
 
     let fp = &snap["sheets"]["sheet-1"]["_freezePane"];
-    assert!(fp.is_object(), "expected _freezePane on sheet-1, got {snap}");
+    assert!(
+        fp.is_object(),
+        "expected _freezePane on sheet-1, got {snap}"
+    );
     assert_eq!(fp["state"].as_str(), Some("split"));
     assert_eq!(fp["row"].as_u64(), Some(1500));
     assert_eq!(fp["col"].as_u64(), Some(2880));
@@ -305,7 +311,10 @@ fn mixed_frozen_and_split_round_trip() {
 
     // sheet-1: frozen — `state` field should be omitted (frozen is the default).
     let fp1 = &snap["sheets"]["sheet-1"]["_freezePane"];
-    assert!(fp1.is_object(), "expected _freezePane on sheet-1, got {snap}");
+    assert!(
+        fp1.is_object(),
+        "expected _freezePane on sheet-1, got {snap}"
+    );
     assert!(
         fp1.get("state").is_none(),
         "frozen is the default; `state` should be omitted on sheet-1, got {fp1}"
@@ -315,7 +324,10 @@ fn mixed_frozen_and_split_round_trip() {
 
     // sheet-2: split — `state` field should be present.
     let fp2 = &snap["sheets"]["sheet-2"]["_freezePane"];
-    assert!(fp2.is_object(), "expected _freezePane on sheet-2, got {snap}");
+    assert!(
+        fp2.is_object(),
+        "expected _freezePane on sheet-2, got {snap}"
+    );
     assert_eq!(fp2["state"].as_str(), Some("split"));
     assert_eq!(fp2["row"].as_u64(), Some(3000));
     assert_eq!(fp2["col"].as_u64(), Some(1800));
@@ -353,7 +365,10 @@ fn mixed_frozen_and_split_round_trip() {
     let snap2: Value = serde_json::from_str(&result2.handle.snapshot_json.unwrap()).unwrap();
     let rt1 = &snap2["sheets"]["sheet-1"]["_freezePane"];
     let rt2 = &snap2["sheets"]["sheet-2"]["_freezePane"];
-    assert!(rt1.is_object() && rt2.is_object(), "both panes should round-trip; got {snap2}");
+    assert!(
+        rt1.is_object() && rt2.is_object(),
+        "both panes should round-trip; got {snap2}"
+    );
     assert!(
         rt1.get("state").is_none(),
         "after round-trip, sheet-1 is still frozen (state omitted); got {rt1}"

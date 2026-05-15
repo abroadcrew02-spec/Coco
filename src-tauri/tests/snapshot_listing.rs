@@ -31,7 +31,11 @@ fn fresh_coco_after_single_save_has_one_snapshot() {
     assert_eq!(snapshots.len(), 1);
     assert_eq!(snapshots[0].reason, "manual_save");
     // created_at should be a non-empty RFC3339 string.
-    assert!(snapshots[0].created_at.contains('T'), "got: {:?}", snapshots[0].created_at);
+    assert!(
+        snapshots[0].created_at.contains('T'),
+        "got: {:?}",
+        snapshots[0].created_at
+    );
 }
 
 #[test]
@@ -71,7 +75,10 @@ fn open_snapshot_returns_handle_with_detached_path() {
     assert_eq!(result.handle.source_type, "coco");
     assert_eq!(result.handle.workbook_id, "wb1");
     let snap = result.handle.snapshot_json.unwrap();
-    assert!(snap.contains("\"v\":1"), "expected older snapshot, got: {snap}");
+    assert!(
+        snap.contains("\"v\":1"),
+        "expected older snapshot, got: {snap}"
+    );
 }
 
 #[test]

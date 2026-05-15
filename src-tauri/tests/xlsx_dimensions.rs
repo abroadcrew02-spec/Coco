@@ -7,7 +7,7 @@
 //! char-width conversion when *it* writes widths, which would otherwise muddy
 //! the assertions for the import test step.
 
-use coco_lib::commands::xlsx_io::{import_xlsx_core, export_xlsx_core};
+use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use serde_json::Value;
 use std::io::{Read, Write};
 use tempfile::TempDir;
@@ -203,9 +203,21 @@ fn column_span_expands_to_multiple_indices() {
         serde_json::from_str(&result.handle.snapshot_json.unwrap()).expect("parse snap");
 
     let col_data = &snap["sheets"]["sheet-1"]["columnData"];
-    assert_eq!(col_data["0"]["w"].as_f64(), Some(20.0), "col 0 should be 20");
-    assert_eq!(col_data["1"]["w"].as_f64(), Some(20.0), "col 1 should be 20");
-    assert_eq!(col_data["2"]["w"].as_f64(), Some(20.0), "col 2 should be 20");
+    assert_eq!(
+        col_data["0"]["w"].as_f64(),
+        Some(20.0),
+        "col 0 should be 20"
+    );
+    assert_eq!(
+        col_data["1"]["w"].as_f64(),
+        Some(20.0),
+        "col 1 should be 20"
+    );
+    assert_eq!(
+        col_data["2"]["w"].as_f64(),
+        Some(20.0),
+        "col 2 should be 20"
+    );
     assert!(
         col_data.get("3").is_none(),
         "col 3 must NOT be populated, span was 1..=3"

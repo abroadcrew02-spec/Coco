@@ -73,8 +73,7 @@ fn tab_color_round_trips() {
     );
 
     let re = import_xlsx_core(path_str(&exported)).expect("re-import");
-    let re_snap: Value =
-        serde_json::from_str(&re.handle.snapshot_json.unwrap()).expect("parse2");
+    let re_snap: Value = serde_json::from_str(&re.handle.snapshot_json.unwrap()).expect("parse2");
     let re_color = re_snap["sheets"]["sheet-1"]["_tabColor"]
         .as_str()
         .expect("_tabColor should round-trip");
@@ -132,8 +131,7 @@ fn auto_filter_round_trips() {
     );
 
     let re = import_xlsx_core(path_str(&exported)).expect("re-import");
-    let re_snap: Value =
-        serde_json::from_str(&re.handle.snapshot_json.unwrap()).expect("parse2");
+    let re_snap: Value = serde_json::from_str(&re.handle.snapshot_json.unwrap()).expect("parse2");
     let re_ref = re_snap["sheets"]["sheet-1"]["_autoFilter"]
         .as_str()
         .expect("_autoFilter should round-trip");

@@ -107,7 +107,9 @@ fn external_links_detected() {
         &["xl/workbook.xml", "xl/externalLinks/externalLink1.xml"],
     );
     let result = detect_unsupported_features(&path_str(&path)).unwrap();
-    assert!(result.iter().any(|w| w.code == "XLSX_EXTERNAL_LINKS_DISCARDED"));
+    assert!(result
+        .iter()
+        .any(|w| w.code == "XLSX_EXTERNAL_LINKS_DISCARDED"));
 }
 
 #[test]
@@ -128,12 +130,24 @@ fn drawings_and_media_detected_as_drawings() {
     let path = build_zip_with_entries(
         &tmp,
         "with_drawings.xlsx",
-        &["xl/workbook.xml", "xl/drawings/drawing1.xml", "xl/media/image1.png"],
+        &[
+            "xl/workbook.xml",
+            "xl/drawings/drawing1.xml",
+            "xl/media/image1.png",
+        ],
     );
     let result = detect_unsupported_features(&path_str(&path)).unwrap();
     // Both prefixes trigger the same warning code — should only get ONE warning, not two.
-    let drawing_warnings: Vec<_> = result.iter().filter(|w| w.code == "XLSX_DRAWINGS_DISCARDED").collect();
-    assert_eq!(drawing_warnings.len(), 1, "should dedupe to one drawing warning, got {:?}", result);
+    let drawing_warnings: Vec<_> = result
+        .iter()
+        .filter(|w| w.code == "XLSX_DRAWINGS_DISCARDED")
+        .collect();
+    assert_eq!(
+        drawing_warnings.len(),
+        1,
+        "should dedupe to one drawing warning, got {:?}",
+        result
+    );
 }
 
 #[test]
@@ -145,7 +159,9 @@ fn embeddings_detected() {
         &["xl/workbook.xml", "xl/embeddings/oleObject1.bin"],
     );
     let result = detect_unsupported_features(&path_str(&path)).unwrap();
-    assert!(result.iter().any(|w| w.code == "XLSX_EMBEDDED_OBJECTS_DISCARDED"));
+    assert!(result
+        .iter()
+        .any(|w| w.code == "XLSX_EMBEDDED_OBJECTS_DISCARDED"));
 }
 
 #[test]
@@ -163,7 +179,12 @@ fn multiple_features_detected_independently() {
         ],
     );
     let result = detect_unsupported_features(&path_str(&path)).unwrap();
-    assert_eq!(result.len(), 4, "expected 4 distinct warnings, got {:?}", result);
+    assert_eq!(
+        result.len(),
+        4,
+        "expected 4 distinct warnings, got {:?}",
+        result
+    );
     let codes: Vec<&str> = result.iter().map(|w| w.code.as_str()).collect();
     assert!(codes.contains(&"XLSX_CHARTS_DISCARDED"));
     assert!(codes.contains(&"XLSX_PIVOT_DISCARDED"));
@@ -223,7 +244,9 @@ fn conditional_formatting_not_emitted_when_absent() {
     );
     let result = detect_unsupported_features(&path_str(&path)).unwrap();
     assert!(
-        !result.iter().any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
+        !result
+            .iter()
+            .any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
         "should NOT emit conditional-formatting warning, got {:?}",
         result
     );
@@ -246,7 +269,9 @@ fn conditional_formatting_detected_only_in_second_sheet() {
     );
     let result = detect_unsupported_features(&path_str(&path)).unwrap();
     assert!(
-        result.iter().any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
+        result
+            .iter()
+            .any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
         "expected detection across multiple worksheet entries, got {:?}",
         result
     );
@@ -347,7 +372,9 @@ fn conditional_formatting_marker_split_across_chunk_boundary() {
     );
     let result = detect_unsupported_features(&path_str(&path)).unwrap();
     assert!(
-        result.iter().any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
+        result
+            .iter()
+            .any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
         "boundary-straddling marker should still be detected, got {:?}",
         result
     );
@@ -383,7 +410,9 @@ fn worksheet_scan_cap_enforced_at_16mib() {
     // Conservative emission: cap-hit ⇒ warning even if marker bytes weren't
     // seen. This is intentional per the OOM-hardening spec.
     assert!(
-        result.iter().any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
+        result
+            .iter()
+            .any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
         "cap-hit policy should conservatively emit CF warning, got {:?}",
         result
     );
@@ -410,7 +439,9 @@ fn conditional_formatting_inside_xml_comment_is_ignored() {
     );
     let result = detect_unsupported_features(&path_str(&path)).unwrap();
     assert!(
-        !result.iter().any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
+        !result
+            .iter()
+            .any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
         "commented-out CF must not produce a warning, got {:?}",
         result
     );
@@ -459,7 +490,9 @@ fn conditional_formatting_real_after_commented_block_still_detected() {
     );
     let result = detect_unsupported_features(&path_str(&path)).unwrap();
     assert!(
-        result.iter().any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
+        result
+            .iter()
+            .any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
         "real CF after commented one must still warn, got {:?}",
         result
     );
@@ -492,7 +525,9 @@ fn conditional_formatting_inside_comment_straddling_chunk_boundary() {
     );
     let result = detect_unsupported_features(&path_str(&path)).unwrap();
     assert!(
-        !result.iter().any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
+        !result
+            .iter()
+            .any(|w| w.code == "XLSX_CONDITIONAL_FORMATTING"),
         "commented CF straddling chunk boundary must stay suppressed, got {:?}",
         result
     );

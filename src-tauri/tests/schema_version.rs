@@ -61,3 +61,26 @@ fn schema_version_row_records_app_version() {
         app_version
     );
 }
+
+#[test]
+fn workbook_meta_source_type_allows_csv() {
+    let conn = Connection::open_in_memory().unwrap();
+    initialize(&conn).unwrap();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    conn.execute(
+        "INSERT INTO workbook_meta (workbook_id, app_version, created_at, updated_at, source_type, calc_mode, locale, encrypted)
+         VALUES (?1, ?2, ?3, ?3, 'csv', 'auto', 'ja-JP', 0)",
+        rusqlite::params!["wb-csv", env!("CARGO_PKG_VERSION"), now],
+    )
+    .unwrap();
+
+    let source_type: String = conn
+        .query_row(
+            "SELECT source_type FROM workbook_meta WHERE workbook_id = 'wb-csv'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(source_type, "csv");
+}

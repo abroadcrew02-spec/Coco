@@ -28,6 +28,8 @@ fn simple_values_roundtrip_through_snapshot() {
     let snapshot_str = result.handle.snapshot_json.clone().unwrap();
     let snapshot: serde_json::Value = serde_json::from_str(&snapshot_str).unwrap();
 
+    assert_eq!(result.handle.source_type, "csv");
+    assert!(result.handle.requires_save_as_on_first_save);
     assert_eq!(snapshot["sheets"]["sheet-1"]["name"], "values");
     assert_eq!(snapshot["sheetOrder"].as_array().unwrap().len(), 1);
 
@@ -96,7 +98,10 @@ fn empty_cells_are_sparse() {
     assert!(!row0.contains_key("1"), "empty cell should be skipped");
 
     let root_obj = cell_data.as_object().unwrap();
-    assert!(!root_obj.contains_key("1"), "all-empty row should be omitted");
+    assert!(
+        !root_obj.contains_key("1"),
+        "all-empty row should be omitted"
+    );
 
     let row2 = cell_data["2"].as_object().unwrap();
     assert_eq!(row2.len(), 1);
@@ -165,13 +170,13 @@ fn shift_jis_csv_decoded_and_warned() {
     // "名前,得点" + CRLF + "山田,90" in Shift_JIS bytes.
     let sjis_bytes: Vec<u8> = vec![
         0x96, 0xBC, 0x91, 0x4F, // 名前
-        0x2C,                   // ,
+        0x2C, // ,
         0x93, 0xBE, 0x93, 0x5F, // 得点
-        0x0D, 0x0A,             // CRLF
+        0x0D, 0x0A, // CRLF
         0x8E, 0x52, 0x93, 0x63, // 山田
-        0x2C,                   // ,
-        0x39, 0x30,             // 90
-        0x0D, 0x0A,             // CRLF
+        0x2C, // ,
+        0x39, 0x30, // 90
+        0x0D, 0x0A, // CRLF
     ];
     std::fs::write(&path, &sjis_bytes).expect("write sjis file");
 
@@ -326,8 +331,7 @@ fn near_cap_warning_fires_above_4m_cells() {
     }
     drop(file);
 
-    let result =
-        import_csv_core(path.to_string_lossy().into_owned(), None).unwrap();
+    let result = import_csv_core(path.to_string_lossy().into_owned(), None).unwrap();
     assert!(
         result.warnings.iter().any(|w| w.code == "CSV_NEAR_CAP"),
         "expected CSV_NEAR_CAP warning, got: {:?}",
@@ -435,7 +439,10 @@ fn numeric_strings_that_look_like_dates_still_parse_as_numbers_when_unambiguous(
     let result = import_csv_core(path, None).unwrap();
     let snap: serde_json::Value =
         serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
-    assert_eq!(snap["sheets"]["sheet-1"]["cellData"]["0"]["0"]["v"], 20260513);
+    assert_eq!(
+        snap["sheets"]["sheet-1"]["cellData"]["0"]["0"]["v"],
+        20260513
+    );
 }
 
 #[test]
@@ -658,7 +665,10 @@ fn iso_date_with_trailing_whitespace_stays_string() {
     let snap: serde_json::Value =
         serde_json::from_str(&result.handle.snapshot_json.unwrap()).unwrap();
     let c = &snap["sheets"]["sheet-1"]["cellData"]["0"]["0"];
-    assert_eq!(c["v"], "2026-05-13 ", "should stay a plain string with the trailing space preserved");
+    assert_eq!(
+        c["v"], "2026-05-13 ",
+        "should stay a plain string with the trailing space preserved"
+    );
     assert!(
         c.get("_fmt").is_none(),
         "must NOT be coerced to a date serial, got: {:?}",
@@ -702,11 +712,19 @@ fn excel_1900_leap_bug_serial_60_handled() {
     let cell_data = &snap["sheets"]["sheet-1"]["cellData"];
 
     let c0 = &cell_data["0"]["0"];
-    assert_eq!(c0["v"].as_f64(), Some(59.0), "1900-02-28 should serialize to 59 (pre-leap-bug)");
+    assert_eq!(
+        c0["v"].as_f64(),
+        Some(59.0),
+        "1900-02-28 should serialize to 59 (pre-leap-bug)"
+    );
     assert_eq!(c0["_fmt"], "yyyy-mm-dd");
 
     let c1 = &cell_data["1"]["0"];
-    assert_eq!(c1["v"].as_f64(), Some(61.0), "1900-03-01 should serialize to 61 (post-leap-bug, +1 adjustment)");
+    assert_eq!(
+        c1["v"].as_f64(),
+        Some(61.0),
+        "1900-03-01 should serialize to 61 (post-leap-bug, +1 adjustment)"
+    );
     assert_eq!(c1["_fmt"], "yyyy-mm-dd");
 }
 
@@ -724,7 +742,11 @@ fn extreme_dates_9999_and_1900_01_01() {
     let cell_data = &snap["sheets"]["sheet-1"]["cellData"];
 
     let c0 = &cell_data["0"]["0"];
-    assert_eq!(c0["v"].as_f64(), Some(1.0), "1900-01-01 should serialize to 1");
+    assert_eq!(
+        c0["v"].as_f64(),
+        Some(1.0),
+        "1900-01-01 should serialize to 1"
+    );
     assert_eq!(c0["_fmt"], "yyyy-mm-dd");
 
     // From 1899-12-31 to 9999-12-31 is (9999-1900)*365 + leap_days + 1 days,
@@ -733,9 +755,14 @@ fn extreme_dates_9999_and_1900_01_01() {
     // adds +1 across the leap-bug threshold, so we compute what our impl
     // produces and verify it's a sensible round-trip rather than hard-coding.
     let c1 = &cell_data["1"]["0"];
-    let serial = c1["v"].as_f64().expect("9999-12-31 should serialize to f64");
-    assert!(serial > 2_958_000.0 && serial < 2_959_000.0,
-        "9999-12-31 should be in the ~2.96M serial range, got {}", serial);
+    let serial = c1["v"]
+        .as_f64()
+        .expect("9999-12-31 should serialize to f64");
+    assert!(
+        serial > 2_958_000.0 && serial < 2_959_000.0,
+        "9999-12-31 should be in the ~2.96M serial range, got {}",
+        serial
+    );
     assert_eq!(c1["_fmt"], "yyyy-mm-dd");
 }
 
@@ -758,8 +785,11 @@ fn percent_minus_100_and_tiny_fraction() {
     assert_eq!(c0["_fmt"], "0%");
 
     let c1 = &cell_data["1"]["0"];
-    assert!((c1["v"].as_f64().unwrap() - 0.000001).abs() < 1e-12,
-        "0.0001% should be 0.000001, got {:?}", c1["v"]);
+    assert!(
+        (c1["v"].as_f64().unwrap() - 0.000001).abs() < 1e-12,
+        "0.0001% should be 0.000001, got {:?}",
+        c1["v"]
+    );
     assert_eq!(c1["_fmt"], "0.00%");
 
     let c2 = &cell_data["2"]["0"];
@@ -845,11 +875,71 @@ fn quoted_field_with_internal_doublequote_and_newline() {
     let cell_data = &snap["sheets"]["sheet-1"]["cellData"];
 
     assert_eq!(
-        cell_data["0"]["0"]["v"],
-        "He said \"hi\"\nworld",
+        cell_data["0"]["0"]["v"], "He said \"hi\"\nworld",
         "internal doublequote should be unescaped and embedded newline preserved"
     );
     assert_eq!(cell_data["0"]["1"]["v"], "tail");
     // Only one logical row.
     assert!(!cell_data.as_object().unwrap().contains_key("1"));
+}
+
+#[test]
+fn import_rejects_file_over_byte_cap_before_read() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("too_big.csv");
+    let file = fs::File::create(&path).unwrap();
+    file.set_len(129 * 1024 * 1024).unwrap();
+    drop(file);
+
+    let err = import_csv_core(path.to_string_lossy().into_owned(), None).unwrap_err();
+    assert!(
+        err.contains("CSV_TOO_LARGE"),
+        "expected CSV_TOO_LARGE, got {:?}",
+        err
+    );
+}
+
+#[test]
+fn import_rejects_field_over_char_cap() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "field_too_big.csv");
+    let field = "x".repeat(1_000_001);
+    fs::write(&path, format!("{}\n", field)).unwrap();
+
+    let err = import_csv_core(path, None).unwrap_err();
+    assert!(
+        err.contains("CSV_FIELD_TOO_LARGE"),
+        "expected CSV_FIELD_TOO_LARGE, got {:?}",
+        err
+    );
+}
+
+#[test]
+fn import_rejects_record_over_byte_cap() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "record_bytes.csv");
+    let field = "あ".repeat(940_000);
+    fs::write(&path, format!("{0},{0},{0}\n", field)).unwrap();
+
+    let err = import_csv_core(path, None).unwrap_err();
+    assert!(
+        err.contains("CSV_RECORD_TOO_LARGE") && err.contains("bytes"),
+        "expected byte CSV_RECORD_TOO_LARGE, got {:?}",
+        err
+    );
+}
+
+#[test]
+fn import_rejects_record_over_char_cap() {
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "record_chars.csv");
+    let field = "x".repeat(900_000);
+    fs::write(&path, format!("{0},{0},{0},{0},{0},{0}\n", field)).unwrap();
+
+    let err = import_csv_core(path, None).unwrap_err();
+    assert!(
+        err.contains("CSV_RECORD_TOO_LARGE") && err.contains("characters"),
+        "expected char CSV_RECORD_TOO_LARGE, got {:?}",
+        err
+    );
 }

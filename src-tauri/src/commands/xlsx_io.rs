@@ -613,14 +613,53 @@ fn parse_styles_xml(
     (fonts, fills, borders, xfs, custom_num_fmts)
 }
 
-/// Decode the small set of XML entities that may appear inside `formatCode`
-/// attributes (rust_xlsxwriter / Excel escape `&`, `<`, `>`, `"`).
+/// Decode the XML entities Excel may emit inside attribute / text content:
+/// the five named entities plus numeric character references in decimal
+/// (`&#10;`) and hexadecimal (`&#xA;`) forms. #66: without numeric refs,
+/// Excel-emitted newlines inside header/footer / comments / number formats
+/// survive as literal `&#10;` text and get double-escaped on re-export.
 fn decode_xml_entities(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(idx) = rest.find('&') {
+        out.push_str(&rest[..idx]);
+        let after = &rest[idx..];
+        let semi = match after.find(';') {
+            Some(p) if p <= 8 => p,
+            _ => {
+                // No `;` close within a plausible entity window — emit `&`
+                // verbatim and continue past it.
+                out.push('&');
+                rest = &after[1..];
+                continue;
+            }
+        };
+        let body = &after[1..semi];
+        let decoded: Option<char> = match body {
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            _ if body.starts_with("#x") || body.starts_with("#X") => {
+                u32::from_str_radix(&body[2..], 16).ok().and_then(char::from_u32)
+            }
+            _ if body.starts_with('#') => {
+                body[1..].parse::<u32>().ok().and_then(char::from_u32)
+            }
+            _ => None,
+        };
+        match decoded {
+            Some(c) => out.push(c),
+            None => out.push_str(&after[..=semi]),
+        }
+        rest = &after[semi + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Parse a `<top style="thin"><color rgb="FF000000"/></top>` (or similar side
@@ -950,11 +989,21 @@ fn parse_sheet_cell_styles(xml: &str) -> HashMap<(u32, u32), usize> {
 
 /// Parse an A1-style ref like "B12" or "AA100" into (row0, col0).
 fn parse_a1(s: &str) -> Option<(u32, u32)> {
+    // OOXML spec caps columns at XFD (16384) and rows at 1048576. #65: use
+    // checked arithmetic so malicious refs like "ZZZZZZZ1" can't overflow u32
+    // (panic in debug, silent wrap in release with downstream HashMap
+    // mis-keying). Reject anything past the spec maximum.
+    const MAX_COL: u32 = 16_384;
+    const MAX_ROW: u32 = 1_048_576;
     let mut col = 0u32;
     let mut row_start = 0;
     for (i, ch) in s.char_indices() {
         if ch.is_ascii_alphabetic() {
-            col = col * 26 + (ch.to_ascii_uppercase() as u32 - 'A' as u32 + 1);
+            let inc = (ch.to_ascii_uppercase() as u32) - ('A' as u32) + 1;
+            col = col.checked_mul(26)?.checked_add(inc)?;
+            if col > MAX_COL {
+                return None;
+            }
             row_start = i + 1;
         } else {
             break;
@@ -964,7 +1013,7 @@ fn parse_a1(s: &str) -> Option<(u32, u32)> {
         return None;
     }
     let row: u32 = s[row_start..].parse().ok()?;
-    if row == 0 {
+    if row == 0 || row > MAX_ROW {
         return None;
     }
     Some((row - 1, col - 1))
@@ -2557,6 +2606,14 @@ fn encode_xml_text(s: &str) -> String {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&apos;"),
+            // #80: strip XML 1.0 illegal control characters. NUL and other
+            // C0 controls (except TAB / LF / CR) are not legal in any XML
+            // document — leaving them in `<t>` cells produces a comments.xml
+            // that Excel rejects with "file is corrupt" on open. Replace with
+            // U+FFFD so the cell stays present but no longer invalidates the
+            // whole package.
+            '\t' | '\n' | '\r' => out.push(c),
+            c if (c as u32) < 0x20 || (c as u32) == 0x7F => out.push('\u{FFFD}'),
             _ => out.push(c),
         }
     }

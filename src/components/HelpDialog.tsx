@@ -50,13 +50,23 @@ export default function HelpDialog({ onClose }: Props) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // #77: stopImmediatePropagation so the global F1 / Ctrl+/ listener in
+      // useGlobalShortcuts doesn't re-open the dialog the instant we close
+      // it. The global listener registers on `window` too, and without
+      // immediate-stop both handlers fire on the same event.
       if (e.key === "Escape" || e.key === "F1") {
         e.preventDefault();
+        e.stopImmediatePropagation();
+        onClose();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
         onClose();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture phase: run before useGlobalShortcuts' bubble-phase listener.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
   useEffect(() => {

@@ -237,17 +237,23 @@ fn scan_worksheet_dimensions<R: std::io::Read + std::io::Seek>(
         }
 
         // Even when `<dimension>` is present we still count `<f>` for the
-        // formula-warn threshold. Row / col streaming fallback only kicks in
-        // when no dimension was seen.
+        // formula-warn threshold. #73: only count tags whose `<f` start
+        // sits inside the new chunk (i.e. position >= overlap.len()) so the
+        // carry-over isn't double-counted on the next iteration. Tags that
+        // straddle the previous boundary were already counted last time we
+        // saw them as "fresh" inside their own chunk.
+        let overlap_len = overlap.len();
         stats.formula_count = stats
             .formula_count
-            .saturating_add(count_formula_tags(&window) as u64);
+            .saturating_add(count_formula_tags_from(&window, overlap_len) as u64);
 
-        if !dimension_found {
-            let (r, c) = scan_row_col_refs(&window);
-            stats.max_row = stats.max_row.max(r);
-            stats.max_col = stats.max_col.max(c);
-        }
+        // #64: also always run the streaming row/col fallback and take the
+        // max. `<dimension>` is a writer hint, not a guarantee — a malicious
+        // file can declare `A1:A1` while packing millions of rows underneath.
+        // Trusting only the dimension lets the §5.3.2 hard caps be bypassed.
+        let (r, c) = scan_row_col_refs(&window);
+        stats.max_row = stats.max_row.max(r);
+        stats.max_col = stats.max_col.max(c);
 
         let keep = window.len().min(WORKSHEET_SCAN_OVERLAP);
         overlap.clear();
@@ -331,13 +337,15 @@ fn parse_cell_ref(s: &str) -> Option<(u64, u64)> {
     Some((row, col))
 }
 
-/// Count `<f>` and `<f ...>` formula tags. Naive byte scan; avoids matching
-/// `<filter`, `<fill`, `<font>`, `<fonts>` etc. by requiring the next byte
-/// after `<f` to be `>`, space, or `/`.
-fn count_formula_tags(window: &[u8]) -> usize {
+/// Count `<f>` and `<f ...>` formula tags whose `<` position is at or after
+/// `start_at`. Naive byte scan; avoids matching `<filter`, `<fill`, `<font>`,
+/// `<fonts>` etc. by requiring the next byte after `<f` to be `>`, space,
+/// or `/`. #73: the `start_at` cursor lets the caller skip the carry-over
+/// overlap region whose contents were already counted in the previous tick.
+fn count_formula_tags_from(window: &[u8], start_at: usize) -> usize {
     let needle = b"<f";
     let mut count = 0;
-    let mut i = 0;
+    let mut i = start_at;
     while i + needle.len() < window.len() {
         if &window[i..i + needle.len()] == needle {
             let next = window[i + needle.len()];

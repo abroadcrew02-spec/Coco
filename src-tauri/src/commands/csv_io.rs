@@ -717,14 +717,28 @@ fn is_currency_format(fmt: &str) -> bool {
 
 /// Render `value` as a currency string using the given `fmt` code. Supports
 /// the common patterns: "$#,##0.00", "$#,##0", "¥#,##0", "[$$-409]#,##0.00".
-/// Falls back to plain numeric formatting if the format is unrecognized.
+/// #79: also honours the negative-branch (second section after `;`) so
+/// accounting formats like `$#,##0.00;($#,##0.00)` produce `($1,234.50)`
+/// rather than `-$1,234.50`. Falls back to plain numeric formatting if the
+/// format is unrecognized.
 fn format_currency(value: f64, fmt: &str) -> String {
-    // Extract symbol: first non-digit, non-#, non-comma, non-period, non-bracket char.
-    let symbol = pick_currency_symbol(fmt).unwrap_or('$');
-    // Decimal count: zeros after the `.` in the format string, capped at 6.
+    // OOXML format-code sections are separated by `;`:
+    //   positive ; negative ; zero ; text
+    // Pick the section that matches the value's sign.
+    let sections: Vec<&str> = fmt.split(';').collect();
+    let section = if value < 0.0 && sections.len() >= 2 {
+        sections[1]
+    } else if value == 0.0 && sections.len() >= 3 {
+        sections[2]
+    } else {
+        sections[0]
+    };
+    let active = section.trim();
+
+    let symbol = pick_currency_symbol(active).unwrap_or('$');
     let mut decimals = 0usize;
-    if let Some(dot_idx) = fmt.find('.') {
-        for c in fmt[dot_idx + 1..].chars() {
+    if let Some(dot_idx) = active.find('.') {
+        for c in active[dot_idx + 1..].chars() {
             if c == '0' {
                 decimals += 1;
                 if decimals >= 6 {
@@ -735,7 +749,7 @@ fn format_currency(value: f64, fmt: &str) -> String {
             }
         }
     }
-    let uses_thousands = fmt.contains("#,##");
+    let uses_thousands = active.contains("#,##");
     let abs_value = value.abs();
     let formatted = if uses_thousands {
         format_thousands(abs_value, decimals)
@@ -744,7 +758,17 @@ fn format_currency(value: f64, fmt: &str) -> String {
     } else {
         format!("{:.*}", decimals, abs_value)
     };
-    let sign = if value < 0.0 { "-" } else { "" };
+
+    // If the active section wraps the body in `( ... )` (Excel's accounting
+    // negative convention), preserve those literal parens around the value.
+    let has_paren_open = active.contains('(');
+    let has_paren_close = active.contains(')');
+    if value < 0.0 && has_paren_open && has_paren_close {
+        return format!("({}{})", symbol, formatted);
+    }
+
+    // No explicit negative section → keep historical "-${value}" output.
+    let sign = if value < 0.0 && sections.len() < 2 { "-" } else { "" };
     format!("{}{}{}", sign, symbol, formatted)
 }
 

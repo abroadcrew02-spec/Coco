@@ -86,6 +86,36 @@ fn open_workbook_db(path: &str) -> Result<Connection, String> {
     Ok(conn)
 }
 
+/// Sniff `path` as a SQLite file and reject anything that isn't a Coco
+/// workbook. Shared by every maintenance command (vacuum, integrity,
+/// diagnostic) so #74 stays plugged consistently. Returns Ok(()) on a real
+/// Coco workbook, Err with a user-facing message otherwise.
+fn require_coco_schema(path: &str) -> Result<(), String> {
+    let conn = Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(|e| e.to_string())?;
+    let has_meta: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workbook_meta'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    let has_snapshots: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workbook_snapshots'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if !has_meta || !has_snapshots {
+        return Err("Not a Coco workbook (.coco)".to_string());
+    }
+    Ok(())
+}
+
 /// Read-only Coco DB open: rejects files that lack Coco's core tables so we
 /// never write Coco schema onto unrelated SQLite databases.
 fn open_workbook_db_for_read(path: &str) -> Result<Connection, String> {
@@ -584,13 +614,18 @@ pub fn restore_backup_core(
     );
     let (workbook_id, snapshot_json) = result.map_err(|e| e.to_string())?;
 
+    // #67: detach the recovery temp path. Returning `Some(temp_path)` plus
+    // `requires_save_as_on_first_save: false` would silently overwrite the
+    // recovery file on the next Ctrl+S — and the next recovery cleanup pass
+    // would then delete the saved work. Force Save As so the user has to
+    // pick a real location.
     Ok(OpenWorkbookResult {
         handle: WorkbookHandle {
             workbook_id,
-            path: Some(temp_path),
+            path: None,
             source_type: "coco".to_string(),
             snapshot_json: Some(snapshot_json),
-            requires_save_as_on_first_save: false,
+            requires_save_as_on_first_save: true,
         },
         warnings: vec![],
     })
@@ -725,6 +760,11 @@ pub fn vacuum_core(path: &str) -> Result<VacuumResult, String> {
     if !p.exists() {
         return Err(format!("File not found: {path}"));
     }
+    // #74: refuse to VACUUM SQLite files that aren't Coco workbooks. Same
+    // motivation as #51 — Coco's commands accept any path string, so without
+    // a schema sniff a malicious frontend invocation could rewrite an
+    // unrelated database (KeePass, app history, etc.).
+    require_coco_schema(path)?;
     let before_bytes = std::fs::metadata(p).map_err(|e| e.to_string())?.len();
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     conn.execute_batch("VACUUM;").map_err(|e| e.to_string())?;
@@ -763,6 +803,7 @@ pub fn check_integrity_core(path: &str) -> Result<IntegrityCheckResult, String> 
     if !std::path::Path::new(path).exists() {
         return Err(format!("File not found: {path}"));
     }
+    require_coco_schema(path)?; // #74
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("PRAGMA integrity_check")
@@ -810,6 +851,7 @@ pub fn diagnostic_info_core(path: &str) -> Result<DiagnosticInfo, String> {
     if !p.exists() {
         return Err(format!("File not found: {path}"));
     }
+    require_coco_schema(path)?; // #74
     let size_bytes = std::fs::metadata(p).map_err(|e| e.to_string())?.len();
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     let snapshot_count: i64 = conn

@@ -61,9 +61,11 @@ pub fn reveal_in_file_manager(path: String) -> Result<(), String> {
 
 /// Open an URL or file path in the user's default browser / handler. Used by
 /// the in-grid hyperlink renderer when the user clicks a cell with a
-/// `_hyperlinks` entry. We reject schemes other than http(s), mailto, and
-/// file so a malicious workbook can't ship a `javascript:` payload or coerce
-/// us into running an arbitrary OS handler.
+/// `_hyperlinks` entry. We reject schemes other than http(s) and mailto.
+/// The `file:` scheme is intentionally rejected (issue #63) because a
+/// malicious workbook could otherwise launch arbitrary local/SMB executables
+/// via the OS default handler (cf. CVE-2017-0199-style phishing). Users who
+/// need to reach a local file can do so via the file manager.
 pub fn open_url_core(url: &str) -> Result<(), String> {
     let trimmed = validate_open_url(url)?;
 
@@ -112,7 +114,8 @@ fn validate_open_url(url: &str) -> Result<&str, String> {
     }
 
     match scheme.to_ascii_lowercase().as_str() {
-        "http" | "https" | "mailto" | "file" => Ok(trimmed),
+        "http" | "https" | "mailto" => Ok(trimmed),
+        // file: removed (issue #63) — see open_url_core doc comment.
         _ => Err("OPEN_URL_DISALLOWED_SCHEME".to_string()),
     }
 }

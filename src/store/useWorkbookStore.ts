@@ -152,6 +152,20 @@ const defaultSaveAsName = (path: string | null): string =>
 // switching `currentHandle` / `currentSnapshotJson` for a new workbook.
 let openSeq = 0;
 let autoSaveInFlight: Promise<void> | null = null;
+// #69: manual save/saveAs in-flight guard. Without this, Ctrl+S double-presses
+// (or shortcut + menu race) launch two `workbook_save` / `workbook_export_xlsx`
+// invocations against the same path. Both call `rotate_backups`, shifting the
+// backup chain twice for one logical save.
+let saveInFlight: Promise<void> | null = null;
+const waitForSave = async () => {
+  const pending = saveInFlight;
+  if (pending) await pending;
+};
+// #70: counts edits arriving while a save is in-flight. markDirty bumps it
+// instead of stomping `saveStatus`; on save resolution we honor a non-zero
+// counter by transitioning to "unsaved" rather than "saved", closing the
+// race where a close-during-save bypassed the dirty guard.
+let pendingEditsDuringSave = 0;
 
 const waitForAutoSave = async () => {
   const pending = autoSaveInFlight;
@@ -328,83 +342,113 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   },
 
   save: async () => {
-    await waitForAutoSave();
-    await flushPendingSnapshot();
-    const { currentHandle, currentSnapshotJson, saveAs } = get();
-    if (!currentHandle) return;
-
-    if (!hasSnapshotJson(currentSnapshotJson)) {
-      set({ saveStatus: "save_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+    // #69: serialize manual saves so double-press / menu+shortcut races
+    // can't kick off two concurrent rotate_backups against the same path.
+    // Subsequent callers piggyback on the in-flight save and return when it
+    // resolves, matching the user expectation of "Ctrl+S = one save".
+    if (saveInFlight) {
+      await saveInFlight;
       return;
     }
+    const run = (async () => {
+      // #70: reset the mid-save edit counter at entry; markDirty increments
+      // it during the save, and at resolution we honour any non-zero value
+      // by transitioning to "unsaved" instead of "saved".
+      pendingEditsDuringSave = 0;
+      await waitForAutoSave();
+      await flushPendingSnapshot();
+      const { currentHandle, currentSnapshotJson, saveAs } = get();
+      if (!currentHandle) return;
 
-    const currentPath = currentHandle.path;
-    const currentLower = currentPath?.toLowerCase() ?? "";
-
-    // New/imported-protected workbook → prompt for save target (xlsx only — see AD-02).
-    if (!currentPath || currentHandle.requiresSaveAsOnFirstSave || currentLower.endsWith(".xlsm")) {
-      const defaultPath = defaultSaveAsName(currentPath);
-      const chosen = await saveDialog({
-        title: "名前を付けて保存",
-        defaultPath: defaultPath.split(/[\\/]/).pop() ?? "Untitled.xlsx",
-        filters: [
-          { name: "Excel Workbook", extensions: ["xlsx"] },
-        ],
-      });
-      if (!chosen) {
-        set({ saveStatus: "unsaved" });
+      if (!hasSnapshotJson(currentSnapshotJson)) {
+        set({ saveStatus: "save_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
         return;
       }
-      await saveAs(chosen);
-      return;
-    }
 
-    // Overwrite in place — route to xlsx writer or SQLite writer based on extension.
-    set({ saveStatus: "saving" });
-    try {
-      if (currentLower.endsWith(".xlsx")) {
-        const result = await invoke<ExportResult>("workbook_export_xlsx", {
+      const currentPath = currentHandle.path;
+      const currentLower = currentPath?.toLowerCase() ?? "";
+
+      if (!currentPath || currentHandle.requiresSaveAsOnFirstSave || currentLower.endsWith(".xlsm")) {
+        const defaultPath = defaultSaveAsName(currentPath);
+        const chosen = await saveDialog({
+          title: "名前を付けて保存",
+          defaultPath: defaultPath.split(/[\\/]/).pop() ?? "Untitled.xlsx",
+          filters: [
+            { name: "Excel Workbook", extensions: ["xlsx"] },
+          ],
+        });
+        if (!chosen) {
+          set({ saveStatus: "unsaved" });
+          return;
+        }
+        await saveAs(chosen);
+        return;
+      }
+
+      set({ saveStatus: "saving" });
+      try {
+        if (currentLower.endsWith(".xlsx")) {
+          const result = await invoke<ExportResult>("workbook_export_xlsx", {
+            path: currentPath,
+            snapshotJson: currentSnapshotJson,
+          });
+          // #70: if edits arrived while we were saving, downgrade success to
+          // "unsaved" so closeGuard can still warn.
+          const dirtyAfter = pendingEditsDuringSave > 0;
+          set({
+            saveStatus: result.success
+              ? dirtyAfter
+                ? "unsaved"
+                : "saved"
+              : "save_failed",
+            wasDirtyBeforeExport: result.success ? false : get().wasDirtyBeforeExport,
+            currentHandle: result.success
+              ? { ...currentHandle, requiresSaveAsOnFirstSave: false }
+              : currentHandle,
+            lastError: result.success ? null : friendlyError(result.error) ?? "保存に失敗しました",
+            lastSavedAt: result.success ? Date.now() : get().lastSavedAt,
+          });
+          if (result.success) {
+            clearRecoveryBestEffort(currentHandle.workbookId);
+          }
+          return;
+        }
+        const result = await invoke<SaveResult>("workbook_save", {
+          workbookId: currentHandle.workbookId,
           path: currentPath,
           snapshotJson: currentSnapshotJson,
         });
-        set({
-          saveStatus: result.success ? "saved" : "save_failed",
-          wasDirtyBeforeExport: result.success ? false : get().wasDirtyBeforeExport,
-          currentHandle: result.success
-            ? { ...currentHandle, requiresSaveAsOnFirstSave: false }
-            : currentHandle,
-          lastError: result.success ? null : friendlyError(result.error) ?? "保存に失敗しました",
-          lastSavedAt: result.success ? Date.now() : get().lastSavedAt,
-        });
+        const dirtyAfter = pendingEditsDuringSave > 0;
         if (result.success) {
-          clearRecoveryBestEffort(currentHandle.workbookId);
+          set({
+            saveStatus: dirtyAfter ? "unsaved" : "saved",
+            wasDirtyBeforeExport: false,
+            currentHandle: { ...currentHandle, path: result.path, requiresSaveAsOnFirstSave: false },
+            lastError: null,
+            lastSavedAt: Date.now(),
+          });
+        } else {
+          set({ saveStatus: "save_failed", lastError: friendlyError(result.error) });
         }
-        return;
+      } catch (e) {
+        set({ saveStatus: "save_failed", lastError: friendlyError(String(e)) });
       }
-      // Legacy .coco path (already-saved file). Treat unknown extensions as
-      // .coco for back-compat; user can no longer select .coco from Save As.
-      const result = await invoke<SaveResult>("workbook_save", {
-        workbookId: currentHandle.workbookId,
-        path: currentPath,
-        snapshotJson: currentSnapshotJson,
-      });
-      if (result.success) {
-        set({
-          saveStatus: "saved",
-          wasDirtyBeforeExport: false,
-          currentHandle: { ...currentHandle, path: result.path, requiresSaveAsOnFirstSave: false },
-          lastError: null,
-          lastSavedAt: Date.now(),
-        });
-      } else {
-        set({ saveStatus: "save_failed", lastError: friendlyError(result.error) });
-      }
-    } catch (e) {
-      set({ saveStatus: "save_failed", lastError: friendlyError(String(e)) });
+    })();
+    saveInFlight = run;
+    try {
+      await run;
+    } finally {
+      if (saveInFlight === run) saveInFlight = null;
     }
   },
 
   saveAs: async (path: string) => {
+    // #69: saveAs is not separately locked because the public save() may
+    // delegate here from inside its own saveInFlight section — re-locking
+    // would deadlock that handoff. Direct concurrent Save As is rare (no
+    // double-press shortcut, only the menu) so the residual race is
+    // acceptable.
+    pendingEditsDuringSave = 0;
     await waitForAutoSave();
     await flushPendingSnapshot();
     const { currentHandle, currentSnapshotJson } = get();
@@ -416,10 +460,8 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     const lower = path.toLowerCase();
     set({ saveStatus: "saving" });
     try {
-      // Route by chosen extension.
       const isCoco = lower.endsWith(".coco");
       const isXlsx = lower.endsWith(".xlsx");
-      // Default unknown extensions to xlsx (since xlsx is now the canonical format).
       const command = isCoco ? "workbook_save_as" : "workbook_export_xlsx";
       const args = isCoco
         ? {
@@ -433,9 +475,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
           };
 
       const result = (await invoke(command, args)) as SaveResult | ExportResult;
+      const dirtyAfter = pendingEditsDuringSave > 0;
       if (result.success) {
         set({
-          saveStatus: "saved",
+          saveStatus: dirtyAfter ? "unsaved" : "saved",
           wasDirtyBeforeExport: false,
           currentHandle: { ...currentHandle, path: result.path, requiresSaveAsOnFirstSave: false },
           lastError: null,
@@ -524,7 +567,11 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
             snapshotJson: currentSnapshotJson,
           });
           if (result.success) {
-            set({ saveStatus: "unsaved", lastError: null, lastSavedAt: Date.now() });
+            // #75: temp autosave writes a hidden recovery .coco — the user's
+            // xlsx is NOT saved. Don't bump lastSavedAt or the status bar
+            // shows "未保存 · 最終保存 X秒前" (misleading: user thinks xlsx
+            // is safe). Only explicit Ctrl+S of the xlsx updates lastSavedAt.
+            set({ saveStatus: "unsaved", lastError: null });
           } else {
             // #42: temp autosave failure also flips saveStatus + surfaces error.
             set({
@@ -673,6 +720,13 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   markDirty: () => {
     const { saveStatus } = get();
     if (saveStatus === "saving" || saveStatus === "exporting" || saveStatus === "loading") {
+      // #70: still record that an edit arrived so the save resolution can
+      // downgrade "saved" → "unsaved" instead of leaving a 300ms window
+      // where closeGuard thinks the workbook is clean. Don't touch
+      // saveStatus directly — the in-progress save still needs its
+      // "saving" indicator until the invoke resolves.
+      pendingEditsDuringSave += 1;
+      set((s) => ({ dirtyRevision: s.dirtyRevision + 1 }));
       return;
     }
     set((s) => ({ saveStatus: "unsaved", dirtyRevision: s.dirtyRevision + 1 }));

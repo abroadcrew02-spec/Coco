@@ -1,6 +1,6 @@
 # Coco
 
-Coco is a local-first spreadsheet desktop application for internal use, built on Tauri v2, Rust, React, TypeScript, and Univer. It reads and writes Excel `.xlsx` as the primary work format and exposes an optional SQLite-backed `.coco` format via **Save As**.
+Coco is a local-first spreadsheet desktop application for internal use, built on Tauri v2, Rust, React, TypeScript, and Univer. It reads and writes Excel `.xlsx` as the sole user-visible work format. A SQLite store is used internally for autosave snapshots and crash recovery but is not exposed as a pickable save format.
 
 The full requirements specification lives in [`requirements.md`](./requirements.md). This README is the contributor-facing quick start.
 
@@ -39,7 +39,7 @@ Sheet name collisions on import are deduplicated with `_2`, `_3`, ... suffixes.
 
 ### Authoring UI (Phase 1)
 
-- New workbook, open `.xlsx` / `.xlsm` / `.coco`, save, save-as, CSV export
+- New workbook, open `.xlsx` / `.xlsm`, save, save-as, CSV export
 - Cell input / edit / delete, multi-sheet (add / delete / rename / reorder)
 - Univer formula bar, autofill, clipboard with paste-special
 - Find / replace (Ctrl+F / Ctrl+H) via Univer find-replace plugin
@@ -70,7 +70,7 @@ These dialogs capture user input into the workbook snapshot and survive xlsx rou
 
 - Auto-save to a temporary recovery area
 - `.bak.1`..`.bak.5` rotation before overwriting an opened xlsx
-- Atomic `.coco` save (temp file → `PRAGMA integrity_check` → rename)
+- Atomic internal SQLite snapshot save (temp file → `PRAGMA integrity_check` → rename) backs autosave / recovery
 - Recovery candidates surfaced on next launch
 
 ## Quick start
@@ -110,7 +110,7 @@ npm run pack:stage
 ## Repository layout
 
 - `src/` — React frontend (components, stores, hooks, xlsx adapter glue)
-- `src-tauri/` — Rust backend (Tauri commands, xlsx I/O via `calamine` + `rust_xlsxwriter`, SQLite for `.coco`)
+- `src-tauri/` — Rust backend (Tauri commands, xlsx I/O via `calamine` + `rust_xlsxwriter`, SQLite for internal autosave / recovery snapshots)
 - `docs/` — design notes, audit reports, distbin README template
 - `scripts/pack-distbin.mjs` — release packaging
 - `requirements.md` — authoritative spec

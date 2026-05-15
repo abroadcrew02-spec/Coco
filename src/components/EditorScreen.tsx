@@ -1949,7 +1949,7 @@ export default function EditorScreen() {
             className="toolbar-btn"
             onClick={promptSaveAs}
             disabled={saveStatus === "saving"}
-            title="保存先と形式（xlsx / .coco）を選んで保存 (Ctrl+Shift+S)"
+            title="保存先を選んで xlsx として保存 (Ctrl+Shift+S)"
           >
             別名保存
           </button>
@@ -1976,7 +1976,7 @@ export default function EditorScreen() {
               type="button"
               className="toolbar-btn"
               onClick={() => setSnapshotsOpen(true)}
-              title="保存履歴（.coco の過去 5 世代）"
+              title="保存履歴（過去 5 世代）"
               aria-label="スナップショット履歴"
             >
               履歴

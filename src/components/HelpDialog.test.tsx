@@ -26,7 +26,6 @@ describe("HelpDialog", () => {
       expect(screen.getByText("キーボードショートカット（Coco）")).toBeTruthy();
       expect(screen.getByText("編集ショートカット（Univer 標準）")).toBeTruthy();
       expect(screen.getByText("対応ファイル形式")).toBeTruthy();
-      expect(screen.getByText(".coco のバージョン履歴")).toBeTruthy();
       expect(screen.getByText("このアプリについて")).toBeTruthy();
     });
 
@@ -65,13 +64,13 @@ describe("HelpDialog", () => {
       expect(row.textContent).toContain("K");
     });
 
-    it("mentions xlsx, xlsm, csv, and coco file formats", () => {
+    it("mentions xlsx, xlsm, and csv file formats (no .coco — AD-02)", () => {
       render(<HelpDialog onClose={onClose} />);
       const formatSection = screen.getByText("対応ファイル形式").parentElement!;
       expect(formatSection.textContent).toContain(".xlsx");
       expect(formatSection.textContent).toContain(".xlsm");
       expect(formatSection.textContent).toContain(".csv");
-      expect(formatSection.textContent).toContain(".coco");
+      expect(formatSection.textContent).not.toContain(".coco");
       expect(formatSection.textContent).toContain("Shift_JIS");
     });
   });

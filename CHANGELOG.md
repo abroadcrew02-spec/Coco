@@ -2,6 +2,12 @@
 
 All notable changes to Coco are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Removed user-visible `.coco` save option; `.xlsx` is now the only user-selectable format (AD-02 / 2026-05-15). The Save As dialog, Open dialog filters, HelpDialog format list, SettingsDialog hint, EditorScreen toolbar tooltips, and DropOverlay hint no longer advertise `.coco`. Crash-recovery snapshots still use SQLite internally, and existing `.coco` files already in the recents list remain openable so no prior work is lost.
+
 ## [0.1.0] - 2026-05-14
 
 Initial internal release. Covers Phase 0 foundation, the full Phase 1 MVP (FR-001..FR-014, FR-101..FR-105, FR-201..FR-204, FR-301..FR-304), and Phase 2 authoring entry points in preview.

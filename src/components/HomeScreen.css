@@ -465,7 +465,7 @@
 .recent-kind--xlsm { background: #fff3e0; color: #ef6c00; }
 .recent-kind--csv  { background: #fff8e1; color: #f57f17; }
 .recent-kind--tsv  { background: #fff8e1; color: #f57f17; }
-.recent-kind--coco { background: #f3e5f5; color: #6a1b9a; }
+/* Legacy .coco recents fall through to the neutral default styling. */
 
 .recent-remove:hover {
   color: #b71c1c;

@@ -28,7 +28,7 @@ export function useFileDrop(): { isHovering: boolean } {
         // it the user can't tell whether the app received the file at all.
         const ext = route.extension ?? "（拡張子なし）";
         useWorkbookStore.setState({
-          lastError: `対応していない形式です（${ext}）。.xlsx / .xlsm / .csv / .coco のみ受け付けます。`,
+          lastError: `対応していない形式です（${ext}）。.xlsx / .xlsm / .csv のみ受け付けます。`,
         });
         return;
       }

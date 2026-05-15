@@ -534,6 +534,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
 
       const path = currentHandle.path;
       const isCoco = path ? path.toLowerCase().endsWith(".coco") : false;
+      // #71: snapshot we're committing now. If the user edits during the
+      // invoke window, currentSnapshotJson moves past it and we must NOT
+      // declare the workbook clean (auto_saved) for a stale snapshot.
+      const inflightSnapshot = currentSnapshotJson;
 
       try {
         if (isCoco && path) {
@@ -544,11 +548,16 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
             snapshotJson: currentSnapshotJson,
           });
           if (result.success) {
+            // #71: only transition to auto_saved when the snapshot we just
+            // wrote is still the latest. If newer edits arrived, keep the
+            // workbook dirty so the next tick re-runs autosave and the
+            // close guard can still warn.
+            const stillCurrent = get().currentSnapshotJson === inflightSnapshot;
             set({
-              saveStatus: "auto_saved",
+              saveStatus: stillCurrent ? "auto_saved" : "unsaved",
               wasDirtyBeforeExport: false,
               lastError: null,
-              lastSavedAt: Date.now(),
+              lastSavedAt: stillCurrent ? Date.now() : get().lastSavedAt,
             });
           } else {
             // #42: surface auto_save_failed so the UI can warn the user that
@@ -934,8 +943,11 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     set({ pinnedPaths: next });
     try {
       await invoke("set_setting", { key: PINNED_PATHS_KEY, value: JSON.stringify(next) });
-    } catch {
-      // best-effort persistence
+    } catch (e) {
+      // #84: roll back the in-memory change so the UI state stays in sync
+      // with persisted state. Otherwise the pin "stays" until the next
+      // app restart, surprising the user.
+      set({ pinnedPaths: cur, lastError: friendlyError(String(e)) ?? "ピンの保存に失敗しました" });
     }
   },
 
@@ -953,11 +965,13 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   },
 
   setPinnedOrder: async (order: string[]) => {
+    const prev = get().pinnedOrder;
     set({ pinnedOrder: order });
     try {
       await invoke("set_setting", { key: PINNED_ORDER_KEY, value: JSON.stringify(order) });
-    } catch {
-      // best-effort persistence
+    } catch (e) {
+      // #84: rollback to keep in-memory state aligned with disk.
+      set({ pinnedOrder: prev, lastError: friendlyError(String(e)) ?? "並び順の保存に失敗しました" });
     }
   },
 
@@ -1000,11 +1014,13 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   },
 
   setSuppressCsvPocWarning: async (v: boolean) => {
+    const prev = get().suppressCsvPocWarning;
     set({ suppressCsvPocWarning: v });
     try {
       await invoke("set_setting", { key: SUPPRESS_CSV_POC_KEY, value: v ? "true" : "false" });
-    } catch {
-      // best-effort persistence
+    } catch (e) {
+      // #84: rollback so the toggle reflects the persisted state.
+      set({ suppressCsvPocWarning: prev, lastError: friendlyError(String(e)) ?? "設定保存に失敗しました" });
     }
   },
 

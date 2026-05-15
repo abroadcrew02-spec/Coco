@@ -1,6 +1,19 @@
+use std::sync::OnceLock;
 use tauri::Manager;
 
 use crate::commands::workbook::{SaveResult, MAX_SNAPSHOTS_PER_WORKBOOK};
+
+/// Session-unique suffix appended to recovery file names. #72: without this,
+/// two app instances editing the same workbook share `recovery/{wb}.coco`
+/// and clobber each other's autosaves. The first call seeds a per-process
+/// UUID; every subsequent autosave from this process uses the same suffix.
+fn session_suffix() -> &'static str {
+    static SUFFIX: OnceLock<String> = OnceLock::new();
+    SUFFIX.get_or_init(|| {
+        let uuid = uuid::Uuid::new_v4().simple().to_string();
+        uuid[..12].to_string()
+    })
+}
 
 fn validate_workbook_id(workbook_id: &str) -> Result<(), String> {
     if workbook_id.is_empty() || workbook_id.len() > 128 {
@@ -25,7 +38,11 @@ pub fn autosave_temp_core(
     let recovery_dir = data_dir.join("recovery");
     std::fs::create_dir_all(&recovery_dir).map_err(|e| e.to_string())?;
 
-    let temp_path = recovery_dir.join(format!("{}.coco", workbook_id));
+    // #72: per-session suffix isolates concurrent windows editing the same
+    // workbook. Recovery cleanup still walks the directory and removes the
+    // candidate row + file pair, so the suffix is only about avoiding the
+    // write collision.
+    let temp_path = recovery_dir.join(format!("{}-{}.coco", workbook_id, session_suffix()));
 
     // Defense-in-depth: ensure the resulting path is still inside recovery_dir.
     let canonical_recovery = std::fs::canonicalize(&recovery_dir).map_err(|e| e.to_string())?;

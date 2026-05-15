@@ -5367,6 +5367,10 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                         // Rich-text cells: write each run with its own Format.
                         // rust_xlsxwriter's write_rich_string takes &[(&Format, &str)]
                         // and rejects empty segments, so build the Vec carefully.
+                        // #81: if there's only a single run, write_rich_string
+                        // would reject it (it requires ≥2 segments). Instead of
+                        // dropping the run's formatting, write the text with the
+                        // run's format applied as a cell-level Format.
                         if let Some(runs_arr) = cell_val.get("_richRuns").and_then(|v| v.as_array())
                         {
                             let parsed_runs: Vec<RichRun> = runs_arr
@@ -5374,7 +5378,29 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                                 .filter_map(RichRun::from_json)
                                 .filter(|r| !r.text.is_empty())
                                 .collect();
-                            if !parsed_runs.is_empty() {
+                            if parsed_runs.len() == 1 {
+                                // Single-run shortcut: build a Format from the
+                                // run's properties and merge with the cell-level
+                                // fmt_obj (cell style + num format). The run's
+                                // typography wins over the cell style for the
+                                // exact attributes the run specifies.
+                                let run_fmt = build_run_format(&parsed_runs[0]);
+                                let write_res = worksheet.write_string_with_format(
+                                    row_idx,
+                                    col_idx,
+                                    &parsed_runs[0].text,
+                                    &run_fmt,
+                                );
+                                if write_res.is_ok() {
+                                    cell_count += 1;
+                                    if cell_count > MAX_EXPORT_CELLS {
+                                        return Err(format!(
+                                            "XLSX_EXPORT_TOO_MANY_CELLS: {cell_count} cells exceeds limit {MAX_EXPORT_CELLS}"
+                                        ));
+                                    }
+                                    continue;
+                                }
+                            } else if !parsed_runs.is_empty() {
                                 let formats: Vec<Format> =
                                     parsed_runs.iter().map(build_run_format).collect();
                                 let segments: Vec<(&Format, &str)> = parsed_runs
@@ -5611,25 +5637,12 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
         });
     }
 
-    // Step 4: atomic save — rotate backups, write tmp, rename onto target
+    // Step 4: atomic save — write tmp first, rotate backups only after the
+    // tmp is fully built (#68 — rotating earlier means a transient failure
+    // during write / preserved-parts injection / comment rewrite shifts the
+    // backup chain even though no successful save happened).
     let target_path = PathBuf::from(&path);
     let tmp_path = temp_save_path(&target_path);
-
-    if target_path.exists() {
-        if let Err(e) = rotate_backups(&target_path) {
-            return Ok(ExportResult {
-                success: false,
-                path: path.clone(),
-                warnings: vec![CompatibilityWarning {
-                    severity: "blocking".to_string(),
-                    code: "XLSX_WRITE_FAILED".to_string(),
-                    message: format!("backup rotation failed: {e}"),
-                    affected_sheets: None,
-                }],
-                error: Some(format!("backup rotation failed: {e}")),
-            });
-        }
-    }
 
     if let Err(e) = workbook.save(&tmp_path) {
         let msg = e.to_string();
@@ -5716,6 +5729,27 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                     affected_sheets: None,
                 }],
                 error: Some(format!("XLSX_PRESERVED_PARTS_INJECTION_FAILED: {e}")),
+            });
+        }
+    }
+
+    // #68: rotate now that the tmp file passed every build / injection
+    // step. A rotation failure here is fatal and we still abort cleanly,
+    // but at this point the bak chain only shifts when we're truly about
+    // to commit a new generation.
+    if target_path.exists() {
+        if let Err(e) = rotate_backups(&target_path) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Ok(ExportResult {
+                success: false,
+                path: path.clone(),
+                warnings: vec![CompatibilityWarning {
+                    severity: "blocking".to_string(),
+                    code: "XLSX_WRITE_FAILED".to_string(),
+                    message: format!("backup rotation failed: {e}"),
+                    affected_sheets: None,
+                }],
+                error: Some(format!("backup rotation failed: {e}")),
             });
         }
     }

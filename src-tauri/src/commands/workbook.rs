@@ -261,7 +261,11 @@ fn do_save(
 
     if target.exists() {
         checkpoint_existing_wal(&target).map_err(|e| format!("WAL checkpoint failed: {e}"))?;
-        rotate_backups(&target).map_err(|e| format!("backup rotation failed: {e}"))?;
+        // #68: rotate_backups previously ran here — before the tmp DB was
+        // validated. A run of failing saves would shift the chain on each
+        // attempt and destroy historical bak.1..N. Defer rotation until just
+        // before replace_temp_file (see below) so a failure path can't burn
+        // backup history.
         // Seed the tmp DB from the existing target so that prior workbook_snapshots
         // rows are preserved across saves. Without this, every save rewrites a fresh
         // empty DB and the retention cap is meaningless. After insert + cap, the
@@ -325,6 +329,20 @@ fn do_save(
     // Release the SQLite file handle before renaming — Windows refuses to
     // rename a file that still has an open handle.
     drop(conn);
+
+    // #68: rotate backups now, after the tmp DB has passed integrity_check
+    // and is ready to be committed. A failed save no longer churns the bak
+    // chain.
+    if target.exists() {
+        if let Err(e) = rotate_backups(&target) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Ok(SaveResult {
+                success: false,
+                path: path.to_string(),
+                error: Some(format!("backup rotation failed: {e}")),
+            });
+        }
+    }
 
     if let Err(e) = crate::commands::file_replace::replace_temp_file(&tmp_path, &target) {
         let _ = std::fs::remove_file(&tmp_path);

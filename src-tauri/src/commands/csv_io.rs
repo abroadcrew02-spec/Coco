@@ -638,12 +638,17 @@ fn is_time_only_format(fmt: &str) -> bool {
 }
 
 /// Render a time-fractional value (0.0..1.0) as HH:MM:SS, rounding to whole
-/// seconds. Values outside the range are clamped via wrap (modulo 1) since
-/// Excel time semantics treat the integer part as days.
+/// seconds. #83: when the value rounds to 86400 (i.e. 0.9999… very close to
+/// 1.0) the result was wrapping to 00:00:00 — visually "midnight" rather
+/// than the intended end-of-day. Saturate at 23:59:59 to preserve the
+/// user's intent that the source time was just before the next day.
 fn format_time(value: f64) -> String {
     let frac = value - value.floor();
-    let total_seconds = (frac * 86400.0).round() as i64;
-    let h = (total_seconds / 3600) % 24;
+    let mut total_seconds = (frac * 86400.0).round() as i64;
+    if total_seconds >= 86400 {
+        total_seconds = 86399;
+    }
+    let h = total_seconds / 3600;
     let m = (total_seconds % 3600) / 60;
     let s = total_seconds % 60;
     format!("{:02}:{:02}:{:02}", h, m, s)

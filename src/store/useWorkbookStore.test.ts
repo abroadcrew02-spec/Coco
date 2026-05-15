@@ -1228,10 +1228,14 @@ describe("pinnedPaths", () => {
     expect(useWorkbookStore.getState().pinnedPaths).toEqual(["/tmp/b.csv"]);
   });
 
-  it("togglePinned keeps in-memory state even when persistence fails", async () => {
+  it("togglePinned rolls back in-memory state when persistence fails (#84)", async () => {
+    // #84: persist failure shouldn't leave a phantom pin that vanishes on
+    // next restart. Roll back and surface a lastError so the user knows.
+    useWorkbookStore.setState({ pinnedPaths: [] });
     invokeMock.mockRejectedValue("db locked");
     await useWorkbookStore.getState().togglePinned("/tmp/a.xlsx");
-    expect(useWorkbookStore.getState().pinnedPaths).toEqual(["/tmp/a.xlsx"]);
+    expect(useWorkbookStore.getState().pinnedPaths).toEqual([]);
+    expect(useWorkbookStore.getState().lastError).not.toBeNull();
   });
 });
 
@@ -1592,10 +1596,15 @@ describe("pinnedOrder", () => {
     );
   });
 
-  it("setPinnedOrder keeps in-memory state even when persistence fails", async () => {
+  it("setPinnedOrder rolls back in-memory state when persistence fails (#84)", async () => {
+    // #84: previously the in-memory state stayed and persisted state diverged
+    // silently. Now we roll back so the visible order matches what will
+    // survive the next app restart.
+    useWorkbookStore.setState({ pinnedOrder: [] });
     invokeMock.mockRejectedValue("db locked");
     await useWorkbookStore.getState().setPinnedOrder(["/tmp/a.xlsx"]);
-    expect(useWorkbookStore.getState().pinnedOrder).toEqual(["/tmp/a.xlsx"]);
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual([]);
+    expect(useWorkbookStore.getState().lastError).not.toBeNull();
   });
 
   it("reorderPinned moves dragged to where target is (insert before target)", async () => {
@@ -2115,10 +2124,14 @@ describe("settings-persist reject is best-effort", () => {
     expect(useWorkbookStore.getState().csvImportEncoding).toBe("shift_jis");
   });
 
-  it("setSuppressCsvPocWarning keeps in-memory value when invoke rejects", async () => {
+  it("setSuppressCsvPocWarning rolls back in-memory value when invoke rejects (#84)", async () => {
+    // #84: rollback so in-memory state matches persisted state. Previously
+    // the toggle would appear flipped until restart.
+    useWorkbookStore.setState({ suppressCsvPocWarning: false });
     invokeMock.mockRejectedValue("DB_LOCKED");
     await useWorkbookStore.getState().setSuppressCsvPocWarning(true);
-    expect(useWorkbookStore.getState().suppressCsvPocWarning).toBe(true);
+    expect(useWorkbookStore.getState().suppressCsvPocWarning).toBe(false);
+    expect(useWorkbookStore.getState().lastError).not.toBeNull();
   });
 
   it("setAutoSaveInterval keeps in-memory value when invoke rejects", async () => {

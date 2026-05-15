@@ -1436,22 +1436,16 @@ fn find_marker_outside_comments(
 /// can reuse the already-open archive.
 pub fn detect_unsupported_features(path: &str) -> Result<Vec<CompatibilityWarning>, String> {
     use std::fs::File;
+    use std::io::BufReader;
     use zip::ZipArchive;
     let file = File::open(path).map_err(|e| e.to_string())?;
-    let bytes = {
-        use std::io::Read;
-        let mut buf = Vec::new();
-        let mut f = file;
-        f.read_to_end(&mut buf).map_err(|e| e.to_string())?;
-        buf
-    };
-    let mut archive = ZipArchive::new(std::io::Cursor::new(bytes.as_slice()))
+    let mut archive = ZipArchive::new(BufReader::new(file))
         .map_err(|e| format!("Invalid xlsx (zip): {e}"))?;
     detect_unsupported_features_in(&mut archive)
 }
 
-pub fn detect_unsupported_features_in(
-    mut archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
+    mut archive: &mut zip::ZipArchive<R>,
 ) -> Result<Vec<CompatibilityWarning>, String> {
     let mut has_charts = false;
     let mut has_pivot = false;

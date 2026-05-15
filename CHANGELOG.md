@@ -16,7 +16,9 @@ Initial internal release. Covers Phase 0 foundation, the full Phase 1 MVP (FR-00
 - Preserve column widths and row heights per sheet.
 - Preserve rich-text runs (per-character formatting in a cell).
 - Preserve data validation rules.
-- Preserve conditional formatting (cellIs, colorScale, dataBar, iconSet), later extended to top10 and duplicate / unique rules.
+- Preserve conditional formatting (cellIs, top10, duplicate / unique rules) with typed APIs.
+- Preserve colorScale / dataBar / iconSet CF rules via raw-XML round-trip (visual payload, cfvo / color stops, icon set name).
+- Emit authored CF rule styles as `<dxf>` entries on export (M1 follow-up) so Excel renders bold / italic / fontColor / bgColor visibly.
 - Preserve hyperlinks (external + internal).
 - Preserve cell comments including author.
 - Preserve charts byte-for-byte (blob mode).
@@ -24,11 +26,12 @@ Initial internal release. Covers Phase 0 foundation, the full Phase 1 MVP (FR-00
 - Preserve embedded images under `xl/media/`.
 - Preserve external link parts (cached values only; no auto-fetch).
 - Preserve print / page setup.
-- Preserve frozen panes and sheet visibility.
+- Preserve frozen panes and sheet visibility; later extended to split panes (`state="split"`) with xSplit / ySplit + topLeftCell preserved via post-save zip rewrite.
 - Preserve sheet tab colors and auto-filter ranges.
 - Preserve sheet protection flags.
 - Deduplicate colliding sheet names with `_2`, `_3`, ... on import.
 - Harden CF / DV scanner; detect data validation in worksheet XML feature scan.
+- Comment-aware CF / DV substring scanner: `<!-- ... -->` regions are skipped (chunk-boundary state machine) so commented-out markup never trips a false-positive warning.
 
 ### xlsx authoring UI (Phase 1)
 
@@ -39,19 +42,20 @@ Initial internal release. Covers Phase 0 foundation, the full Phase 1 MVP (FR-00
 - Enforce sheet protection live: block mutations on protected sheets.
 - Group editor toolbar; refresh HelpDialog with Phase 2 shortcuts.
 
-### xlsx authoring UI (Phase 2 preview)
+### xlsx authoring UI (Phase 2)
 
-These dialogs capture authoring intent into the snapshot and survive xlsx round-trip. Full visual rendering of the resulting elements is still in progress.
+Authoring dialogs capture intent into the snapshot and survive xlsx round-trip. Many entries now also render live in-grid.
 
-- Named Ranges CRUD dialog.
-- Data Validation authoring dialog.
-- Conditional Formatting authoring dialog.
-- Insert Hyperlink dialog (Ctrl+K).
-- Insert / Edit Comment dialog (Shift+F2).
-- Insert Chart dialog.
-- Insert Image dialog with `file_io` Tauri command.
-- Number Format dialog (Ctrl+1).
-- Sheet protection toggle UI.
+- Named Ranges CRUD dialog (Ctrl+F3, live via Univer facade).
+- Data Validation authoring dialog (live enforcement via `onBeforeCommandExecute` guard).
+- Conditional Formatting authoring dialog with in-grid live rendering (`patchCfRenders`): cellIs / containsText / top10 / duplicate / unique evaluated against current cell values, highlight style merged into inline `s` field at createUnit time; rule-priority precedence preserved.
+- Insert Hyperlink dialog (Ctrl+K) with in-grid rendering, click-to-open routing (external → `open_url` Tauri command with scheme allowlist; internal `#Sheet!A1` → facade `setActiveSheet` + `setActiveRange`), and live re-style on apply.
+- Insert / Edit Comment dialog (Shift+F2) with in-grid red-triangle indicators + hover tooltip via DOM-overlay panel tracking scroll / zoom.
+- Insert Chart dialog plus `ChartPreviewPanel`: floating sidebar lists each `_charts` entry as an inline SVG (bar / line / pie) rendered from snapshot data; click-to-jump to source range.
+- Insert Image dialog plus `ImagePreviewPanel`: floating sidebar of thumbnails decoded from `_preservedParts` / `xl/media/`, click-to-jump to anchor cell.
+- Number Format dialog (Ctrl+1, live).
+- Sheet protection toggle UI (live enforcement).
+- Format Painter (書式コピー) toolbar tool: single-shot click or double-click for sticky mode; ESC cancels. Captures source style from selection anchor, applies via snapshot walk; handles inline + interned style-id refs.
 
 ### Home and recents
 
@@ -73,6 +77,12 @@ These dialogs capture authoring intent into the snapshot and survive xlsx round-
 - `npm run pack` script: `tauri build` followed by `scripts/pack-distbin.mjs` staging signed / unsigned artifacts into `./distbin/`.
 - `pack-distbin.mjs` emits `SHA256SUMS.txt` and `manifest.json` (per requirements.md §5.6).
 - Distbin README template under `docs/DISTBIN_README_TEMPLATE.md`, copied to `distbin/README.md` on each pack.
+- Native menu accelerator labels use a `cfg`-gated `CmdOrCtrl` MOD const (renders as "Cmd" on macOS, "Ctrl" elsewhere) so menu hints match platform convention.
+- Declared `bundle.macOS.minimumSystemVersion = "12.0"` in `tauri.conf.json` to align with §12.3 OS matrix.
+
+### Security
+
+- §5.3.2 row / column / formula caps enforced in `security_scan_xlsx`: streaming scan of each worksheet's dimension / row tags + `<f>` count; blocks at row > 1,000,000 or column > 16,384; emits `XLSX_FORMULA_HEAVY` warning at 1,000,000 formulas.
 
 ### Tests
 
@@ -80,18 +90,43 @@ These dialogs capture authoring intent into the snapshot and survive xlsx round-
 - `useWorkbookStore` action-path coverage.
 - HomeScreen recents / pin / drag / filter coverage.
 - SettingsDialog interactions and edge cases.
-- CSV / TSV encoding round-trip edge cases.
+- CSV / TSV encoding round-trip edge cases plus 3 new format-code tests (US-style slash date, `@` text format, currency symbol).
 - FR-105 representative 10-file P0 compatibility suite.
 - P0 formula round-trip suite (FR-003 + §4.4).
 - P1 formula round-trip suite (13 common P1 formulas).
-- `CappedUndoRedoService` keeps the FR-011 100-entry cap.
+- `CappedUndoRedoService` keeps the FR-011 100-entry cap; stability hardened (Q tier).
 - End-to-end recovery candidate flow tests (§6.5).
 - Excluded `.claude/worktrees` from vitest discovery.
+- Comment-aware CF / DV scanner: 4 regression tests (commented CF, commented DV, mixed commented+real CF, chunk-straddling commented CF).
+- colorScale / dataBar / iconSet CF round-trip tests with raw-`<cfRule>` injection helper.
+- Split pane round-trip + mixed frozen+split workbook tests.
+- CF dxf emission tests (styled rule produces non-empty `<dxfs>` + `dxfId`; unstyled keeps `<dxfs>` empty).
+- 13 chart preview tests (range parsing, series extraction, numeric coercion, malformed-input tolerance).
+- 13 image preview tests (base64 decode incl. UTF-8 multibyte, rels parse, anchor parse, media-path resolution, mime mapping, A1 conversion).
+- 13 Format Painter tests (null / malformed input, sheet / cell lookup, id resolution, rectangle apply, style aliasing).
+- 15 hyperlink render tests (`patchHyperlinkRenders`, `parseA1`, `lookupHyperlink`, `classifyHyperlink`) + 3 Rust `open_url` scheme-allowlist tests.
+- CF render unit tests (cellIs operators, top10 modes, duplicate / uniqueValues, sqref parser, rule priority).
+- xlsx perf smoke test: 1 MB / 10% formulas import on Windows release lands at 3565 ms (was 7891 ms), well below §5.1 5,000 ms p95 ceiling.
 
 ### Documentation
 
 - `docs/MVP1_AUDIT.md`: FR-001..FR-014 coverage report with inline TODO markers for known gaps.
+- `docs/COVERAGE.md`: full FR coverage audit (§4.1 / §4.2 / §4.3 / §4.7 + Phase 2 + non-functional gates).
+- `docs/TODOS.md`: single source of truth for deferred work, grouped by Blocker / High / Medium / Low / Wontfix with effort estimates and inline `TODO(category): description (see docs/TODOS.md#anchor)` cross-references.
+- `docs/CROSS_PLATFORM_PREFLIGHT.md`: §12.3 macOS / Linux build preflight audit (0 BLOCKER, 3 WARNING, 7 NOTE).
+- `docs/STATE.md`: single-page current-state snapshot of the project.
 - `README.md` (this release): project overview, features, quick start, build instructions.
 - `CHANGELOG.md` (this file).
+
+### Performance
+
+- xlsx import shared-archive refactor: 16 parse helpers + `detect_unsupported_features` + security scan now share one `ZipArchive` and a sheet-XML `HashMap`, eliminating redundant central-directory parses and per-sheet decompression. 1 MB / 10% formulas fixture: 7,891 ms → 3,565 ms (-55%, -4,326 ms wall-clock).
+- Helper timings collapsed from 70-100 ms each to 0-25 ms; rich_text 733 → 209 ms; styles 552 → 147 ms.
+
+### Changed
+
+- Hyperlink `applyHyperlink` now drives the Univer facade imperatively after snapshot patch (live blue+underline restyle) instead of waiting for the next createUnit pass.
+- CF authoring style bag is wired into a `rust_xlsxwriter::Format` and emitted as `<dxf>` on export with matching `dxfId` reference.
+- CSV export honors `_fmt` per cell via shared token-substitution renderer: `yyyy/yy/mm/m/dd/d/hh/h/mm/m/ss/s` walk, US-style `m/d/yyyy` and `mm/dd/yyyy`, `@` text, currency `$ / ¥ / € / £ / [$X-409]` with thousands grouping + decimal precision from the format string. Exponential / fraction / multi-letter month / elapsed-time still pass through as plain numeric.
 
 [0.1.0]: https://example.invalid/coco/releases/tag/v0.1.0

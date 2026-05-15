@@ -52,14 +52,79 @@ afterEach(() => cleanup());
 
 describe("HomeScreen", () => {
   describe("empty state", () => {
-    it("renders the empty hint when no recents or recovery candidates exist", () => {
+    it("renders the first-run welcome card when no recents or recovery candidates exist", () => {
       render(<HomeScreen />);
-      expect(screen.getByText("最近使ったファイルはありません")).toBeTruthy();
+      expect(screen.getByText("Coco へようこそ")).toBeTruthy();
+      // Tagline is split across a <br/>; query a substring.
+      expect(
+        screen.getByText(/ローカルファーストの xlsx スプレッドシート/),
+      ).toBeTruthy();
+      // 3-step onboarding list.
+      expect(screen.getByText("ファイルを開く / ドロップ")).toBeTruthy();
+      expect(screen.getByText("編集 / 保存 (Ctrl+S)")).toBeTruthy();
+      expect(screen.getByText("シートタブで複数シート")).toBeTruthy();
     });
 
     it("does not render the 前回のファイルを続ける button when no recents", () => {
       render(<HomeScreen />);
       expect(screen.queryByText("前回のファイルを続ける")).toBeNull();
+    });
+
+    it("does not render the tip footer in the first-run state", () => {
+      const { container } = render(<HomeScreen />);
+      expect(container.querySelector(".home-tip")).toBeNull();
+    });
+
+    it("hides the welcome card once a recent file exists", () => {
+      useWorkbookStore.setState({
+        recentFiles: [
+          {
+            path: "/tmp/a.xlsx",
+            name: "a.xlsx",
+            lastOpened: "2026-05-13T10:00:00Z",
+            exists: true,
+          },
+        ],
+      });
+      render(<HomeScreen />);
+      expect(screen.queryByText("Coco へようこそ")).toBeNull();
+    });
+
+    it("hides the welcome card when only a recovery candidate is present", () => {
+      useWorkbookStore.setState({
+        recoveryCandidates: [
+          {
+            candidateId: "r1",
+            originalPath: "/tmp/lost.xlsx",
+            savedAt: "2026-05-13T10:00:00Z",
+            reason: "auto_save",
+          },
+        ],
+      });
+      render(<HomeScreen />);
+      expect(screen.queryByText("Coco へようこそ")).toBeNull();
+    });
+  });
+
+  describe("tip footer", () => {
+    it("renders the tip footer when at least one recent file is present", () => {
+      useWorkbookStore.setState({
+        recentFiles: [
+          {
+            path: "/tmp/a.xlsx",
+            name: "a.xlsx",
+            lastOpened: "2026-05-13T10:00:00Z",
+            exists: true,
+          },
+        ],
+      });
+      const { container } = render(<HomeScreen />);
+      const tip = container.querySelector(".home-tip");
+      expect(tip).toBeTruthy();
+      expect(tip!.textContent).toContain("ヒント:");
+      // The tip body should be non-empty (one entry from the rotation pool).
+      const body = tip!.querySelector(".home-tip__body");
+      expect(body?.textContent?.trim().length).toBeGreaterThan(0);
     });
   });
 

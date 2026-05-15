@@ -509,6 +509,87 @@
   margin-top: 16px;
 }
 
+/* First-run welcome hero — only shown when both recents and recovery are
+   empty. The hero anchors below the primary action buttons so the obvious
+   next step (creating/opening a workbook) stays at the top of the visual
+   hierarchy. */
+.home-welcome {
+  width: 100%;
+  max-width: 520px;
+  margin-top: 8px;
+  padding: 24px 28px;
+  background-color: #ffffff;
+  border: 1px solid #d4e9db;
+  border-radius: 10px;
+  text-align: center;
+  box-shadow: 0 1px 2px rgba(33, 115, 70, 0.04);
+}
+
+.home-welcome__title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1b5e20;
+  margin: 0 0 8px;
+  border: none;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 0;
+}
+
+.home-welcome__tagline {
+  font-size: 14px;
+  line-height: 1.55;
+  color: #555;
+  margin: 0 0 18px;
+}
+
+.home-welcome__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 0 0 24px;
+  margin: 0;
+  text-align: left;
+  font-size: 13px;
+  color: #444;
+  list-style: decimal;
+}
+
+.home-welcome__steps li::marker {
+  color: #217346;
+  font-weight: 700;
+}
+
+/* Tip footer — a low-key hint for returning users. Lives under the recent
+   list (so it doesn't compete with primary actions) and uses a subdued
+   palette so it doesn't read as a warning. */
+.home-tip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #666;
+  background-color: #f7faf8;
+  border: 1px solid #e0ece4;
+  border-radius: 999px;
+}
+
+.home-tip__icon {
+  font-size: 12px;
+}
+
+.home-tip__label {
+  font-weight: 600;
+  color: #1b5e20;
+}
+
+.home-tip__body {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #444;
+}
+
 .home-error {
   width: 100%;
   max-width: 640px;

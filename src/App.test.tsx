@@ -57,6 +57,9 @@ function resetStore() {
 }
 
 beforeEach(() => {
+  // Tests assert against Japanese labels; pin the i18n locale so the help
+  // dialog title stays "Coco — ヘルプ" instead of the en-US fallback.
+  localStorage.setItem("coco.locale", "ja-JP");
   invokeMock.mockReset();
   // Route by command name so list commands return [] (the store stores the
   // response verbatim; a null would break iteration in HomeScreen).

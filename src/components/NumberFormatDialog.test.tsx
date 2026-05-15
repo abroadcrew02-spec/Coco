@@ -8,6 +8,9 @@ let onApply: ReturnType<typeof vi.fn<(v: NumberFormatValue) => void>>;
 let onClose: ReturnType<typeof vi.fn<() => void>>;
 
 beforeEach(() => {
+  // Tests assert against Japanese labels; pin the i18n locale so happy-dom's
+  // en-US default doesn't switch the title to "Number Format".
+  localStorage.setItem("coco.locale", "ja-JP");
   onApply = vi.fn<(v: NumberFormatValue) => void>();
   onClose = vi.fn<() => void>();
 });

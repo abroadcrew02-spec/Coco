@@ -88,6 +88,7 @@ import {
   type ImagePreview,
 } from "../store/imagePreviews";
 import { validateMutation, extractCellWrites } from "../store/dataValidation";
+import { t } from "../i18n/locale";
 import "./EditorScreen.css";
 
 // req 5.4.1: "loading" blocks editing (snapshot is being replaced); "saving"
@@ -1925,7 +1926,7 @@ export default function EditorScreen() {
       <div className="editor-toolbar">
         <div className="editor-toolbar__left">
           <button type="button" className="toolbar-btn" onClick={goHome} title="ホームへ戻る">
-            ← ホーム
+            {t("toolbar.home")}
           </button>
           <span
             className="editor-toolbar__filename"
@@ -1942,7 +1943,7 @@ export default function EditorScreen() {
             disabled={saveStatus === "saving"}
             title="同じパスに上書き保存 (Ctrl+S)"
           >
-            保存
+            {t("toolbar.save")}
           </button>
           <button
             type="button"
@@ -1951,7 +1952,7 @@ export default function EditorScreen() {
             disabled={saveStatus === "saving"}
             title="保存先と形式（xlsx / .coco）を選んで保存 (Ctrl+Shift+S)"
           >
-            別名保存
+            {t("toolbar.saveAs")}
           </button>
           <button
             type="button"
@@ -1960,7 +1961,7 @@ export default function EditorScreen() {
             disabled={isExporting}
             title="現在のブックを別名の xlsx として書き出す"
           >
-            xlsx エクスポート
+            {t("toolbar.exportXlsx")}
           </button>
           <button
             type="button"
@@ -1969,7 +1970,7 @@ export default function EditorScreen() {
             disabled={isExporting}
             title="シートを選んで CSV (UTF-8 BOM) として書き出す"
           >
-            {isExporting ? "出力中..." : "CSV エクスポート"}
+            {isExporting ? "出力中..." : t("toolbar.exportCsv")}
           </button>
           {isCocoFile && (
             <button
@@ -1979,7 +1980,7 @@ export default function EditorScreen() {
               title="保存履歴（.coco の過去 5 世代）"
               aria-label="スナップショット履歴"
             >
-              履歴
+              {t("toolbar.history")}
             </button>
           )}
           <span className="toolbar-divider" aria-hidden="true" />
@@ -1992,7 +1993,7 @@ export default function EditorScreen() {
               title="データの入力規則を追加・編集"
               aria-label="データの入力規則"
             >
-              入力規則
+              {t("toolbar.dataValidation")}
             </button>
             <button
               type="button"
@@ -2001,7 +2002,7 @@ export default function EditorScreen() {
               title="条件付き書式を編集 (Ctrl+F8)"
               aria-label="条件付き書式"
             >
-              条件付き書式...
+              {t("toolbar.conditionalFormat")}
             </button>
             <button
               type="button"
@@ -2010,7 +2011,7 @@ export default function EditorScreen() {
               title="選択範囲の表示形式を変更 (Ctrl+1)"
               aria-label="表示形式"
             >
-              🔢 表示形式
+              {t("toolbar.numberFormat")}
             </button>
             <button
               type="button"
@@ -2031,7 +2032,7 @@ export default function EditorScreen() {
               aria-pressed={formatPainterMode !== "idle"}
               data-testid="format-painter"
             >
-              🖌 書式コピー
+              {t("toolbar.formatPainter")}
             </button>
             <button
               type="button"
@@ -2069,7 +2070,7 @@ export default function EditorScreen() {
               title="名前付き範囲を編集 (Ctrl+F3)"
               aria-label="名前付き範囲"
             >
-              名前付き範囲
+              {t("toolbar.namedRanges")}
             </button>
             <button
               type="button"
@@ -2078,7 +2079,7 @@ export default function EditorScreen() {
               title="選択範囲からグラフを挿入"
               aria-label="グラフを挿入"
             >
-              📊 グラフ
+              {t("toolbar.insertChart")}
             </button>
             <button
               type="button"
@@ -2087,7 +2088,7 @@ export default function EditorScreen() {
               title="画像をワークブックに挿入"
               aria-label="画像挿入"
             >
-              🖼 画像挿入
+              {t("toolbar.insertImage")}
             </button>
           </div>
           <span className="toolbar-divider" aria-hidden="true" />
@@ -2098,7 +2099,7 @@ export default function EditorScreen() {
             title="選択範囲を並べ替え"
             aria-label="並べ替え"
           >
-            ↕ 並べ替え
+            {t("toolbar.sort")}
           </button>
           <button
             type="button"

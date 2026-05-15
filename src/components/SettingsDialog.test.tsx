@@ -35,6 +35,9 @@ function resetStore() {
 }
 
 beforeEach(() => {
+  // Tests assert against Japanese labels; pin the i18n locale so the title
+  // is "設定" rather than the en-US fallback "Settings".
+  localStorage.setItem("coco.locale", "ja-JP");
   invokeMock.mockReset();
   invokeMock.mockResolvedValue(undefined);
   resetStore();
@@ -223,17 +226,19 @@ describe("SettingsDialog", () => {
       expect(radio).toBeTruthy();
     });
 
-    it("renders exactly four collapsible sections, only the first open by default", () => {
+    it("renders exactly five collapsible sections, only the first open by default", () => {
       const { container } = render(<SettingsDialog onClose={onClose} />);
       const sections = container.querySelectorAll<HTMLDetailsElement>(
         "details.settings-section"
       );
-      expect(sections.length).toBe(4);
+      // Autosave / CSV export / CSV import / CSV PoC banner / Language
+      expect(sections.length).toBe(5);
       // Autosave (index 0) is the only one open by default.
       expect(sections[0].open).toBe(true);
       expect(sections[1].open).toBe(false);
       expect(sections[2].open).toBe(false);
       expect(sections[3].open).toBe(false);
+      expect(sections[4].open).toBe(false);
     });
   });
 

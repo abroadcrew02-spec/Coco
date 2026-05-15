@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { t } from "../i18n/locale";
 import "./HelpDialog.css";
 
 interface Props {
@@ -72,7 +73,7 @@ export default function HelpDialog({ onClose }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <header className="help-header">
-          <h2 id="help-title" className="help-title">Coco — ヘルプ</h2>
+          <h2 id="help-title" className="help-title">{t("dialog.help")}</h2>
           <button type="button" className="help-close" onClick={onClose} aria-label="閉じる">
             ×
           </button>

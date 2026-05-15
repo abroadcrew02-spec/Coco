@@ -11,6 +11,8 @@ import HelpDialog from "./HelpDialog";
 let onClose: ReturnType<typeof vi.fn<() => void>>;
 
 beforeEach(() => {
+  // Tests assert against Japanese labels; pin the i18n locale.
+  localStorage.setItem("coco.locale", "ja-JP");
   getVersionMock.mockReset();
   getVersionMock.mockResolvedValue("0.1.0");
   onClose = vi.fn<() => void>();

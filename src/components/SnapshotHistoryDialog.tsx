@@ -6,6 +6,7 @@ import {
 } from "../store/useWorkbookStore";
 import { recoveryReasonLabel } from "../store/recoveryLabels";
 import { timeAgoJa } from "./timeAgo";
+import { t } from "../i18n/locale";
 import "./SnapshotHistoryDialog.css";
 
 interface Props {
@@ -138,7 +139,7 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <header className="snapshot-header">
-          <h2 id="snapshot-title" className="snapshot-title">スナップショット履歴</h2>
+          <h2 id="snapshot-title" className="snapshot-title">{t("dialog.snapshotHistory")}</h2>
           <button
             type="button"
             className="snapshot-close"

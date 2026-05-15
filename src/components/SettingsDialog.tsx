@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useWorkbookStore } from "../store/useWorkbookStore";
+import { getLocale, setLocale, t, type Locale } from "../i18n/locale";
 import "./SettingsDialog.css";
 
 interface Props {
@@ -45,6 +46,8 @@ export default function SettingsDialog({ onClose }: Props) {
     useState<CsvImportEncoding>(csvImportEncoding);
   const [pendingSuppressPoc, setPendingSuppressPoc] =
     useState<boolean>(suppressCsvPocWarning);
+  const initialLocale = getLocale();
+  const [pendingLocale, setPendingLocale] = useState<Locale>(initialLocale);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -70,6 +73,9 @@ export default function SettingsDialog({ onClose }: Props) {
     if (pendingSuppressPoc !== suppressCsvPocWarning) {
       await setSuppressCsvPocWarning(pendingSuppressPoc);
     }
+    if (pendingLocale !== initialLocale) {
+      setLocale(pendingLocale);
+    }
     onClose();
   };
 
@@ -77,7 +83,8 @@ export default function SettingsDialog({ onClose }: Props) {
     pendingInterval !== intervalMs ||
     pendingEncoding !== csvEncoding ||
     pendingImportEncoding !== csvImportEncoding ||
-    pendingSuppressPoc !== suppressCsvPocWarning;
+    pendingSuppressPoc !== suppressCsvPocWarning ||
+    pendingLocale !== initialLocale;
 
   return (
     <div className="settings-backdrop" onClick={onClose}>
@@ -89,7 +96,7 @@ export default function SettingsDialog({ onClose }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <header className="settings-header">
-          <h2 id="settings-title" className="settings-title">設定</h2>
+          <h2 id="settings-title" className="settings-title">{t("dialog.settings")}</h2>
           <button type="button" className="settings-close" onClick={onClose} aria-label="閉じる">
             ×
           </button>
@@ -173,6 +180,32 @@ export default function SettingsDialog({ onClose }: Props) {
               />
               <span>「CSV PoC インポート」バナーを表示しない</span>
             </label>
+          </details>
+          <details className="settings-section">
+            <summary className="settings-section-summary">
+              <h3>{t("settings.language")}</h3>
+            </summary>
+            <p className="settings-hint">{t("settings.languageHint")}</p>
+            <div className="settings-radio-group">
+              <label className="settings-radio">
+                <input
+                  type="radio"
+                  name="coco-locale"
+                  checked={pendingLocale === "ja-JP"}
+                  onChange={() => setPendingLocale("ja-JP")}
+                />
+                <span>{t("settings.languageJa")}</span>
+              </label>
+              <label className="settings-radio">
+                <input
+                  type="radio"
+                  name="coco-locale"
+                  checked={pendingLocale === "en-US"}
+                  onChange={() => setPendingLocale("en-US")}
+                />
+                <span>{t("settings.languageEn")}</span>
+              </label>
+            </div>
           </details>
         </div>
         <footer className="settings-footer">

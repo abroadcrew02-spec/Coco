@@ -53,6 +53,9 @@ function resetStore() {
 }
 
 beforeEach(() => {
+  // Tests assert against Japanese labels; pin the i18n locale so happy-dom's
+  // en-US default doesn't switch the title to English.
+  localStorage.setItem("coco.locale", "ja-JP");
   invokeMock.mockReset();
   // Default for unmatched calls: resolve to []. Specific tests use
   // mockResolvedValueOnce to override per-call ordering. The dialog calls

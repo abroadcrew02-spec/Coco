@@ -69,31 +69,38 @@ describe("EditorScreen Univer plugin wiring", () => {
     expect(editorSource).not.toMatch(/onClick=\{goHome\} title="ホームへ戻る"/);
   });
 
-  it("tracks editor readiness and clears it on init failure or cleanup", () => {
-    expect(editorSource).toMatch(/const \[editorReady, setEditorReady\] = useState\(false\)/);
-    expect(editorSource).toMatch(/setEditorReady\(false\);\s*setEditorOperationError\(null\);/);
+  it("initializes Univer and surfaces init errors", () => {
+    // editorReady state was removed when the right-side toolbar buttons were
+    // pulled into the native menu — readiness is now checked per-action via
+    // getReadyWorkbook (see test below). Init failures still take over the
+    // screen with editorInitError.
+    expect(editorSource).not.toMatch(/setEditorReady\(/);
     expect(editorSource).toMatch(/fUniverRef\.current = FUniver\.newAPI\(univer\)/);
-    expect(editorSource).toMatch(
-      /if \(!fUniverRef\.current\.getActiveWorkbook\(\)\) \{\s*throw new Error\("Active workbook is not available"\);\s*\}\s*setEditorReady\(true\)/,
-    );
-    expect(editorSource).toMatch(/setEditorReady\(false\);\s*setEditorInitError\(String\(e\)\)/);
+    expect(editorSource).toMatch(/if \(!fUniverRef\.current\.getActiveWorkbook\(\)\) \{\s*throw new Error\("Active workbook is not available"\);\s*\}/);
+    expect(editorSource).toMatch(/setEditorInitError\(String\(e\)\)/);
   });
 
-  it("guards editor tools per action without latching the toolbar disabled", () => {
+  it("guards editor tools per action via getReadyWorkbook", () => {
     expect(editorSource).toMatch(/EDITOR_NOT_READY_MESSAGE/);
     expect(getReadyWorkbookSource).toMatch(/const getReadyWorkbook = useCallback/);
     expect(getReadyWorkbookSource).toMatch(/setEditorOperationError\(`\$\{label\}: \$\{EDITOR_NOT_READY_MESSAGE\}`\)/);
-    expect(getReadyWorkbookSource).not.toMatch(/setEditorReady\(false\)/);
-    expect(getReadyWorkbookSource).toMatch(/setEditorReady\(true\);\s*setEditorOperationError\(null\)/);
+    expect(getReadyWorkbookSource).toMatch(/setEditorOperationError\(null\)/);
     expect(editorSource).toMatch(/className="status-bar__operation-error"/);
     expect(editorSource).toMatch(/aria-live="polite"/);
   });
 
-  it("disables workbook-dependent toolbar actions until the editor is ready", () => {
-    expect(editorSource).toMatch(/const editorToolDisabled = !editorReady/);
-    expect(toolbarSource).toMatch(/aria-label="クイック操作"/);
-    expect(toolbarSource.match(/disabled=\{editorToolDisabled\}/g)?.length ?? 0).toBeGreaterThanOrEqual(5);
-    expect(toolbarSource).not.toMatch(/isExporting/);
+  it("keeps the Coco custom toolbar minimal (back-to-home + filename only)", () => {
+    // The 6 quick-action buttons (表示形式 / Σ / 通貨 / % / 書式コピー / 並べ替え)
+    // were moved into the native menu (書式 / データ submenus) to declutter the
+    // top bar. They are still reachable via menu + keyboard shortcuts; the
+    // toolbar-side disabling has nothing to gate now, so the dedicated state
+    // and the "クイック操作" group are gone. `getReadyWorkbook` still guards
+    // each underlying action against premature execution.
+    expect(toolbarSource).not.toMatch(/aria-label="クイック操作"/);
+    expect(toolbarSource).not.toMatch(/editorToolDisabled/);
+    expect(toolbarSource).not.toMatch(/data-testid="autosum"/);
+    expect(toolbarSource).not.toMatch(/data-testid="quick-fmt-currency"/);
+    expect(toolbarSource).not.toMatch(/data-testid="format-painter"/);
     expect(toolbarSource).not.toMatch(/t\("toolbar\.save"\)/);
     expect(toolbarSource).not.toMatch(/t\("toolbar\.exportXlsx"\)/);
   });

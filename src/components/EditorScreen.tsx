@@ -69,11 +69,14 @@ import InsertImageDialog, {
 } from "./InsertImageDialog";
 import SortDialog, { type SortFormValue } from "./SortDialog";
 import SheetTabColorDialog from "./SheetTabColorDialog";
+import CommandPalette, { type PaletteCommand } from "./CommandPalette";
 import CommentIndicatorsPanel from "./CommentIndicatorsPanel";
 import ChartPreviewPanel from "./ChartPreviewPanel";
 import { computeChartPreviews, type ChartPreview } from "./chartPreviewData";
 import ImagePreviewPanel from "./ImagePreviewPanel";
 import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
+import { confirmDiscardIfUnsaved } from "../store/dirtyGuard";
+import { routeOpenPath } from "../store/pathRouter";
 import { timeAgoJa } from "./timeAgo";
 import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
 import { isSheetProtectedInSnapshot } from "../store/sheetProtection";
@@ -144,10 +147,18 @@ export default function EditorScreen() {
     dismissWarnings,
     dismissExportWarnings,
     updateSnapshot,
+    newWorkbook,
+    openCoco,
+    importXlsx,
+    importCsv,
   } = useWorkbookStore();
 
   const [sheetPicker, setSheetPicker] = useState<{ id: string; name: string }[] | null>(null);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  // Command palette (Ctrl+Shift+P / Cmd+Shift+P). Boolean state — the command
+  // list is rebuilt on every render so the palette always sees the latest
+  // handler closures and store actions.
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [warningsDialog, setWarningsDialog] = useState<null | "import" | "export">(null);
   // Named-ranges dialog state: null while closed; once opened we snapshot the
   // current set so the user can cancel out without mutating the workbook.
@@ -1518,6 +1529,199 @@ export default function EditorScreen() {
     return () => disposable.dispose();
   }, [formatPainterMode, updateSnapshot, deactivateFormatPainter]);
 
+  // Open-file flow for the command palette. Mirrors useGlobalShortcuts' Ctrl+O
+  // logic so the palette and the keyboard binding stay in lock step. We can't
+  // simply reuse the hook because that listener is registered higher up in
+  // App; routing through the store actions directly is cleaner than firing a
+  // synthetic keyboard event.
+  const openFromPalette = useCallback(async () => {
+    if (!confirmDiscardIfUnsaved()) return;
+    const selected = await openDialog({
+      multiple: false,
+      filters: [
+        { name: "Excel / CSV / TSV", extensions: ["xlsx", "xlsm", "csv", "tsv"] },
+        { name: "Excel Files", extensions: ["xlsx", "xlsm"] },
+        { name: "CSV / TSV Files", extensions: ["csv", "tsv"] },
+      ],
+    });
+    if (!selected) return;
+    const path = typeof selected === "string" ? selected : selected[0];
+    const route = routeOpenPath(path);
+    if (route.kind === "coco") await openCoco(route.path);
+    else if (route.kind === "csv") await importCsv(route.path);
+    else if (route.kind === "xlsx") await importXlsx(route.path);
+  }, [openCoco, importXlsx, importCsv]);
+
+  const newFromPalette = useCallback(async () => {
+    if (!confirmDiscardIfUnsaved()) return;
+    await newWorkbook();
+  }, [newWorkbook]);
+
+  // Build the command palette's command list. Each entry pairs an existing
+  // handler with a label, optional category, and shortcut hint. We rebuild
+  // every render so callbacks always see the latest closures (cheap — ~20
+  // objects).
+  const paletteCommands: PaletteCommand[] = [
+    {
+      id: "file.save",
+      label: "保存",
+      category: "ファイル",
+      shortcut: "Ctrl+S",
+      keywords: "save",
+      run: () => void save(),
+    },
+    {
+      id: "file.saveAs",
+      label: "名前を付けて保存",
+      category: "ファイル",
+      shortcut: "Ctrl+Shift+S",
+      keywords: "save as",
+      run: () => void promptSaveAs(),
+    },
+    {
+      id: "file.open",
+      label: "ファイルを開く",
+      category: "ファイル",
+      shortcut: "Ctrl+O",
+      keywords: "open",
+      run: () => void openFromPalette(),
+    },
+    {
+      id: "file.new",
+      label: "新規ワークブック",
+      category: "ファイル",
+      shortcut: "Ctrl+N",
+      keywords: "new",
+      run: () => void newFromPalette(),
+    },
+    {
+      id: "file.exportXlsx",
+      label: "xlsx としてエクスポート",
+      category: "エクスポート",
+      keywords: "export xlsx",
+      run: () => void exportXlsx(),
+    },
+    {
+      id: "file.exportCsv",
+      label: "CSV としてエクスポート",
+      category: "エクスポート",
+      keywords: "export csv",
+      run: () => void handleCsvExport(),
+    },
+    {
+      id: "insert.hyperlink",
+      label: "ハイパーリンクを挿入",
+      category: "挿入",
+      shortcut: "Ctrl+K",
+      keywords: "hyperlink link",
+      run: openHyperlinkDialog,
+    },
+    {
+      id: "insert.comment",
+      label: "コメントを挿入 / 編集",
+      category: "挿入",
+      shortcut: "Shift+F2",
+      keywords: "comment note",
+      run: openCommentDialog,
+    },
+    {
+      id: "insert.chart",
+      label: "グラフを挿入",
+      category: "挿入",
+      keywords: "chart graph",
+      run: openChartDialog,
+    },
+    {
+      id: "insert.image",
+      label: "画像を挿入",
+      category: "挿入",
+      keywords: "image picture",
+      run: openImageDialog,
+    },
+    {
+      id: "insert.namedRange",
+      label: "名前付き範囲を編集",
+      category: "挿入",
+      shortcut: "Ctrl+F3",
+      keywords: "named range name manager",
+      run: openNamedRangesDialog,
+    },
+    {
+      id: "format.conditional",
+      label: "条件付き書式",
+      category: "書式",
+      shortcut: "Ctrl+F8",
+      keywords: "conditional formatting cf",
+      run: openCfDialog,
+    },
+    {
+      id: "format.dataValidation",
+      label: "データの入力規則",
+      category: "書式",
+      keywords: "data validation dv",
+      run: openDataValidationDialog,
+    },
+    {
+      id: "format.numberFormat",
+      label: "表示形式",
+      category: "書式",
+      shortcut: "Ctrl+1",
+      keywords: "number format cells",
+      run: openNumberFormatDialog,
+    },
+    {
+      id: "format.tabColor",
+      label: "シートタブの色",
+      category: "書式",
+      keywords: "tab color sheet",
+      run: openTabColorDialog,
+    },
+    {
+      id: "format.painter",
+      label: "書式のコピー / 貼り付け",
+      category: "書式",
+      keywords: "format painter brush",
+      run: handleFormatPainterClick,
+    },
+    {
+      id: "format.protection",
+      label: activeSheetProtected ? "シート保護を解除" : "シートを保護",
+      category: "書式",
+      keywords: "protect sheet readonly",
+      run: toggleSheetProtection,
+    },
+    {
+      id: "data.sort",
+      label: "並べ替え",
+      category: "データ",
+      keywords: "sort",
+      run: openSortDialog,
+    },
+    {
+      id: "view.snapshots",
+      label: "スナップショット履歴",
+      category: "表示",
+      keywords: "history snapshots",
+      run: () => setSnapshotsOpen(true),
+    },
+    {
+      id: "view.settings",
+      label: "設定",
+      category: "表示",
+      shortcut: "Ctrl+,",
+      keywords: "settings preferences",
+      run: () => requestSettings(),
+    },
+    {
+      id: "view.help",
+      label: "ヘルプ",
+      category: "表示",
+      shortcut: "F1",
+      keywords: "help shortcuts",
+      run: () => requestHelp(),
+    },
+  ];
+
   useAutoSave();
 
   // Keyboard shortcuts (req 4.6): Ctrl+S / Cmd+S = save; Ctrl+Shift+S / Cmd+Shift+S = save as.
@@ -1525,7 +1729,14 @@ export default function EditorScreen() {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.shiftKey && (e.key === "s" || e.key === "S")) {
+      if (mod && e.shiftKey && (e.key === "p" || e.key === "P")) {
+        // VS Code / Slack convention. Some browsers map Ctrl+Shift+P to print
+        // preview, but that mapping is owned by Chromium and only fires on
+        // browser-chrome focus — inside a Tauri WebView the page-level listener
+        // wins, so preventDefault here is enough to keep the binding ours.
+        e.preventDefault();
+        setPaletteOpen(true);
+      } else if (mod && e.shiftKey && (e.key === "s" || e.key === "S")) {
         e.preventDefault();
         promptSaveAs();
       } else if (mod && !e.shiftKey && e.key === "s") {
@@ -2259,6 +2470,12 @@ export default function EditorScreen() {
         />
       )}
       {snapshotsOpen && <SnapshotHistoryDialog onClose={() => setSnapshotsOpen(false)} />}
+      {paletteOpen && (
+        <CommandPalette
+          commands={paletteCommands}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
       {namedRanges !== null && (
         <NamedRangesDialog
           initialRanges={namedRanges}

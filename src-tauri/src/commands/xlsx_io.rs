@@ -19,6 +19,8 @@ use crate::commands::workbook::{
 const MIN_ROWS: usize = 1000;
 const MIN_COLS: usize = 100;
 const LARGE_SHEET_THRESHOLD: usize = 100_000;
+const MAX_EXPORT_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
+const MAX_EXPORT_CELLS: usize = 500_000;
 
 /// Normalized cell style extracted from xl/styles.xml + per-sheet `<c s="..."/>` refs.
 /// Scope: font (bold/italic/color) + fill (color) + alignment (horizontal/vertical)
@@ -1293,6 +1295,7 @@ fn data_to_cell(d: &Data, num_format_override: Option<&str>) -> Option<Value> {
 /// CF/dataValidation blocks (typically near the end of the sheet) and bounding
 /// memory.
 const WORKSHEET_SCAN_CAP_BYTES: u64 = 16 * 1024 * 1024;
+const IMPORT_WORKSHEET_XML_CAP_BYTES: u64 = WORKSHEET_SCAN_CAP_BYTES;
 /// Read buffer size for the chunked worksheet scan.
 const WORKSHEET_SCAN_CHUNK: usize = 65_536;
 /// Overlap window kept between successive chunks so a marker straddling a
@@ -3925,6 +3928,58 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         .map_err(|e| format!("Invalid xlsx (zip): {e}"))?;
     let sheet_paths = parse_sheet_path_map_from_archive(&mut archive);
 
+    let mut oversized_sheet: Option<(String, u64)> = None;
+    for i in 0..archive.len() {
+        let entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        let zip_path = entry.name().to_string();
+        if !zip_path.starts_with("xl/worksheets/") || !zip_path.ends_with(".xml") {
+            continue;
+        }
+        if entry.size() > IMPORT_WORKSHEET_XML_CAP_BYTES {
+            let sheet_name = sheet_paths
+                .iter()
+                .find(|(_, path)| *path == &zip_path)
+                .map(|(name, _)| name.clone())
+                .unwrap_or(zip_path);
+            oversized_sheet = Some((sheet_name, entry.size()));
+            break;
+        }
+    }
+    if let Some((sheet_name, size)) = oversized_sheet {
+        let empty_snapshot = json!({
+            "id": workbook_id,
+            "name": "Imported Workbook",
+            "appVersion": "0.1.0",
+            "locale": "enUS",
+            "styles": {},
+            "sheetOrder": [],
+            "sheets": {},
+        });
+        let mb = size as f64 / 1024.0 / 1024.0;
+        let cap_mb = IMPORT_WORKSHEET_XML_CAP_BYTES as f64 / 1024.0 / 1024.0;
+        let mut warnings = prepended_warnings;
+        warnings.push(CompatibilityWarning {
+            severity: "blocking".to_string(),
+            code: "XLSX_WORKSHEET_XML_TOO_LARGE".to_string(),
+            message: format!(
+                "Worksheet '{sheet_name}' XML is {mb:.1} MB after decompression; limit is {cap_mb:.0} MB."
+            ),
+            affected_sheets: Some(vec![sheet_name]),
+        });
+        return Ok(ImportWorkbookResult {
+            handle: WorkbookHandle {
+                workbook_id,
+                path: Some(path),
+                source_type: "xlsx".to_string(),
+                snapshot_json: Some(
+                    serde_json::to_string(&empty_snapshot).map_err(|e| e.to_string())?,
+                ),
+                requires_save_as_on_first_save: false,
+            },
+            warnings,
+        });
+    }
+
     // Workbook-level XML parts are parsed once. Worksheet XML is streamed one
     // sheet at a time below, then dropped after each sheet's metadata is merged.
     let mut parsed_styles = parse_xlsx_styles(&mut archive).ok();
@@ -4731,6 +4786,24 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
         });
     }
 
+    if snapshot_json.len() > MAX_EXPORT_SNAPSHOT_BYTES {
+        return Ok(ExportResult {
+            success: false,
+            path: path.clone(),
+            warnings: vec![CompatibilityWarning {
+                severity: "blocking".to_string(),
+                code: "XLSX_SNAPSHOT_TOO_LARGE".to_string(),
+                message: format!(
+                    "Snapshot JSON is too large for XLSX export ({} bytes > {} bytes).",
+                    snapshot_json.len(),
+                    MAX_EXPORT_SNAPSHOT_BYTES
+                ),
+                affected_sheets: None,
+            }],
+            error: Some("XLSX_SNAPSHOT_TOO_LARGE".to_string()),
+        });
+    }
+
     // Step 2: parse snapshot
     let snapshot: Value = match serde_json::from_str(&snapshot_json) {
         Ok(v) => v,
@@ -5226,6 +5299,11 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                             }
                             formula_count += 1;
                             cell_count += 1;
+                            if cell_count > MAX_EXPORT_CELLS {
+                                return Err(format!(
+                                    "XLSX_EXPORT_TOO_MANY_CELLS: {cell_count} cells exceeds limit {MAX_EXPORT_CELLS}"
+                                ));
+                            }
                             continue;
                         }
 
@@ -5256,6 +5334,11 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                                 };
                                 if write_res.is_ok() {
                                     cell_count += 1;
+                                    if cell_count > MAX_EXPORT_CELLS {
+                                        return Err(format!(
+                                            "XLSX_EXPORT_TOO_MANY_CELLS: {cell_count} cells exceeds limit {MAX_EXPORT_CELLS}"
+                                        ));
+                                    }
                                     continue;
                                 }
                                 // On failure, fall through to plain `v` write so
@@ -5272,6 +5355,11 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                                             .write_blank(row_idx, col_idx, fmt)
                                             .map_err(|e| e.to_string())?;
                                         cell_count += 1;
+                                        if cell_count > MAX_EXPORT_CELLS {
+                                            return Err(format!(
+                                                "XLSX_EXPORT_TOO_MANY_CELLS: {cell_count} cells exceeds limit {MAX_EXPORT_CELLS}"
+                                            ));
+                                        }
                                     }
                                     continue;
                                 }
@@ -5327,12 +5415,22 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                                 }
                             }
                             cell_count += 1;
+                            if cell_count > MAX_EXPORT_CELLS {
+                                return Err(format!(
+                                    "XLSX_EXPORT_TOO_MANY_CELLS: {cell_count} cells exceeds limit {MAX_EXPORT_CELLS}"
+                                ));
+                            }
                         } else if let Some(ref fmt) = fmt_obj {
                             // No `v` field but has style — blank styled cell.
                             worksheet
                                 .write_blank(row_idx, col_idx, fmt)
                                 .map_err(|e| e.to_string())?;
                             cell_count += 1;
+                            if cell_count > MAX_EXPORT_CELLS {
+                                return Err(format!(
+                                    "XLSX_EXPORT_TOO_MANY_CELLS: {cell_count} cells exceeds limit {MAX_EXPORT_CELLS}"
+                                ));
+                            }
                         }
                     }
                 }

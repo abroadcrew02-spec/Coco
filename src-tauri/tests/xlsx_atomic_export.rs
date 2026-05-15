@@ -273,3 +273,19 @@ fn bad_extension_returns_failure_without_touching_disk() {
         "tmp dir should be empty, got: {entries:?}"
     );
 }
+
+#[test]
+fn oversized_snapshot_is_rejected_before_export() {
+    let tmp = TempDir::new().expect("tempdir");
+    let target = tmp.path().join("huge.xlsx");
+    let snapshot = "x".repeat(33 * 1024 * 1024);
+
+    let result = export_xlsx_core(path_str(&target), snapshot).expect("call returns Ok");
+    assert!(!result.success, "export should fail for huge snapshot");
+    let err = result.error.unwrap_or_default();
+    assert!(
+        err.contains("XLSX_SNAPSHOT_TOO_LARGE"),
+        "error should mention XLSX_SNAPSHOT_TOO_LARGE, got: {err}"
+    );
+    assert!(!target.exists(), "failed export should not write target");
+}

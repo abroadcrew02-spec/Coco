@@ -142,7 +142,9 @@ mod tests {
     #[test]
     fn rejects_non_image_extension() {
         let tmp = tempfile::Builder::new().suffix(".txt").tempfile().unwrap();
-        tmp.as_file().write_all(b"\x89PNG\r\n\x1a\n payload").unwrap();
+        tmp.as_file()
+            .write_all(b"\x89PNG\r\n\x1a\n payload")
+            .unwrap();
         let res = read_file_bytes_base64(tmp.path().to_string_lossy().to_string());
         assert_eq!(res.unwrap_err(), "UNSUPPORTED_FILE_TYPE");
     }
@@ -158,8 +160,8 @@ mod tests {
     #[test]
     fn returns_existing_csv_export_paths_only_for_csv_like_paths() {
         let tmp = tempfile::Builder::new().suffix(".csv").tempfile().unwrap();
-        let existing = existing_csv_export_paths(vec![tmp.path().to_string_lossy().to_string()])
-            .unwrap();
+        let existing =
+            existing_csv_export_paths(vec![tmp.path().to_string_lossy().to_string()]).unwrap();
         assert_eq!(existing, vec![tmp.path().to_string_lossy().to_string()]);
     }
 

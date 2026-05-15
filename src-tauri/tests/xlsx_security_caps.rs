@@ -9,6 +9,7 @@
 //! literal 1M-row body would balloon test time for no benefit.
 
 use coco_lib::commands::security::security_scan_xlsx;
+use coco_lib::commands::xlsx_io::import_xlsx_core;
 use std::io::Write;
 use tempfile::TempDir;
 use zip::write::FileOptions;
@@ -181,5 +182,36 @@ fn streaming_row_fallback_detects_overflow_without_dimension() {
         r.issues.iter().any(|m| m.contains("XLSX_ROW_LIMIT")),
         "expected XLSX_ROW_LIMIT issue from streaming fallback, got {:?}",
         r.issues
+    );
+}
+
+#[test]
+fn import_rejects_large_worksheet_xml_before_slurping() {
+    let tmp = TempDir::new().expect("tempdir");
+    let mut sheet_xml = Vec::with_capacity(17 * 1024 * 1024 + 64);
+    sheet_xml.extend_from_slice(b"<worksheet><sheetData>");
+    sheet_xml.resize(17 * 1024 * 1024, b' ');
+    sheet_xml.extend_from_slice(b"</sheetData></worksheet>");
+
+    let workbook_xml =
+        br#"<workbook><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>"#;
+    let rels_xml = br#"<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>"#;
+    let path = build_zip(
+        &tmp,
+        "large_sheet_xml.xlsx",
+        &[
+            ("xl/workbook.xml", workbook_xml),
+            ("xl/_rels/workbook.xml.rels", rels_xml),
+            ("xl/worksheets/sheet1.xml", &sheet_xml),
+        ],
+    );
+
+    let r = import_xlsx_core(path_str(&path)).expect("import returns result");
+    assert!(
+        r.warnings
+            .iter()
+            .any(|w| w.code == "XLSX_WORKSHEET_XML_TOO_LARGE" && w.severity == "blocking"),
+        "expected XLSX_WORKSHEET_XML_TOO_LARGE blocking warning, got {:?}",
+        r.warnings
     );
 }

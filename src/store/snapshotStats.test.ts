@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { computeSnapshotStats, formatSnapshotStats } from "./snapshotStats";
+import {
+  BACKGROUND_SNAPSHOT_SYNC_MAX_BYTES,
+  BACKGROUND_SNAPSHOT_SYNC_MAX_CELLS,
+  computeSnapshotStats,
+  formatSnapshotStats,
+  shouldSkipBackgroundSnapshotSync,
+} from "./snapshotStats";
 
 describe("computeSnapshotStats", () => {
   it("returns zero counts for null / undefined / empty input", () => {
@@ -83,5 +89,30 @@ describe("formatSnapshotStats", () => {
 
   it("returns a non-null label even when only sheets exist (zero cells)", () => {
     expect(formatSnapshotStats({ sheetCount: 2, cellCount: 0 })).toBe("2 シート · 0 セル");
+  });
+});
+
+describe("shouldSkipBackgroundSnapshotSync", () => {
+  it("keeps background sync enabled for small workbooks", () => {
+    const snap = JSON.stringify({
+      sheets: { s1: { cellData: { "0": { "0": { v: "hello" } } } } },
+    });
+    expect(shouldSkipBackgroundSnapshotSync(snap)).toBe(false);
+  });
+
+  it("skips background sync once the cached snapshot is too large", () => {
+    const snap = "x".repeat(BACKGROUND_SNAPSHOT_SYNC_MAX_BYTES);
+    expect(shouldSkipBackgroundSnapshotSync(snap)).toBe(true);
+  });
+
+  it("skips background sync once the workbook has many populated cells", () => {
+    const row = Object.fromEntries(
+      Array.from({ length: BACKGROUND_SNAPSHOT_SYNC_MAX_CELLS }, (_, i) => [
+        String(i),
+        { v: i },
+      ])
+    );
+    const snap = JSON.stringify({ sheets: { s1: { cellData: { "0": row } } } });
+    expect(shouldSkipBackgroundSnapshotSync(snap)).toBe(true);
   });
 });

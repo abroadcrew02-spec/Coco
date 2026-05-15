@@ -15,6 +15,8 @@ const getReadyWorkbookSource =
   editorSource.match(/const getReadyWorkbook = useCallback\(\(label: string\) => \{[\s\S]*?\n  \}, \[\]\);/)?.[0] ?? "";
 const mutationSnapshotSyncSource =
   editorSource.match(/\/\/ Sync snapshot to store on data mutations[\s\S]*?\n  \}, \[markDirty, updateSnapshot\]\);/)?.[0] ?? "";
+const toolbarSource =
+  editorSource.match(/<div className="editor-toolbar">[\s\S]*?\n      \{sheetPicker && \(/)?.[0] ?? "";
 
 describe("EditorScreen Univer plugin wiring", () => {
   it("imports and registers the Find/Replace plugins (Ctrl+F / Ctrl+H)", () => {
@@ -45,6 +47,12 @@ describe("EditorScreen Univer plugin wiring", () => {
     expect(editorSource).toMatch(
       /univer\.registerPlugin\(UniverSheetsFilterPlugin\)/,
     );
+  });
+
+  it("uses Coco's Univer locale bundle so standard UI labels can be overridden", () => {
+    expect(editorSource).toMatch(/import \{ buildCocoUniverLocale \} from "\.\/cocoUniverLocale"/);
+    expect(editorSource).toMatch(/import \{ getLocale, t \} from "\.\.\/i18n\/locale"/);
+    expect(editorSource).toMatch(/\[LocaleType\.EN_US\]: buildCocoUniverLocale\(getLocale\(\)\)/);
   });
 
   it("catches editor init errors and renders a recovery panel", () => {
@@ -83,8 +91,11 @@ describe("EditorScreen Univer plugin wiring", () => {
 
   it("disables workbook-dependent toolbar actions until the editor is ready", () => {
     expect(editorSource).toMatch(/const editorToolDisabled = !editorReady/);
-    expect(editorSource).toMatch(/disabled=\{isExporting \|\| editorToolDisabled\}/);
-    expect(editorSource.match(/disabled=\{editorToolDisabled\}/g)?.length ?? 0).toBeGreaterThanOrEqual(10);
+    expect(toolbarSource).toMatch(/aria-label="クイック操作"/);
+    expect(toolbarSource.match(/disabled=\{editorToolDisabled\}/g)?.length ?? 0).toBeGreaterThanOrEqual(5);
+    expect(toolbarSource).not.toMatch(/isExporting/);
+    expect(toolbarSource).not.toMatch(/t\("toolbar\.save"\)/);
+    expect(toolbarSource).not.toMatch(/t\("toolbar\.exportXlsx"\)/);
   });
 
   it("surfaces an error when CSV export has no sheet names", () => {
@@ -101,6 +112,7 @@ describe("EditorScreen Univer plugin wiring", () => {
   });
 
   it("defers mutation snapshot sync to idle work and cancels stale scheduled syncs", () => {
+    expect(editorSource).toMatch(/shouldSkipBackgroundSnapshotSync/);
     expect(mutationSnapshotSyncSource).toMatch(/window\.requestIdleCallback/);
     expect(mutationSnapshotSyncSource).toMatch(/window\.cancelIdleCallback\(idleCallback\)/);
     expect(mutationSnapshotSyncSource).toMatch(/idleFallbackTimer = setTimeout\(\(\) => \{/);
@@ -109,6 +121,9 @@ describe("EditorScreen Univer plugin wiring", () => {
     );
     expect(mutationSnapshotSyncSource.match(/cancelPendingSnapshotSync\(\);/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
     expect(mutationSnapshotSyncSource).toMatch(/updateSnapshot\(JSON\.stringify\(workbook\.save\(\)\)\)/);
+    expect(mutationSnapshotSyncSource).toMatch(
+      /if \(shouldSkipBackgroundSnapshotSync\(snapshotRef\.current\)\) \{\s*return;\s*\}/,
+    );
   });
 
   it("registers a synchronous snapshot flush for immediate save/close flows", () => {
@@ -120,19 +135,15 @@ describe("EditorScreen Univer plugin wiring", () => {
     expect(mutationSnapshotSyncSource).toMatch(/unregisterSnapshotFlush\(\);/);
   });
 
-  it("renders the sheet-protection toggle button and wires its handler", () => {
-    // The toolbar button must be present with the testid and onClick handler
-    // so toggling sheet protection routes through `toggleSheetProtection`.
-    expect(editorSource).toMatch(/toggleSheetProtection/);
-    expect(editorSource).toMatch(/data-testid="sheet-protection-toggle"/);
-    // Locked / unlocked labels — emoji + Japanese verb. Guards against
-    // accidental label drift.
-    expect(editorSource).toMatch(/🔒 保護/);
-    expect(editorSource).toMatch(/🔓 解除/);
-    // The handler must write back via updateSnapshot so the save button
-    // enables and the round-trip catches the change.
+  it("routes native editor menu commands to existing editor handlers", () => {
+    expect(editorSource).toMatch(/const runEditorCommand = useCallback\(\(id: string\) => \{/);
+    expect(editorSource).toMatch(/window\.addEventListener\("coco:editor-command", onEditorCommand\)/);
+    expect(editorSource).toMatch(/case "format-number":\s*openNumberFormatDialog\(\);/);
+    expect(editorSource).toMatch(/case "format-currency":\s*applyQuickFormat\(QUICK_FMT_CURRENCY\);/);
+    expect(editorSource).toMatch(/case "data-autosum":\s*applyAutoSum\(\);/);
+    expect(editorSource).toMatch(/case "tools-sheet-protection":\s*toggleSheetProtection\(\);/);
+    expect(toolbarSource).not.toMatch(/data-testid="sheet-protection-toggle"/);
     expect(editorSource).toMatch(/updateSnapshot\(JSON\.stringify\(fresh\)\)/);
-    // Snapshot field name — must match the Rust side `_protected`.
     expect(editorSource).toMatch(/_protected/);
   });
 });

@@ -6,6 +6,26 @@ import { confirmDiscardIfUnsaved } from "../store/dirtyGuard";
 import { routeOpenPath } from "../store/pathRouter";
 import { requestHelp, requestSettings } from "./useGlobalShortcuts";
 
+const EDITOR_COMMAND_IDS = new Set([
+  "edit-command-palette",
+  "view-snapshots",
+  "insert-hyperlink",
+  "insert-comment",
+  "insert-chart",
+  "insert-image",
+  "format-number",
+  "format-currency",
+  "format-percent",
+  "format-conditional",
+  "format-painter",
+  "format-tab-color",
+  "data-sort",
+  "data-validation",
+  "data-named-ranges",
+  "data-autosum",
+  "tools-sheet-protection",
+]);
+
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route
 // them to the existing store actions / module emitters here so the menu and
 // keyboard shortcuts share one implementation surface.
@@ -47,6 +67,11 @@ export function useMenuActions() {
     };
 
     const dispatch = async (id: string) => {
+      if (EDITOR_COMMAND_IDS.has(id)) {
+        window.dispatchEvent(new CustomEvent("coco:editor-command", { detail: id }));
+        return;
+      }
+
       switch (id) {
         case "new":
           if (!confirmDiscardIfUnsaved()) return;

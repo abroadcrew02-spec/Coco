@@ -24,14 +24,6 @@ import { UniverSheetsFindReplacePlugin } from "@univerjs/sheets-find-replace";
 import { UniverSheetsFilterPlugin } from "@univerjs/sheets-filter";
 import { FUniver } from "@univerjs/facade";
 
-import SheetsEnUS from "@univerjs/sheets/locale/en-US";
-import SheetsUIEnUS from "@univerjs/sheets-ui/locale/en-US";
-import UIEnUS from "@univerjs/ui/locale/en-US";
-import DocsUIEnUS from "@univerjs/docs-ui/locale/en-US";
-import SheetsFormulaUIEnUS from "@univerjs/sheets-formula-ui/locale/en-US";
-import FindReplaceEnUS from "@univerjs/find-replace/locale/en-US";
-import SheetsFindReplaceEnUS from "@univerjs/sheets-find-replace/locale/en-US";
-
 import "@univerjs/design/lib/index.css";
 import "@univerjs/ui/lib/index.css";
 import "@univerjs/docs-ui/lib/index.css";
@@ -41,6 +33,7 @@ import "@univerjs/find-replace/lib/index.css";
 
 import { undoRedoOverride } from "./univerUndoRedoOverride";
 import { registerCocoContextMenu } from "./univerContextMenu";
+import { buildCocoUniverLocale } from "./cocoUniverLocale";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { useAutoSave } from "../hooks/useAutoSave";
 import type { CompatibilityWarning } from "../types/workbook";
@@ -79,7 +72,11 @@ import { confirmDiscardIfUnsaved } from "../store/dirtyGuard";
 import { routeOpenPath } from "../store/pathRouter";
 import { registerSnapshotFlush } from "../store/snapshotSync";
 import { timeAgoJa } from "./timeAgo";
-import { computeSnapshotStats, formatSnapshotStats } from "../store/snapshotStats";
+import {
+  computeSnapshotStats,
+  formatSnapshotStats,
+  shouldSkipBackgroundSnapshotSync,
+} from "../store/snapshotStats";
 import { isSheetProtectedInSnapshot } from "../store/sheetProtection";
 import { extractCellStyle, applyCellStyle } from "../store/formatPainter";
 import { inferAutoSumRange, buildSumFormula } from "../store/autoSum";
@@ -98,7 +95,7 @@ import {
   type ImagePreview,
 } from "../store/imagePreviews";
 import { validateMutation, extractCellWrites } from "../store/dataValidation";
-import { t } from "../i18n/locale";
+import { getLocale, t } from "../i18n/locale";
 import "./EditorScreen.css";
 
 // req 5.4.1: "loading" blocks editing (snapshot is being replaced); "saving"
@@ -144,7 +141,6 @@ export default function EditorScreen() {
     saveStatus,
     importWarnings,
     exportWarnings,
-    isExporting,
     currentHandle,
     currentSnapshotJson,
     lastError,
@@ -1966,6 +1962,77 @@ export default function EditorScreen() {
     setSheetPicker(sheets);
   }, [getReadyWorkbook, listSheetNames, runCsvExport]);
 
+  const runEditorCommand = useCallback((id: string) => {
+    switch (id) {
+      case "edit-command-palette":
+        setPaletteOpen(true);
+        break;
+      case "view-snapshots":
+        setSnapshotsOpen(true);
+        break;
+      case "insert-hyperlink":
+        openHyperlinkDialog();
+        break;
+      case "insert-comment":
+        openCommentDialog();
+        break;
+      case "insert-chart":
+        openChartDialog();
+        break;
+      case "insert-image":
+        openImageDialog();
+        break;
+      case "format-number":
+        openNumberFormatDialog();
+        break;
+      case "format-currency":
+        applyQuickFormat(QUICK_FMT_CURRENCY);
+        break;
+      case "format-percent":
+        applyQuickFormat(QUICK_FMT_PERCENT);
+        break;
+      case "format-conditional":
+        openCfDialog();
+        break;
+      case "format-painter":
+        handleFormatPainterClick();
+        break;
+      case "format-tab-color":
+        openTabColorDialog();
+        break;
+      case "data-sort":
+        openSortDialog();
+        break;
+      case "data-validation":
+        openDataValidationDialog();
+        break;
+      case "data-named-ranges":
+        openNamedRangesDialog();
+        break;
+      case "data-autosum":
+        applyAutoSum();
+        break;
+      case "tools-sheet-protection":
+        toggleSheetProtection();
+        break;
+    }
+  }, [
+    openHyperlinkDialog,
+    openCommentDialog,
+    openChartDialog,
+    openImageDialog,
+    openNumberFormatDialog,
+    applyQuickFormat,
+    openCfDialog,
+    handleFormatPainterClick,
+    openTabColorDialog,
+    openSortDialog,
+    openDataValidationDialog,
+    openNamedRangesDialog,
+    applyAutoSum,
+    toggleSheetProtection,
+  ]);
+
   // Export every sheet in the workbook as a separate <sheetName>.csv file
   // inside a user-chosen directory. Multi-sheet workbooks only — the single
   // -sheet case routes through runCsvExport which already prompts for a path.
@@ -2025,6 +2092,15 @@ export default function EditorScreen() {
   }, [handleCsvExport]);
 
   useEffect(() => {
+    const onEditorCommand = (event: Event) => {
+      const id = event instanceof CustomEvent ? event.detail : null;
+      if (typeof id === "string") runEditorCommand(id);
+    };
+    window.addEventListener("coco:editor-command", onEditorCommand);
+    return () => window.removeEventListener("coco:editor-command", onEditorCommand);
+  }, [runEditorCommand]);
+
+  useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
@@ -2051,15 +2127,7 @@ export default function EditorScreen() {
         theme: defaultTheme,
         locale: LocaleType.EN_US,
         locales: {
-          [LocaleType.EN_US]: {
-            ...SheetsEnUS,
-            ...SheetsUIEnUS,
-            ...UIEnUS,
-            ...DocsUIEnUS,
-            ...SheetsFormulaUIEnUS,
-            ...FindReplaceEnUS,
-            ...SheetsFindReplaceEnUS,
-          },
+          [LocaleType.EN_US]: buildCocoUniverLocale(getLocale()),
         },
         // FR-011: bump the per-unit undo stack from Univer's default 20 to 100.
         override: undoRedoOverride,
@@ -2186,6 +2254,9 @@ export default function EditorScreen() {
     };
 
     const scheduleSnapshotSync = () => {
+      if (shouldSkipBackgroundSnapshotSync(snapshotRef.current)) {
+        return;
+      }
       if (typeof window.requestIdleCallback === "function") {
         idleCallback = window.requestIdleCallback(() => {
           idleCallback = null;
@@ -2405,76 +2476,7 @@ export default function EditorScreen() {
           </span>
         </div>
         <div className="editor-toolbar__right">
-          <button
-            type="button"
-            className="toolbar-btn toolbar-btn--primary"
-            onClick={save}
-            disabled={saveStatus === "saving"}
-            title="同じパスに上書き保存 (Ctrl+S)"
-          >
-            {t("toolbar.save")}
-          </button>
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={promptSaveAs}
-            disabled={saveStatus === "saving"}
-            title="保存先を選んで xlsx として保存 (Ctrl+Shift+S)"
-          >
-            {t("toolbar.saveAs")}
-          </button>
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={exportXlsx}
-            disabled={isExporting}
-            title="現在のブックを別名の xlsx として書き出す"
-          >
-            {t("toolbar.exportXlsx")}
-          </button>
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={handleCsvExport}
-            disabled={isExporting || editorToolDisabled}
-            title="シートを選んで CSV (UTF-8 BOM) として書き出す"
-          >
-            {isExporting ? "出力中..." : t("toolbar.exportCsv")}
-          </button>
-          {isCocoFile && (
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={() => setSnapshotsOpen(true)}
-              title="保存履歴（過去 5 世代）"
-              aria-label="スナップショット履歴"
-            >
-              {t("toolbar.history")}
-            </button>
-          )}
-          <span className="toolbar-divider" aria-hidden="true" />
-          {/* 編集系: 入力規則 / 条件付き書式 / 表示形式 / シート保護 */}
-          <div className="toolbar-group" role="group" aria-label="編集">
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={openDataValidationDialog}
-              disabled={editorToolDisabled}
-              title="データの入力規則を追加・編集"
-              aria-label="データの入力規則"
-            >
-              {t("toolbar.dataValidation")}
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={openCfDialog}
-              disabled={editorToolDisabled}
-              title="条件付き書式を編集 (Ctrl+F8)"
-              aria-label="条件付き書式"
-            >
-              {t("toolbar.conditionalFormat")}
-            </button>
+          <div className="toolbar-group" role="group" aria-label="クイック操作">
             <button
               type="button"
               className="toolbar-btn"
@@ -2543,94 +2545,14 @@ export default function EditorScreen() {
             <button
               type="button"
               className="toolbar-btn"
-              onClick={toggleSheetProtection}
+              onClick={openSortDialog}
               disabled={editorToolDisabled}
-              title={
-                activeSheetProtected
-                  ? "シート保護を解除（書き込み可に戻す）"
-                  : "シートを保護（読み取り専用にする）"
-              }
-              aria-label="シート保護"
-              aria-pressed={activeSheetProtected}
-              data-testid="sheet-protection-toggle"
+              title="選択範囲を並べ替え"
+              aria-label="並べ替え"
             >
-              {activeSheetProtected ? "🔓 解除" : "🔒 保護"}
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={openTabColorDialog}
-              disabled={editorToolDisabled}
-              title="シートタブの色を変更"
-              aria-label="シートタブの色"
-              data-testid="sheet-tab-color"
-            >
-              🎨 タブ色
+              {t("toolbar.sort")}
             </button>
           </div>
-          <span className="toolbar-divider" aria-hidden="true" />
-          {/* 挿入系: 名前付き範囲 / グラフ / 画像挿入 */}
-          <div className="toolbar-group" role="group" aria-label="挿入">
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={openNamedRangesDialog}
-              disabled={editorToolDisabled}
-              title="名前付き範囲を編集 (Ctrl+F3)"
-              aria-label="名前付き範囲"
-            >
-              {t("toolbar.namedRanges")}
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={openChartDialog}
-              disabled={editorToolDisabled}
-              title="選択範囲からグラフを挿入"
-              aria-label="グラフを挿入"
-            >
-              {t("toolbar.insertChart")}
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={openImageDialog}
-              disabled={editorToolDisabled}
-              title="画像をワークブックに挿入"
-              aria-label="画像挿入"
-            >
-              {t("toolbar.insertImage")}
-            </button>
-          </div>
-          <span className="toolbar-divider" aria-hidden="true" />
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={openSortDialog}
-            disabled={editorToolDisabled}
-            title="選択範囲を並べ替え"
-            aria-label="並べ替え"
-          >
-            {t("toolbar.sort")}
-          </button>
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={requestSettings}
-            title="設定（自動保存間隔など）"
-            aria-label="設定"
-          >
-            ⚙
-          </button>
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={requestHelp}
-            title="ヘルプとキーボードショートカット (F1)"
-            aria-label="ヘルプ"
-          >
-            ?
-          </button>
         </div>
       </div>
       {sheetPicker && (

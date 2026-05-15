@@ -7,6 +7,9 @@ export interface SnapshotStats {
   cellCount: number;
 }
 
+export const BACKGROUND_SNAPSHOT_SYNC_MAX_BYTES = 1_000_000;
+export const BACKGROUND_SNAPSHOT_SYNC_MAX_CELLS = 5_000;
+
 /**
  * Counts the number of non-empty cells across all sheets in a Univer snapshot.
  * Tolerates malformed input (returns zeros rather than throwing) so the status
@@ -51,4 +54,12 @@ export function formatSnapshotStats(stats: SnapshotStats): string | null {
   if (stats.sheetCount === 0 && stats.cellCount === 0) return null;
   const cellLabel = stats.cellCount.toLocaleString("ja-JP");
   return `${stats.sheetCount} シート · ${cellLabel} セル`;
+}
+
+export function shouldSkipBackgroundSnapshotSync(
+  snapshotJson: string | null | undefined,
+): boolean {
+  if (!snapshotJson) return false;
+  if (snapshotJson.length >= BACKGROUND_SNAPSHOT_SYNC_MAX_BYTES) return true;
+  return computeSnapshotStats(snapshotJson).cellCount >= BACKGROUND_SNAPSHOT_SYNC_MAX_CELLS;
 }

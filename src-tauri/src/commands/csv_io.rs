@@ -1110,14 +1110,14 @@ pub fn import_csv_core(
 
     // Read the whole file (CSV size capped at ~5M cells later anyway).
     let raw = std::fs::read(&path).map_err(|e| e.to_string())?;
-    let (mut text, encoding_name) = detect_and_decode(&raw, encoding_override.as_deref());
+    let (text, encoding_name) = detect_and_decode(&raw, encoding_override.as_deref());
 
     // #91: csv::Reader's default terminator handles CRLF and LF; bare CR is
     // not recognised, so a classic-Mac CSV becomes a single mega-record. Do
-    // a cheap pre-pass: if the text contains CRs that aren't followed by an
-    // LF, normalise them to LF so each "row" is preserved.
-    if text.contains('\r') && !text.contains("\r\n") {
-        text = text.replace('\r', "\n");
+    // a cheap pre-pass that owns the buffer only when normalisation is
+    // actually needed.
+    let text: std::borrow::Cow<'_, str> = if text.contains('\r') && !text.contains("\r\n") {
+        std::borrow::Cow::Owned(text.replace('\r', "\n"))
     } else if text.contains('\r') {
         // Mixed: keep CRLF intact, but convert lone CRs (rare but legal in
         // some Excel exports). Convert by mapping CR-not-followed-by-LF → LF.
@@ -1145,8 +1145,10 @@ pub fn import_csv_core(
             out.push_str(&text[i..i + ch_len]);
             i += ch_len;
         }
-        text = out;
-    }
+        std::borrow::Cow::Owned(out)
+    } else {
+        text
+    };
 
     let delimiter = infer_delimiter(&lower, &text);
     let mut rdr = csv::ReaderBuilder::new()

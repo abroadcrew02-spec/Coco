@@ -1,31 +1,23 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// EditorScreen alone is ~10MB unminified (mostly Univer). Splitting it into a
-// few smaller chunks lets the browser download them in parallel and lets
-// downstream code caches stay warm across releases when only one area
-// changes. Each Univer package family lives in its own chunk so a patch
-// release of @univerjs/sheets doesn't invalidate the core chunk.
-//
 // React and react-dom are pinned to their own "vendor-react" chunk because
 // Univer's UI plugins also import react-dom; without this, Rollup folds
 // react-dom into one of the lazy Univer chunks and the eagerly-loaded home
 // screen ends up missing its renderer.
+//
+// All @univerjs/* packages collapse into ONE chunk. Splitting them per family
+// (core / ui / sheets / misc) breaks Univer's internal circular imports:
+// chunks evaluate before peer chunks' exports are populated, so accesses like
+// `CommandType.OPERATION` from @univerjs/sheets hit `undefined` at startup
+// and the whole bundle crashes before React mounts. Keeping all Univer in one
+// chunk preserves the cycle inside a single module-evaluation pass.
 function univerChunks(id: string): string | undefined {
   if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) {
     return "vendor-react";
   }
   if (id.includes("node_modules/@univerjs/")) {
-    if (/@univerjs\/(core|design|engine-render|engine-formula)\//.test(id)) {
-      return "univer-core";
-    }
-    if (/@univerjs\/(ui|docs-ui|sheets-ui|sheets-formula-ui)\//.test(id)) {
-      return "univer-ui";
-    }
-    if (/@univerjs\/(sheets|docs|sheets-formula|facade)\//.test(id)) {
-      return "univer-sheets";
-    }
-    return "univer-misc";
+    return "univer";
   }
   if (id.includes("node_modules/rxjs/")) return "rxjs";
   return undefined;
@@ -70,7 +62,7 @@ export default defineConfig(async () => ({
     // requests them on demand.
     modulePreload: {
       resolveDependencies: (_filename, deps) =>
-        deps.filter((d) => !/(?:^|\/)(?:univer-|rxjs-|vue\.runtime)/.test(d)),
+        deps.filter((d) => !/(?:^|\/)(?:univer\b|rxjs-|vue\.runtime)/.test(d)),
     },
   },
 }));

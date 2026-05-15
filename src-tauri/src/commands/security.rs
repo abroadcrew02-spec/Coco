@@ -263,20 +263,53 @@ fn scan_worksheet_dimensions<R: std::io::Read + std::io::Seek>(
 
 /// Find the first `<dimension ref="A1:XFD1048576"/>` (or single-cell variant)
 /// and return its (max_row, max_col). Returns None if absent or unparseable.
+/// Accepts both double- and single-quoted attributes (valid XML).
 fn parse_dimension(window: &[u8]) -> Option<(u64, u64)> {
     let needle = b"<dimension";
     let start = window.windows(needle.len()).position(|w| w == needle)?;
     let tail = &window[start..];
-    let ref_key = b"ref=\"";
-    let ref_start = tail.windows(ref_key.len()).position(|w| w == ref_key)?;
-    let after_open = &tail[ref_start + ref_key.len()..];
-    let end = after_open.iter().position(|&b| b == b'"')?;
-    let value = std::str::from_utf8(&after_open[..end]).ok()?;
+    let value = extract_attr_value(tail, b"ref")?;
+    let value_str = std::str::from_utf8(value).ok()?;
 
     // Dimension is either a single cell ("A1") or a range ("A1:XFD1048576").
     // We want the bottom-right corner.
-    let (_, br) = value.split_once(':').unwrap_or((value, value));
+    let (_, br) = value_str.split_once(':').unwrap_or((value_str, value_str));
     parse_cell_ref(br)
+}
+
+/// Locate `attr="value"` or `attr='value'` (with optional whitespace) inside
+/// the given byte slice. Returns the raw value bytes.
+fn extract_attr_value<'a>(tail: &'a [u8], attr: &[u8]) -> Option<&'a [u8]> {
+    let mut i = 0;
+    while i + attr.len() < tail.len() {
+        if &tail[i..i + attr.len()] == attr {
+            let mut j = i + attr.len();
+            while j < tail.len() && (tail[j] == b' ' || tail[j] == b'\t' || tail[j] == b'\n') {
+                j += 1;
+            }
+            if j >= tail.len() || tail[j] != b'=' {
+                i += 1;
+                continue;
+            }
+            j += 1;
+            while j < tail.len() && (tail[j] == b' ' || tail[j] == b'\t' || tail[j] == b'\n') {
+                j += 1;
+            }
+            if j >= tail.len() {
+                return None;
+            }
+            let quote = tail[j];
+            if quote != b'"' && quote != b'\'' {
+                i += 1;
+                continue;
+            }
+            let start = j + 1;
+            let end = tail[start..].iter().position(|&b| b == quote)?;
+            return Some(&tail[start..start + end]);
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Parse a cell ref like "XFD1048576" or "A1" into (row, col). 1-based.
@@ -319,60 +352,82 @@ fn count_formula_tags(window: &[u8]) -> usize {
     count
 }
 
-/// Fallback row/col scan: find `<row r="N"` and `<c r="XX"` refs.
-/// Cheap byte search; we don't need to be perfect here because we only use
-/// this when `<dimension>` is absent.
+/// Fallback row/col scan: find `<row r="N"` / `<row r='N'` and `<c r="XX"` /
+/// `<c r='XX'` refs. Cheap byte search; we don't need to be perfect here
+/// because we only use this when `<dimension>` is absent.
 fn scan_row_col_refs(window: &[u8]) -> (u64, u64) {
     let mut max_row: u64 = 0;
     let mut max_col: u64 = 0;
 
-    let row_marker = b"<row r=\"";
-    let mut i = 0;
-    while let Some(pos) = window[i..]
-        .windows(row_marker.len())
-        .position(|w| w == row_marker)
-    {
-        let start = i + pos + row_marker.len();
-        let end = window[start..]
-            .iter()
-            .position(|&b| b == b'"')
-            .map(|p| start + p)
-            .unwrap_or(start);
-        if let Ok(s) = std::str::from_utf8(&window[start..end]) {
-            if let Ok(n) = s.parse::<u64>() {
-                if n > max_row {
-                    max_row = n;
+    // `<row r=` (quote-agnostic). After the `=`, allow optional whitespace before the quote.
+    for prefix in [b"<row r=" as &[u8], b"<row r =" as &[u8]] {
+        let mut i = 0;
+        while let Some(pos) = window[i..]
+            .windows(prefix.len())
+            .position(|w| w == prefix)
+        {
+            let mut j = i + pos + prefix.len();
+            while j < window.len() && (window[j] == b' ' || window[j] == b'\t') {
+                j += 1;
+            }
+            if j >= window.len() || (window[j] != b'"' && window[j] != b'\'') {
+                i = i + pos + prefix.len();
+                continue;
+            }
+            let quote = window[j];
+            let start = j + 1;
+            let end = window[start..]
+                .iter()
+                .position(|&b| b == quote)
+                .map(|p| start + p)
+                .unwrap_or(start);
+            if let Ok(s) = std::str::from_utf8(&window[start..end]) {
+                if let Ok(n) = s.parse::<u64>() {
+                    if n > max_row {
+                        max_row = n;
+                    }
                 }
             }
-        }
-        i = end.max(i + pos + row_marker.len());
-        if i >= window.len() {
-            break;
+            i = end.max(i + pos + prefix.len());
+            if i >= window.len() {
+                break;
+            }
         }
     }
 
-    let cell_marker = b"<c r=\"";
-    let mut i = 0;
-    while let Some(pos) = window[i..]
-        .windows(cell_marker.len())
-        .position(|w| w == cell_marker)
-    {
-        let start = i + pos + cell_marker.len();
-        let end = window[start..]
-            .iter()
-            .position(|&b| b == b'"')
-            .map(|p| start + p)
-            .unwrap_or(start);
-        if let Ok(s) = std::str::from_utf8(&window[start..end]) {
-            if let Some((_, col)) = parse_cell_ref(s) {
-                if col > max_col {
-                    max_col = col;
+    // `<c r=` (quote-agnostic).
+    for prefix in [b"<c r=" as &[u8], b"<c r =" as &[u8]] {
+        let mut i = 0;
+        while let Some(pos) = window[i..]
+            .windows(prefix.len())
+            .position(|w| w == prefix)
+        {
+            let mut j = i + pos + prefix.len();
+            while j < window.len() && (window[j] == b' ' || window[j] == b'\t') {
+                j += 1;
+            }
+            if j >= window.len() || (window[j] != b'"' && window[j] != b'\'') {
+                i = i + pos + prefix.len();
+                continue;
+            }
+            let quote = window[j];
+            let start = j + 1;
+            let end = window[start..]
+                .iter()
+                .position(|&b| b == quote)
+                .map(|p| start + p)
+                .unwrap_or(start);
+            if let Ok(s) = std::str::from_utf8(&window[start..end]) {
+                if let Some((_, col)) = parse_cell_ref(s) {
+                    if col > max_col {
+                        max_col = col;
+                    }
                 }
             }
-        }
-        i = end.max(i + pos + cell_marker.len());
-        if i >= window.len() {
-            break;
+            i = end.max(i + pos + prefix.len());
+            if i >= window.len() {
+                break;
+            }
         }
     }
 

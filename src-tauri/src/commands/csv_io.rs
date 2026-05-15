@@ -1014,8 +1014,10 @@ fn infer_delimiter(path_lower: &str, text: &str) -> u8 {
         return b'\t';
     }
     let first_line = text.lines().find(|l| !l.is_empty()).unwrap_or("");
-    let commas = first_line.matches(',').count();
-    let tabs = first_line.matches('\t').count();
+    // #53: RFC4180 quoted fields can contain tabs/commas that are not
+    // delimiters. Count only the unquoted ones so a quoted tab can't flip
+    // the inference to TSV.
+    let (commas, tabs) = count_unquoted_separators(first_line);
     // Tabs win only when they're a clear majority — otherwise stick with the
     // CSV-standard comma so legit comma data isn't reinterpreted.
     if tabs > commas && tabs >= 2 {
@@ -1023,6 +1025,36 @@ fn infer_delimiter(path_lower: &str, text: &str) -> u8 {
     } else {
         b','
     }
+}
+
+/// Walk the line once, tracking whether we're inside a double-quoted field
+/// per RFC4180 (with doubled `""` as an escaped quote). Only separators
+/// observed outside quotes count toward the inference tally.
+fn count_unquoted_separators(line: &str) -> (usize, usize) {
+    let mut commas = 0;
+    let mut tabs = 0;
+    let mut in_quotes = false;
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'"' {
+            if in_quotes && i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                // Escaped quote inside a quoted field — skip the pair.
+                i += 2;
+                continue;
+            }
+            in_quotes = !in_quotes;
+        } else if !in_quotes {
+            if b == b',' {
+                commas += 1;
+            } else if b == b'\t' {
+                tabs += 1;
+            }
+        }
+        i += 1;
+    }
+    (commas, tabs)
 }
 
 /// Pure-Rust CSV import. `encoding_override` is None for auto-detect.

@@ -1383,12 +1383,12 @@ describe("audit item 14: concurrent open race", () => {
   );
 });
 
-describe("audit item 15: autoSave swallows invoke rejection", () => {
-  it("keeps saveStatus stable (does NOT flip to save_failed) on autosave invoke rejection", async () => {
-    // Intentional design: autosave failures must not disrupt the user;
-    // explicit Ctrl+S surfaces real errors. The empty `catch {}` block
-    // in autoSave is the pin. This test locks that contract so a future
-    // refactor doesn't accidentally start propagating autosave errors.
+describe("audit item 15: autoSave surfaces invoke rejection (issue #42)", () => {
+  it("flips saveStatus to save_failed on autosave invoke rejection so the user sees the failure", async () => {
+    // Issue #42: previously the empty catch{} swallowed the rejection silently,
+    // leaving the user with a stale "unsaved" indicator that hid the fact that
+    // autosave was broken (e.g. disk full). The new contract is to flip to
+    // save_failed + surface a friendly error so the UI can warn.
     invokeMock.mockRejectedValue("disk full");
     useWorkbookStore.setState({
       currentHandle: makeHandle({ path: "/tmp/data.coco" }),
@@ -1398,12 +1398,11 @@ describe("audit item 15: autoSave swallows invoke rejection", () => {
     });
     await useWorkbookStore.getState().autoSave();
     const s = useWorkbookStore.getState();
-    expect(s.saveStatus).toBe("unsaved");
-    expect(s.saveStatus).not.toBe("save_failed");
-    expect(s.lastError).toBeNull();
+    expect(s.saveStatus).toBe("save_failed");
+    expect(s.lastError).not.toBeNull();
   });
 
-  it("keeps saveStatus stable when temp autosave (xlsx path) rejects", async () => {
+  it("flips saveStatus to save_failed when temp autosave (xlsx path) rejects", async () => {
     invokeMock.mockRejectedValue("EACCES /app_data/recovery");
     useWorkbookStore.setState({
       currentHandle: makeHandle({ path: "/tmp/data.xlsx" }),
@@ -1413,8 +1412,8 @@ describe("audit item 15: autoSave swallows invoke rejection", () => {
     });
     await useWorkbookStore.getState().autoSave();
     const s = useWorkbookStore.getState();
-    expect(s.saveStatus).toBe("unsaved");
-    expect(s.lastError).toBeNull();
+    expect(s.saveStatus).toBe("save_failed");
+    expect(s.lastError).not.toBeNull();
   });
 });
 

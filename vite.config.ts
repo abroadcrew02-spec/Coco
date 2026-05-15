@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig, type PluginOption } from "vite";
 import react from "@vitejs/plugin-react";
 
 // React and react-dom are pinned to their own "vendor-react" chunk because
@@ -23,8 +23,8 @@ function univerChunks(id: string): string | undefined {
   return undefined;
 }
 
-export default defineConfig(async () => ({
-  plugins: [react()],
+export default defineConfig(() => ({
+  plugins: [react() as PluginOption],
   clearScreen: false,
   // Worktrees under .claude/worktrees/ hold in-flight agent branches.
   // Without this exclude, Vitest discovers their test files too and runs
@@ -47,7 +47,7 @@ export default defineConfig(async () => ({
   envPrefix: ["VITE_", "TAURI_ENV_*"],
   build: {
     target: process.env.TAURI_ENV_PLATFORM == "windows" ? "chrome105" : "safari13",
-    minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,
+    minify: (!process.env.TAURI_ENV_DEBUG ? "esbuild" : false) as "esbuild" | false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
     rollupOptions: {
       output: {
@@ -61,7 +61,7 @@ export default defineConfig(async () => ({
     // EditorScreen actually mounts; Vite's runtime __vitePreload helper still
     // requests them on demand.
     modulePreload: {
-      resolveDependencies: (_filename, deps) =>
+      resolveDependencies: (_filename: string, deps: string[]) =>
         deps.filter((d) => !/(?:^|\/)(?:univer\b|rxjs-|vue\.runtime)/.test(d)),
     },
   },

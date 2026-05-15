@@ -6347,14 +6347,34 @@ pub(crate) fn inject_preserved_parts(
 
         // Workbook.xml / workbook.xml.rels rewrites for external-link
         // preservation. rust_xlsxwriter doesn't know about `<externalReferences>`
-        // or the externalLink rels, so we splice them back in.
+        // or the externalLink rels, so we splice them back in. #55: if a
+        // preserved rId collides with rust_xlsxwriter's freshly-emitted ones,
+        // we must remap to a fresh id and rewrite both the rels file and the
+        // `<externalReference r:id="…">` references in workbook.xml so they
+        // continue to point at the same entry.
+        let mut wb_rels_xml_for_resolve = String::new();
+        if rewrite_workbook_xml || rewrite_workbook_rels {
+            if let Ok(mut e) = src.by_name("xl/_rels/workbook.xml.rels") {
+                let _ = std::io::Read::read_to_string(&mut e, &mut wb_rels_xml_for_resolve);
+            }
+        }
+        let rid_remap: HashMap<String, String> = if rewrite_workbook_rels {
+            resolve_ext_link_rid_remap(&wb_rels_xml_for_resolve, &ext_link_rels)
+        } else {
+            HashMap::new()
+        };
         if rewrite_workbook_xml {
             let mut wb_xml = String::new();
             if let Ok(mut e) = src.by_name("xl/workbook.xml") {
                 let _ = std::io::Read::read_to_string(&mut e, &mut wb_xml);
             }
             let new_wb_xml = if let Some(block) = &ext_refs_block {
-                splice_external_references(&wb_xml, block)
+                let remapped_block = if rid_remap.is_empty() {
+                    block.clone()
+                } else {
+                    remap_ext_reference_rids(block, &rid_remap)
+                };
+                splice_external_references(&wb_xml, &remapped_block)
             } else {
                 wb_xml
             };
@@ -6364,11 +6384,8 @@ pub(crate) fn inject_preserved_parts(
                 .map_err(|e| e.to_string())?;
         }
         if rewrite_workbook_rels {
-            let mut wb_rels_xml = String::new();
-            if let Ok(mut e) = src.by_name("xl/_rels/workbook.xml.rels") {
-                let _ = std::io::Read::read_to_string(&mut e, &mut wb_rels_xml);
-            }
-            let new_wb_rels = append_workbook_rels(&wb_rels_xml, &ext_link_rels);
+            let new_wb_rels =
+                append_workbook_rels(&wb_rels_xml_for_resolve, &ext_link_rels, &rid_remap);
             out.start_file("xl/_rels/workbook.xml.rels", opts)
                 .map_err(|e| e.to_string())?;
             std::io::Write::write_all(&mut out, new_wb_rels.as_bytes())
@@ -6494,20 +6511,27 @@ fn splice_external_references(new_wb: &str, block: &str) -> String {
 /// Append preserved externalLink `<Relationship>` entries to the workbook
 /// rels file emitted by rust_xlsxwriter. Existing rels (sheets, styles,
 /// shared strings, etc.) are kept; we just splice the new ones before
-/// `</Relationships>`. If an rId already collides with an existing one we
-/// drop the new one — collision is unlikely since rust_xlsxwriter uses a
-/// monotonic counter and externalLink rIds typically come at the end.
-fn append_workbook_rels(new_rels: &str, ext_links: &[(String, String, String)]) -> String {
+/// `</Relationships>`. Colliding rIds use the remap produced by
+/// `resolve_ext_link_rid_remap` so the rels entry and the matching
+/// `<externalReference>` block in workbook.xml agree on the new id.
+fn append_workbook_rels(
+    new_rels: &str,
+    ext_links: &[(String, String, String)],
+    rid_remap: &HashMap<String, String>,
+) -> String {
     if ext_links.is_empty() {
         return new_rels.to_string();
     }
     let mut adds = String::new();
     for (rid, target, ty) in ext_links {
-        if new_rels.contains(&format!("Id=\"{rid}\"")) {
+        let effective_rid = rid_remap.get(rid).cloned().unwrap_or_else(|| rid.clone());
+        if new_rels.contains(&format!("Id=\"{effective_rid}\"")) {
+            // Should not happen after remap, but be defensive against weird
+            // input where a remap target was already used.
             continue;
         }
         adds.push_str(&format!(
-            "<Relationship Id=\"{rid}\" Type=\"{ty}\" Target=\"{target}\"/>"
+            "<Relationship Id=\"{effective_rid}\" Type=\"{ty}\" Target=\"{target}\"/>"
         ));
     }
     if adds.is_empty() {
@@ -6522,4 +6546,95 @@ fn append_workbook_rels(new_rels: &str, ext_links: &[(String, String, String)]) 
     } else {
         new_rels.to_string()
     }
+}
+
+/// Build a (old_rid → new_rid) remap for any preserved externalLink rId that
+/// would collide with the rels file rust_xlsxwriter just emitted. Picks fresh
+/// `rId<N>` values starting past the largest existing N so collisions in the
+/// remap target are avoided. Non-colliding rIds map to themselves implicitly
+/// (callers fall back to the input rId when the map has no entry).
+fn resolve_ext_link_rid_remap(
+    new_rels: &str,
+    ext_links: &[(String, String, String)],
+) -> HashMap<String, String> {
+    let mut remap = HashMap::new();
+    if ext_links.is_empty() {
+        return remap;
+    }
+
+    // Highest existing `rId<N>` in the rels file.
+    let mut max_n: u64 = 0;
+    let mut i = 0;
+    let bytes = new_rels.as_bytes();
+    let needle = b"Id=\"rId";
+    while i + needle.len() < bytes.len() {
+        if &bytes[i..i + needle.len()] == needle {
+            let start = i + needle.len();
+            let mut j = start;
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j > start {
+                if let Ok(s) = std::str::from_utf8(&bytes[start..j]) {
+                    if let Ok(n) = s.parse::<u64>() {
+                        if n > max_n {
+                            max_n = n;
+                        }
+                    }
+                }
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut next_n = max_n + 1;
+    for (rid, _target, _ty) in ext_links {
+        let collides = new_rels.contains(&format!("Id=\"{rid}\""));
+        if !collides {
+            continue;
+        }
+        // Find a fresh rId<N> not used by the rels file or by an earlier remap.
+        let new_rid = loop {
+            let candidate = format!("rId{next_n}");
+            next_n += 1;
+            if !new_rels.contains(&format!("Id=\"{candidate}\"")) && !used.contains(&candidate) {
+                break candidate;
+            }
+        };
+        used.insert(new_rid.clone());
+        remap.insert(rid.clone(), new_rid);
+    }
+    remap
+}
+
+/// Rewrite each `<externalReference r:id="OLD"/>` in `block` so that OLD is
+/// replaced with its remap target when one exists. Walks the block once and
+/// emits a fresh string; preserves attribute order and whitespace.
+fn remap_ext_reference_rids(block: &str, rid_remap: &HashMap<String, String>) -> String {
+    if rid_remap.is_empty() {
+        return block.to_string();
+    }
+    let mut out = String::with_capacity(block.len());
+    let mut rest = block;
+    let attr_marker = "r:id=\"";
+    while let Some(idx) = rest.find(attr_marker) {
+        out.push_str(&rest[..idx + attr_marker.len()]);
+        let after = &rest[idx + attr_marker.len()..];
+        if let Some(end) = after.find('"') {
+            let old_rid = &after[..end];
+            let new_rid = rid_remap.get(old_rid).cloned().unwrap_or_else(|| old_rid.to_string());
+            out.push_str(&new_rid);
+            out.push('"');
+            rest = &after[end + 1..];
+        } else {
+            // Malformed input — bail out and emit the rest verbatim.
+            out.push_str(after);
+            return out;
+        }
+    }
+    out.push_str(rest);
+    out
 }

@@ -4,6 +4,7 @@ import {
   type SnapshotMeta,
   type DiagnosticInfo,
 } from "../store/useWorkbookStore";
+import { confirmDiscardIfUnsaved } from "../store/dirtyGuard";
 import { recoveryReasonLabel } from "../store/recoveryLabels";
 import { timeAgoJa } from "./timeAgo";
 import { t } from "../i18n/locale";
@@ -64,6 +65,11 @@ export default function SnapshotHistoryDialog({ onClose }: Props) {
   }, [listSnapshots, workbookDiagnosticInfo]);
 
   const handleOpen = async (snapshotId: number) => {
+    // #49: opening a past snapshot replaces currentHandle / currentSnapshotJson,
+    // which would silently discard the user's unsaved edits. Route the request
+    // through the shared dirty guard so it matches every other "leave the
+    // current workbook" entry point.
+    if (!confirmDiscardIfUnsaved()) return;
     await openSnapshot(snapshotId);
     onClose();
   };

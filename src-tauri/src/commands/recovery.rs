@@ -2,15 +2,41 @@ use tauri::Manager;
 
 use crate::commands::workbook::{SaveResult, MAX_SNAPSHOTS_PER_WORKBOOK};
 
+fn validate_workbook_id(workbook_id: &str) -> Result<(), String> {
+    if workbook_id.is_empty() || workbook_id.len() > 128 {
+        return Err("invalid workbook_id length".to_string());
+    }
+    if !workbook_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("invalid workbook_id characters".to_string());
+    }
+    Ok(())
+}
+
 pub fn autosave_temp_core(
     data_dir: &std::path::Path,
     workbook_id: &str,
     snapshot_json: &str,
 ) -> Result<SaveResult, String> {
+    validate_workbook_id(workbook_id)?;
+
     let recovery_dir = data_dir.join("recovery");
     std::fs::create_dir_all(&recovery_dir).map_err(|e| e.to_string())?;
 
     let temp_path = recovery_dir.join(format!("{}.coco", workbook_id));
+
+    // Defense-in-depth: ensure the resulting path is still inside recovery_dir.
+    let canonical_recovery = std::fs::canonicalize(&recovery_dir).map_err(|e| e.to_string())?;
+    let canonical_parent = temp_path
+        .parent()
+        .ok_or_else(|| "invalid recovery path".to_string())
+        .and_then(|p| std::fs::canonicalize(p).map_err(|e| e.to_string()))?;
+    if canonical_parent != canonical_recovery {
+        return Err("workbook_id escapes recovery directory".to_string());
+    }
+
     let temp_path_str = temp_path.to_string_lossy().to_string();
 
     let conn = rusqlite::Connection::open(&temp_path).map_err(|e| e.to_string())?;

@@ -1227,19 +1227,21 @@ export default function EditorScreen() {
   };
 
   // Apply the new image by mutating the snapshot's `_preservedParts`.
+  // Returns null on success, or a user-visible error string on rejection
+  // (#50: surface failures back to the dialog instead of silently closing it).
   const applyImage = useCallback(
-    (value: ImageFormValue) => {
-      if (!imageDialog) return;
+    (value: ImageFormValue): string | null => {
+      if (!imageDialog) return "ダイアログの状態が無効です";
       const fUniver = fUniverRef.current;
-      if (!fUniver) return;
+      if (!fUniver) return "ワークブックがまだ準備できていません";
       const workbook = fUniver.getActiveWorkbook();
-      if (!workbook) return;
+      if (!workbook) return "アクティブなワークブックがありません";
       const snapshot = workbook.save() as unknown as Record<string, unknown>;
       const sheetOrder = (snapshot.sheetOrder as string[] | undefined) ?? [];
       const sheetIdx = sheetOrder.indexOf(imageDialog.sheetId);
-      if (sheetIdx < 0) return;
+      if (sheetIdx < 0) return "対象シートが見つかりません";
       const pos = a1ToColRow(value.cell);
-      if (!pos) return;
+      if (!pos) return "アンカーセルの解析に失敗しました";
 
       type PreservedPart = string;
       type SheetRef = {
@@ -1259,8 +1261,9 @@ export default function EditorScreen() {
 
       const existing = sheetRefs[sheetIdx];
       if (existing && existing.drawingRid) {
-        console.warn("InsertImage: sheet already has a drawing; skipping");
-        return;
+        // #50: previously silently logged + returned. Surface the limitation
+        // so the user understands why their insert was rejected.
+        return "このシートには既に図形/画像があります。現状は1シートに1つまで挿入できます。";
       }
 
       const usedImageNums = new Set<number>();
@@ -1344,6 +1347,7 @@ export default function EditorScreen() {
       };
 
       updateSnapshot(JSON.stringify(snapshot));
+      return null;
     },
     [imageDialog, updateSnapshot],
   );

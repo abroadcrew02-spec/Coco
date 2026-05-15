@@ -86,6 +86,34 @@ fn open_workbook_db(path: &str) -> Result<Connection, String> {
     Ok(conn)
 }
 
+/// Read-only Coco DB open: rejects files that lack Coco's core tables so we
+/// never write Coco schema onto unrelated SQLite databases.
+fn open_workbook_db_for_read(path: &str) -> Result<Connection, String> {
+    let conn = Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(|e| e.to_string())?;
+    let has_meta: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workbook_meta'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    let has_snapshots: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workbook_snapshots'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if !has_meta || !has_snapshots {
+        return Err("Not a Coco workbook (.coco)".to_string());
+    }
+    Ok(conn)
+}
+
 pub fn bak_path(target: &Path, n: u32) -> PathBuf {
     // Append ".bak.N" to the full target path so multi-dot names like
     // "data.archive.coco" become "data.archive.coco.bak.1" rather than
@@ -333,7 +361,7 @@ pub fn open_coco_core(
     if !std::path::Path::new(path).exists() {
         return Err(format!("File not found: {path}"));
     }
-    let conn = open_workbook_db(path)?;
+    let conn = open_workbook_db_for_read(path)?;
 
     let result: Result<(String, String), rusqlite::Error> = conn.query_row(
         "SELECT workbook_id, snapshot_json FROM workbook_snapshots ORDER BY snapshot_id DESC LIMIT 1",
@@ -602,7 +630,7 @@ pub fn list_snapshots_core(path: &str) -> Result<Vec<SnapshotMeta>, String> {
     if !std::path::Path::new(path).exists() {
         return Err(format!("File not found: {path}"));
     }
-    let conn = open_workbook_db(path)?;
+    let conn = open_workbook_db_for_read(path)?;
     let mut stmt = conn
         .prepare(
             "SELECT snapshot_id, created_at, reason FROM workbook_snapshots ORDER BY snapshot_id DESC",
@@ -640,7 +668,7 @@ pub fn open_snapshot_core(path: &str, snapshot_id: i64) -> Result<OpenWorkbookRe
     if !std::path::Path::new(path).exists() {
         return Err(format!("File not found: {path}"));
     }
-    let conn = open_workbook_db(path)?;
+    let conn = open_workbook_db_for_read(path)?;
     let row: Result<(String, String), rusqlite::Error> = conn.query_row(
         "SELECT workbook_id, snapshot_json FROM workbook_snapshots WHERE snapshot_id = ?1",
         rusqlite::params![snapshot_id],

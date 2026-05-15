@@ -8,11 +8,15 @@ import InsertImageDialog, {
 } from "./InsertImageDialog";
 
 let onClose: ReturnType<typeof vi.fn<() => void>>;
-let onApply: ReturnType<typeof vi.fn<(value: ImageFormValue) => void>>;
+let onApply: ReturnType<typeof vi.fn<(value: ImageFormValue) => string | null>>;
 
 beforeEach(() => {
   onClose = vi.fn<() => void>();
-  onApply = vi.fn<(value: ImageFormValue) => void>();
+  // Default success: onApply returns null so the dialog closes after submit.
+  // Tests that want the rejection path can override with mockReturnValue("…").
+  onApply = vi
+    .fn<(value: ImageFormValue) => string | null>()
+    .mockReturnValue(null);
 });
 
 afterEach(() => cleanup());

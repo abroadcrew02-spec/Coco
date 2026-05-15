@@ -139,23 +139,16 @@ export default function HelpDialog({ onClose }: Props) {
           <section className="help-section">
             <h3>対応ファイル形式</h3>
             <ul className="help-list">
-              <li><b>.xlsx</b> — Excel ワークブック（既定の保存形式）</li>
+              <li><b>.xlsx</b> — Excel ワークブック（作業形式）</li>
               <li><b>.xlsm</b> — マクロ付き Excel ワークブック（読み込みのみ、マクロは破棄）</li>
               <li>
                 <b>.csv / .tsv</b> — UTF-8 BOM / UTF-8 / Shift_JIS を入出力で対応。
                 インポートは文字コード・区切り文字を自動検出、エクスポートの
                 既定は設定から変更可能
               </li>
-              <li><b>.coco</b> — SQLite ベース、原子的保存・履歴対応（オプション）</li>
             </ul>
-          </section>
-          <section className="help-section">
-            <h3>.coco のバージョン履歴</h3>
             <p className="help-about">
-              .coco ファイルでは過去 5 回までの保存ポイントが保持されます。
-              エディタ画面の「履歴」ボタンから一覧を開き、過去のバージョンを
-              閲覧できます（編集後の Ctrl+S は別名保存となり、現在のファイルは
-              上書きされません）。
+              編集中の自動保存とクラッシュ後の復元はバックグラウンドで動作し、ユーザー操作は不要です。
             </p>
           </section>
           <section className="help-section">

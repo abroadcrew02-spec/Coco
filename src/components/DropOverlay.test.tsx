@@ -12,7 +12,8 @@ describe("DropOverlay", () => {
     expect(container.textContent).toContain(".xlsx");
     expect(container.textContent).toContain(".xlsm");
     expect(container.textContent).toContain(".csv");
-    expect(container.textContent).toContain(".coco");
+    // .coco is no longer advertised on user-visible surfaces (AD-02).
+    expect(container.textContent).not.toContain(".coco");
   });
 
   it("is decorative (role=presentation, aria-hidden=true) — should not steal focus from a screenreader", () => {

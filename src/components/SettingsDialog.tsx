@@ -107,7 +107,7 @@ export default function SettingsDialog({ onClose }: Props) {
               <h3>自動保存の頻度</h3>
             </summary>
             <p className="settings-hint">
-              編集後この間隔で自動保存します。`.coco` は同一ファイルへ、xlsx は背後の一時 `.coco` へ書き出します（ユーザーの xlsx は明示保存時のみ更新）。
+              編集後この間隔で復元用スナップショットを書き出します。ユーザーの xlsx ファイルは明示保存（Ctrl+S）時のみ更新されます。
             </p>
             <div className="settings-radio-group">
               {INTERVAL_OPTIONS.map((opt) => (

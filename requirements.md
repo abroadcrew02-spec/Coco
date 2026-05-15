@@ -6,6 +6,8 @@
 **最終更新日**: 2026-05-12  
 **ステータス**: Phase 0 開発着手可 / Phase 1 はゲート通過後に着手
 
+> **2026-05-15 revision note**: `.coco` is no longer offered as a user-pickable save format (AD-02). xlsx is canonical; SQLite remains internally for autosave / recovery snapshots only. See `feedback_format_policy` memory and `CHANGELOG.md` (Unreleased) for context. Body of this document is intentionally left unchanged pending a full re-spec.
+
 ---
 
 ## 0. 本書の目的と開発着手条件

@@ -79,9 +79,8 @@ export function useGlobalShortcuts() {
         const selected = await openFileDialog({
           multiple: false,
           filters: [
-            { name: "Excel / Coco / CSV / TSV", extensions: ["xlsx", "xlsm", "coco", "csv", "tsv"] },
+            { name: "Excel / CSV / TSV", extensions: ["xlsx", "xlsm", "csv", "tsv"] },
             { name: "Excel Files", extensions: ["xlsx", "xlsm"] },
-            { name: "Coco Files", extensions: ["coco"] },
             { name: "CSV / TSV Files", extensions: ["csv", "tsv"] },
           ],
         });

@@ -265,14 +265,13 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     const { currentHandle, currentSnapshotJson, saveAs } = get();
     if (!currentHandle) return;
 
-    // New workbook → prompt for save target (xlsx default, .coco optional).
+    // New workbook → prompt for save target (xlsx only — see AD-02).
     if (!currentHandle.path) {
       const chosen = await saveDialog({
         title: "名前を付けて保存",
         defaultPath: "Untitled.xlsx",
         filters: [
           { name: "Excel Workbook", extensions: ["xlsx"] },
-          { name: "Coco (SQLite)", extensions: ["coco"] },
         ],
       });
       if (!chosen) {
@@ -299,7 +298,8 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         });
         return;
       }
-      // .coco (or unknown extension treated as .coco for backwards compat)
+      // Legacy .coco path (already-saved file). Treat unknown extensions as
+      // .coco for back-compat; user can no longer select .coco from Save As.
       const result = await invoke<SaveResult>("workbook_save", {
         workbookId: currentHandle.workbookId,
         path: currentHandle.path,
@@ -367,18 +367,17 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   promptSaveAs: async () => {
     const { currentHandle, saveAs } = get();
     if (!currentHandle) return;
-    const lower = (currentHandle.path ?? "").toLowerCase();
-    const defaultExt = lower.endsWith(".coco") ? "coco" : "xlsx";
+    // Save As always defaults to xlsx — .coco is no longer user-pickable (AD-02).
+    // Legacy .coco files keep working through `save` / `autoSave` once opened.
     const baseName = currentHandle.path
-      ? currentHandle.path.replace(/\.[^./\\]*$/, "") + `.${defaultExt}`
-      : `Untitled.${defaultExt}`;
-    const fileName = baseName.split(/[\\/]/).pop() ?? `Untitled.${defaultExt}`;
+      ? currentHandle.path.replace(/\.[^./\\]*$/, "") + ".xlsx"
+      : "Untitled.xlsx";
+    const fileName = baseName.split(/[\\/]/).pop() ?? "Untitled.xlsx";
     const chosen = await saveDialog({
       title: "名前を付けて保存",
       defaultPath: fileName,
       filters: [
         { name: "Excel Workbook", extensions: ["xlsx"] },
-        { name: "Coco (SQLite)", extensions: ["coco"] },
       ],
     });
     if (!chosen) return;

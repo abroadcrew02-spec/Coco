@@ -1310,10 +1310,10 @@ const WORKSHEET_SCAN_OVERLAP: usize = 32;
 ///   emit a conservative warning).
 /// - Bubbles up real I/O errors instead of masking them as "marker not found".
 ///
-/// Known false-positive limitation: matches the literal byte sequence
-/// anywhere, including inside XML comments. Coco's xlsx writer never emits
-/// comments around `<conditionalFormatting`/`<dataValidations`, so this only
-/// affects hand-authored or third-party files. We accept the over-warning.
+/// Scans for the marker while skipping over `<!-- ... -->` comment regions so
+/// a literal `<conditionalFormatting` sitting inside an XML comment doesn't
+/// produce a false-positive warning (see `medium-cf-comment-falsepositive`
+/// in docs/TODOS.md).
 fn worksheet_contains_marker<R: std::io::Read + std::io::Seek>(
     archive: &mut zip::ZipArchive<R>,
     idx: usize,
@@ -1327,9 +1327,16 @@ fn worksheet_contains_marker<R: std::io::Read + std::io::Seek>(
     let mut entry = archive.by_index(idx).map_err(|e| e.to_string())?;
     let mut buf = [0u8; WORKSHEET_SCAN_CHUNK];
     // The overlap holds the tail bytes of the previous chunk so we can detect
-    // markers that span the chunk boundary. We search the concatenation of
-    // (overlap || current chunk) each iteration.
+    // markers (and comment delimiters) that span the chunk boundary. We always
+    // walk the joined `(overlap || new)` window from its beginning so the
+    // byte-level state machine cleanly handles a `<!--` that opens in chunk N
+    // and closes in chunk N+1.
     let mut overlap: Vec<u8> = Vec::with_capacity(WORKSHEET_SCAN_OVERLAP);
+    // Mirror of `in_comment` AT THE START of `overlap` (i.e., the state to
+    // restore when we re-walk the overlap on the next iteration). Updating
+    // this in lock-step with the overlap tail keeps the walker idempotent
+    // over the overlapped bytes.
+    let mut in_comment_at_overlap_start = false;
     let mut total_read: u64 = 0;
     let mut cap_hit = false;
 
@@ -1342,19 +1349,32 @@ fn worksheet_contains_marker<R: std::io::Read + std::io::Seek>(
 
         // Build a scratch view of (overlap || new bytes) and search it whole.
         // Allocation is bounded by 64KiB + 32B per iteration.
-        let mut window: Vec<u8> = Vec::with_capacity(overlap.len() + n);
+        let prev_overlap_len = overlap.len();
+        let mut window: Vec<u8> = Vec::with_capacity(prev_overlap_len + n);
         window.extend_from_slice(&overlap);
         window.extend_from_slice(&buf[..n]);
 
-        if memchr_find(&window, marker) {
+        let mut in_comment = in_comment_at_overlap_start;
+        // Walking the prefix (the previous overlap) is what makes boundary-
+        // straddling markers detectable; the in-comment state at the START of
+        // the overlap is what we restore from, so the transitions inside the
+        // overlap reproduce the exact same outcome as last time.
+        if find_marker_outside_comments(&window, 0, marker, &mut in_comment) {
             return Ok((true, false));
         }
 
-        // Preserve the tail of `window` as the next iteration's overlap so a
-        // marker that straddles the next chunk boundary is still detected.
+        // Compute the in_comment state at the START of the next overlap, i.e.
+        // at position `window.len() - keep` in the window we just walked.
         let keep = window.len().min(WORKSHEET_SCAN_OVERLAP);
+        let next_overlap_start = window.len() - keep;
+        let mut probe = in_comment_at_overlap_start;
+        // Re-walk just up to next_overlap_start to recover the in_comment
+        // state at that position. (Cheap: `next_overlap_start <= 64KiB`.)
+        find_marker_outside_comments(&window[..next_overlap_start], 0, &[], &mut probe);
+        in_comment_at_overlap_start = probe;
+
         overlap.clear();
-        overlap.extend_from_slice(&window[window.len() - keep..]);
+        overlap.extend_from_slice(&window[next_overlap_start..]);
 
         if total_read >= WORKSHEET_SCAN_CAP_BYTES {
             cap_hit = true;
@@ -1365,14 +1385,46 @@ fn worksheet_contains_marker<R: std::io::Read + std::io::Seek>(
     Ok((false, cap_hit))
 }
 
-/// Substring search via libstd's window iteration. Pulled out to a free
-/// function so callers read cleanly; ripgrep-style `memchr` is overkill for
-/// the short ASCII markers we use.
-fn memchr_find(haystack: &[u8], needle: &[u8]) -> bool {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return false;
+/// Walk `haystack[start..]`, tracking `<!-- ... -->` regions across calls via
+/// `in_comment`, and report whether `marker` appears outside any comment.
+/// Pass an empty `marker` to use this purely as a state-update walker (no
+/// match attempts). Comments inside CDATA are rare enough in worksheet XML
+/// that we don't special-case them.
+fn find_marker_outside_comments(
+    haystack: &[u8],
+    start: usize,
+    marker: &[u8],
+    in_comment: &mut bool,
+) -> bool {
+    let open = b"<!--";
+    let close = b"-->";
+    let mut i = start;
+    while i < haystack.len() {
+        if *in_comment {
+            // Look for "-->" ending the comment.
+            if i + close.len() <= haystack.len() && &haystack[i..i + close.len()] == close {
+                *in_comment = false;
+                i += close.len();
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        // Not in a comment: check comment open, then marker.
+        if i + open.len() <= haystack.len() && &haystack[i..i + open.len()] == open {
+            *in_comment = true;
+            i += open.len();
+            continue;
+        }
+        if !marker.is_empty()
+            && i + marker.len() <= haystack.len()
+            && &haystack[i..i + marker.len()] == marker
+        {
+            return true;
+        }
+        i += 1;
     }
-    haystack.windows(needle.len()).any(|w| w == needle)
+    false
 }
 
 /// Inspects the ZIP for unsupported feature directories and returns a list of

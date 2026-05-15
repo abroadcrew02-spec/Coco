@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { t } from "../i18n/locale";
 import "./NamedRangesDialog.css";
 
 export interface NamedRangeEntry {
@@ -160,7 +161,7 @@ export default function NamedRangesDialog({ initialRanges, onSave, onClose }: Pr
         onClick={(e) => e.stopPropagation()}
       >
         <header className="nr-header">
-          <h2 id="nr-title" className="nr-title">名前付き範囲</h2>
+          <h2 id="nr-title" className="nr-title">{t("dialog.namedRanges")}</h2>
           <button type="button" className="nr-close" onClick={onClose} aria-label="閉じる">
             ×
           </button>

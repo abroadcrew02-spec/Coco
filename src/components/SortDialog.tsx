@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { t } from "../i18n/locale";
 import "./SortDialog.css";
 
 export interface SortLevel {
@@ -119,7 +120,7 @@ export default function SortDialog({ initialRange, onApply, onClose }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <header className="sd-header">
-          <h2 id="sd-title" className="sd-title">並べ替え</h2>
+          <h2 id="sd-title" className="sd-title">{t("dialog.sort")}</h2>
           <button type="button" className="sd-close" onClick={onClose} aria-label="閉じる">
             ×
           </button>

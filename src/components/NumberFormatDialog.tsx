@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { t } from "../i18n/locale";
 import "./NumberFormatDialog.css";
 
 export interface NumberFormatValue {
@@ -83,7 +84,7 @@ export default function NumberFormatDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <header className="nf-header">
-          <h2 id="nf-title" className="nf-title">表示形式</h2>
+          <h2 id="nf-title" className="nf-title">{t("dialog.numberFormat")}</h2>
           <button type="button" className="nf-close" onClick={onClose} aria-label="閉じる">
             ×
           </button>

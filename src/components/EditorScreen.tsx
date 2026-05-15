@@ -2118,6 +2118,12 @@ export default function EditorScreen() {
     let contextMenuReg: ReturnType<typeof registerCocoContextMenu> | null = null;
 
     try {
+      // #95 note: Univer 0.5.x does not ship a `JA_JP` LocaleType, so the
+      // app locale is always served from the EN_US slot — `buildCocoUniverLocale`
+      // returns the JA override when getLocale() is "ja-JP". When Univer adds
+      // JA_JP natively, switch this to `LocaleType.JA_JP` and split the
+      // locales bundle accordingly. See cocoUniverLocale.ts for the
+      // override list.
       univer = new Univer({
         theme: defaultTheme,
         locale: LocaleType.EN_US,
@@ -2245,8 +2251,20 @@ export default function EditorScreen() {
       }
     };
 
+    // #87: large-workbook back-off. For tiny workbooks we keep the
+    // requestIdleCallback path (essentially immediate). For workbooks past
+    // the size/cell threshold we still sync, just on a longer leash, so the
+    // protection / data-validation / hyperlink guards (which read
+    // snapshotRef.current in onBeforeCommandExecute) eventually see fresh
+    // state. Previously a single skip would freeze snapshotRef indefinitely
+    // and the guards would consult stale data for the rest of the session.
+    const LARGE_WORKBOOK_SYNC_LEASH_MS = 2_000;
     const scheduleSnapshotSync = () => {
       if (shouldSkipBackgroundSnapshotSync(snapshotRef.current)) {
+        idleFallbackTimer = setTimeout(() => {
+          idleFallbackTimer = null;
+          syncSnapshot();
+        }, LARGE_WORKBOOK_SYNC_LEASH_MS);
         return;
       }
       if (typeof window.requestIdleCallback === "function") {

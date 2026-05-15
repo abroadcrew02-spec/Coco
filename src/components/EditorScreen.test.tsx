@@ -128,9 +128,11 @@ describe("EditorScreen Univer plugin wiring", () => {
     );
     expect(mutationSnapshotSyncSource.match(/cancelPendingSnapshotSync\(\);/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
     expect(mutationSnapshotSyncSource).toMatch(/updateSnapshot\(JSON\.stringify\(workbook\.save\(\)\)\)/);
-    expect(mutationSnapshotSyncSource).toMatch(
-      /if \(shouldSkipBackgroundSnapshotSync\(snapshotRef\.current\)\) \{\s*return;\s*\}/,
-    );
+    // #87: when the workbook is too large for the fast path, we still
+    // schedule a longer-leash sync (instead of returning indefinitely) so
+    // protection / data-validation guards eventually see fresh state.
+    expect(mutationSnapshotSyncSource).toMatch(/shouldSkipBackgroundSnapshotSync\(snapshotRef\.current\)/);
+    expect(mutationSnapshotSyncSource).toMatch(/LARGE_WORKBOOK_SYNC_LEASH_MS/);
   });
 
   it("registers a synchronous snapshot flush for immediate save/close flows", () => {

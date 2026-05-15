@@ -133,13 +133,30 @@ function parseNumberFormula(f: string | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// Coerce a cell-write value to a number for numeric rules. Strings that parse
-// as numbers are accepted; everything else returns null (invalid).
+/** #100: Excel-style numeric normalisation. Accepts:
+ *  - full-width digits (０-９) → half-width
+ *  - thousand separators ("1,234" → "1234")
+ *  - accounting negatives ("(50)" → "-50")
+ *  - leading + sign
+ *  Returns the normalized number as a JS Number, or null if still invalid.
+ */
 function coerceNumber(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   if (typeof value === "string") {
-    const t = value.trim();
+    let t = value.trim();
     if (!t) return null;
+    // Full-width digits + signs → ASCII.
+    t = t.replace(/[０-９]/g, (c) =>
+      String.fromCharCode(c.charCodeAt(0) - 0xff10 + 0x30),
+    );
+    t = t.replace(/[＋]/g, "+").replace(/[－−]/g, "-").replace(/[．]/g, ".");
+    // Accounting parens around digits → negative.
+    if (/^\([\d.,+\-]+\)$/.test(t)) {
+      t = "-" + t.slice(1, -1);
+    }
+    // Strip thousand separators (only when surrounded by digits to avoid
+    // wrecking actual decimals — JS Number uses "." not ",").
+    t = t.replace(/(\d),(?=\d)/g, "$1");
     const n = Number(t);
     return Number.isFinite(n) ? n : null;
   }

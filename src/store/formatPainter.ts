@@ -121,13 +121,23 @@ export function applyCellStyle(
   if (!sheet) return snapshotJson;
   if (!sheet.cellData) sheet.cellData = {};
   const cellData = sheet.cellData;
+  // #98: same UI-freeze cap as quickNumberFormat. Whole-column / whole-row
+  // selections (1M rows) would otherwise generate cellData entries for
+  // every empty cell. Past the cap we only paint cells that already exist.
+  const FORMAT_PAINTER_MAX_NEW_CELLS = 100_000;
+  const rangeCellCount =
+    (range.endRow - range.startRow + 1) * (range.endCol - range.startCol + 1);
+  const usedRangeOnly = rangeCellCount > FORMAT_PAINTER_MAX_NEW_CELLS;
   for (let r = range.startRow; r <= range.endRow; r++) {
     const rowKey = String(r);
+    const rowExists = cellData[rowKey] !== undefined;
+    if (usedRangeOnly && !rowExists) continue;
     if (!cellData[rowKey]) cellData[rowKey] = {};
     const row = cellData[rowKey]!;
     for (let c = range.startCol; c <= range.endCol; c++) {
       const colKey = String(c);
       const existing = row[colKey];
+      if (usedRangeOnly && existing === undefined) continue;
       const cell = existing ?? {};
       // Shallow clone the style so the caller can apply the same style payload
       // to multiple targets without aliasing.

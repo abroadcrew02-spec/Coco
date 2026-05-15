@@ -907,6 +907,63 @@ fn format_date_or_datetime(dt: chrono::NaiveDateTime, fmt: &str, is_datetime: bo
     out
 }
 
+/// #102: strip RFC4180-style thousand separators only when the layout
+/// clearly matches the US/UK convention (digits in groups of 3 separated
+/// by `,`, optionally followed by a `.` fraction). Returns Some(stripped)
+/// for "1,234", "12,345.67", "1,234,567"; returns None for "1,23",
+/// "12,3456", "a,b", date-like "2024,06,15" etc. so European-locale decimal
+/// commas and other text stay untouched.
+fn strip_thousand_separators(s: &str) -> Option<String> {
+    if !s.contains(',') {
+        return None;
+    }
+    let trimmed = s.trim();
+    // Optional leading sign.
+    let (sign, body) = match trimmed.as_bytes().first() {
+        Some(b'+') | Some(b'-') => trimmed.split_at(1),
+        _ => ("", trimmed),
+    };
+    // Split off optional fractional part. The integer part must follow the
+    // US thousands shape; the fractional part must be plain digits.
+    let (int_part, frac_part) = match body.find('.') {
+        Some(i) => {
+            let frac = &body[i + 1..];
+            if frac.is_empty() || !frac.chars().all(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            (&body[..i], Some(frac))
+        }
+        None => (body, None),
+    };
+    // int_part must be `\d{1,3}(,\d{3})+` — at least one comma group, and
+    // the trailing groups are exactly 3 digits each.
+    let groups: Vec<&str> = int_part.split(',').collect();
+    if groups.len() < 2 {
+        return None;
+    }
+    if groups[0].is_empty() || !groups[0].chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if groups[0].len() > 3 {
+        return None;
+    }
+    for g in &groups[1..] {
+        if g.len() != 3 || !g.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+    }
+    let mut out = String::with_capacity(trimmed.len());
+    out.push_str(sign);
+    for g in &groups {
+        out.push_str(g);
+    }
+    if let Some(frac) = frac_part {
+        out.push('.');
+        out.push_str(frac);
+    }
+    Some(out)
+}
+
 fn infer_csv_cell(raw: &str) -> Option<Value> {
     if raw.is_empty() {
         return None;
@@ -942,6 +999,20 @@ fn infer_csv_cell(raw: &str) -> Option<Value> {
         if let Ok(f) = unescaped.parse::<f64>() {
             if f.is_finite() {
                 return Some(json!({ "v": f }));
+            }
+        }
+        // #102: try again with RFC4180-style thousand separators stripped.
+        // "1,234" / "1,234.56" — Excel and Sheets both number-coerce these
+        // on import. Only when the commas sit strictly between digits do we
+        // strip them, so date-like "2024,06,15" or text "a,b" remain text.
+        if let Some(stripped) = strip_thousand_separators(&unescaped) {
+            if let Ok(n) = stripped.parse::<i64>() {
+                return Some(json!({ "v": n }));
+            }
+            if let Ok(f) = stripped.parse::<f64>() {
+                if f.is_finite() {
+                    return Some(json!({ "v": f, "_fmt": "#,##0" }));
+                }
             }
         }
     }

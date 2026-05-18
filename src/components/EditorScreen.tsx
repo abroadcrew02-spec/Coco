@@ -270,6 +270,30 @@ import {
   deleteFormatCode,
 } from "../store/numberFormatManager";
 import RangeCompareDialog from "./RangeCompareDialog";
+import InsertSymbolDialog from "./InsertSymbolDialog";
+import SheetNoteDialog from "./SheetNoteDialog";
+import {
+  type SheetNote,
+  type WorkbookNotesSnapshot,
+  getSheetNote,
+  setSheetNote,
+  deleteSheetNote,
+} from "../store/sheetNotes";
+import ImageManagerDialog from "./ImageManagerDialog";
+import {
+  listAllImages,
+  deleteImage as deleteImageInSnapshot,
+  bulkDeleteImagesOnSheet,
+} from "../store/imageManager";
+import TemplatesGalleryDialog from "./TemplatesGalleryDialog";
+import { buildTemplateSnapshot } from "../store/templates";
+import SnapshotControlsDialog from "./SnapshotControlsDialog";
+import {
+  type SnapshotIntervalSetting,
+  getAutoSaveInterval,
+  setAutoSaveInterval as persistInterval,
+  snapshotIntervalToMs,
+} from "../store/snapshotControls";
 // Single-thread InsertCommentDialog superseded by ThreadedCommentDialog;
 // its CommentEntry type lives in its own module for other consumers.
 import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
@@ -638,6 +662,21 @@ export default function EditorScreen() {
     initialB: string;
     snapshotJson: string;
   } | null>(null);
+  // Wave 10
+  const [insertSymbolCtx, setInsertSymbolCtx] = useState<{ sheetId: string; cellRef: string } | null>(null);
+  const [sheetNoteDialog, setSheetNoteDialog] = useState<{
+    sheetId: string;
+    sheetName: string;
+    initial: SheetNote | null;
+  } | null>(null);
+  const [imageManagerOpen, setImageManagerOpen] = useState(false);
+  const [templatesGalleryOpen, setTemplatesGalleryOpen] = useState(false);
+  const [snapshotControlsState, setSnapshotControlsState] = useState<{
+    open: boolean;
+    lastSnapshotAt: string | null;
+    snapshotCount: number;
+  }>({ open: false, lastSnapshotAt: null, snapshotCount: 0 });
+  const [snapInterval, setSnapInterval] = useState<SnapshotIntervalSetting>(() => getAutoSaveInterval());
   // Format Painter (書式コピー) state. Excel's paintbrush:
   //   - "idle"   : tool is off.
   //   - "single" : armed for one paste; next selection-change applies + deactivates.
@@ -2887,6 +2926,90 @@ export default function EditorScreen() {
     [currentSnapshotJson, readNamedRanges, goToJump],
   );
 
+  // --- Wave 10: Insert Symbol / Sheet Notes / Image Manager / Templates / Snapshot Controls ---
+  const openInsertSymbolDialog = useCallback(() => {
+    const ready = getReadyWorkbook("記号の挿入");
+    if (!ready) return;
+    const sheet = ready.workbook.getActiveSheet();
+    if (!sheet) return;
+    let cellRef = "A1";
+    try {
+      const a1 = sheet.getSelection()?.getActiveRange()?.getA1Notation() ?? "A1";
+      cellRef = a1.includes(":") ? a1.split(":")[0] : a1;
+    } catch {
+      // best-effort
+    }
+    setInsertSymbolCtx({ sheetId: sheet.getSheetId(), cellRef });
+  }, [getReadyWorkbook]);
+
+  const applyInsertSymbol = useCallback(
+    (char: string) => {
+      if (!insertSymbolCtx) return;
+      const ready = getReadyWorkbook("記号の挿入");
+      if (!ready) return;
+      const sheet = ready.workbook.getActiveSheet();
+      const range = sheet?.getRange(insertSymbolCtx.cellRef);
+      if (!range) return;
+      const current = range.getValue();
+      const base = current === null || current === undefined ? "" : String(current);
+      range.setValue(base + char);
+    },
+    [getReadyWorkbook, insertSymbolCtx],
+  );
+
+  const openSheetNoteDialog = useCallback(() => {
+    const ready = getReadyWorkbook("シートのメモ");
+    if (!ready) return;
+    const ws = ready.workbook.getActiveSheet();
+    if (!ws) return;
+    const sheetId = ws.getSheetId();
+    const sheetName = ws.getSheetName();
+    let initial: SheetNote | null = null;
+    if (currentSnapshotJson) {
+      try {
+        initial = getSheetNote(JSON.parse(currentSnapshotJson) as WorkbookNotesSnapshot, sheetId);
+      } catch {
+        initial = null;
+      }
+    }
+    setSheetNoteDialog({ sheetId, sheetName, initial });
+  }, [currentSnapshotJson, getReadyWorkbook]);
+
+  const openTemplatesGallery = useCallback(() => {
+    setTemplatesGalleryOpen(true);
+  }, []);
+
+  const handleUseTemplate = useCallback(
+    async (id: string) => {
+      setTemplatesGalleryOpen(false);
+      if (!confirmDiscardIfUnsaved()) return;
+      await newWorkbook();
+      const snapshotJson = buildTemplateSnapshot(id);
+      if (snapshotJson) applyMutatedSnapshot(snapshotJson);
+    },
+    [newWorkbook, applyMutatedSnapshot],
+  );
+
+  const openSnapshotControlsDialog = useCallback(() => {
+    void (async () => {
+      try {
+        const rows = await useWorkbookStore.getState().listSnapshots();
+        setSnapshotControlsState({
+          open: true,
+          lastSnapshotAt: rows[0]?.createdAt ?? null,
+          snapshotCount: rows.length,
+        });
+      } catch {
+        setSnapshotControlsState({ open: true, lastSnapshotAt: null, snapshotCount: 0 });
+      }
+    })();
+  }, []);
+
+  const triggerSnapshotNow = useCallback(() => {
+    void useWorkbookStore.getState().autoSave();
+    window.dispatchEvent(new CustomEvent("coco:snapshot-now"));
+  }, []);
+
   // Shared utility: jump active selection to A1 cell/range on a given sheet.
   // Used by TableInfoPanel and SparklineListPanel.
   const jumpToA1OnSheet = useCallback((sheetId: string, a1: string) => {
@@ -4354,6 +4477,24 @@ export default function EditorScreen() {
       case "data-range-compare":
         openRangeCompareDialog();
         break;
+      case "insert-symbol":
+        openInsertSymbolDialog();
+        break;
+      case "view-sheet-note":
+        openSheetNoteDialog();
+        break;
+      case "view-image-manager":
+        setImageManagerOpen((v) => !v);
+        break;
+      case "file-templates":
+        openTemplatesGallery();
+        break;
+      case "view-snapshot-controls":
+        openSnapshotControlsDialog();
+        break;
+      case "snapshot-now":
+        triggerSnapshotNow();
+        break;
     }
   }, [
     openHyperlinkDialog,
@@ -4405,6 +4546,11 @@ export default function EditorScreen() {
     openGoToDialog,
     addCurrentCellAsBookmark,
     openRangeCompareDialog,
+    openInsertSymbolDialog,
+    openSheetNoteDialog,
+    openTemplatesGallery,
+    openSnapshotControlsDialog,
+    triggerSnapshotNow,
   ]);
 
   // Export every sheet in the workbook as a separate <sheetName>.csv file
@@ -5774,6 +5920,99 @@ export default function EditorScreen() {
             setRangeCompareState(null);
           }}
           onClose={() => setRangeCompareState(null)}
+        />
+      )}
+      {insertSymbolCtx && (
+        <InsertSymbolDialog
+          onInsert={(char) => {
+            applyInsertSymbol(char);
+            setInsertSymbolCtx(null);
+          }}
+          onClose={() => setInsertSymbolCtx(null)}
+        />
+      )}
+      {sheetNoteDialog && (
+        <SheetNoteDialog
+          sheetName={sheetNoteDialog.sheetName}
+          initial={sheetNoteDialog.initial}
+          defaultAuthor={resolveDefaultAuthor()}
+          onSave={(text, author) => {
+            if (!currentSnapshotJson) return;
+            try {
+              const snap = JSON.parse(currentSnapshotJson) as WorkbookNotesSnapshot;
+              const next = text.trim()
+                ? setSheetNote(snap, sheetNoteDialog.sheetId, text, author)
+                : deleteSheetNote(snap, sheetNoteDialog.sheetId);
+              applyMutatedSnapshot(JSON.stringify(next));
+            } catch {
+              // best-effort
+            }
+            setSheetNoteDialog(null);
+          }}
+          onDelete={() => {
+            if (!currentSnapshotJson) return;
+            try {
+              const snap = JSON.parse(currentSnapshotJson) as WorkbookNotesSnapshot;
+              applyMutatedSnapshot(JSON.stringify(deleteSheetNote(snap, sheetNoteDialog.sheetId)));
+            } catch {
+              // best-effort
+            }
+            setSheetNoteDialog(null);
+          }}
+          onClose={() => setSheetNoteDialog(null)}
+        />
+      )}
+      {imageManagerOpen && currentSnapshotJson && (
+        <ImageManagerDialog
+          images={listAllImages(currentSnapshotJson)}
+          onJumpTo={(sheetId, anchor) => {
+            jumpToA1OnSheet(sheetId, anchor);
+            setImageManagerOpen(false);
+          }}
+          onDelete={(sheetId, anchor) => {
+            if (!currentSnapshotJson) return;
+            try {
+              const next = deleteImageInSnapshot(currentSnapshotJson, sheetId, anchor);
+              applyMutatedSnapshot(JSON.stringify(next));
+            } catch {
+              // best-effort
+            }
+          }}
+          onBulkDeleteOnSheet={(sheetId) => {
+            if (!currentSnapshotJson) return;
+            try {
+              const { snapshotMutated } = bulkDeleteImagesOnSheet(currentSnapshotJson, sheetId);
+              applyMutatedSnapshot(JSON.stringify(snapshotMutated));
+            } catch {
+              // best-effort
+            }
+          }}
+          onExport={() => {
+            setEditorOperationError("画像書き出しは未実装です (画像はバイナリで保全されています)。");
+          }}
+          onClose={() => setImageManagerOpen(false)}
+        />
+      )}
+      {templatesGalleryOpen && (
+        <TemplatesGalleryDialog
+          onUseTemplate={(id) => {
+            void handleUseTemplate(id);
+          }}
+          onClose={() => setTemplatesGalleryOpen(false)}
+        />
+      )}
+      {snapshotControlsState.open && (
+        <SnapshotControlsDialog
+          currentInterval={snapInterval}
+          lastSnapshotAt={snapshotControlsState.lastSnapshotAt}
+          snapshotCount={snapshotControlsState.snapshotCount}
+          onIntervalChange={(next) => {
+            setSnapInterval(next);
+            persistInterval(next);
+            void useWorkbookStore.getState().setAutoSaveInterval(snapshotIntervalToMs(next));
+          }}
+          onSnapshotNow={triggerSnapshotNow}
+          onClose={() => setSnapshotControlsState((s) => ({ ...s, open: false }))}
         />
       )}
       {commentsManagerOpen && currentSnapshotJson && (

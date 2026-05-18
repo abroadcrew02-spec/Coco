@@ -77,6 +77,12 @@ const EDITOR_COMMAND_IDS = new Set([
   "bookmark-add-current",
   "format-manage-codes",
   "data-range-compare",
+  "insert-symbol",
+  "view-sheet-note",
+  "view-image-manager",
+  "file-templates",
+  "view-snapshot-controls",
+  "snapshot-now",
 ]);
 
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route

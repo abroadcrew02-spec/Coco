@@ -53,7 +53,51 @@ import {
   chooseHyperlinkRestyle,
 } from "./hyperlinkRender";
 import { patchCfRenders } from "./conditionalFormatRender";
-import InsertCommentDialog, { type CommentEntry } from "./InsertCommentDialog";
+import { patchOutlineRenders } from "./outlineRender";
+import { patchTableRenders } from "./tableRender";
+import { patchSparklineRenders } from "./sparklineRender";
+import OutlineGroupDialog from "./OutlineGroupDialog";
+import { type OutlineGroup, addGroup as addOutlineGroup } from "../store/outlineGroups";
+import InsertTableDialog from "./InsertTableDialog";
+import TableInfoPanel from "./TableInfoPanel";
+import {
+  type TableEntry,
+  collectAllTableNames,
+  removeTable,
+  renameTable as renameWorkbookTable,
+} from "../store/tables";
+import InsertSparklineDialog from "./InsertSparklineDialog";
+import SparklineListPanel from "./SparklineListPanel";
+import {
+  type SparklineEntry,
+  addSparkline,
+  removeSparkline,
+} from "../store/sparklines";
+import PageSetupDialog from "./PageSetupDialog";
+import {
+  type PageSetupValue,
+  getPageSetup,
+  setPageSetup,
+} from "../store/pageSetup";
+import ThreadedCommentDialog from "./ThreadedCommentDialog";
+import {
+  type ThreadedComment,
+  normalizeToThread,
+} from "../store/threadedComments";
+import CellStylesDialog from "./CellStylesDialog";
+import {
+  type CellStylePreset,
+  applyPresetToRange,
+} from "../store/cellStyles";
+import GoalSeekDialog from "./GoalSeekDialog";
+import { type GoalSeekAdapter } from "../store/goalSeek";
+import { patchShowFormulasView } from "./showFormulasRender";
+import { patchErrorIndicators } from "./errorIndicatorRender";
+import { collectAuditIssues } from "../store/formulaAudit";
+import ErrorIndicatorsPanel from "./ErrorIndicatorsPanel";
+import ErrorCheckingDialog from "./ErrorCheckingDialog";
+// Single-thread InsertCommentDialog superseded by ThreadedCommentDialog;
+// its CommentEntry type lives in its own module for other consumers.
 import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
 import NumberFormatDialog, { type NumberFormatValue } from "./NumberFormatDialog";
 import InsertImageDialog, {
@@ -212,7 +256,7 @@ export default function EditorScreen() {
   const [commentDialog, setCommentDialog] = useState<{
     sheetId: string;
     cellRef: string;
-    existing: CommentEntry | null;
+    existing: ThreadedComment | null;
   } | null>(null);
   // Chart dialog state: null while closed. Pins the active sheet and the
   // range derived from the current selection at open time so the user's
@@ -256,6 +300,50 @@ export default function EditorScreen() {
     sheetName: string;
     initialColor: string | null;
   } | null>(null);
+  // Row/column outline dialog. Pins the active sheet + a snapshot of its
+  // existing groups + the current selection rect at open time.
+  const [outlineDialog, setOutlineDialog] = useState<{
+    sheetId: string;
+    sheetName: string;
+    rows: OutlineGroup[];
+    cols: OutlineGroup[];
+    selection: { startRow: number; endRow: number; startCol: number; endCol: number } | null;
+  } | null>(null);
+  // Insert-Table dialog state. Pins active sheet + default range at open time.
+  const [tableDialog, setTableDialog] = useState<{
+    sheetId: string;
+    range: string;
+  } | null>(null);
+  // Toggleable sidebars (initial: closed).
+  const [tablesPanelOpen, setTablesPanelOpen] = useState(false);
+  // Insert-Sparkline dialog state. Pins active sheet + default source + anchor.
+  const [sparklineDialog, setSparklineDialog] = useState<{
+    sheetId: string;
+    sourceRange: string;
+    anchorCell: string;
+  } | null>(null);
+  const [sparklinesPanelOpen, setSparklinesPanelOpen] = useState(false);
+  // Page Setup dialog state. Pins active sheet + a copy of its effective page setup.
+  const [pageSetupDialog, setPageSetupDialog] = useState<{
+    sheetId: string;
+    sheetName: string;
+    initial: PageSetupValue;
+  } | null>(null);
+  // Cell Styles gallery dialog.
+  const [cellStylesDialog, setCellStylesDialog] = useState<{
+    sheetId: string;
+    range: string;
+  } | null>(null);
+  // Goal Seek dialog state. Adapter wraps Univer FUniver to read/write values.
+  const [goalSeekState, setGoalSeekState] = useState<{
+    targetCell: string;
+    changingCell: string;
+    adapter: GoalSeekAdapter;
+  } | null>(null);
+  // Formula audit: Ctrl+` shows formula text in cells.
+  const [showFormulasMode, setShowFormulasMode] = useState(false);
+  const [errorsPanelOpen, setErrorsPanelOpen] = useState(false);
+  const [errorCheckingOpen, setErrorCheckingOpen] = useState(false);
   // Format Painter (書式コピー) state. Excel's paintbrush:
   //   - "idle"   : tool is off.
   //   - "single" : armed for one paste; next selection-change applies + deactivates.
@@ -636,14 +724,15 @@ export default function EditorScreen() {
     const cellRef = toA1(row, col);
     const sheetId = worksheet.getSheetId();
 
-    let existing: CommentEntry | null = null;
+    let existing: ThreadedComment | null = null;
     if (currentSnapshotJson) {
       try {
         const snap = JSON.parse(currentSnapshotJson) as {
-          sheets?: Record<string, { _comments?: CommentEntry[] }>;
+          sheets?: Record<string, { _comments?: Array<Record<string, unknown>> }>;
         };
         const arr = snap.sheets?.[sheetId]?._comments ?? [];
-        existing = arr.find((c) => c.cell === cellRef) ?? null;
+        const found = arr.find((c) => (c.cell ?? c.cellRef) === cellRef);
+        if (found) existing = normalizeToThread(found);
       } catch {
         // Bad snapshot JSON: treat as no existing comment; the apply path
         // also re-parses defensively so we don't poison the snapshot.
@@ -657,19 +746,36 @@ export default function EditorScreen() {
   // otherwise append. Always re-stringifies and pushes back via updateSnapshot
   // so the save button enables and the auto-save path picks up the change.
   const applyComment = useCallback(
-    (sheetId: string, entry: CommentEntry) => {
+    (sheetId: string, entry: ThreadedComment) => {
       const snap = getSnapshotForTool("コメント") as {
-        sheets?: Record<string, { _comments?: CommentEntry[] }>;
+        sheets?: Record<string, { _comments?: Array<Record<string, unknown>> }>;
       } | null;
       if (!snap) return;
       if (!snap.sheets) snap.sheets = {};
       if (!snap.sheets[sheetId]) snap.sheets[sheetId] = {};
       const list = snap.sheets[sheetId]._comments ?? [];
-      const idx = list.findIndex((c) => c.cell === entry.cell);
+      // Persist both legacy keys (cell/text) and new keys (cellRef/body) so
+      // CommentIndicatorsPanel (legacy reader) and ThreadedCommentDialog
+      // (new reader) both see the same row.
+      const row: Record<string, unknown> = {
+        cell: entry.cellRef,
+        cellRef: entry.cellRef,
+        text: entry.body,
+        body: entry.body,
+      };
+      if (entry.author) row.author = entry.author;
+      if (entry.createdAt) row.createdAt = entry.createdAt;
+      if (entry.replies && entry.replies.length > 0) row.replies = entry.replies;
+      if (entry.resolved) {
+        row.resolved = true;
+        if (entry.resolvedAt) row.resolvedAt = entry.resolvedAt;
+        if (entry.resolvedBy) row.resolvedBy = entry.resolvedBy;
+      }
+      const idx = list.findIndex((c) => (c.cell ?? c.cellRef) === entry.cellRef);
       if (idx >= 0) {
-        list[idx] = entry;
+        list[idx] = row;
       } else {
-        list.push(entry);
+        list.push(row);
       }
       snap.sheets[sheetId]._comments = list;
       applyMutatedSnapshot(JSON.stringify(snap));
@@ -761,6 +867,357 @@ export default function EditorScreen() {
     [applyMutatedSnapshot],
   );
 
+  // --- Outline grouping (Excel-style row/column outline) ---------------------
+  const openOutlineDialog = useCallback(() => {
+    const ready = getReadyWorkbook("グループ化");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    const sheetName = sheet.getSheetName();
+    const fresh = workbook.save() as unknown as {
+      sheets?: Record<string, { _outlineRows?: OutlineGroup[]; _outlineCols?: OutlineGroup[] }>;
+    };
+    const stored = fresh.sheets?.[sheetId];
+    const rows = Array.isArray(stored?._outlineRows) ? stored!._outlineRows! : [];
+    const cols = Array.isArray(stored?._outlineCols) ? stored!._outlineCols! : [];
+    let selection: { startRow: number; endRow: number; startCol: number; endCol: number } | null = null;
+    try {
+      const sel = sheet.getSelection();
+      const range = sel?.getActiveRange();
+      if (range) {
+        const startRow = range.getRow();
+        const startCol = range.getColumn();
+        const height = (range as unknown as { getHeight?: () => number }).getHeight?.() ?? 1;
+        const width = (range as unknown as { getWidth?: () => number }).getWidth?.() ?? 1;
+        selection = {
+          startRow,
+          endRow: startRow + Math.max(0, height - 1),
+          startCol,
+          endCol: startCol + Math.max(0, width - 1),
+        };
+      }
+    } catch {
+      // best-effort
+    }
+    setOutlineDialog({ sheetId, sheetName, rows, cols, selection });
+  }, [getReadyWorkbook]);
+
+  const applyOutline = useCallback(
+    (sheetId: string, rows: OutlineGroup[], cols: OutlineGroup[]) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as {
+        sheets?: Record<string, { _outlineRows?: OutlineGroup[]; _outlineCols?: OutlineGroup[] }>;
+      };
+      if (!fresh.sheets || !fresh.sheets[sheetId]) return;
+      const sheet = fresh.sheets[sheetId];
+      sheet._outlineRows = rows;
+      sheet._outlineCols = cols;
+      applyMutatedSnapshot(JSON.stringify(fresh));
+    },
+    [applyMutatedSnapshot],
+  );
+  // Suppress unused-warning: helper is re-exported for dialog convenience.
+  void addOutlineGroup;
+
+  // --- Tables (Excel-style ListObject) ---------------------------------------
+  const openTableDialog = useCallback(() => {
+    const ready = getReadyWorkbook("テーブル");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let range = "A1";
+    try {
+      const sel = sheet.getSelection();
+      const r = sel?.getActiveRange();
+      if (r) range = r.getA1Notation();
+    } catch {
+      // best-effort
+    }
+    setTableDialog({ sheetId, range });
+  }, [getReadyWorkbook]);
+
+  const applyTable = useCallback(
+    (sheetId: string, entry: TableEntry) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as {
+        sheets?: Record<string, { _tables?: TableEntry[] }>;
+      };
+      if (!fresh.sheets || !fresh.sheets[sheetId]) return;
+      const sheet = fresh.sheets[sheetId];
+      const existing = Array.isArray(sheet._tables) ? sheet._tables : [];
+      sheet._tables = [...existing, entry];
+      applyMutatedSnapshot(JSON.stringify(fresh));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  const deleteTable = useCallback(
+    (sheetId: string, name: string) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as {
+        sheets?: Record<string, { _tables?: TableEntry[] }>;
+      };
+      if (!fresh.sheets || !fresh.sheets[sheetId]) return;
+      const sheet = fresh.sheets[sheetId];
+      sheet._tables = removeTable(sheet as { _tables?: TableEntry[] }, name);
+      applyMutatedSnapshot(JSON.stringify(fresh));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  const renameTableAcrossWorkbook = useCallback(
+    (oldName: string, newName: string) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as {
+        sheets?: Record<string, { _tables?: TableEntry[] }>;
+      };
+      const ok = renameWorkbookTable(fresh as { sheets?: Record<string, { _tables?: TableEntry[] }> }, oldName, newName);
+      if (!ok) return;
+      applyMutatedSnapshot(JSON.stringify(fresh));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // --- Sparklines ------------------------------------------------------------
+  const openSparklineDialog = useCallback(() => {
+    const ready = getReadyWorkbook("スパークライン");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let sourceRange = "A1:C1";
+    let anchorCell = "D1";
+    try {
+      const sel = sheet.getSelection();
+      const r = sel?.getActiveRange();
+      if (r) {
+        sourceRange = r.getA1Notation();
+        // Default anchor: one cell to the right of the source range's top-right.
+        const startCol = r.getColumn();
+        const startRow = r.getRow();
+        const width = (r as unknown as { getWidth?: () => number }).getWidth?.() ?? 1;
+        const anchorColIdx = startCol + width;
+        const colLetters = (() => {
+          let n = anchorColIdx + 1;
+          let out = "";
+          while (n > 0) {
+            const rem = (n - 1) % 26;
+            out = String.fromCharCode(65 + rem) + out;
+            n = Math.floor((n - 1) / 26);
+          }
+          return out;
+        })();
+        anchorCell = `${colLetters}${startRow + 1}`;
+      }
+    } catch {
+      // best-effort
+    }
+    setSparklineDialog({ sheetId, sourceRange, anchorCell });
+  }, [getReadyWorkbook]);
+
+  const applySparkline = useCallback(
+    (sheetId: string, entry: SparklineEntry) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as {
+        sheets?: Record<string, { _sparklines?: SparklineEntry[] }>;
+      };
+      if (!fresh.sheets || !fresh.sheets[sheetId]) return;
+      const sheet = fresh.sheets[sheetId];
+      sheet._sparklines = addSparkline(sheet as { _sparklines?: SparklineEntry[] }, entry);
+      applyMutatedSnapshot(JSON.stringify(fresh));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  const deleteSparkline = useCallback(
+    (sheetId: string, cell: string) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as {
+        sheets?: Record<string, { _sparklines?: SparklineEntry[] }>;
+      };
+      if (!fresh.sheets || !fresh.sheets[sheetId]) return;
+      const sheet = fresh.sheets[sheetId];
+      sheet._sparklines = removeSparkline(sheet as { _sparklines?: SparklineEntry[] }, cell);
+      applyMutatedSnapshot(JSON.stringify(fresh));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // --- Page Setup ------------------------------------------------------------
+  const openPageSetupDialog = useCallback(() => {
+    const ready = getReadyWorkbook("ページ設定");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    const sheetName = sheet.getSheetName();
+    const fresh = workbook.save() as unknown as Parameters<typeof getPageSetup>[0];
+    const initial = getPageSetup(fresh, sheetId);
+    setPageSetupDialog({ sheetId, sheetName, initial });
+  }, [getReadyWorkbook]);
+
+  const applyPageSetup = useCallback(
+    (value: PageSetupValue) => {
+      if (!pageSetupDialog) return;
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save();
+      const json = JSON.stringify(fresh);
+      try {
+        const next = setPageSetup(json, pageSetupDialog.sheetId, value);
+        applyMutatedSnapshot(next);
+      } catch (e) {
+        setEditorOperationError(`ページ設定: ${(e as Error).message}`);
+      }
+    },
+    [pageSetupDialog, applyMutatedSnapshot],
+  );
+
+  // --- Cell Styles gallery ---------------------------------------------------
+  const openCellStylesDialog = useCallback(() => {
+    const ready = getReadyWorkbook("セルスタイル");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let range = "A1";
+    try {
+      const sel = sheet.getSelection();
+      const r = sel?.getActiveRange();
+      if (r) range = r.getA1Notation();
+    } catch {
+      // best-effort
+    }
+    setCellStylesDialog({ sheetId, range });
+  }, [getReadyWorkbook]);
+
+  const applyCellStylePreset = useCallback(
+    (preset: CellStylePreset, range: string) => {
+      if (!cellStylesDialog) return;
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save();
+      const json = JSON.stringify(fresh);
+      // Parse range to rect; the dialog supplies an A1 like "A1:C10" with or
+      // without a sheet qualifier. Strip the sheet prefix if present.
+      const cleaned = range.includes("!") ? range.split("!").slice(1).join("!") : range;
+      const m = /^\$?([A-Za-z]+)\$?(\d+)(?::\$?([A-Za-z]+)\$?(\d+))?$/.exec(cleaned.trim());
+      if (!m) return;
+      const colLetterToIndex = (s: string) => {
+        let n = 0;
+        for (const ch of s.toUpperCase()) {
+          n = n * 26 + (ch.charCodeAt(0) - 64);
+        }
+        return n - 1;
+      };
+      const c1 = colLetterToIndex(m[1]);
+      const r1 = parseInt(m[2], 10) - 1;
+      const c2 = m[3] ? colLetterToIndex(m[3]) : c1;
+      const r2 = m[4] ? parseInt(m[4], 10) - 1 : r1;
+      const rect = {
+        r1: Math.min(r1, r2),
+        c1: Math.min(c1, c2),
+        r2: Math.max(r1, r2),
+        c2: Math.max(c1, c2),
+      };
+      try {
+        const next = applyPresetToRange(json, cellStylesDialog.sheetId, rect, preset.id);
+        applyMutatedSnapshot(next);
+      } catch (e) {
+        setEditorOperationError(`セルスタイル: ${(e as Error).message}`);
+      }
+    },
+    [cellStylesDialog, applyMutatedSnapshot],
+  );
+
+  // --- Goal Seek -------------------------------------------------------------
+  const openGoalSeekDialog = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    const sheet = workbook?.getActiveSheet();
+    if (!workbook || !sheet) return;
+    let activeRef = "B5";
+    try {
+      const sel = sheet.getSelection();
+      const r = sel?.getActiveRange();
+      if (r) activeRef = r.getA1Notation();
+    } catch {
+      // best-effort
+    }
+    const adapter: GoalSeekAdapter = {
+      readNumeric(cellRef: string) {
+        const r = sheet.getRange(cellRef);
+        const v = r?.getValue();
+        if (typeof v === "number" && Number.isFinite(v)) return v;
+        if (typeof v === "string" && v.trim() !== "") {
+          const n = Number(v);
+          return Number.isFinite(n) ? n : null;
+        }
+        return null;
+      },
+      writeNumeric(cellRef: string, value: number) {
+        sheet.getRange(cellRef)?.setValue(value);
+      },
+    };
+    setGoalSeekState({ targetCell: activeRef, changingCell: "A1", adapter });
+  }, []);
+
+  // Shared utility: jump active selection to A1 cell/range on a given sheet.
+  // Used by TableInfoPanel and SparklineListPanel.
+  const jumpToA1OnSheet = useCallback((sheetId: string, a1: string) => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    try {
+      const sheet = workbook.getSheetBySheetId
+        ? workbook.getSheetBySheetId(sheetId)
+        : null;
+      if (sheet) {
+        // best-effort sheet activation; not all Univer versions expose this
+        const w = workbook as unknown as { setActiveSheet?: (s: unknown) => void };
+        w.setActiveSheet?.(sheet);
+        const range = (sheet as unknown as { getRange?: (a1: string) => unknown }).getRange?.(a1);
+        if (range) {
+          const r = range as { activate?: () => void };
+          r.activate?.();
+        }
+      }
+    } catch {
+      // best-effort silent
+    }
+  }, []);
+
   // Reactive flag: is the active sheet currently protected per the snapshot?
   // Derived from `currentSnapshotJson` so the button label flips immediately
   // when toggleSheetProtection updates the store.
@@ -799,7 +1256,7 @@ export default function EditorScreen() {
     (sheetId: string, cellRef: string) => {
       if (!currentSnapshotJson) return;
       let snap: {
-        sheets?: Record<string, { _comments?: CommentEntry[] }>;
+        sheets?: Record<string, { _comments?: Array<Record<string, unknown>> }>;
       };
       try {
         snap = JSON.parse(currentSnapshotJson);
@@ -808,7 +1265,7 @@ export default function EditorScreen() {
       }
       const list = snap.sheets?.[sheetId]?._comments;
       if (!list) return;
-      const next = list.filter((c) => c.cell !== cellRef);
+      const next = list.filter((c) => (c.cell ?? c.cellRef) !== cellRef);
       if (next.length === list.length) return;
       if (next.length === 0) {
         // Drop the key entirely so the round-trip stays clean (Rust side
@@ -2043,6 +2500,39 @@ export default function EditorScreen() {
       case "tools-sheet-protection":
         toggleSheetProtection();
         break;
+      case "data-outline-groups":
+        openOutlineDialog();
+        break;
+      case "insert-table":
+        openTableDialog();
+        break;
+      case "insert-sparkline":
+        openSparklineDialog();
+        break;
+      case "file-page-setup":
+        openPageSetupDialog();
+        break;
+      case "view-tables-panel":
+        setTablesPanelOpen((v) => !v);
+        break;
+      case "view-sparklines-panel":
+        setSparklinesPanelOpen((v) => !v);
+        break;
+      case "format-cell-styles":
+        openCellStylesDialog();
+        break;
+      case "tools-goal-seek":
+        openGoalSeekDialog();
+        break;
+      case "tools-error-checking":
+        setErrorCheckingOpen(true);
+        break;
+      case "view-show-formulas":
+        setShowFormulasMode((v) => !v);
+        break;
+      case "view-errors-panel":
+        setErrorsPanelOpen((v) => !v);
+        break;
     }
   }, [
     openHyperlinkDialog,
@@ -2059,6 +2549,12 @@ export default function EditorScreen() {
     openNamedRangesDialog,
     applyAutoSum,
     toggleSheetProtection,
+    openOutlineDialog,
+    openTableDialog,
+    openSparklineDialog,
+    openPageSetupDialog,
+    openCellStylesDialog,
+    openGoalSeekDialog,
   ]);
 
   // Export every sheet in the workbook as a separate <sheetName>.csv file
@@ -2201,7 +2697,18 @@ export default function EditorScreen() {
       // array is its source of truth for re-emitting the actual <hyperlink>
       // elements on xlsx export.
       const initialData: Partial<IWorkbookData> = currentSnapshotJson
-        ? patchCfRenders(patchHyperlinkRenders(JSON.parse(currentSnapshotJson)))
+        ? patchShowFormulasView(
+            patchErrorIndicators(
+              patchCfRenders(
+                patchSparklineRenders(
+                  patchTableRenders(
+                    patchOutlineRenders(patchHyperlinkRenders(JSON.parse(currentSnapshotJson))),
+                  ),
+                ),
+              ),
+            ),
+            showFormulasMode,
+          )
         : {
             id: "coco-workbook",
             name: "Coco Workbook",
@@ -2621,6 +3128,27 @@ export default function EditorScreen() {
           images={imagePreviews}
           onSelect={jumpToImageCell}
         />
+        {tablesPanelOpen && (
+          <TableInfoPanel
+            workbookSnapshotJson={currentSnapshotJson ?? ""}
+            onJumpTo={jumpToA1OnSheet}
+            onRename={renameTableAcrossWorkbook}
+            onDelete={deleteTable}
+          />
+        )}
+        {sparklinesPanelOpen && (
+          <SparklineListPanel
+            workbookSnapshotJson={currentSnapshotJson ?? ""}
+            onJumpTo={jumpToA1OnSheet}
+            onDelete={deleteSparkline}
+          />
+        )}
+        {errorsPanelOpen && currentSnapshotJson && (
+          <ErrorIndicatorsPanel
+            workbookSnapshotJson={currentSnapshotJson}
+            onJumpTo={jumpToA1OnSheet}
+          />
+        )}
         {BUSY_LABELS[saveStatus] && (
           <BusyOverlay
             label={BUSY_LABELS[saveStatus]!.label}
@@ -2707,12 +3235,15 @@ export default function EditorScreen() {
         />
       )}
       {commentDialog && (
-        <InsertCommentDialog
+        <ThreadedCommentDialog
           cellRef={commentDialog.cellRef}
-          initialEntry={commentDialog.existing}
+          initialComment={commentDialog.existing}
           defaultAuthor={resolveDefaultAuthor()}
-          onApply={(entry) => applyComment(commentDialog.sheetId, entry)}
-          onDelete={() => deleteComment(commentDialog.sheetId, commentDialog.cellRef)}
+          onSave={(entry) => applyComment(commentDialog.sheetId, entry)}
+          onDelete={() => {
+            deleteComment(commentDialog.sheetId, commentDialog.cellRef);
+            setCommentDialog(null);
+          }}
           onClose={() => setCommentDialog(null)}
         />
       )}
@@ -2752,6 +3283,90 @@ export default function EditorScreen() {
           initialColor={tabColorDialog.initialColor}
           onApply={(color) => applyTabColor(tabColorDialog.sheetId, color)}
           onClose={() => setTabColorDialog(null)}
+        />
+      )}
+      {outlineDialog && (
+        <OutlineGroupDialog
+          sheetName={outlineDialog.sheetName}
+          sheetId={outlineDialog.sheetId}
+          initialRows={outlineDialog.rows}
+          initialCols={outlineDialog.cols}
+          selection={outlineDialog.selection}
+          onApply={(rows, cols) => applyOutline(outlineDialog.sheetId, rows, cols)}
+          onClose={() => setOutlineDialog(null)}
+        />
+      )}
+      {tableDialog && (
+        <InsertTableDialog
+          initialRange={tableDialog.range}
+          existingTableNames={(() => {
+            if (!currentSnapshotJson) return [];
+            try {
+              return collectAllTableNames(JSON.parse(currentSnapshotJson));
+            } catch {
+              return [];
+            }
+          })()}
+          onApply={(entry) => applyTable(tableDialog.sheetId, entry)}
+          onClose={() => setTableDialog(null)}
+        />
+      )}
+      {sparklineDialog && (
+        <InsertSparklineDialog
+          initialSourceRange={sparklineDialog.sourceRange}
+          initialAnchorCell={sparklineDialog.anchorCell}
+          onApply={(entry) => applySparkline(sparklineDialog.sheetId, entry)}
+          onClose={() => setSparklineDialog(null)}
+        />
+      )}
+      {pageSetupDialog && (
+        <PageSetupDialog
+          sheetName={pageSetupDialog.sheetName}
+          initial={pageSetupDialog.initial}
+          onApply={applyPageSetup}
+          onClose={() => setPageSetupDialog(null)}
+        />
+      )}
+      {cellStylesDialog && (
+        <CellStylesDialog
+          sheetId={cellStylesDialog.sheetId}
+          initialRange={cellStylesDialog.range}
+          onApply={applyCellStylePreset}
+          onClose={() => setCellStylesDialog(null)}
+        />
+      )}
+      {goalSeekState && (
+        <GoalSeekDialog
+          initialTargetCell={goalSeekState.targetCell}
+          initialChangingCell={goalSeekState.changingCell}
+          runAdapter={goalSeekState.adapter}
+          onCommit={() => {
+            // The adapter already wrote the converged value; close + push
+            // a snapshot checkpoint so Ctrl+Alt+Z can undo the change.
+            const fUniver = fUniverRef.current;
+            const wb = fUniver?.getActiveWorkbook();
+            if (wb) {
+              applyMutatedSnapshot(JSON.stringify(wb.save()));
+            }
+            setGoalSeekState(null);
+          }}
+          onClose={() => setGoalSeekState(null)}
+        />
+      )}
+      {errorCheckingOpen && currentSnapshotJson && (
+        <ErrorCheckingDialog
+          issues={(() => {
+            try {
+              return collectAuditIssues(JSON.parse(currentSnapshotJson));
+            } catch {
+              return [];
+            }
+          })()}
+          onJumpToCell={(sheetId, cellRef) => {
+            jumpToA1OnSheet(sheetId, cellRef);
+            setErrorCheckingOpen(false);
+          }}
+          onClose={() => setErrorCheckingOpen(false)}
         />
       )}
       {warningsDialog === "import" && (

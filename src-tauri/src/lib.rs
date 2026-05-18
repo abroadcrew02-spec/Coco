@@ -59,8 +59,12 @@ pub fn run() {
                 .text("save", format!("保存\t{MOD}+S"))
                 .text("save-as", format!("名前を付けて保存...\t{MOD}+Shift+S"))
                 .separator()
+                .text("file-page-setup", "ページ設定...")
+                .separator()
                 .text("export-xlsx", "xlsx エクスポート...")
                 .text("export-csv", "CSV エクスポート...")
+                .text("export-html", "HTML エクスポート...")
+                .text("export-pdf", "PDF エクスポート...")
                 .separator()
                 .text("close", "終了")
                 .build()?;
@@ -72,6 +76,11 @@ pub fn run() {
                 .build()?;
             let view_menu = SubmenuBuilder::new(app, "表示")
                 .text("view-snapshots", "スナップショット...")
+                .text("view-tables-panel", "テーブル一覧")
+                .text("view-sparklines-panel", "スパークライン一覧")
+                .text("view-errors-panel", "エラー一覧")
+                .separator()
+                .text("view-show-formulas", format!("数式の表示\t{MOD}+`"))
                 .separator()
                 .text("settings", "設定...")
                 .build()?;
@@ -80,12 +89,16 @@ pub fn run() {
                 .text("insert-comment", "コメント...")
                 .text("insert-chart", "グラフ...")
                 .text("insert-image", "画像...")
+                .separator()
+                .text("insert-table", "テーブル...")
+                .text("insert-sparkline", "スパークライン...")
                 .build()?;
             let format_menu = SubmenuBuilder::new(app, "書式")
                 .text("format-number", "表示形式...")
                 .text("format-currency", "通貨")
                 .text("format-percent", "パーセント")
                 .separator()
+                .text("format-cell-styles", "セルスタイル...")
                 .text("format-conditional", "条件付き書式...")
                 .text("format-painter", "書式のコピー")
                 .text("format-tab-color", "シート見出しの色...")
@@ -95,9 +108,14 @@ pub fn run() {
                 .text("data-validation", "データの入力規則...")
                 .text("data-named-ranges", "名前付き範囲...")
                 .text("data-autosum", "オートSUM")
+                .separator()
+                .text("data-outline-groups", "グループ化 / アウトライン...")
                 .build()?;
             let tools_menu = SubmenuBuilder::new(app, "ツール")
                 .text("tools-sheet-protection", "シート保護...")
+                .separator()
+                .text("tools-goal-seek", "ゴールシーク...")
+                .text("tools-error-checking", "エラーチェック...")
                 .build()?;
             let help_menu = SubmenuBuilder::new(app, "ヘルプ")
                 .text("help", "ヘルプ\tF1")
@@ -146,6 +164,8 @@ pub fn run() {
             commands::csv_io::workbook_export_csv,
             commands::csv_io::workbook_import_csv,
             commands::csv_io::list_sheet_names,
+            commands::html_export::workbook_export_html,
+            commands::pdf_export::workbook_export_pdf,
             commands::settings::get_setting,
             commands::settings::set_setting,
             commands::settings::list_settings,

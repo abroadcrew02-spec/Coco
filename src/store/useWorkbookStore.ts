@@ -60,6 +60,8 @@ interface WorkbookState {
   dismissSaveError: () => void;
   autoSave: () => Promise<void>;
   exportXlsx: () => Promise<void>;
+  exportHtml: () => Promise<void>;
+  exportPdf: () => Promise<void>;
   listSheetNames: () => Promise<{ id: string; name: string }[]>;
   exportCsvToPath: (path: string, sheetId: string) => Promise<void>;
   dismissExportWarnings: () => void;
@@ -673,6 +675,88 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         saveStatus: "export_failed",
         lastError: friendlyError(String(e)),
       });
+    }
+  },
+
+  exportHtml: async () => {
+    await waitForAutoSave();
+    await flushPendingSnapshot();
+    const { currentHandle, currentSnapshotJson } = get();
+    if (!currentHandle) return;
+    if (!hasSnapshotJson(currentSnapshotJson)) {
+      set({ saveStatus: "export_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+      return;
+    }
+    const defaultName = currentHandle.path
+      ? defaultSaveAsName(currentHandle.path).replace(/\.xlsx$/i, ".html").split(/[\\/]/).pop()
+      : "Untitled.html";
+    const chosen = await saveDialog({
+      title: "HTML としてエクスポート",
+      defaultPath: defaultName,
+      filters: [{ name: "HTML", extensions: ["html", "htm"] }],
+    });
+    if (!chosen) return;
+    const priorDirty = isDirtySaveStatusValue(get().saveStatus);
+    set({
+      isExporting: true,
+      saveStatus: "exporting",
+      exportWarnings: [],
+      wasDirtyBeforeExport: priorDirty,
+    });
+    try {
+      const result = await invoke<ExportResult>("workbook_export_html", {
+        snapshotJson: currentSnapshotJson,
+        outputPath: chosen,
+      });
+      set({
+        isExporting: false,
+        saveStatus: result.success ? "export_done" : "export_failed",
+        exportWarnings: result.warnings ?? [],
+        lastError: result.success ? null : friendlyError(result.error) ?? "HTML エクスポートに失敗しました",
+      });
+    } catch (e) {
+      set({ isExporting: false, saveStatus: "export_failed", lastError: friendlyError(String(e)) });
+    }
+  },
+
+  exportPdf: async () => {
+    await waitForAutoSave();
+    await flushPendingSnapshot();
+    const { currentHandle, currentSnapshotJson } = get();
+    if (!currentHandle) return;
+    if (!hasSnapshotJson(currentSnapshotJson)) {
+      set({ saveStatus: "export_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+      return;
+    }
+    const defaultName = currentHandle.path
+      ? defaultSaveAsName(currentHandle.path).replace(/\.xlsx$/i, ".pdf").split(/[\\/]/).pop()
+      : "Untitled.pdf";
+    const chosen = await saveDialog({
+      title: "PDF としてエクスポート",
+      defaultPath: defaultName,
+      filters: [{ name: "PDF", extensions: ["pdf"] }],
+    });
+    if (!chosen) return;
+    const priorDirty = isDirtySaveStatusValue(get().saveStatus);
+    set({
+      isExporting: true,
+      saveStatus: "exporting",
+      exportWarnings: [],
+      wasDirtyBeforeExport: priorDirty,
+    });
+    try {
+      const result = await invoke<ExportResult>("workbook_export_pdf", {
+        snapshotJson: currentSnapshotJson,
+        outputPath: chosen,
+      });
+      set({
+        isExporting: false,
+        saveStatus: result.success ? "export_done" : "export_failed",
+        exportWarnings: result.warnings ?? [],
+        lastError: result.success ? null : friendlyError(result.error) ?? "PDF エクスポートに失敗しました",
+      });
+    } catch (e) {
+      set({ isExporting: false, saveStatus: "export_failed", lastError: friendlyError(String(e)) });
     }
   },
 

@@ -13,17 +13,28 @@ const EDITOR_COMMAND_IDS = new Set([
   "insert-comment",
   "insert-chart",
   "insert-image",
+  "insert-table",
+  "insert-sparkline",
   "format-number",
   "format-currency",
   "format-percent",
   "format-conditional",
+  "format-cell-styles",
   "format-painter",
   "format-tab-color",
   "data-sort",
   "data-validation",
   "data-named-ranges",
   "data-autosum",
+  "data-outline-groups",
   "tools-sheet-protection",
+  "tools-goal-seek",
+  "tools-error-checking",
+  "file-page-setup",
+  "view-tables-panel",
+  "view-sparklines-panel",
+  "view-errors-panel",
+  "view-show-formulas",
 ]);
 
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route
@@ -37,6 +48,8 @@ export function useMenuActions() {
   const save = useWorkbookStore((s) => s.save);
   const promptSaveAs = useWorkbookStore((s) => s.promptSaveAs);
   const exportXlsx = useWorkbookStore((s) => s.exportXlsx);
+  const exportHtml = useWorkbookStore((s) => s.exportHtml);
+  const exportPdf = useWorkbookStore((s) => s.exportPdf);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -92,6 +105,12 @@ export function useMenuActions() {
         case "export-csv":
           await handleCsvExport();
           break;
+        case "export-html":
+          await exportHtml();
+          break;
+        case "export-pdf":
+          await exportPdf();
+          break;
         case "settings":
           requestSettings();
           break;
@@ -120,5 +139,5 @@ export function useMenuActions() {
       cancelled = true;
       if (unlisten) unlisten();
     };
-  }, [newWorkbook, openCoco, importXlsx, importCsv, save, promptSaveAs, exportXlsx]);
+  }, [newWorkbook, openCoco, importXlsx, importCsv, save, promptSaveAs, exportXlsx, exportHtml, exportPdf]);
 }

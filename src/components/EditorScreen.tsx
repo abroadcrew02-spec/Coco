@@ -234,6 +234,28 @@ import {
   deleteComment as deleteCmInline,
   bulkDeleteResolved as bulkDeleteResolvedComments,
 } from "../store/commentsManager";
+import SmartDateDialog from "./SmartDateDialog";
+import {
+  type ConvertToDateParams,
+  type SmartDateLocale,
+  applyConvertToDate,
+  tryParseDate,
+  excelSerialToDate,
+  DEFAULT_SMART_DATE_FORMAT,
+} from "../store/smartDate";
+import ConvertToRangeDialog, { type ConvertToRangeTableSummary } from "./ConvertToRangeDialog";
+import { applyConvertToRange } from "../store/convertToRange";
+import { listAllTables as listAllTablesAcrossSheets, rangeToA1 as rangeToA1Helper, type WorkbookTableSnapshot } from "../store/tables";
+import DocumentInspectorDialog from "./DocumentInspectorDialog";
+import {
+  type InspectionCategory,
+  type InspectionResult,
+  inspectDocument,
+  stripCategory,
+} from "../store/documentInspector";
+import BulkCleanDialog from "./BulkCleanDialog";
+import { applyBulkClean, type BulkCleanParams } from "../store/bulkClean";
+import CsvImportWizardDialog from "./CsvImportWizardDialog";
 // Single-thread InsertCommentDialog superseded by ThreadedCommentDialog;
 // its CommentEntry type lives in its own module for other consumers.
 import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
@@ -572,6 +594,26 @@ export default function EditorScreen() {
     snapshotJson: string;
   } | null>(null);
   const [commentsManagerOpen, setCommentsManagerOpen] = useState(false);
+  // Wave 8
+  const [smartDateDialog, setSmartDateDialog] = useState<{
+    sheetId: string;
+    range: string;
+    rangeRect: { r1: number; c1: number; r2: number; c2: number };
+  } | null>(null);
+  const [smartDatePreview, setSmartDatePreview] = useState<
+    Array<{ original: string; converted: string }>
+  >([]);
+  const [convertToRangeDialog, setConvertToRangeDialog] = useState<{
+    tables: ConvertToRangeTableSummary[];
+  } | null>(null);
+  const [documentInspectorOpen, setDocumentInspectorOpen] = useState(false);
+  const [documentInspections, setDocumentInspections] = useState<InspectionResult[]>([]);
+  const [bulkCleanDialog, setBulkCleanDialog] = useState<{
+    sheetId: string;
+    range: string;
+    preview: Array<{ original: string }>;
+  } | null>(null);
+  const [csvWizard, setCsvWizard] = useState<{ filePath: string; previewBytes: Uint8Array } | null>(null);
   // Format Painter (書式コピー) state. Excel's paintbrush:
   //   - "idle"   : tool is off.
   //   - "single" : armed for one paste; next selection-change applies + deactivates.
@@ -2463,6 +2505,196 @@ export default function EditorScreen() {
     }
   }, [currentSnapshotJson, applyMutatedSnapshot]);
 
+  // --- Smart Date ------------------------------------------------------------
+  // Helper: parse "A1:B5" to a rect (returns null on bad input). Local-only.
+  const parseRectFromA1 = (a1: string): { r1: number; c1: number; r2: number; c2: number } | null => {
+    const m = /^(?:[^!]+!)?\$?([A-Za-z]+)\$?(\d+)(?::\$?([A-Za-z]+)\$?(\d+))?$/.exec(a1.trim());
+    if (!m) return null;
+    const colToIdx = (s: string): number => {
+      let n = 0;
+      for (const c of s.toUpperCase()) n = n * 26 + (c.charCodeAt(0) - 64);
+      return n - 1;
+    };
+    const c1 = colToIdx(m[1]);
+    const r1 = parseInt(m[2], 10) - 1;
+    if (m[3] === undefined) return { r1, c1, r2: r1, c2: c1 };
+    const c2 = colToIdx(m[3]);
+    const r2 = parseInt(m[4], 10) - 1;
+    return { r1: Math.min(r1, r2), c1: Math.min(c1, c2), r2: Math.max(r1, r2), c2: Math.max(c1, c2) };
+  };
+
+  const buildSmartDatePreview = useCallback(
+    (sheetId: string, rect: { r1: number; c1: number; r2: number; c2: number }, locale: SmartDateLocale, _outputFormat: string) => {
+      const out: Array<{ original: string; converted: string }> = [];
+      const fUniver = fUniverRef.current;
+      const wb = fUniver?.getActiveWorkbook();
+      if (!wb) return out;
+      const snap = wb.save() as unknown as {
+        sheets?: Record<string, { cellData?: Record<string, Record<string, { v?: unknown; f?: unknown }>> }>;
+      };
+      const cellData = snap.sheets?.[sheetId]?.cellData ?? {};
+      for (let r = rect.r1; r <= rect.r2 && out.length < 5; r++) {
+        for (let c = rect.c1; c <= rect.c2 && out.length < 5; c++) {
+          const cell = cellData[String(r)]?.[String(c)];
+          if (!cell || cell.f) continue;
+          if (typeof cell.v !== "string") continue;
+          const parsed = tryParseDate(cell.v, locale);
+          if (!parsed) {
+            out.push({ original: cell.v, converted: "(変換不可)" });
+          } else {
+            out.push({ original: cell.v, converted: parsed.toISOString().slice(0, 10) });
+          }
+        }
+      }
+      return out;
+    },
+    [],
+  );
+
+  const openSmartDateDialog = useCallback(() => {
+    const ready = getReadyWorkbook("日付に変換");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let range = "A1:A1";
+    let rangeRect = { r1: 0, c1: 0, r2: 0, c2: 0 };
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) {
+        const a1 = r.getA1Notation();
+        range = a1.includes(":") ? a1 : `${a1}:${a1}`;
+        const parsed = parseRectFromA1(range);
+        if (parsed) rangeRect = parsed;
+      }
+    } catch {
+      // best-effort
+    }
+    setSmartDatePreview(buildSmartDatePreview(sheetId, rangeRect, "ja", DEFAULT_SMART_DATE_FORMAT));
+    setSmartDateDialog({ sheetId, range, rangeRect });
+  }, [getReadyWorkbook, buildSmartDatePreview]);
+
+  const applySmartDate = useCallback(
+    (params: ConvertToDateParams) => {
+      if (!smartDateDialog) return;
+      const fUniver = fUniverRef.current;
+      const wb = fUniver?.getActiveWorkbook();
+      if (!wb) return;
+      const snap = wb.save();
+      const { snapshotMutated, convertedCount } = applyConvertToDate(snap, smartDateDialog.sheetId, params);
+      if (convertedCount === 0) {
+        setEditorOperationError("日付に変換: 対象の日付文字列が見つかりませんでした。");
+        return;
+      }
+      applyMutatedSnapshot(JSON.stringify(snapshotMutated));
+    },
+    [smartDateDialog, applyMutatedSnapshot],
+  );
+  // Suppress unused-warning for helper re-export.
+  void excelSerialToDate;
+
+  // --- Convert Table to Range ------------------------------------------------
+  const openConvertToRangeDialog = useCallback(() => {
+    if (!currentSnapshotJson) return;
+    try {
+      const parsed = JSON.parse(currentSnapshotJson) as WorkbookTableSnapshot;
+      const listings = listAllTablesAcrossSheets(parsed);
+      const tables: ConvertToRangeTableSummary[] = listings.map((l) => ({
+        name: l.table.name,
+        sheetId: l.sheetId,
+        sheetName: l.sheetName,
+        rangeLabel: rangeToA1Helper(l.table.range),
+        columnCount: l.table.columns.length,
+      }));
+      setConvertToRangeDialog({ tables });
+    } catch {
+      setConvertToRangeDialog({ tables: [] });
+    }
+  }, [currentSnapshotJson]);
+
+  // --- Document Inspector ----------------------------------------------------
+  const openDocumentInspector = useCallback(() => {
+    if (!currentSnapshotJson) return;
+    setDocumentInspections(inspectDocument(currentSnapshotJson));
+    setDocumentInspectorOpen(true);
+  }, [currentSnapshotJson]);
+
+  // --- Bulk Data Clean -------------------------------------------------------
+  const openBulkCleanDialog = useCallback(() => {
+    const ready = getReadyWorkbook("データクリーニング");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    const snap = workbook.save() as unknown as {
+      sheets?: Record<string, { cellData?: Record<string, Record<string, { v?: unknown; f?: unknown }>> }>;
+    };
+    let range = "A1";
+    const preview: Array<{ original: string }> = [];
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) {
+        const a1 = r.getA1Notation();
+        range = a1.includes(":") ? a1 : `${a1}:${a1}`;
+      }
+      const parsed = parseRectFromA1(range);
+      if (parsed) {
+        const cellData = snap.sheets?.[sheetId]?.cellData ?? {};
+        outer: for (let rr = parsed.r1; rr <= parsed.r2; rr++) {
+          for (let cc = parsed.c1; cc <= parsed.c2; cc++) {
+            const cell = cellData[String(rr)]?.[String(cc)];
+            if (cell && typeof cell.v === "string" && (cell.f === undefined || cell.f === null || cell.f === "")) {
+              preview.push({ original: cell.v });
+              if (preview.length >= 3) break outer;
+            }
+          }
+        }
+      }
+    } catch {
+      // best-effort
+    }
+    setBulkCleanDialog({ sheetId, range, preview });
+  }, [getReadyWorkbook]);
+
+  const applyBulkCleanAction = useCallback(
+    (params: BulkCleanParams) => {
+      if (!bulkCleanDialog) return;
+      const wb = fUniverRef.current?.getActiveWorkbook();
+      if (!wb) return;
+      const fresh = JSON.stringify(wb.save());
+      const { snapshotMutated, cellsTouched } = applyBulkClean(fresh, bulkCleanDialog.sheetId, params);
+      applyMutatedSnapshot(JSON.stringify(snapshotMutated));
+      setEditorOperationError(`データクリーニング: ${cellsTouched} セルを更新しました。`);
+    },
+    [bulkCleanDialog, applyMutatedSnapshot],
+  );
+
+  // --- CSV Import Wizard -----------------------------------------------------
+  const openCsvImportWizard = useCallback(() => {
+    void (async () => {
+      try {
+        const { open: openFileDialog } = await import("@tauri-apps/plugin-dialog");
+        const selected = await openFileDialog({
+          multiple: false,
+          filters: [{ name: "CSV / TSV", extensions: ["csv", "tsv"] }],
+        });
+        if (!selected) return;
+        const path = typeof selected === "string" ? selected : selected[0];
+        // Read first 5KB via existing read_file_bytes_base64 backend command
+        // (limited to ~32 MiB; CSV preview is well under that).
+        const b64 = await invoke<string>("read_file_bytes_base64", { path });
+        const raw = atob(b64);
+        const bytes = new Uint8Array(Math.min(raw.length, 5 * 1024));
+        for (let i = 0; i < bytes.length; i++) bytes[i] = raw.charCodeAt(i);
+        setCsvWizard({ filePath: path, previewBytes: bytes });
+      } catch (e) {
+        setEditorOperationError(`CSV インポートウィザード: ${(e as Error).message}`);
+      }
+    })();
+  }, []);
+
   // Shared utility: jump active selection to A1 cell/range on a given sheet.
   // Used by TableInfoPanel and SparklineListPanel.
   const jumpToA1OnSheet = useCallback((sheetId: string, a1: string) => {
@@ -3897,6 +4129,21 @@ export default function EditorScreen() {
       case "view-comments-manager":
         setCommentsManagerOpen((v) => !v);
         break;
+      case "data-smart-date":
+        openSmartDateDialog();
+        break;
+      case "data-convert-to-range":
+        openConvertToRangeDialog();
+        break;
+      case "tools-document-inspector":
+        openDocumentInspector();
+        break;
+      case "data-bulk-clean":
+        openBulkCleanDialog();
+        break;
+      case "file-csv-import-wizard":
+        openCsvImportWizard();
+        break;
     }
   }, [
     openHyperlinkDialog,
@@ -3940,6 +4187,11 @@ export default function EditorScreen() {
     openSpellCheckDialog,
     openDataFormDialog,
     openFindReplaceAllDialog,
+    openSmartDateDialog,
+    openConvertToRangeDialog,
+    openDocumentInspector,
+    openBulkCleanDialog,
+    openCsvImportWizard,
   ]);
 
   // Export every sheet in the workbook as a separate <sheetName>.csv file
@@ -5115,6 +5367,79 @@ export default function EditorScreen() {
             setFindReplaceAllDialog(null);
           }}
           onClose={() => setFindReplaceAllDialog(null)}
+        />
+      )}
+      {smartDateDialog && (
+        <SmartDateDialog
+          initialRange={smartDateDialog.range}
+          samplePreview={smartDatePreview}
+          onConfigChange={(config) => {
+            const rect = parseRectFromA1(config.range) ?? smartDateDialog.rangeRect;
+            setSmartDatePreview(buildSmartDatePreview(smartDateDialog.sheetId, rect, config.locale, config.outputFormat));
+          }}
+          onApply={(params) => {
+            applySmartDate(params);
+            setSmartDateDialog(null);
+          }}
+          onClose={() => setSmartDateDialog(null)}
+        />
+      )}
+      {convertToRangeDialog && (
+        <ConvertToRangeDialog
+          tables={convertToRangeDialog.tables}
+          onApply={({ sheetId, tableName, preserveStyles }) => {
+            if (!currentSnapshotJson) return;
+            try {
+              const snap = JSON.parse(currentSnapshotJson);
+              const { snapshotMutated } = applyConvertToRange(snap, sheetId, { tableName, preserveStyles });
+              applyMutatedSnapshot(JSON.stringify(snapshotMutated));
+            } catch {
+              // best-effort
+            }
+            setConvertToRangeDialog(null);
+          }}
+          onClose={() => setConvertToRangeDialog(null)}
+        />
+      )}
+      {documentInspectorOpen && currentSnapshotJson && (
+        <DocumentInspectorDialog
+          inspections={documentInspections}
+          onStrip={(cat: InspectionCategory) => {
+            const { snapshotMutated, strippedCount } = stripCategory(currentSnapshotJson, cat);
+            if (strippedCount > 0) {
+              const json = JSON.stringify(snapshotMutated);
+              applyMutatedSnapshot(json);
+              setDocumentInspections(inspectDocument(json));
+            }
+          }}
+          onJumpTo={(sheetId, cellRef) => {
+            jumpToA1OnSheet(sheetId, cellRef);
+            setDocumentInspectorOpen(false);
+          }}
+          onReinspect={() => setDocumentInspections(inspectDocument(currentSnapshotJson))}
+          onClose={() => setDocumentInspectorOpen(false)}
+        />
+      )}
+      {bulkCleanDialog && (
+        <BulkCleanDialog
+          initialRange={bulkCleanDialog.range}
+          preview={bulkCleanDialog.preview}
+          onApply={(params) => {
+            applyBulkCleanAction(params);
+            setBulkCleanDialog(null);
+          }}
+          onClose={() => setBulkCleanDialog(null)}
+        />
+      )}
+      {csvWizard && (
+        <CsvImportWizardDialog
+          filePath={csvWizard.filePath}
+          previewBytes={csvWizard.previewBytes}
+          onImport={async () => {
+            await importCsv(csvWizard.filePath);
+            setCsvWizard(null);
+          }}
+          onClose={() => setCsvWizard(null)}
         />
       )}
       {commentsManagerOpen && currentSnapshotJson && (

@@ -66,6 +66,11 @@ const EDITOR_COMMAND_IDS = new Set([
   "data-form",
   "edit-find-replace-all",
   "view-comments-manager",
+  "data-smart-date",
+  "data-convert-to-range",
+  "tools-document-inspector",
+  "data-bulk-clean",
+  "file-csv-import-wizard",
 ]);
 
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route

@@ -186,6 +186,28 @@ import {
   saveWatchList,
 } from "../store/watchList";
 import { toA1Ref } from "../store/formulaAudit";
+import ScenarioManagerDialog from "./ScenarioManagerDialog";
+import {
+  type ScenarioAdapter,
+  type ScenarioEntry,
+  type WorkbookScenarioSnapshot,
+  listScenarios,
+  addScenario,
+  removeScenario,
+  applyScenario,
+  captureFromCurrentValues,
+} from "../store/scenarios";
+import ForecastSheetDialog, { type ForecastApplyParams } from "./ForecastSheetDialog";
+import { runForecast, parseXValues } from "../store/forecastSheet";
+import RecommendedChartsDialog from "./RecommendedChartsDialog";
+import { type ChartRecommendation, analyzeRange } from "../store/recommendedCharts";
+import CfRuleManagerDialog from "./CfRuleManagerDialog";
+import {
+  type WorkbookCfSnapshot,
+  reorderRule as reorderCfRule,
+  deleteRule as deleteCfRule,
+} from "../store/cfRuleManager";
+import SnapshotDiffDialog from "./SnapshotDiffDialog";
 // Single-thread InsertCommentDialog superseded by ThreadedCommentDialog;
 // its CommentEntry type lives in its own module for other consumers.
 import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
@@ -496,6 +518,18 @@ export default function EditorScreen() {
   const [calcOptionsOpen, setCalcOptionsOpen] = useState(false);
   const [calcMode, setCalcModeState] = useState<CalcMode>(() => getCalcMode());
   const [watchWindowOpen, setWatchWindowOpen] = useState(false);
+  // Wave 6
+  const [scenariosOpen, setScenariosOpen] = useState(false);
+  const [scenarioAdapter, setScenarioAdapter] = useState<ScenarioAdapter | null>(null);
+  const [forecastDialog, setForecastDialog] = useState<{ xRange: string; yRange: string } | null>(null);
+  const [recommendedChartsDialog, setRecommendedChartsDialog] = useState<{
+    sheetId: string;
+    range: string;
+    recommendations: ChartRecommendation[];
+  } | null>(null);
+  const [cfManagerOpen, setCfManagerOpen] = useState(false);
+  const [snapshotDiffOpen, setSnapshotDiffOpen] = useState(false);
+  const [snapshotDiffOptions, setSnapshotDiffOptions] = useState<Array<{ id: string; label: string }>>([]);
   // Format Painter (書式コピー) state. Excel's paintbrush:
   //   - "idle"   : tool is off.
   //   - "single" : armed for one paste; next selection-change applies + deactivates.
@@ -2046,6 +2080,218 @@ export default function EditorScreen() {
     }
   }, []);
 
+  // --- Scenario Manager ------------------------------------------------------
+  const openScenarioManagerDialog = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    const adapter: ScenarioAdapter = {
+      readCell(ref) {
+        try {
+          const sheet = workbook.getActiveSheet();
+          return sheet?.getRange(ref)?.getValue();
+        } catch {
+          return undefined;
+        }
+      },
+      writeCell(ref, value) {
+        try {
+          const sheet = workbook.getActiveSheet();
+          sheet?.getRange(ref)?.setValue(value as never);
+        } catch {
+          // best-effort
+        }
+      },
+    };
+    setScenarioAdapter(adapter);
+    setScenariosOpen(true);
+  }, []);
+
+  // --- Forecast Sheet --------------------------------------------------------
+  const openForecastSheetDialog = useCallback(() => {
+    const ready = getReadyWorkbook("予測シート");
+    if (!ready) return;
+    const sheet = ready.workbook.getActiveSheet();
+    if (!sheet) return;
+    let xRange = "A2:A10";
+    let yRange = "B2:B10";
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) {
+        const a1 = r.getA1Notation();
+        const m = /^([^!]*!?)\$?([A-Za-z]+)\$?(\d+):\$?([A-Za-z]+)\$?(\d+)$/.exec(a1);
+        if (m && m[2].toUpperCase() !== m[4].toUpperCase()) {
+          xRange = `${m[1]}${m[2]}${m[3]}:${m[2]}${m[5]}`;
+          yRange = `${m[1]}${m[4]}${m[3]}:${m[4]}${m[5]}`;
+        } else {
+          xRange = a1;
+        }
+      }
+    } catch {
+      // best-effort
+    }
+    setForecastDialog({ xRange, yRange });
+  }, [getReadyWorkbook]);
+
+  const applyForecastResult = useCallback(
+    (p: ForecastApplyParams) => {
+      const fUniver = fUniverRef.current;
+      const wb = fUniver?.getActiveWorkbook();
+      if (!wb) return;
+      const snap = wb.save() as unknown as {
+        sheets?: Record<string, { cellData?: Record<string, Record<string, unknown>> }>;
+      };
+      const sheetId = wb.getActiveSheet()?.getSheetId();
+      const sheet = sheetId ? snap.sheets?.[sheetId] : undefined;
+      if (!sheet) return;
+      // Simple range parser (local — Forecast helper has its own)
+      const parseRange = (a1: string): { r1: number; c1: number; r2: number; c2: number } | null => {
+        const m = /^(?:[^!]+!)?\$?([A-Za-z]+)\$?(\d+):\$?([A-Za-z]+)\$?(\d+)$/.exec(a1.trim());
+        if (!m) return null;
+        const colToIdx = (s: string) => {
+          let n = 0;
+          for (const c of s.toUpperCase()) n = n * 26 + (c.charCodeAt(0) - 64);
+          return n - 1;
+        };
+        return { c1: colToIdx(m[1]), r1: parseInt(m[2], 10) - 1, c2: colToIdx(m[3]), r2: parseInt(m[4], 10) - 1 };
+      };
+      const parseCell = (a1: string): { row: number; col: number } | null => {
+        const m = /^(?:[^!]+!)?\$?([A-Za-z]+)\$?(\d+)$/.exec(a1.trim());
+        if (!m) return null;
+        let col = 0;
+        for (const c of m[1].toUpperCase()) col = col * 26 + (c.charCodeAt(0) - 64);
+        return { col: col - 1, row: parseInt(m[2], 10) - 1 };
+      };
+      const xParsed = parseRange(p.xRange);
+      const yParsed = parseRange(p.yRange);
+      const dst = parseCell(p.destination);
+      if (!xParsed || !yParsed || !dst) return;
+      const readVals = (pr: { r1: number; c1: number; r2: number; c2: number }): unknown[] => {
+        const out: unknown[] = [];
+        for (let r = pr.r1; r <= pr.r2; r++) {
+          for (let c = pr.c1; c <= pr.c2; c++) {
+            const cell = (sheet.cellData?.[String(r)] as Record<string, { v?: unknown }> | undefined)?.[String(c)];
+            out.push(cell?.v);
+          }
+        }
+        return out;
+      };
+      const xs = parseXValues(readVals(xParsed));
+      const ys = readVals(yParsed).map((v) => (typeof v === "number" ? v : Number(v)));
+      const result = runForecast({
+        xValues: xs,
+        yValues: ys,
+        periods: p.periods,
+        confidenceLevel: p.confidence,
+      });
+      const cd = sheet.cellData ?? (sheet.cellData = {});
+      const headers = p.showConfidence ? ["X", "Y (実測)", "予測", "下限", "上限"] : ["X", "Y (実測)", "予測"];
+      headers.forEach((h, i) => {
+        if (!cd[String(dst.row)]) cd[String(dst.row)] = {};
+        (cd[String(dst.row)] as Record<string, unknown>)[String(dst.col + i)] = { v: h };
+      });
+      const histN = result.xs.length - result.forecast.length;
+      for (let i = 0; i < result.xs.length; i++) {
+        const rowKey = String(dst.row + 1 + i);
+        if (!cd[rowKey]) cd[rowKey] = {};
+        const r = cd[rowKey] as Record<string, unknown>;
+        r[String(dst.col)] = { v: result.xs[i] };
+        r[String(dst.col + 1)] = { v: result.ys[i] ?? "" };
+        if (i >= histN) {
+          const k = i - histN;
+          r[String(dst.col + 2)] = { v: result.forecast[k] };
+          if (p.showConfidence) {
+            r[String(dst.col + 3)] = { v: result.lower[k] };
+            r[String(dst.col + 4)] = { v: result.upper[k] };
+          }
+        }
+      }
+      applyMutatedSnapshot(JSON.stringify(snap));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // --- Recommended Charts ----------------------------------------------------
+  const openRecommendedChartsDialog = useCallback(() => {
+    const ready = getReadyWorkbook("おすすめグラフ");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let range = "A1";
+    let values: unknown[][] = [];
+    try {
+      const sel = sheet.getSelection();
+      const r = sel?.getActiveRange();
+      if (r) {
+        range = r.getA1Notation();
+        const v = (r as unknown as { getValues?: () => unknown[][] }).getValues?.();
+        if (Array.isArray(v)) values = v;
+      }
+    } catch {
+      // best-effort
+    }
+    const recs = analyzeRange(values, true);
+    setRecommendedChartsDialog({ sheetId, range, recommendations: recs });
+  }, [getReadyWorkbook]);
+
+  const applyRecommendedChart = useCallback(
+    (type: string, range: string) => {
+      if (!recommendedChartsDialog) return;
+      const fUniver = fUniverRef.current;
+      const wb = fUniver?.getActiveWorkbook();
+      if (!wb) return;
+      const snap = wb.save() as unknown as Record<string, unknown>;
+      const sheets = (snap.sheets as Record<string, Record<string, unknown>>) ?? {};
+      const sheetObj = sheets[recommendedChartsDialog.sheetId];
+      if (!sheetObj) return;
+      const existing = Array.isArray(sheetObj._charts) ? (sheetObj._charts as unknown[]) : [];
+      sheetObj._charts = [...existing, { range, type }];
+      applyMutatedSnapshot(JSON.stringify(snap));
+    },
+    [recommendedChartsDialog, applyMutatedSnapshot],
+  );
+
+  // --- Snapshot Diff ---------------------------------------------------------
+  const openSnapshotDiffDialog = useCallback(async () => {
+    if (!currentHandle?.path) {
+      setEditorOperationError("スナップショット比較: ファイルを保存してから利用してください。");
+      return;
+    }
+    try {
+      const rows = await invoke<Array<{ snapshotId: number; createdAt: string }>>("workbook_list_snapshots", {
+        path: currentHandle.path,
+      });
+      setSnapshotDiffOptions(
+        rows.map((r) => ({
+          id: String(r.snapshotId),
+          label: `${new Date(r.createdAt).toLocaleString("ja-JP")} (#${r.snapshotId})`,
+        })),
+      );
+      setSnapshotDiffOpen(true);
+    } catch (e) {
+      setEditorOperationError(`スナップショット比較: ${(e as Error).message}`);
+    }
+  }, [currentHandle]);
+
+  const loadSnapshotJsonById = useCallback(
+    async (id: string): Promise<string | null> => {
+      if (!currentHandle?.path) return null;
+      try {
+        const r = await invoke<{ handle?: { snapshotJson?: string } }>("workbook_open_snapshot", {
+          path: currentHandle.path,
+          snapshotId: Number(id),
+        });
+        return r.handle?.snapshotJson ?? null;
+      } catch {
+        return null;
+      }
+    },
+    [currentHandle],
+  );
+
   // Shared utility: jump active selection to A1 cell/range on a given sheet.
   // Used by TableInfoPanel and SparklineListPanel.
   const jumpToA1OnSheet = useCallback((sheetId: string, a1: string) => {
@@ -3453,6 +3699,21 @@ export default function EditorScreen() {
       case "watch-add-active":
         addActiveCellToWatch();
         break;
+      case "tools-scenarios":
+        openScenarioManagerDialog();
+        break;
+      case "data-forecast-sheet":
+        openForecastSheetDialog();
+        break;
+      case "insert-recommended-charts":
+        openRecommendedChartsDialog();
+        break;
+      case "format-cf-manage-rules":
+        setCfManagerOpen(true);
+        break;
+      case "view-snapshot-diff":
+        void openSnapshotDiffDialog();
+        break;
     }
   }, [
     openHyperlinkDialog,
@@ -3489,6 +3750,10 @@ export default function EditorScreen() {
     openInsertFunctionDialog,
     openCustomListsDialog,
     addActiveCellToWatch,
+    openScenarioManagerDialog,
+    openForecastSheetDialog,
+    openRecommendedChartsDialog,
+    openSnapshotDiffDialog,
   ]);
 
   // Export every sheet in the workbook as a separate <sheetName>.csv file
@@ -4477,6 +4742,106 @@ export default function EditorScreen() {
           onRecalcAll={() => window.dispatchEvent(new CustomEvent("coco:calc-recalc", { detail: { scope: "all" } }))}
           onRecalcSheet={() => window.dispatchEvent(new CustomEvent("coco:calc-recalc", { detail: { scope: "sheet" } }))}
           onClose={() => setCalcOptionsOpen(false)}
+        />
+      )}
+      {scenariosOpen && scenarioAdapter && (() => {
+        const wb = fUniverRef.current?.getActiveWorkbook();
+        const snap = (wb ? wb.save() : {}) as unknown as WorkbookScenarioSnapshot;
+        const scenarios = listScenarios(snap);
+        return (
+          <ScenarioManagerDialog
+            scenarios={scenarios}
+            onApply={(s) => {
+              applyScenario(scenarioAdapter, s);
+              const wb2 = fUniverRef.current?.getActiveWorkbook();
+              if (wb2) applyMutatedSnapshot(JSON.stringify(wb2.save()));
+            }}
+            onAdd={(entry) => {
+              const values = captureFromCurrentValues(scenarioAdapter, entry.changingCells);
+              const full: ScenarioEntry = { ...entry, values, createdAt: new Date().toISOString() };
+              const next = addScenario(snap, full);
+              applyMutatedSnapshot(JSON.stringify({ ...((wb?.save() as unknown as object) ?? {}), _scenarios: next._scenarios }));
+            }}
+            onDelete={(name) => {
+              const next = removeScenario(snap, name);
+              applyMutatedSnapshot(JSON.stringify({ ...((wb?.save() as unknown as object) ?? {}), _scenarios: next._scenarios }));
+            }}
+            onSummary={() => {
+              // Summary creation deferred — needs result-range UX (TODO)
+              setEditorOperationError("シナリオサマリー: 集約セル指定 UI は未実装です。");
+            }}
+            onClose={() => {
+              setScenariosOpen(false);
+              setScenarioAdapter(null);
+            }}
+          />
+        );
+      })()}
+      {forecastDialog && (
+        <ForecastSheetDialog
+          initialXRange={forecastDialog.xRange}
+          initialYRange={forecastDialog.yRange}
+          onApply={(p) => {
+            applyForecastResult(p);
+            setForecastDialog(null);
+          }}
+          onClose={() => setForecastDialog(null)}
+        />
+      )}
+      {recommendedChartsDialog && (
+        <RecommendedChartsDialog
+          recommendations={recommendedChartsDialog.recommendations}
+          sourceRange={recommendedChartsDialog.range}
+          onApply={(type, range) => {
+            applyRecommendedChart(type, range);
+            setRecommendedChartsDialog(null);
+          }}
+          onClose={() => setRecommendedChartsDialog(null)}
+        />
+      )}
+      {cfManagerOpen && (
+        <CfRuleManagerDialog
+          workbookSnapshotJson={currentSnapshotJson ?? ""}
+          onReorder={(sheetId, ruleIndex, direction) => {
+            try {
+              const snap = JSON.parse(currentSnapshotJson || "{}") as WorkbookCfSnapshot;
+              const next = reorderCfRule(snap, sheetId, ruleIndex, direction);
+              const rules = next.sheets?.[sheetId]?._conditionalFormatting ?? [];
+              applyCfRules(sheetId, rules as CfRule[]);
+            } catch {
+              // best-effort
+            }
+          }}
+          onDelete={(sheetId, ruleIndex) => {
+            try {
+              const snap = JSON.parse(currentSnapshotJson || "{}") as WorkbookCfSnapshot;
+              const next = deleteCfRule(snap, sheetId, ruleIndex);
+              const rules = next.sheets?.[sheetId]?._conditionalFormatting ?? [];
+              applyCfRules(sheetId, rules as CfRule[]);
+            } catch {
+              // best-effort
+            }
+          }}
+          onEdit={() => {
+            setCfManagerOpen(false);
+            openCfDialog();
+          }}
+          onNew={() => {
+            setCfManagerOpen(false);
+            openCfDialog();
+          }}
+          onClose={() => setCfManagerOpen(false)}
+        />
+      )}
+      {snapshotDiffOpen && (
+        <SnapshotDiffDialog
+          availableSnapshots={snapshotDiffOptions}
+          loadSnapshotJson={loadSnapshotJsonById}
+          onJumpTo={(sheetId, cellRef) => {
+            jumpToA1OnSheet(sheetId, cellRef);
+            setSnapshotDiffOpen(false);
+          }}
+          onClose={() => setSnapshotDiffOpen(false)}
         />
       )}
       {quickAnalysisDialog && (

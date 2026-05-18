@@ -294,6 +294,15 @@ import {
   setAutoSaveInterval as persistInterval,
   snapshotIntervalToMs,
 } from "../store/snapshotControls";
+import SortByColorDialog from "./SortByColorDialog";
+import { type SortByColorParams, applySortByColor } from "../store/sortByColor";
+import FilterByColorDialog from "./FilterByColorDialog";
+import { type FilterByColorParams, applyFilterByColor } from "../store/filterByColor";
+import WorkbookStatsDialog from "./WorkbookStatsDialog";
+import { type WorkbookStatsBundle, collectWorkbookStats } from "../store/workbookStats";
+import { patchShowAllCommentsView } from "./showAllCommentsRender";
+import CommentsAllOverlay from "./CommentsAllOverlay";
+import QuickPrintDialog from "./QuickPrintDialog";
 // Single-thread InsertCommentDialog superseded by ThreadedCommentDialog;
 // its CommentEntry type lives in its own module for other consumers.
 import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
@@ -677,6 +686,20 @@ export default function EditorScreen() {
     snapshotCount: number;
   }>({ open: false, lastSnapshotAt: null, snapshotCount: 0 });
   const [snapInterval, setSnapInterval] = useState<SnapshotIntervalSetting>(() => getAutoSaveInterval());
+  // Wave 11
+  const [sortByColorDialog, setSortByColorDialog] = useState<{ sheetId: string; range: string } | null>(null);
+  const [filterByColorDialog, setFilterByColorDialog] = useState<{
+    sheetId: string;
+    range: string;
+    snapshot: { cellData?: Record<string, Record<string, unknown>> };
+  } | null>(null);
+  const [workbookStatsOpen, setWorkbookStatsOpen] = useState(false);
+  const [workbookStats, setWorkbookStats] = useState<WorkbookStatsBundle | null>(null);
+  const [showAllCommentsMode, setShowAllCommentsMode] = useState(false);
+  const [quickPrintDialog, setQuickPrintDialog] = useState<{
+    snapshot: object;
+    activeSheetId: string | null;
+  } | null>(null);
   // Format Painter (書式コピー) state. Excel's paintbrush:
   //   - "idle"   : tool is off.
   //   - "single" : armed for one paste; next selection-change applies + deactivates.
@@ -3010,6 +3033,96 @@ export default function EditorScreen() {
     window.dispatchEvent(new CustomEvent("coco:snapshot-now"));
   }, []);
 
+  // --- Wave 11: Sort by Color / Filter by Color / Workbook Stats / Show All Comments / Quick Print ---
+  const openSortByColorDialog = useCallback(() => {
+    const ready = getReadyWorkbook("色で並べ替え");
+    if (!ready) return;
+    const sheet = ready.workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let range = "A1:A1";
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) {
+        const a1 = r.getA1Notation();
+        range = a1.includes(":") ? a1 : `${a1}:${a1}`;
+      }
+    } catch {
+      // best-effort
+    }
+    setSortByColorDialog({ sheetId, range });
+  }, [getReadyWorkbook]);
+
+  const applySortByColorAction = useCallback(
+    (params: SortByColorParams) => {
+      if (!sortByColorDialog) return;
+      const ready = getReadyWorkbook("色で並べ替え");
+      if (!ready) return;
+      const snap = ready.workbook.save();
+      const { snapshotMutated, reorderedCount } = applySortByColor(snap, sortByColorDialog.sheetId, params);
+      if (reorderedCount === 0) return;
+      applyMutatedSnapshot(JSON.stringify(snapshotMutated));
+    },
+    [sortByColorDialog, getReadyWorkbook, applyMutatedSnapshot],
+  );
+
+  const openFilterByColorDialog = useCallback(() => {
+    const ready = getReadyWorkbook("色でフィルター");
+    if (!ready) return;
+    const sheet = ready.workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let range = "A1:A1";
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) {
+        const a1 = r.getA1Notation();
+        range = a1.includes(":") ? a1 : `${a1}:${a1}`;
+      }
+    } catch {
+      // best-effort
+    }
+    const fresh = ready.workbook.save() as {
+      sheets?: Record<string, { cellData?: Record<string, Record<string, unknown>> }>;
+    };
+    const snap = fresh.sheets?.[sheetId] ?? {};
+    setFilterByColorDialog({ sheetId, range, snapshot: snap });
+  }, [getReadyWorkbook]);
+
+  const applyFilterByColorAction = useCallback(
+    (params: FilterByColorParams) => {
+      if (!filterByColorDialog) return;
+      const wb = fUniverRef.current?.getActiveWorkbook();
+      if (!wb) return;
+      const fresh = wb.save() as object;
+      const { snapshotMutated, matchedRows, hiddenRows } = applyFilterByColor(fresh, filterByColorDialog.sheetId, params);
+      applyMutatedSnapshot(JSON.stringify(snapshotMutated));
+      setEditorOperationError(`色でフィルター: ${matchedRows} 行表示 / ${hiddenRows} 行非表示`);
+    },
+    [filterByColorDialog, applyMutatedSnapshot],
+  );
+
+  const openWorkbookStatsDialog = useCallback(() => {
+    setWorkbookStats(collectWorkbookStats(currentSnapshotJson ?? ""));
+    setWorkbookStatsOpen(true);
+  }, [currentSnapshotJson]);
+
+  const refreshWorkbookStats = useCallback(() => {
+    setWorkbookStats(collectWorkbookStats(currentSnapshotJson ?? ""));
+  }, [currentSnapshotJson]);
+
+  const openQuickPrintDialog = useCallback(() => {
+    if (!currentSnapshotJson) return;
+    let snap: object;
+    try {
+      snap = JSON.parse(currentSnapshotJson) as object;
+    } catch {
+      return;
+    }
+    const activeId = fUniverRef.current?.getActiveWorkbook()?.getActiveSheet()?.getSheetId() ?? null;
+    setQuickPrintDialog({ snapshot: snap, activeSheetId: activeId });
+  }, [currentSnapshotJson]);
+
   // Shared utility: jump active selection to A1 cell/range on a given sheet.
   // Used by TableInfoPanel and SparklineListPanel.
   const jumpToA1OnSheet = useCallback((sheetId: string, a1: string) => {
@@ -4495,6 +4608,21 @@ export default function EditorScreen() {
       case "snapshot-now":
         triggerSnapshotNow();
         break;
+      case "data-sort-by-color":
+        openSortByColorDialog();
+        break;
+      case "data-filter-by-color":
+        openFilterByColorDialog();
+        break;
+      case "view-workbook-stats":
+        openWorkbookStatsDialog();
+        break;
+      case "view-show-all-comments":
+        setShowAllCommentsMode((v) => !v);
+        break;
+      case "file-quick-print":
+        openQuickPrintDialog();
+        break;
     }
   }, [
     openHyperlinkDialog,
@@ -4551,6 +4679,10 @@ export default function EditorScreen() {
     openTemplatesGallery,
     openSnapshotControlsDialog,
     triggerSnapshotNow,
+    openSortByColorDialog,
+    openFilterByColorDialog,
+    openWorkbookStatsDialog,
+    openQuickPrintDialog,
   ]);
 
   // Export every sheet in the workbook as a separate <sheetName>.csv file
@@ -4694,16 +4826,19 @@ export default function EditorScreen() {
       // elements on xlsx export.
       const initialData: Partial<IWorkbookData> = currentSnapshotJson
         ? patchShowFormulasView(
-            patchErrorIndicators(
-              patchCfRenders(
-                patchSparklineRenders(
-                  patchTableRenders(
-                    patchSlicerFilters(
-                      patchOutlineRenders(patchHyperlinkRenders(JSON.parse(currentSnapshotJson))),
+            patchShowAllCommentsView(
+              patchErrorIndicators(
+                patchCfRenders(
+                  patchSparklineRenders(
+                    patchTableRenders(
+                      patchSlicerFilters(
+                        patchOutlineRenders(patchHyperlinkRenders(JSON.parse(currentSnapshotJson))),
+                      ),
                     ),
                   ),
                 ),
               ),
+              showAllCommentsMode,
             ),
             showFormulasMode,
           )
@@ -5186,6 +5321,13 @@ export default function EditorScreen() {
             sheetNamesById={sheetNamesById}
             onJumpTo={jumpToA1OnSheet}
             onRequestAddCurrent={addCurrentCellAsBookmark}
+          />
+        )}
+        {showAllCommentsMode && currentSnapshotJson && (
+          <CommentsAllOverlay
+            workbookSnapshotJson={currentSnapshotJson}
+            onJumpTo={jumpToA1OnSheet}
+            onClose={() => setShowAllCommentsMode(false)}
           />
         )}
         {BUSY_LABELS[saveStatus] && (
@@ -5999,6 +6141,43 @@ export default function EditorScreen() {
             void handleUseTemplate(id);
           }}
           onClose={() => setTemplatesGalleryOpen(false)}
+        />
+      )}
+      {sortByColorDialog && (
+        <SortByColorDialog
+          initialRange={sortByColorDialog.range}
+          sheetId={sortByColorDialog.sheetId}
+          onApply={(params) => {
+            applySortByColorAction(params);
+            setSortByColorDialog(null);
+          }}
+          onClose={() => setSortByColorDialog(null)}
+        />
+      )}
+      {filterByColorDialog && (
+        <FilterByColorDialog
+          initialRange={filterByColorDialog.range}
+          sheetId={filterByColorDialog.sheetId}
+          sheetSnapshot={filterByColorDialog.snapshot}
+          onApply={(params) => {
+            applyFilterByColorAction(params);
+            setFilterByColorDialog(null);
+          }}
+          onClose={() => setFilterByColorDialog(null)}
+        />
+      )}
+      {workbookStatsOpen && workbookStats && (
+        <WorkbookStatsDialog
+          stats={workbookStats}
+          onRefresh={refreshWorkbookStats}
+          onClose={() => setWorkbookStatsOpen(false)}
+        />
+      )}
+      {quickPrintDialog && (
+        <QuickPrintDialog
+          snapshot={quickPrintDialog.snapshot}
+          activeSheetId={quickPrintDialog.activeSheetId}
+          onClose={() => setQuickPrintDialog(null)}
         />
       )}
       {snapshotControlsState.open && (

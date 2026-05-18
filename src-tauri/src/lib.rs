@@ -64,6 +64,7 @@ pub fn run() {
                 .text("file-csv-import-wizard", "CSV インポート ウィザード...")
                 .text("file-import-sheet", "シートを別ファイルから取り込み...")
                 .text("snapshot-now", "今すぐスナップショット")
+                .text("file-quick-print", format!("印刷プレビュー\t{MOD}+P"))
                 .separator()
                 .text("export-xlsx", "xlsx エクスポート...")
                 .text("export-csv", "CSV エクスポート...")
@@ -103,8 +104,10 @@ pub fn run() {
                 .text("view-comments-manager", "コメント一覧...")
                 .text("view-image-manager", "画像一覧...")
                 .text("view-sheet-note", "シートのメモ...")
+                .text("view-workbook-stats", "ブック統計...")
                 .separator()
                 .text("view-show-formulas", format!("数式の表示\t{MOD}+`"))
+                .text("view-show-all-comments", "コメントをすべて表示")
                 .separator()
                 .text("settings", "設定...")
                 .build()?;
@@ -159,6 +162,9 @@ pub fn run() {
                 .text("data-bulk-clean", "データクリーニング...")
                 .text("data-convert-to-range", "テーブル → 通常の範囲に変換...")
                 .text("data-range-compare", "範囲の比較...")
+                .separator()
+                .text("data-sort-by-color", "色で並べ替え...")
+                .text("data-filter-by-color", "色でフィルター...")
                 .build()?;
             let tools_menu = SubmenuBuilder::new(app, "ツール")
                 .text("tools-sheet-protection", "シート保護...")

@@ -83,6 +83,11 @@ const EDITOR_COMMAND_IDS = new Set([
   "file-templates",
   "view-snapshot-controls",
   "snapshot-now",
+  "data-sort-by-color",
+  "data-filter-by-color",
+  "view-workbook-stats",
+  "view-show-all-comments",
+  "file-quick-print",
 ]);
 
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route

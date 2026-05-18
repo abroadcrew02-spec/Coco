@@ -1,0 +1,133 @@
+/* "Show All Comments" floating overlay. Sticky card stack docked to the
+   bottom-right of the editor (above the status bar). Positioned with
+   absolute coordinates inside the .univer-wrap parent so it floats over
+   the grid without permanently consuming layout space. Pointer-events
+   stay isolated to the panel so the grid below remains interactive. */
+
+.cao-overlay {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  z-index: 26; /* one above CommentIndicatorsPanel so the two can coexist */
+  width: 300px;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: #fffdf6;
+  border: 1px solid #d4b85a;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.cao-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #fef3c7;
+  border-bottom: 1px solid #f1d572;
+}
+
+.cao-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #78350f;
+}
+
+.cao-glyph {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.cao-close {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+  color: #92400e;
+}
+
+.cao-close:hover,
+.cao-close:focus-visible {
+  color: #431407;
+  outline: none;
+}
+
+.cao-cards {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cao-card {
+  background: #fff;
+  border: 1px solid #f1d572;
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cao-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.cao-cell-ref {
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 11px;
+  color: #4338ca;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cao-author {
+  font-size: 11px;
+  color: #6b7280;
+  font-style: italic;
+  white-space: nowrap;
+}
+
+.cao-body {
+  margin: 0;
+  color: #1f2937;
+  line-height: 1.4;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.cao-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cao-jump {
+  background: #fde68a;
+  border: 1px solid #d4b85a;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  color: #78350f;
+}
+
+.cao-jump:hover,
+.cao-jump:focus-visible {
+  background: #fcd34d;
+  outline: none;
+}

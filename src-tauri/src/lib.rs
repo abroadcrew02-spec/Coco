@@ -37,6 +37,18 @@ pub fn run() {
         )
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // #82: best-effort startup sweep of orphan recovery .coco files
+            // (file present, no recovery_candidates row). Scoped to the
+            // recovery directory so user files are never touched. Errors
+            // are non-fatal — log and continue with app startup.
+            if let Ok(data_dir) = app.path().app_data_dir() {
+                match commands::recovery::sweep_orphan_recovery_files(&data_dir) {
+                    Ok(0) => {}
+                    Ok(n) => log::info!("recovery sweep removed {} orphan files", n),
+                    Err(e) => log::warn!("recovery sweep failed: {}", e),
+                }
+            }
+
             // req 7.2: native menu bar. Items emit a "menu-action" event with
             // their id; the frontend listens and routes to existing store
             // actions or editor commands.

@@ -85,16 +85,45 @@ function parseA1(cell: string): CellCoord | null {
   return { row: rowNum - 1, col };
 }
 
+/** Parse a column-only ref like "A", "$AA" — returns the 0-based column,
+ *  or null if it's not pure letters. #101 helper. */
+function parseColRef(s: string): number | null {
+  const trimmed = s.replace(/^\$/, "");
+  if (!/^[A-Za-z]+$/.test(trimmed)) return null;
+  const col = colLettersToIndex(trimmed);
+  return col >= 0 ? col : null;
+}
+
+/** Parse a row-only ref like "1", "$5" — returns the 0-based row, or null. */
+function parseRowRef(s: string): number | null {
+  const trimmed = s.replace(/^\$/, "");
+  if (!/^\d+$/.test(trimmed)) return null;
+  const n = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return n - 1;
+}
+
 /**
  * Parse an Excel sqref into a flat list of cell coordinates. Accepts:
  *   - single cells: "A1"
  *   - ranges: "A1:C3"
+ *   - whole-column refs: "A:A", "B:D" (#101)
+ *   - whole-row refs: "1:1", "5:10" (#101)
  *   - space-separated mixes: "A1 B2 D4:D10"
- * Returns an empty array on any malformed piece.
+ *
+ * #101: whole-column / whole-row refs are bounded by `usedRange` (passed in
+ * by the caller) so we never generate 1M-coordinate arrays for the full
+ * worksheet. If usedRange is omitted, whole-column / whole-row pieces
+ * conservatively fall back to row 0 / col 0 only.
  */
-export function parseSqrefToCells(sqref: string): CellCoord[] {
+export function parseSqrefToCells(
+  sqref: string,
+  usedRange?: { maxRow: number; maxCol: number },
+): CellCoord[] {
   const out: CellCoord[] = [];
   if (typeof sqref !== "string") return out;
+  const maxRow = usedRange?.maxRow ?? 0;
+  const maxCol = usedRange?.maxCol ?? 0;
   const pieces = sqref.trim().split(/\s+/);
   for (const piece of pieces) {
     if (!piece) continue;
@@ -104,8 +133,33 @@ export function parseSqrefToCells(sqref: string): CellCoord[] {
       if (c) out.push(c);
       continue;
     }
-    const a = parseA1(piece.slice(0, colon));
-    const b = parseA1(piece.slice(colon + 1));
+    const leftStr = piece.slice(0, colon);
+    const rightStr = piece.slice(colon + 1);
+    // Whole-column ("A:A", "B:D")
+    const lc = parseColRef(leftStr);
+    const rc = parseColRef(rightStr);
+    if (lc !== null && rc !== null) {
+      const c0 = Math.min(lc, rc);
+      const c1 = Math.max(lc, rc);
+      for (let r = 0; r <= maxRow; r++) {
+        for (let c = c0; c <= c1; c++) out.push({ row: r, col: c });
+      }
+      continue;
+    }
+    // Whole-row ("1:1", "5:10")
+    const lr = parseRowRef(leftStr);
+    const rr = parseRowRef(rightStr);
+    if (lr !== null && rr !== null) {
+      const r0 = Math.min(lr, rr);
+      const r1 = Math.max(lr, rr);
+      for (let r = r0; r <= r1; r++) {
+        for (let c = 0; c <= maxCol; c++) out.push({ row: r, col: c });
+      }
+      continue;
+    }
+    // Explicit cell range.
+    const a = parseA1(leftStr);
+    const b = parseA1(rightStr);
     if (!a || !b) continue;
     const r0 = Math.min(a.row, b.row);
     const r1 = Math.max(a.row, b.row);
@@ -354,6 +408,24 @@ export function patchCfRenders<T>(snapshot: T): T {
       Record<string, unknown>
     >;
 
+    // #101: compute the used range so whole-column / whole-row sqrefs
+    // ("A:A", "1:1") can be bounded. Walk the existing cellData once —
+    // the keys are stringified ints so a max-reduce is cheap.
+    let usedMaxRow = 0;
+    let usedMaxCol = 0;
+    for (const rowKey of Object.keys(cellData)) {
+      const r = Number.parseInt(rowKey, 10);
+      if (Number.isFinite(r) && r > usedMaxRow) usedMaxRow = r;
+      const row = cellData[rowKey];
+      if (row && typeof row === "object") {
+        for (const colKey of Object.keys(row)) {
+          const c = Number.parseInt(colKey, 10);
+          if (Number.isFinite(c) && c > usedMaxCol) usedMaxCol = c;
+        }
+      }
+    }
+    const usedRange = { maxRow: usedMaxRow, maxCol: usedMaxCol };
+
     // Ascending priority = highest-priority first (Excel convention).
     // We iterate low-to-high and let later (lower-priority) writes only
     // fill keys not already set, so the first rule wins per style key.
@@ -362,7 +434,7 @@ export function patchCfRenders<T>(snapshot: T): T {
       .sort((a, b) => (a.priority ?? 1) - (b.priority ?? 1));
 
     for (const rule of sorted) {
-      const coords = parseSqrefToCells(rule.sqref);
+      const coords = parseSqrefToCells(rule.sqref, usedRange);
       if (coords.length === 0) continue;
       // Pre-collect values when the rule is range-aware.
       let rangeValues: unknown[] = [];

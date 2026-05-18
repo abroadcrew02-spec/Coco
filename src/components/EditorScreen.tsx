@@ -1121,7 +1121,24 @@ export default function EditorScreen() {
     const cellData = sheetObj.cellData;
     const rowKey = String(row);
     if (!cellData[rowKey]) cellData[rowKey] = {};
-    const cell = cellData[rowKey][String(col)] ?? {};
+    const existing = cellData[rowKey][String(col)];
+    // #103: anchor cell already has a value (label like "合計", another
+    // formula, etc.) → confirm before destroying it. Empty cells (no `v`
+    // and no `f`) overwrite silently as before.
+    const hasValue =
+      existing &&
+      (existing.v !== undefined ||
+        (typeof existing.f === "string" && (existing.f as string).length > 0));
+    if (hasValue) {
+      const preview =
+        existing.v !== undefined ? String(existing.v) : String(existing.f ?? "");
+      const trimmed = preview.length > 40 ? preview.slice(0, 40) + "…" : preview;
+      const ok = window.confirm(
+        `アクティブセルに値 "${trimmed}" があります。${formula} で上書きしますか？`,
+      );
+      if (!ok) return;
+    }
+    const cell = existing ?? {};
     cell.f = formula;
     // Drop any stale literal value — Univer will recompute via the formula.
     delete cell.v;

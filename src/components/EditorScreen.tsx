@@ -256,6 +256,20 @@ import {
 import BulkCleanDialog from "./BulkCleanDialog";
 import { applyBulkClean, type BulkCleanParams } from "../store/bulkClean";
 import CsvImportWizardDialog from "./CsvImportWizardDialog";
+import NavigationBox, { type NavigationTarget } from "./NavigationBox";
+import { resolveNamedRange as resolveNavNamed } from "../store/navigationBox";
+import SheetImportDialog from "./SheetImportDialog";
+import { addImportedSheetToSnapshot } from "../store/sheetImport";
+import BookmarksPanel from "./BookmarksPanel";
+import { addBookmark, loadBookmarks, saveBookmarks } from "../store/bookmarks";
+import NumberFormatManagerDialog from "./NumberFormatManagerDialog";
+import {
+  type FormatCodeEntry,
+  listAllFormatCodes,
+  renameFormatCode,
+  deleteFormatCode,
+} from "../store/numberFormatManager";
+import RangeCompareDialog from "./RangeCompareDialog";
 // Single-thread InsertCommentDialog superseded by ThreadedCommentDialog;
 // its CommentEntry type lives in its own module for other consumers.
 import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
@@ -614,6 +628,16 @@ export default function EditorScreen() {
     preview: Array<{ original: string }>;
   } | null>(null);
   const [csvWizard, setCsvWizard] = useState<{ filePath: string; previewBytes: Uint8Array } | null>(null);
+  // Wave 9
+  const [goToOpen, setGoToOpen] = useState(false);
+  const [sheetImportOpen, setSheetImportOpen] = useState(false);
+  const [bookmarksPanelOpen, setBookmarksPanelOpen] = useState(false);
+  const [numberFormatManagerOpen, setNumberFormatManagerOpen] = useState(false);
+  const [rangeCompareState, setRangeCompareState] = useState<{
+    initialA: string;
+    initialB: string;
+    snapshotJson: string;
+  } | null>(null);
   // Format Painter (書式コピー) state. Excel's paintbrush:
   //   - "idle"   : tool is off.
   //   - "single" : armed for one paste; next selection-change applies + deactivates.
@@ -2695,6 +2719,174 @@ export default function EditorScreen() {
     })();
   }, []);
 
+  // --- Wave 9: Sheet Import / Bookmarks / NumberFormatManager / RangeCompare / Go To ---
+  const applySheetImport = useCallback(
+    async (filePath: string, sheetNames: string[]) => {
+      const snapJson = currentSnapshotJson;
+      if (!snapJson) return;
+      try {
+        const merged = JSON.parse(snapJson);
+        for (const name of sheetNames) {
+          const fragJson = await invoke<string>("workbook_extract_sheet_as_snapshot", {
+            path: filePath,
+            sheetName: name,
+          });
+          const frag = JSON.parse(fragJson);
+          addImportedSheetToSnapshot(merged, frag);
+        }
+        applyMutatedSnapshot(JSON.stringify(merged));
+      } catch (e) {
+        setEditorOperationError(`シート取り込みに失敗しました: ${(e as Error).message}`);
+      }
+    },
+    [currentSnapshotJson, applyMutatedSnapshot],
+  );
+
+  const addCurrentCellAsBookmark = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    const workbook = fUniver?.getActiveWorkbook();
+    const sheet = workbook?.getActiveSheet();
+    const r = sheet?.getSelection()?.getActiveRange();
+    if (!sheet || !r) return;
+    const wbId = currentHandle?.path ?? "default";
+    const current = loadBookmarks(wbId);
+    const label = `Bookmark ${current.length + 1}`;
+    const next = addBookmark(current, {
+      label,
+      sheetId: sheet.getSheetId(),
+      cellRef: toA1Ref(r.getRow(), r.getColumn()),
+    });
+    saveBookmarks(wbId, next);
+    setBookmarksPanelOpen(true);
+  }, [currentHandle]);
+
+  // Derive sheetNamesById for the Bookmarks panel
+  const sheetNamesById = useMemo(() => {
+    const m: Record<string, string> = {};
+    if (!currentSnapshotJson) return m;
+    try {
+      const snap = JSON.parse(currentSnapshotJson) as { sheets?: Record<string, { name?: string }> };
+      for (const [id, s] of Object.entries(snap.sheets ?? {})) {
+        if (s?.name) m[id] = s.name;
+      }
+    } catch {
+      // best-effort
+    }
+    return m;
+  }, [currentSnapshotJson]);
+
+  // NumberFormatManager
+  const numberFormatEntries = useMemo<FormatCodeEntry[]>(
+    () => listAllFormatCodes(currentSnapshotJson ?? ""),
+    [currentSnapshotJson],
+  );
+
+  const activeSelectionA1 = useMemo(() => {
+    try {
+      const fUniver = fUniverRef.current;
+      const wb = fUniver?.getActiveWorkbook();
+      const sheet = wb?.getActiveSheet();
+      const r = sheet?.getSelection()?.getActiveRange();
+      return r ? r.getA1Notation() : "";
+    } catch {
+      return "";
+    }
+  }, []);
+
+  const replaceWorkbookSnapshot = useCallback(
+    (json: string) => {
+      applyMutatedSnapshot(json);
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // RangeCompare opener
+  const openRangeCompareDialog = useCallback(() => {
+    const ready = getReadyWorkbook("範囲の比較");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet || !currentSnapshotJson) return;
+    const sheetName = sheet.getSheetName?.() ?? "Sheet1";
+    let initialA = `${sheetName}!A1:A1`;
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) {
+        const a1 = r.getA1Notation();
+        initialA = `${sheetName}!${a1.includes(":") ? a1 : `${a1}:${a1}`}`;
+      }
+    } catch {
+      // best-effort
+    }
+    setRangeCompareState({ initialA, initialB: initialA, snapshotJson: currentSnapshotJson });
+  }, [getReadyWorkbook, currentSnapshotJson]);
+
+  // Go To / Name Box opener
+  const openGoToDialog = useCallback(() => {
+    if (!getReadyWorkbook("ジャンプ")) return;
+    setGoToOpen(true);
+  }, [getReadyWorkbook]);
+
+  // Inline jump that doesn't depend on the later-declared jumpToA1OnSheet —
+  // avoids TS's temporal-dead-zone warning in the deps array.
+  const goToJump = useCallback((sheetId: string, a1: string) => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    try {
+      const sheet = workbook.getSheetBySheetId ? workbook.getSheetBySheetId(sheetId) : null;
+      if (sheet) {
+        const w = workbook as unknown as { setActiveSheet?: (s: unknown) => void };
+        w.setActiveSheet?.(sheet);
+        const range = (sheet as unknown as { getRange?: (a1: string) => unknown }).getRange?.(a1);
+        if (range) {
+          const r = range as { activate?: () => void };
+          r.activate?.();
+        }
+      }
+    } catch {
+      // best-effort silent
+    }
+  }, []);
+
+  const handleGoToNavigate = useCallback(
+    (target: NavigationTarget) => {
+      const fUniver = fUniverRef.current;
+      const wb = fUniver?.getActiveWorkbook();
+      if (!wb) return;
+      const activeSheet = wb.getActiveSheet();
+      const activeSid = activeSheet?.getSheetId() ?? "";
+      const sheetIdByName = (name: string): string | null => {
+        if (!currentSnapshotJson) return null;
+        try {
+          const snap = JSON.parse(currentSnapshotJson) as { sheets?: Record<string, { name?: string }> };
+          for (const [id, s] of Object.entries(snap.sheets ?? {})) {
+            if ((s?.name ?? id) === name) return id;
+          }
+        } catch {
+          // ignore
+        }
+        return null;
+      };
+      if (target.kind === "named" && target.name) {
+        try {
+          const snapObj = currentSnapshotJson ? JSON.parse(currentSnapshotJson) : null;
+          const named = readNamedRanges().map((r) => ({ name: r.name, target: r.formula }));
+          const resolved = resolveNavNamed(snapObj, target.name, named);
+          if (resolved) goToJump(resolved.sheetId, resolved.a1);
+        } catch {
+          // ignore
+        }
+      } else if (target.a1) {
+        const sid = target.sheetName ? sheetIdByName(target.sheetName) ?? activeSid : activeSid;
+        goToJump(sid, target.a1);
+      }
+      setGoToOpen(false);
+    },
+    [currentSnapshotJson, readNamedRanges, goToJump],
+  );
+
   // Shared utility: jump active selection to A1 cell/range on a given sheet.
   // Used by TableInfoPanel and SparklineListPanel.
   const jumpToA1OnSheet = useCallback((sheetId: string, a1: string) => {
@@ -4144,6 +4336,24 @@ export default function EditorScreen() {
       case "file-csv-import-wizard":
         openCsvImportWizard();
         break;
+      case "edit-go-to":
+        openGoToDialog();
+        break;
+      case "file-import-sheet":
+        setSheetImportOpen(true);
+        break;
+      case "view-bookmarks-panel":
+        setBookmarksPanelOpen((v) => !v);
+        break;
+      case "bookmark-add-current":
+        addCurrentCellAsBookmark();
+        break;
+      case "format-manage-codes":
+        setNumberFormatManagerOpen(true);
+        break;
+      case "data-range-compare":
+        openRangeCompareDialog();
+        break;
     }
   }, [
     openHyperlinkDialog,
@@ -4192,6 +4402,9 @@ export default function EditorScreen() {
     openDocumentInspector,
     openBulkCleanDialog,
     openCsvImportWizard,
+    openGoToDialog,
+    addCurrentCellAsBookmark,
+    openRangeCompareDialog,
   ]);
 
   // Export every sheet in the workbook as a separate <sheetName>.csv file
@@ -4821,6 +5034,14 @@ export default function EditorScreen() {
             onJumpTo={jumpToA1OnSheet}
           />
         )}
+        {bookmarksPanelOpen && (
+          <BookmarksPanel
+            workbookId={currentHandle?.path ?? "default"}
+            sheetNamesById={sheetNamesById}
+            onJumpTo={jumpToA1OnSheet}
+            onRequestAddCurrent={addCurrentCellAsBookmark}
+          />
+        )}
         {BUSY_LABELS[saveStatus] && (
           <BusyOverlay
             label={BUSY_LABELS[saveStatus]!.label}
@@ -5440,6 +5661,119 @@ export default function EditorScreen() {
             setCsvWizard(null);
           }}
           onClose={() => setCsvWizard(null)}
+        />
+      )}
+      {goToOpen && (
+        <div
+          className="sd-backdrop"
+          onClick={() => setGoToOpen(false)}
+          style={{ alignItems: "flex-start", paddingTop: 80 }}
+        >
+          <div
+            className="sd-modal"
+            role="dialog"
+            aria-modal="true"
+            style={{ maxWidth: 480 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="sd-header">
+              <h2 className="sd-title">ジャンプ / 名前ボックス</h2>
+              <button type="button" className="sd-close" onClick={() => setGoToOpen(false)} aria-label="閉じる">
+                ×
+              </button>
+            </header>
+            <div className="sd-body">
+              <NavigationBox
+                activeSheetName={(() => {
+                  try {
+                    return fUniverRef.current?.getActiveWorkbook()?.getActiveSheet()?.getSheetName() ?? "Sheet1";
+                  } catch {
+                    return "Sheet1";
+                  }
+                })()}
+                activeCellRef={activeSelectionA1 || "A1"}
+                availableNamedRanges={readNamedRanges().map((r) => ({ name: r.name, target: r.formula }))}
+                onNavigate={handleGoToNavigate}
+              />
+              <p className="sd-hint" style={{ marginTop: 12 }}>
+                セル参照 (例: B5)、シート修飾 (Sheet2!A1)、範囲 (A1:C10)、名前付き範囲が使えます。
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      {sheetImportOpen && (
+        <SheetImportDialog
+          onApply={(filePath, sheetNames) => {
+            void applySheetImport(filePath, sheetNames);
+            setSheetImportOpen(false);
+          }}
+          onClose={() => setSheetImportOpen(false)}
+        />
+      )}
+      {numberFormatManagerOpen && (
+        <NumberFormatManagerDialog
+          entries={numberFormatEntries}
+          activeSelectionRange={activeSelectionA1}
+          onRename={(oldCode, newCode) => {
+            const { snapshotMutated, changedCount } = renameFormatCode(currentSnapshotJson ?? "", oldCode, newCode);
+            if (changedCount > 0) replaceWorkbookSnapshot(JSON.stringify(snapshotMutated));
+          }}
+          onApplyToRange={(code, range) => {
+            // Apply via existing applyMutatedSnapshot pattern — set _fmt on each cell in the range.
+            // Simplified: just call applyMutatedSnapshot with a quick range-walk.
+            try {
+              const fUniver = fUniverRef.current;
+              const wb = fUniver?.getActiveWorkbook();
+              const sheet = wb?.getActiveSheet();
+              if (!wb || !sheet) return;
+              const sheetId = sheet.getSheetId();
+              const fresh = wb.save() as unknown as {
+                sheets?: Record<string, { cellData?: Record<string, Record<string, unknown>>; _fmt?: Record<string, Record<string, string>> }>;
+              };
+              const sheetObj = fresh.sheets?.[sheetId];
+              if (!sheetObj) return;
+              if (!sheetObj._fmt) sheetObj._fmt = {};
+              const cleaned = range.includes("!") ? range.split("!").slice(1).join("!") : range;
+              const m = /^\$?([A-Za-z]+)\$?(\d+)(?::\$?([A-Za-z]+)\$?(\d+))?$/.exec(cleaned.trim());
+              if (!m) return;
+              const colToIdx = (s: string) => {
+                let n = 0;
+                for (const c of s.toUpperCase()) n = n * 26 + (c.charCodeAt(0) - 64);
+                return n - 1;
+              };
+              const c1 = colToIdx(m[1]);
+              const r1 = parseInt(m[2], 10) - 1;
+              const c2 = m[3] ? colToIdx(m[3]) : c1;
+              const r2 = m[4] ? parseInt(m[4], 10) - 1 : r1;
+              for (let r = Math.min(r1, r2); r <= Math.max(r1, r2); r++) {
+                if (!sheetObj._fmt[String(r)]) sheetObj._fmt[String(r)] = {};
+                for (let c = Math.min(c1, c2); c <= Math.max(c1, c2); c++) {
+                  sheetObj._fmt[String(r)][String(c)] = code;
+                }
+              }
+              applyMutatedSnapshot(JSON.stringify(fresh));
+            } catch {
+              // best-effort
+            }
+          }}
+          onDelete={(code) => {
+            const { snapshotMutated, clearedCount } = deleteFormatCode(currentSnapshotJson ?? "", code);
+            if (clearedCount > 0) replaceWorkbookSnapshot(JSON.stringify(snapshotMutated));
+          }}
+          onClose={() => setNumberFormatManagerOpen(false)}
+        />
+      )}
+      {rangeCompareState && (
+        <RangeCompareDialog
+          initialRangeA={rangeCompareState.initialA}
+          initialRangeB={rangeCompareState.initialB}
+          workbookSnapshotJson={rangeCompareState.snapshotJson}
+          onJumpTo={(sheetId, cellRef) => {
+            jumpToA1OnSheet(sheetId, cellRef);
+            setRangeCompareState(null);
+          }}
+          onClose={() => setRangeCompareState(null)}
         />
       )}
       {commentsManagerOpen && currentSnapshotJson && (

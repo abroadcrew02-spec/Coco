@@ -61,6 +61,7 @@ pub fn run() {
                 .separator()
                 .text("file-page-setup", "ページ設定...")
                 .text("file-csv-import-wizard", "CSV インポート ウィザード...")
+                .text("file-import-sheet", "シートを別ファイルから取り込み...")
                 .separator()
                 .text("export-xlsx", "xlsx エクスポート...")
                 .text("export-csv", "CSV エクスポート...")
@@ -81,6 +82,8 @@ pub fn run() {
                 .text("edit-flash-fill", format!("フラッシュフィル\t{MOD}+E"))
                 .text("edit-quick-analysis", format!("クイック分析\t{MOD}+Q"))
                 .text("edit-find-replace-all", format!("検索と置換 (全シート)...\t{MOD}+Shift+H"))
+                .text("edit-go-to", format!("ジャンプ / 名前ボックス\t{MOD}+G"))
+                .text("bookmark-add-current", format!("ブックマークを追加\t{MOD}+D"))
                 .build()?;
             let view_menu = SubmenuBuilder::new(app, "表示")
                 .text("view-snapshots", "スナップショット...")
@@ -92,6 +95,7 @@ pub fn run() {
                 .text("view-errors-panel", "エラー一覧")
                 .text("view-trace-panel", "依存関係...")
                 .text("view-watch-window", "ウォッチウィンドウ")
+                .text("view-bookmarks-panel", "ブックマーク一覧")
                 .text("view-snapshot-diff", "スナップショット比較...")
                 .text("view-comments-manager", "コメント一覧...")
                 .separator()
@@ -119,6 +123,7 @@ pub fn run() {
                 .text("format-percent", "パーセント")
                 .separator()
                 .text("format-cell-styles", "セルスタイル...")
+                .text("format-manage-codes", "表示形式: 一覧管理...")
                 .text("format-conditional", "条件付き書式...")
                 .text("format-cf-manage-rules", "条件付き書式: ルールの管理...")
                 .text("format-painter", "書式のコピー")
@@ -147,6 +152,7 @@ pub fn run() {
                 .text("data-smart-date", "日付に変換...")
                 .text("data-bulk-clean", "データクリーニング...")
                 .text("data-convert-to-range", "テーブル → 通常の範囲に変換...")
+                .text("data-range-compare", "範囲の比較...")
                 .build()?;
             let tools_menu = SubmenuBuilder::new(app, "ツール")
                 .text("tools-sheet-protection", "シート保護...")
@@ -216,6 +222,8 @@ pub fn run() {
             commands::pdf_export::workbook_export_pdf,
             commands::workspace_bundle::workbook_export_workspace_bundle,
             commands::workspace_bundle::workbook_import_workspace_bundle,
+            commands::sheet_import::workbook_extract_sheets_from_xlsx,
+            commands::sheet_import::workbook_extract_sheet_as_snapshot,
             commands::settings::get_setting,
             commands::settings::set_setting,
             commands::settings::list_settings,

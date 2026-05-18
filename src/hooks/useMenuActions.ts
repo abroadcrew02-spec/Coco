@@ -71,6 +71,12 @@ const EDITOR_COMMAND_IDS = new Set([
   "tools-document-inspector",
   "data-bulk-clean",
   "file-csv-import-wizard",
+  "edit-go-to",
+  "file-import-sheet",
+  "view-bookmarks-panel",
+  "bookmark-add-current",
+  "format-manage-codes",
+  "data-range-compare",
 ]);
 
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route

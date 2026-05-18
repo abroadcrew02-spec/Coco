@@ -1,0 +1,188 @@
+/* Custom Lists dialog reuses the .settings-backdrop / .settings-header /
+ * .settings-footer / .settings-btn shells from SettingsDialog.css so the
+ * chrome matches the rest of Coco's modal language. The pieces below are
+ * only the bits unique to the two-pane editor layout. */
+
+.custom-lists-modal {
+  /* Roomier than the single-column SettingsDialog because the list editor
+   * needs a left sidebar AND a right pane with a multi-line textarea. */
+  max-width: 720px;
+  width: 100%;
+}
+
+.custom-lists-body {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 400px;
+  max-height: 60vh;
+  overflow: hidden;
+}
+
+.custom-lists-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #e0e0e0;
+  background-color: #fafafa;
+}
+
+.custom-lists-list {
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  padding: 6px 6px;
+  overflow-y: auto;
+}
+
+.custom-lists-list li {
+  list-style: none;
+}
+
+.custom-lists-list-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #424242;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.1s ease, border-color 0.1s ease;
+}
+
+.custom-lists-list-item:hover {
+  background-color: #f0f0f0;
+}
+
+.custom-lists-list-item--active,
+.custom-lists-list-item--active:hover {
+  background-color: #e8f3ed;
+  border-color: #217346;
+  color: #1a5c38;
+}
+
+.custom-lists-list-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-lists-badge {
+  font-size: 10px;
+  font-weight: 500;
+  color: #757575;
+  background-color: #e0e0e0;
+  padding: 1px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.custom-lists-sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-top: 1px solid #e8e8e8;
+  background-color: #f4f4f4;
+}
+
+.custom-lists-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  overflow-y: auto;
+}
+
+.custom-lists-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.custom-lists-field--grow {
+  flex: 1;
+  min-height: 0;
+}
+
+.custom-lists-field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.custom-lists-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #555;
+}
+
+.custom-lists-input,
+.custom-lists-textarea {
+  font-family: inherit;
+  font-size: 13px;
+  color: #212121;
+  padding: 6px 8px;
+  border: 1px solid #c8c8c8;
+  border-radius: 4px;
+  background-color: #fff;
+  outline: none;
+  transition: border-color 0.1s ease, box-shadow 0.1s ease;
+}
+
+.custom-lists-input:focus,
+.custom-lists-textarea:focus {
+  border-color: #217346;
+  box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.18);
+}
+
+.custom-lists-input:disabled,
+.custom-lists-textarea:disabled {
+  background-color: #f5f5f5;
+  color: #888;
+  cursor: not-allowed;
+}
+
+.custom-lists-textarea {
+  flex: 1;
+  resize: vertical;
+  min-height: 160px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    monospace;
+  line-height: 1.45;
+}
+
+.custom-lists-input--range {
+  flex: 1;
+  min-width: 140px;
+}
+
+.custom-lists-apply {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 8px 12px 12px;
+  margin: 0;
+  background-color: #fafcfb;
+}
+
+.custom-lists-apply legend {
+  font-size: 12px;
+  font-weight: 600;
+  color: #424242;
+  padding: 0 4px;
+}
+
+.custom-lists-apply .settings-hint {
+  margin-top: 4px;
+  margin-bottom: 8px;
+}

@@ -47,6 +47,16 @@ const EDITOR_COMMAND_IDS = new Set([
   "view-slicers-panel",
   "edit-quick-analysis",
   "view-trace-panel",
+  "sheet-hide-active",
+  "sheet-unhide",
+  "sheet-move-copy",
+  "insert-function",
+  "settings-custom-lists",
+  "calc-options",
+  "calc-recalc-all",
+  "calc-recalc-sheet",
+  "view-watch-window",
+  "watch-add-active",
 ]);
 
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route

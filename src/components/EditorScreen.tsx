@@ -158,6 +158,34 @@ import {
   recommendForRange,
 } from "../store/quickAnalysis";
 import FormulaTracePanel from "./FormulaTracePanel";
+import UnhideSheetDialog from "./UnhideSheetDialog";
+import {
+  hideSheet,
+  unhideSheet,
+  listHiddenSheets,
+  listVisibleSheets,
+} from "../store/sheetVisibility";
+import MoveCopySheetDialog from "./MoveCopySheetDialog";
+import {
+  moveSheet,
+  copySheet,
+  listSheetsInOrder,
+} from "../store/moveCopySheet";
+import InsertFunctionDialog from "./InsertFunctionDialog";
+import CustomListsDialog from "./CustomListsDialog";
+import CalculationOptionsDialog from "./CalculationOptionsDialog";
+import {
+  type CalcMode,
+  getCalcMode,
+  setCalcMode as persistCalcMode,
+} from "../store/calcMode";
+import WatchWindowPanel from "./WatchWindowPanel";
+import {
+  addWatch,
+  loadWatchList,
+  saveWatchList,
+} from "../store/watchList";
+import { toA1Ref } from "../store/formulaAudit";
 // Single-thread InsertCommentDialog superseded by ThreadedCommentDialog;
 // its CommentEntry type lives in its own module for other consumers.
 import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
@@ -456,6 +484,18 @@ export default function EditorScreen() {
   const [traceActiveSheetId, setTraceActiveSheetId] = useState<string | null>(null);
   const [traceActiveRow, setTraceActiveRow] = useState<number | null>(null);
   const [traceActiveCol, setTraceActiveCol] = useState<number | null>(null);
+  // Wave 5
+  const [unhideDialog, setUnhideDialog] = useState<{ hiddenSheets: { sheetId: string; name: string }[] } | null>(null);
+  const [moveCopyDialog, setMoveCopyDialog] = useState<{
+    sheetId: string;
+    sheetName: string;
+    sheets: { sheetId: string; name: string }[];
+  } | null>(null);
+  const [insertFunctionCtx, setInsertFunctionCtx] = useState<{ sheetId: string; cellRef: string } | null>(null);
+  const [customListsCtx, setCustomListsCtx] = useState<{ initialActiveRange: string } | null>(null);
+  const [calcOptionsOpen, setCalcOptionsOpen] = useState(false);
+  const [calcMode, setCalcModeState] = useState<CalcMode>(() => getCalcMode());
+  const [watchWindowOpen, setWatchWindowOpen] = useState(false);
   // Format Painter (書式コピー) state. Excel's paintbrush:
   //   - "idle"   : tool is off.
   //   - "single" : armed for one paste; next selection-change applies + deactivates.
@@ -1846,6 +1886,166 @@ export default function EditorScreen() {
     return () => window.clearInterval(id);
   }, [tracePanelOpen]);
 
+  // --- Sheet Visibility (Hide/Unhide) ---------------------------------------
+  const hideActiveSheet = useCallback(() => {
+    const ready = getReadyWorkbook("シートを非表示");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    const fresh = JSON.stringify(workbook.save());
+    if (listVisibleSheets(fresh).length <= 1) {
+      setEditorOperationError("シートを非表示: 表示中のシートが 1 枚しかないため非表示にできません。");
+      return;
+    }
+    const next = hideSheet(fresh, sheetId);
+    if (next !== fresh) applyMutatedSnapshot(next);
+  }, [getReadyWorkbook, applyMutatedSnapshot]);
+
+  const openUnhideDialog = useCallback(() => {
+    const ready = getReadyWorkbook("シートの再表示");
+    if (!ready) return;
+    const fresh = JSON.stringify(ready.workbook.save());
+    setUnhideDialog({ hiddenSheets: listHiddenSheets(fresh) });
+  }, [getReadyWorkbook]);
+
+  const applyUnhide = useCallback(
+    (sheetId: string) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = JSON.stringify(workbook.save());
+      const next = unhideSheet(fresh, sheetId);
+      if (next !== fresh) applyMutatedSnapshot(next);
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // --- Move / Copy Sheet -----------------------------------------------------
+  const openMoveCopySheetDialog = useCallback(() => {
+    const ready = getReadyWorkbook("シートの移動 / コピー");
+    if (!ready) return;
+    const { workbook } = ready;
+    const active = workbook.getActiveSheet();
+    if (!active) return;
+    const sheetId = active.getSheetId();
+    const sheetName = active.getSheetName();
+    const snap = JSON.stringify(workbook.save());
+    setMoveCopyDialog({ sheetId, sheetName, sheets: listSheetsInOrder(snap) });
+  }, [getReadyWorkbook]);
+
+  const applyMoveCopy = useCallback(
+    (sheetId: string, params: { targetIndex: number; createCopy: boolean }) => {
+      const fUniver = fUniverRef.current;
+      const wb = fUniver?.getActiveWorkbook();
+      if (!wb) return;
+      const fresh = JSON.stringify(wb.save());
+      const next = params.createCopy
+        ? copySheet(fresh, sheetId, params.targetIndex).json
+        : moveSheet(fresh, sheetId, params.targetIndex);
+      applyMutatedSnapshot(next);
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // --- Insert Function -------------------------------------------------------
+  const openInsertFunctionDialog = useCallback(() => {
+    const ready = getReadyWorkbook("関数の挿入");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    let cellRef = "A1";
+    try {
+      const a1 = sheet.getSelection()?.getActiveRange()?.getA1Notation() ?? "A1";
+      cellRef = a1.includes(":") ? a1.split(":")[0] : a1;
+    } catch {
+      // best-effort
+    }
+    setInsertFunctionCtx({ sheetId: sheet.getSheetId(), cellRef });
+  }, [getReadyWorkbook]);
+
+  const applyInsertFunction = useCallback(
+    (text: string) => {
+      if (!insertFunctionCtx) return;
+      const ready = getReadyWorkbook("関数の挿入");
+      if (!ready) return;
+      const { workbook } = ready;
+      const sheet = workbook.getActiveSheet();
+      sheet?.getRange(insertFunctionCtx.cellRef)?.setValue(text);
+    },
+    [getReadyWorkbook, insertFunctionCtx],
+  );
+
+  // --- Custom Lists ----------------------------------------------------------
+  const openCustomListsDialog = useCallback(() => {
+    const ready = getReadyWorkbook("ユーザー設定リスト");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    let active = "A1";
+    try {
+      const sel = sheet?.getSelection();
+      const range = sel?.getActiveRange();
+      if (range) active = range.getA1Notation();
+    } catch {
+      // best-effort
+    }
+    setCustomListsCtx({ initialActiveRange: active });
+  }, [getReadyWorkbook]);
+
+  const applyCustomList = useCallback(
+    (range: string, items: string[]) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const sheet = workbook.getActiveSheet();
+      if (!sheet) return;
+      const sheetId = sheet.getSheetId();
+      const fresh = workbook.save() as unknown as {
+        sheets?: Record<string, { cellData?: Record<string, Record<string, unknown>> }>;
+      };
+      const sheetObj = fresh.sheets?.[sheetId];
+      if (!sheetObj) return;
+      if (!sheetObj.cellData) sheetObj.cellData = {};
+      const m = /^\$?([A-Za-z]+)\$?(\d+)/.exec(range.trim());
+      if (!m) return;
+      let col = 0;
+      for (const c of m[1].toUpperCase()) col = col * 26 + (c.charCodeAt(0) - 64);
+      col -= 1;
+      const startRow = parseInt(m[2], 10) - 1;
+      for (let i = 0; i < items.length; i++) {
+        const r = String(startRow + i);
+        const c = String(col);
+        if (!sheetObj.cellData[r]) sheetObj.cellData[r] = {};
+        (sheetObj.cellData[r] as Record<string, unknown>)[c] = { v: items[i] };
+      }
+      applyMutatedSnapshot(JSON.stringify(fresh));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // --- Watch Window ----------------------------------------------------------
+  const addActiveCellToWatch = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    const workbook = fUniver?.getActiveWorkbook();
+    if (!workbook) return;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const r = sheet.getSelection()?.getActiveRange();
+    if (!r) return;
+    const sheetId = sheet.getSheetId();
+    const sheetName = sheet.getSheetName();
+    const cellRef = toA1Ref(r.getRow(), r.getColumn());
+    const current = loadWatchList();
+    const next = addWatch(current, { sheetId, sheetName, cellRef });
+    if (next !== current) {
+      saveWatchList(next);
+      setWatchWindowOpen(true);
+    }
+  }, []);
+
   // Shared utility: jump active selection to A1 cell/range on a given sheet.
   // Used by TableInfoPanel and SparklineListPanel.
   const jumpToA1OnSheet = useCallback((sheetId: string, a1: string) => {
@@ -3223,6 +3423,36 @@ export default function EditorScreen() {
       case "view-trace-panel":
         setTracePanelOpen((v) => !v);
         break;
+      case "sheet-hide-active":
+        hideActiveSheet();
+        break;
+      case "sheet-unhide":
+        openUnhideDialog();
+        break;
+      case "sheet-move-copy":
+        openMoveCopySheetDialog();
+        break;
+      case "insert-function":
+        openInsertFunctionDialog();
+        break;
+      case "settings-custom-lists":
+        openCustomListsDialog();
+        break;
+      case "calc-options":
+        setCalcOptionsOpen(true);
+        break;
+      case "calc-recalc-all":
+        window.dispatchEvent(new CustomEvent("coco:calc-recalc", { detail: { scope: "all" } }));
+        break;
+      case "calc-recalc-sheet":
+        window.dispatchEvent(new CustomEvent("coco:calc-recalc", { detail: { scope: "sheet" } }));
+        break;
+      case "view-watch-window":
+        setWatchWindowOpen((v) => !v);
+        break;
+      case "watch-add-active":
+        addActiveCellToWatch();
+        break;
     }
   }, [
     openHyperlinkDialog,
@@ -3253,6 +3483,12 @@ export default function EditorScreen() {
     openPivotDialog,
     openSlicerDialog,
     openQuickAnalysisDialog,
+    hideActiveSheet,
+    openUnhideDialog,
+    openMoveCopySheetDialog,
+    openInsertFunctionDialog,
+    openCustomListsDialog,
+    addActiveCellToWatch,
   ]);
 
   // Export every sheet in the workbook as a separate <sheetName>.csv file
@@ -3876,6 +4112,12 @@ export default function EditorScreen() {
             onJumpTo={jumpToA1OnSheet}
           />
         )}
+        {watchWindowOpen && currentSnapshotJson && (
+          <WatchWindowPanel
+            workbookSnapshotJson={currentSnapshotJson}
+            onJumpTo={jumpToA1OnSheet}
+          />
+        )}
         {BUSY_LABELS[saveStatus] && (
           <BusyOverlay
             label={BUSY_LABELS[saveStatus]!.label}
@@ -4182,6 +4424,59 @@ export default function EditorScreen() {
             setSlicerDialogOpen(false);
           }}
           onClose={() => setSlicerDialogOpen(false)}
+        />
+      )}
+      {unhideDialog && (
+        <UnhideSheetDialog
+          hiddenSheets={unhideDialog.hiddenSheets}
+          onUnhide={(sheetId) => {
+            applyUnhide(sheetId);
+            setUnhideDialog(null);
+          }}
+          onClose={() => setUnhideDialog(null)}
+        />
+      )}
+      {moveCopyDialog && (
+        <MoveCopySheetDialog
+          sheetId={moveCopyDialog.sheetId}
+          sheetName={moveCopyDialog.sheetName}
+          sheets={moveCopyDialog.sheets}
+          onApply={(params) => {
+            applyMoveCopy(moveCopyDialog.sheetId, params);
+            setMoveCopyDialog(null);
+          }}
+          onClose={() => setMoveCopyDialog(null)}
+        />
+      )}
+      {insertFunctionCtx && (
+        <InsertFunctionDialog
+          onInsert={(text) => {
+            applyInsertFunction(text);
+            setInsertFunctionCtx(null);
+          }}
+          onClose={() => setInsertFunctionCtx(null)}
+        />
+      )}
+      {customListsCtx && (
+        <CustomListsDialog
+          initialActiveRange={customListsCtx.initialActiveRange}
+          onApplyToRange={(range, items) => {
+            applyCustomList(range, items);
+            setCustomListsCtx(null);
+          }}
+          onClose={() => setCustomListsCtx(null)}
+        />
+      )}
+      {calcOptionsOpen && (
+        <CalculationOptionsDialog
+          currentMode={calcMode}
+          onApply={(m) => {
+            persistCalcMode(m);
+            setCalcModeState(m);
+          }}
+          onRecalcAll={() => window.dispatchEvent(new CustomEvent("coco:calc-recalc", { detail: { scope: "all" } }))}
+          onRecalcSheet={() => window.dispatchEvent(new CustomEvent("coco:calc-recalc", { detail: { scope: "sheet" } }))}
+          onClose={() => setCalcOptionsOpen(false)}
         />
       )}
       {quickAnalysisDialog && (

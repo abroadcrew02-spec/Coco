@@ -40,6 +40,13 @@ const EDITOR_COMMAND_IDS = new Set([
   "data-text-to-columns",
   "data-advanced-filter",
   "edit-flash-fill",
+  "insert-pivot",
+  "view-pivots-panel",
+  "view-charts-canvas-panel",
+  "insert-slicer",
+  "view-slicers-panel",
+  "edit-quick-analysis",
+  "view-trace-panel",
 ]);
 
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route

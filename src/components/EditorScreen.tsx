@@ -126,6 +126,38 @@ import {
   runFlashFill,
   describeTransform,
 } from "../store/flashFill";
+import InsertPivotDialog from "./InsertPivotDialog";
+import PivotListPanel from "./PivotListPanel";
+import {
+  type PivotConfig,
+  type PivotEntry,
+  type WorkbookPivotSnapshot,
+  generatePivotName,
+  collectAllPivotNames,
+  inferFieldNames,
+  computePivot,
+  addPivot as addPivotToSheet,
+  refreshPivot as refreshPivotInSheet,
+  parseA1Range as parsePivotA1Range,
+  cellToA1 as pivotCellToA1,
+} from "../store/pivots";
+import ChartCanvasPanel from "./ChartCanvasPanel";
+import InsertSlicerDialog from "./InsertSlicerDialog";
+import SlicerPanel from "./SlicerPanel";
+import {
+  type SlicerEntry,
+  type WorkbookSlicerSnapshot,
+  generateSlicerName,
+  removeSlicer as removeSlicerHelper,
+  toggleSlicerValue as toggleSlicerValueHelper,
+} from "../store/slicers";
+import { patchSlicerFilters } from "./slicerRender";
+import QuickAnalysisDialog from "./QuickAnalysisDialog";
+import {
+  type QuickAnalysisOption,
+  recommendForRange,
+} from "../store/quickAnalysis";
+import FormulaTracePanel from "./FormulaTracePanel";
 // Single-thread InsertCommentDialog superseded by ThreadedCommentDialog;
 // its CommentEntry type lives in its own module for other consumers.
 import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
@@ -402,6 +434,28 @@ export default function EditorScreen() {
     sourceCol: string[];
     examplesMask: boolean[];
   } | null>(null);
+  // Wave 4
+  const [pivotDialog, setPivotDialog] = useState<{
+    sheetId: string;
+    sourceRange: string;
+    destCell: string;
+    fieldNames: string[];
+  } | null>(null);
+  const [pivotsPanelOpen, setPivotsPanelOpen] = useState(false);
+  const [chartsCanvasPanelOpen, setChartsCanvasPanelOpen] = useState(false);
+  const [slicerDialogOpen, setSlicerDialogOpen] = useState(false);
+  const [slicersPanelOpen, setSlicersPanelOpen] = useState(false);
+  const [quickAnalysisDialog, setQuickAnalysisDialog] = useState<{
+    sheetId: string;
+    range: string;
+    rangeLabel: string;
+    cellCount: number;
+    recommended: QuickAnalysisOption[];
+  } | null>(null);
+  const [tracePanelOpen, setTracePanelOpen] = useState(false);
+  const [traceActiveSheetId, setTraceActiveSheetId] = useState<string | null>(null);
+  const [traceActiveRow, setTraceActiveRow] = useState<number | null>(null);
+  const [traceActiveCol, setTraceActiveCol] = useState<number | null>(null);
   // Format Painter (書式コピー) state. Excel's paintbrush:
   //   - "idle"   : tool is off.
   //   - "single" : armed for one paste; next selection-change applies + deactivates.
@@ -1548,6 +1602,249 @@ export default function EditorScreen() {
     applyMutatedSnapshot(JSON.stringify(fresh));
     setFlashFillDialog(null);
   }, [flashFillDialog, applyMutatedSnapshot]);
+
+  // --- Pivot Tables ----------------------------------------------------------
+  const openPivotDialog = useCallback(() => {
+    const ready = getReadyWorkbook("ピボットテーブル");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    const snap = workbook.save() as unknown as {
+      sheets?: Record<string, { cellData?: Record<string, Record<string, { v?: unknown; s?: unknown } | undefined> | undefined> }>;
+    };
+    let sourceRange = "A1:A1";
+    let destCell = "F1";
+    let parsedRange: { r1: number; c1: number; r2: number; c2: number } | null = null;
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) {
+        const a1 = r.getA1Notation();
+        sourceRange = a1.includes(":") ? a1 : `${a1}:${a1}`;
+        const parsed = parsePivotA1Range(sourceRange);
+        if (parsed) {
+          parsedRange = parsed.range;
+          destCell = pivotCellToA1(parsed.range.r1, parsed.range.c2 + 2);
+        }
+      }
+    } catch {
+      // best-effort
+    }
+    const cellData = snap.sheets?.[sheetId]?.cellData;
+    const fieldNames = parsedRange ? inferFieldNames(cellData, parsedRange, true) : [];
+    setPivotDialog({ sheetId, sourceRange, destCell, fieldNames });
+  }, [getReadyWorkbook]);
+
+  const applyPivot = useCallback(
+    (config: PivotConfig) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as WorkbookPivotSnapshot & {
+        sheets?: Record<string, { cellData?: Record<string, Record<string, unknown>> }>;
+      };
+      const src = fresh.sheets?.[config.source.sheetId];
+      if (!src) return;
+      // Slice source cells into a 2-D array
+      const sourceCells: Array<Array<unknown>> = [];
+      const cellData = (src.cellData ?? {}) as Record<string, Record<string, { v?: unknown }>>;
+      for (let r = config.source.range.r1; r <= config.source.range.r2; r++) {
+        const row: unknown[] = [];
+        for (let c = config.source.range.c1; c <= config.source.range.c2; c++) {
+          row.push(cellData[String(r)]?.[String(c)]?.v ?? null);
+        }
+        sourceCells.push(row);
+      }
+      const result = computePivot(sourceCells, config);
+      const name = generatePivotName(collectAllPivotNames(fresh));
+      const entry: PivotEntry = { ...config, name };
+      // Write output to destination
+      const destSheet = src;
+      if (!destSheet.cellData) destSheet.cellData = {};
+      for (let r = 0; r < result.output.length; r++) {
+        const row = result.output[r];
+        const targetRow = config.destination.row + r;
+        const rowKey = String(targetRow);
+        if (!destSheet.cellData[rowKey]) destSheet.cellData[rowKey] = {};
+        for (let c = 0; c < row.length; c++) {
+          (destSheet.cellData[rowKey] as Record<string, unknown>)[String(config.destination.col + c)] = { v: row[c] };
+        }
+      }
+      addPivotToSheet(fresh, entry);
+      applyMutatedSnapshot(JSON.stringify(fresh));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  const refreshPivotByName = useCallback(
+    (name: string) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as WorkbookPivotSnapshot;
+      const res = refreshPivotInSheet(fresh, name);
+      if (res.ok) applyMutatedSnapshot(JSON.stringify(fresh));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  const deletePivot = useCallback(
+    (sheetId: string, name: string) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as WorkbookPivotSnapshot;
+      const sheet = fresh.sheets?.[sheetId];
+      if (!sheet) return;
+      sheet._pivots = (sheet._pivots ?? []).filter((p) => p.name !== name);
+      applyMutatedSnapshot(JSON.stringify(fresh));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // --- Slicers ---------------------------------------------------------------
+  const openSlicerDialog = useCallback(() => {
+    if (!getReadyWorkbook("スライサー")) return;
+    setSlicerDialogOpen(true);
+  }, [getReadyWorkbook]);
+
+  const availableSlicerTables = useMemo(() => {
+    if (!currentSnapshotJson) return [];
+    let parsed: { sheetOrder?: string[]; sheets?: Record<string, { name?: string; _tables?: TableEntry[] } | undefined> };
+    try {
+      parsed = JSON.parse(currentSnapshotJson);
+    } catch {
+      return [];
+    }
+    const out: Array<{ name: string; sheetId: string; columns: string[] }> = [];
+    const sheets = parsed.sheets ?? {};
+    const order = parsed.sheetOrder ?? Object.keys(sheets);
+    for (const sid of order) {
+      const sh = sheets[sid];
+      if (!Array.isArray(sh?._tables)) continue;
+      for (const t of sh!._tables!) {
+        if (t?.name) out.push({ name: t.name, sheetId: sid, columns: (t.columns ?? []).map((c) => c.name) });
+      }
+    }
+    return out;
+  }, [currentSnapshotJson]);
+
+  const applySlicer = useCallback(
+    (entry: SlicerEntry, sheetId: string) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as WorkbookSlicerSnapshot;
+      if (!fresh.sheets?.[sheetId]) return;
+      // Auto-generate name if blank
+      const allNames: string[] = [];
+      for (const sid of Object.keys(fresh.sheets)) {
+        const arr = fresh.sheets[sid]?._slicers ?? [];
+        for (const s of arr) if (s?.name) allNames.push(s.name);
+      }
+      const named: SlicerEntry = { ...entry, name: entry.name || generateSlicerName(allNames) };
+      const sheet = fresh.sheets[sheetId]!;
+      sheet._slicers = [...(sheet._slicers ?? []), named];
+      applyMutatedSnapshot(JSON.stringify(fresh));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  const deleteSlicer = useCallback(
+    (_sheetId: string, name: string) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as WorkbookSlicerSnapshot;
+      applyMutatedSnapshot(JSON.stringify(removeSlicerHelper(fresh, name)));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  const toggleSlicer = useCallback(
+    (name: string, value: string) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as WorkbookSlicerSnapshot;
+      if (toggleSlicerValueHelper(fresh, name, value)) {
+        applyMutatedSnapshot(JSON.stringify(fresh));
+      }
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // --- Quick Analysis --------------------------------------------------------
+  const openQuickAnalysisDialog = useCallback(() => {
+    const ready = getReadyWorkbook("クイック分析");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    const r = sheet.getSelection()?.getActiveRange();
+    if (!r) return;
+    const rangeLabel = r.getA1Notation();
+    const range = rangeLabel.includes(":") ? rangeLabel : `${rangeLabel}:${rangeLabel}`;
+    const snap = workbook.save() as unknown as {
+      sheets?: Record<string, { cellData?: Record<string, Record<string, { v?: unknown }>> }>;
+    };
+    const cellData = snap.sheets?.[sheetId]?.cellData ?? {};
+    const startRow = r.getRow();
+    const startCol = r.getColumn();
+    const height = (r as unknown as { getHeight?: () => number }).getHeight?.() ?? 1;
+    const width = (r as unknown as { getWidth?: () => number }).getWidth?.() ?? 1;
+    const endRow = startRow + Math.max(0, height - 1);
+    const endCol = startCol + Math.max(0, width - 1);
+    const values: unknown[][] = [];
+    for (let row = startRow; row <= endRow; row++) {
+      const slice: unknown[] = [];
+      const rowObj = cellData[String(row)];
+      for (let col = startCol; col <= endCol; col++) {
+        slice.push(rowObj?.[String(col)]?.v ?? null);
+      }
+      values.push(slice);
+    }
+    const cellCount = values.length * (values[0]?.length ?? 0);
+    setQuickAnalysisDialog({
+      sheetId,
+      range,
+      rangeLabel,
+      cellCount,
+      recommended: recommendForRange(values),
+    });
+  }, [getReadyWorkbook]);
+
+  // --- Active-cell tracking for FormulaTracePanel ---------------------------
+  // Track Univer's active selection so the Trace panel can show precedents/dependents
+  // for the currently selected cell. Only listens while the panel is open to avoid
+  // unnecessary work.
+  useEffect(() => {
+    if (!tracePanelOpen) return;
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    // Poll every 300ms for the active selection — Univer's selection observable
+    // API has changed across 0.5.x patches; polling is a robust MVP path.
+    const tick = () => {
+      try {
+        const sheet = workbook.getActiveSheet();
+        if (!sheet) return;
+        const r = sheet.getSelection()?.getActiveRange();
+        if (!r) return;
+        setTraceActiveSheetId(sheet.getSheetId());
+        setTraceActiveRow(r.getRow());
+        setTraceActiveCol(r.getColumn());
+      } catch {
+        // ignore
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 300);
+    return () => window.clearInterval(id);
+  }, [tracePanelOpen]);
 
   // Shared utility: jump active selection to A1 cell/range on a given sheet.
   // Used by TableInfoPanel and SparklineListPanel.
@@ -2905,6 +3202,27 @@ export default function EditorScreen() {
       case "edit-flash-fill":
         openFlashFillDialog();
         break;
+      case "insert-pivot":
+        openPivotDialog();
+        break;
+      case "view-pivots-panel":
+        setPivotsPanelOpen((v) => !v);
+        break;
+      case "view-charts-canvas-panel":
+        setChartsCanvasPanelOpen((v) => !v);
+        break;
+      case "insert-slicer":
+        openSlicerDialog();
+        break;
+      case "view-slicers-panel":
+        setSlicersPanelOpen((v) => !v);
+        break;
+      case "edit-quick-analysis":
+        openQuickAnalysisDialog();
+        break;
+      case "view-trace-panel":
+        setTracePanelOpen((v) => !v);
+        break;
     }
   }, [
     openHyperlinkDialog,
@@ -2932,6 +3250,9 @@ export default function EditorScreen() {
     openTextToColumnsDialog,
     openAdvancedFilterDialog,
     openFlashFillDialog,
+    openPivotDialog,
+    openSlicerDialog,
+    openQuickAnalysisDialog,
   ]);
 
   // Export every sheet in the workbook as a separate <sheetName>.csv file
@@ -3079,7 +3400,9 @@ export default function EditorScreen() {
               patchCfRenders(
                 patchSparklineRenders(
                   patchTableRenders(
-                    patchOutlineRenders(patchHyperlinkRenders(JSON.parse(currentSnapshotJson))),
+                    patchSlicerFilters(
+                      patchOutlineRenders(patchHyperlinkRenders(JSON.parse(currentSnapshotJson))),
+                    ),
                   ),
                 ),
               ),
@@ -3526,6 +3849,33 @@ export default function EditorScreen() {
             onJumpTo={jumpToA1OnSheet}
           />
         )}
+        {pivotsPanelOpen && currentSnapshotJson && (
+          <PivotListPanel
+            workbookSnapshotJson={currentSnapshotJson}
+            onRefresh={refreshPivotByName}
+            onDelete={deletePivot}
+            onJumpTo={jumpToA1OnSheet}
+          />
+        )}
+        {chartsCanvasPanelOpen && currentSnapshotJson && (
+          <ChartCanvasPanel workbookSnapshotJson={currentSnapshotJson} />
+        )}
+        {slicersPanelOpen && currentSnapshotJson && (
+          <SlicerPanel
+            workbookSnapshotJson={currentSnapshotJson}
+            onToggleValue={toggleSlicer}
+            onDelete={deleteSlicer}
+          />
+        )}
+        {tracePanelOpen && currentSnapshotJson && (
+          <FormulaTracePanel
+            workbookSnapshotJson={currentSnapshotJson}
+            activeSheetId={traceActiveSheetId}
+            activeRow={traceActiveRow}
+            activeCol={traceActiveCol}
+            onJumpTo={jumpToA1OnSheet}
+          />
+        )}
         {BUSY_LABELS[saveStatus] && (
           <BusyOverlay
             label={BUSY_LABELS[saveStatus]!.label}
@@ -3809,6 +4159,70 @@ export default function EditorScreen() {
             .map((p) => ({ source: p.source, filled: p.filled }))}
           onAccept={acceptFlashFill}
           onClose={() => setFlashFillDialog(null)}
+        />
+      )}
+      {pivotDialog && (
+        <InsertPivotDialog
+          initialSourceRange={pivotDialog.sourceRange}
+          initialDestination={pivotDialog.destCell}
+          sourceFieldNames={pivotDialog.fieldNames}
+          sourceSheetId={pivotDialog.sheetId}
+          onApply={(config) => {
+            applyPivot(config);
+            setPivotDialog(null);
+          }}
+          onClose={() => setPivotDialog(null)}
+        />
+      )}
+      {slicerDialogOpen && (
+        <InsertSlicerDialog
+          availableTables={availableSlicerTables}
+          onApply={(entry, sheetId) => {
+            applySlicer(entry, sheetId);
+            setSlicerDialogOpen(false);
+          }}
+          onClose={() => setSlicerDialogOpen(false)}
+        />
+      )}
+      {quickAnalysisDialog && (
+        <QuickAnalysisDialog
+          rangeLabel={quickAnalysisDialog.rangeLabel}
+          cellCount={quickAnalysisDialog.cellCount}
+          recommended={quickAnalysisDialog.recommended}
+          sheetId={quickAnalysisDialog.sheetId}
+          range={quickAnalysisDialog.range}
+          onSelect={(opt) => {
+            setQuickAnalysisDialog(null);
+            // Route to existing flows. Pre-fill not implemented (MVP).
+            switch (opt.id) {
+              case "format-databar":
+              case "format-colorscale":
+              case "format-top10":
+                openCfDialog();
+                break;
+              case "chart-line":
+              case "chart-bar":
+              case "chart-pie":
+              case "chart-scatter":
+                openChartDialog();
+                break;
+              case "total-sum":
+                applyAutoSum();
+                break;
+              case "table-format":
+                openTableDialog();
+                break;
+              case "table-pivot":
+                openPivotDialog();
+                break;
+              case "sparkline-line":
+              case "sparkline-column":
+              case "sparkline-winloss":
+                openSparklineDialog();
+                break;
+            }
+          }}
+          onClose={() => setQuickAnalysisDialog(null)}
         />
       )}
       {warningsDialog === "import" && (

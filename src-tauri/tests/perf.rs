@@ -68,25 +68,39 @@ fn print_results(
     let p95 = percentile(durations, 0.95);
     let avg = mean(durations);
     println!("  raw timings (ms): {raw}");
+    let mut violations: Vec<String> = Vec::new();
     match p50_budget_ms {
-        Some(b) => println!(
-            "  p50:    {:<10}  (budget {} ms)   {}",
-            fmt_ms(p50),
-            b,
-            verdict(p50, b)
-        ),
+        Some(b) => {
+            let v = verdict(p50, b);
+            println!("  p50:    {:<10}  (budget {} ms)   {}", fmt_ms(p50), b, v);
+            if v == "FAIL" {
+                violations.push(format!("p50 {} > {} ms", fmt_ms(p50), b));
+            }
+        }
         None => println!("  p50:    {:<10}  (no spec budget)", fmt_ms(p50)),
     }
     match p95_budget_ms {
-        Some(b) => println!(
-            "  p95:    {:<10}  (budget {} ms)   {}",
-            fmt_ms(p95),
-            b,
-            verdict(p95, b)
-        ),
+        Some(b) => {
+            let v = verdict(p95, b);
+            println!("  p95:    {:<10}  (budget {} ms)   {}", fmt_ms(p95), b, v);
+            if v == "FAIL" {
+                violations.push(format!("p95 {} > {} ms", fmt_ms(p95), b));
+            }
+        }
         None => println!("  p95:    {:<10}  (no spec budget)", fmt_ms(p95)),
     }
     println!("  mean:   {}", fmt_ms(avg));
+
+    // #41: turn the verdict into an actual assertion when COCO_PERF_GATE=1
+    // is set. CI runs the perf suite with this flag; developers running
+    // `cargo test --ignored` locally still see the table without failing
+    // on slow laptops.
+    if !violations.is_empty() && std::env::var("COCO_PERF_GATE").as_deref() == Ok("1") {
+        panic!(
+            "performance budget exceeded: {}",
+            violations.join(", ")
+        );
+    }
 }
 
 fn det_num(r: u32, c: u32) -> f64 {

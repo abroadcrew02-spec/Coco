@@ -4,9 +4,11 @@ use std::path::PathBuf;
 
 use calamine::{open_workbook, Data, Reader, Xlsx};
 use rust_xlsxwriter::{
-    Color, ConditionalFormatCell, ConditionalFormatCellRule, ConditionalFormatDuplicate,
-    ConditionalFormatFormula, ConditionalFormatText, ConditionalFormatTextRule,
-    ConditionalFormatTop, ConditionalFormatTopRule, DataValidation, DataValidationErrorStyle,
+    Color, ConditionalFormatAverage, ConditionalFormatAverageRule, ConditionalFormatCell,
+    ConditionalFormatCellRule, ConditionalFormatDate, ConditionalFormatDateRule,
+    ConditionalFormatDuplicate, ConditionalFormatFormula, ConditionalFormatText,
+    ConditionalFormatTextRule, ConditionalFormatTop, ConditionalFormatTopRule, DataValidation,
+    DataValidationErrorStyle,
     DataValidationRule, Format, FormatAlign, FormatBorder, FormatPattern, Formula, Url, Workbook,
 };
 use serde_json::{json, Map, Value};
@@ -24,9 +26,13 @@ const MAX_EXPORT_CELLS: usize = 500_000;
 
 /// Normalized cell style extracted from xl/styles.xml + per-sheet `<c s="..."/>` refs.
 /// Scope: font (bold/italic/color) + fill (color) + alignment (horizontal/vertical)
-/// + borders (per-side style/color).
+/// + borders (per-side style/color) + number format (resolved code string).
 ///
-/// TODO(xlsx-roundtrip): promote number formats + rich text into this normalized struct (see docs/TODOS.md#medium-number-format-richtext-styles)
+/// #40: num_format moved in so the struct is self-contained and the dedup
+/// hash naturally accounts for it. Rich-text formatting still lives on the
+/// per-cell `_richRuns` array because each cell carries its own text — sharing
+/// a "rich-text style" across cells would require splitting style from text,
+/// which is a separate refactor.
 #[derive(Default, Clone, PartialEq, Eq, Hash)]
 struct CellStyle {
     bold: bool,
@@ -36,6 +42,10 @@ struct CellStyle {
     h_align: Option<String>,    // "left" | "center" | "right" | "fill" | "justify"
     v_align: Option<String>,    // "top" | "middle" | "bottom"
     borders: Option<CellBorders>,
+    /// Number format code as resolved by `resolve_num_format` (built-in
+    /// table + custom `numFmts`). None means "no explicit num format" which
+    /// rust_xlsxwriter treats as General.
+    num_format: Option<String>,
 }
 
 #[derive(Default, Clone, PartialEq, Eq, Hash)]
@@ -122,6 +132,7 @@ impl CellStyle {
             && self.h_align.is_none()
             && self.v_align.is_none()
             && self.borders.is_none()
+            && self.num_format.is_none()
     }
 
     fn to_json(&self) -> Value {
@@ -272,14 +283,16 @@ fn parse_xlsx_styles<R: Read + Seek>(
     }
     let (fonts, fills, borders, cell_xfs_raw, custom_num_fmts) = parse_styles_xml(&styles_xml);
 
-    // 2. resolve each cellXf to a normalized CellStyle + number format
+    // 2. resolve each cellXf to a normalized CellStyle (which now carries its
+    //    own num_format per #40 — kept parallel cell_num_formats for callers
+    //    that still index by xf id without going through CellStyle).
     let cell_xfs: Vec<CellStyle> = cell_xfs_raw
         .iter()
-        .map(|x| resolve_xf(x, &fonts, &fills, &borders))
+        .map(|x| resolve_xf(x, &fonts, &fills, &borders, &custom_num_fmts))
         .collect();
-    let cell_num_formats: Vec<Option<String>> = cell_xfs_raw
+    let cell_num_formats: Vec<Option<String>> = cell_xfs
         .iter()
-        .map(|x| resolve_num_format(x, &custom_num_fmts))
+        .map(|s| s.num_format.clone())
         .collect();
 
     Ok(ParsedStyles {
@@ -741,6 +754,7 @@ fn resolve_xf(
     fonts: &[RawFont],
     fills: &[RawFill],
     borders: &[RawBorder],
+    custom_num_fmts: &HashMap<u32, String>,
 ) -> CellStyle {
     let mut s = CellStyle::default();
     // Font: honor regardless of applyFont — many writers omit the apply* flag.
@@ -780,6 +794,11 @@ fn resolve_xf(
             other => other.to_string(),
         });
     }
+    // #40: resolve the number-format code so it travels with the rest of the
+    // CellStyle. Same precedence as the old parallel cell_num_formats vec
+    // (built-in lookup, then custom numFmts table) but now bound to the
+    // style identity hash.
+    s.num_format = resolve_num_format(xf, custom_num_fmts);
     s
 }
 
@@ -1260,7 +1279,13 @@ fn build_format(style: &CellStyle, num_format: Option<&str>) -> Format {
             }
         }
     }
-    if let Some(nf) = num_format {
+    // #40: prefer the explicit override (per-cell `_fmt`) if present; fall
+    // back to whatever the resolved CellStyle carries. Previously num_format
+    // only flowed through the override channel, so cells that inherited
+    // formatting purely from their xf number-format ref were silently
+    // emitted as General on export.
+    let effective_num_fmt = num_format.or(style.num_format.as_deref());
+    if let Some(nf) = effective_num_fmt {
         fmt = fmt.set_num_format(nf);
     }
     fmt
@@ -3248,13 +3273,91 @@ pub(crate) struct ConditionalFormattingEntry {
     /// this back into the sheet XML verbatim inside a
     /// `<conditionalFormatting sqref="...">` block.
     pub raw: String,
+    /// #37: visual format hints carried via the rule's `dxfId` → styles.xml
+    /// `<dxfs>` table. Populated by `parse_xlsx_conditional_formatting` so
+    /// authored & round-tripped rules keep their bold / font-color / bg-color
+    /// on re-export through `build_cf_rule_format`. Empty for rules without
+    /// a dxf reference.
+    pub dxf_style: Option<DxfStyle>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct DxfStyle {
+    pub bold: bool,
+    pub italic: bool,
+    pub font_color: Option<String>, // "#RRGGBB"
+    pub bg_color: Option<String>,   // "#RRGGBB"
 }
 
 /// Parse one sheet's `<conditionalFormatting>` blocks. Unlike data validations
 /// (single block per sheet, multiple children), CF has one block per sqref
 /// with one or more `<cfRule>` children — so we scan all matching blocks and
 /// flatten the rules into a single Vec.
-fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEntry> {
+/// Parse the `<dxfs>` block from `xl/styles.xml`. Each `<dxf>` entry can
+/// declare font (bold/italic/color) and fill (bgColor) — we lift the subset
+/// the dialog round-trips. Returns dxf entries in declaration order so
+/// `dxfId` indexes directly. (#37)
+fn parse_dxfs_from_styles(styles_xml: &str) -> Vec<DxfStyle> {
+    let mut out = Vec::new();
+    let block = match extract_block(styles_xml, "<dxfs", "</dxfs>") {
+        Some(b) => b,
+        None => return out,
+    };
+    for dxf_el in extract_self_closing_or_paired(&block, "dxf") {
+        let mut dx = DxfStyle::default();
+        // <font><b/></font> / <font><i/></font> / <font><color rgb="FFRRGGBB"/></font>
+        if let Some(font) = extract_block(&dxf_el, "<font", "</font>") {
+            if font.contains("<b/>") || font.contains("<b ") {
+                dx.bold = true;
+            }
+            if font.contains("<i/>") || font.contains("<i ") {
+                dx.italic = true;
+            }
+            if let Some(color_tag) = find_tag(&font, "<color") {
+                if let Some(rgb) = parse_attr(&color_tag, "rgb") {
+                    if let Some(hex) = normalize_argb_hex(&rgb) {
+                        dx.font_color = Some(hex);
+                    }
+                }
+            }
+        }
+        // <fill><patternFill patternType="solid"><bgColor rgb="..."/></patternFill></fill>
+        // — Excel commonly writes bg under <bgColor> for solid dxf fills.
+        if let Some(fill) = extract_block(&dxf_el, "<fill", "</fill>") {
+            for needle in ["<bgColor", "<fgColor"].iter() {
+                if let Some(tag) = find_tag(&fill, needle) {
+                    if let Some(rgb) = parse_attr(&tag, "rgb") {
+                        if let Some(hex) = normalize_argb_hex(&rgb) {
+                            dx.bg_color = Some(hex);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        out.push(dx);
+    }
+    out
+}
+
+/// Normalize an OOXML ARGB hex (`FFRRGGBB`) to the `#RRGGBB` shape the
+/// dialog speaks. Returns None if the input isn't 6 or 8 hex digits.
+fn normalize_argb_hex(s: &str) -> Option<String> {
+    let cleaned: String = s.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+    let rgb = if cleaned.len() == 8 {
+        &cleaned[2..]
+    } else if cleaned.len() == 6 {
+        &cleaned[..]
+    } else {
+        return None;
+    };
+    Some(format!("#{}", rgb.to_ascii_uppercase()))
+}
+
+fn parse_sheet_conditional_formatting(
+    xml: &str,
+    dxfs: &[DxfStyle],
+) -> Vec<ConditionalFormattingEntry> {
     let mut out = Vec::new();
     for cf_block in extract_self_closing_or_paired(xml, "conditionalFormatting") {
         // Element header carries `sqref`. Body holds one or more <cfRule>.
@@ -3284,6 +3387,11 @@ fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEnt
             let rule_type = parse_attr(rule_head, "type")
                 .map(|s| decode_xml_entities(&s))
                 .unwrap_or_default();
+            // #37: capture dxfId and resolve against the dxfs table so the
+            // rule's visual format (bold / colors) round-trips on re-export.
+            let dxf_style = parse_attr(rule_head, "dxfId")
+                .and_then(|s| s.parse::<usize>().ok())
+                .and_then(|idx| dxfs.get(idx).cloned());
             let operator = parse_attr(rule_head, "operator")
                 .map(|s| decode_xml_entities(&s))
                 .unwrap_or_default();
@@ -3330,6 +3438,10 @@ fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEnt
                     percent: false,
                     bottom: false,
                     raw: rule_el.clone(),
+                    // colorScale / dataBar / iconSet carry their own gradient
+                    // colors inside the raw block, so we don't lift a dxf
+                    // entry here.
+                    dxf_style: dxf_style.clone(),
                 });
                 continue;
             }
@@ -3384,6 +3496,7 @@ fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEnt
                 percent,
                 bottom,
                 raw: String::new(),
+                dxf_style,
             });
         }
     }
@@ -3396,9 +3509,11 @@ fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEnt
 pub(crate) fn parse_xlsx_conditional_formatting(
     sheet_xmls: &HashMap<String, String>,
 ) -> HashMap<String, Vec<ConditionalFormattingEntry>> {
+    // External callers (tests / pre-#37 sites) don't have styles.xml
+    // available; pass an empty dxf table so dxf_style is just None.
     let mut out: HashMap<String, Vec<ConditionalFormattingEntry>> = HashMap::new();
     for (sheet_name, xml) in sheet_xmls {
-        let rules = parse_sheet_conditional_formatting(xml);
+        let rules = parse_sheet_conditional_formatting(xml, &[]);
         if !rules.is_empty() {
             out.insert(sheet_name.clone(), rules);
         }
@@ -3632,8 +3747,78 @@ fn apply_conditional_format_from_snapshot(
                 .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
                 .is_ok()
         }
-        // TODO(cf): reconstruct colorScale / dataBar / iconSet / aboveAverage / timePeriod rules (see docs/TODOS.md#medium-cf-more-rule-types)
-        // These rule types need typed values we don't reconstruct yet — drop silently.
+        "aboveAverage" => {
+            // #38: dialog stores the two bool toggles under `aboveAverage`.
+            // Excel encodes 4 variants on the same rule type via {below,
+            // equalAverage} combinations.
+            let aa = entry
+                .get("aboveAverage")
+                .and_then(|v| v.as_object());
+            let below = aa
+                .and_then(|o| o.get("below"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let equal_average = aa
+                .and_then(|o| o.get("equalAverage"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let rule = match (below, equal_average) {
+                (false, false) => ConditionalFormatAverageRule::AboveAverage,
+                (false, true) => ConditionalFormatAverageRule::EqualOrAboveAverage,
+                (true, false) => ConditionalFormatAverageRule::BelowAverage,
+                (true, true) => ConditionalFormatAverageRule::EqualOrBelowAverage,
+            };
+            let mut cf = ConditionalFormatAverage::new()
+                .set_rule(rule)
+                .set_multi_range(sqref)
+                .set_stop_if_true(stop_if_true);
+            if let Some(f) = style_format {
+                cf = cf.set_format(f);
+            }
+            worksheet
+                .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
+                .is_ok()
+        }
+        "timePeriod" => {
+            // #38: Excel's timePeriod CF rule has a fixed set of named
+            // relative ranges (today / yesterday / lastWeek / etc).
+            let period = entry
+                .get("timePeriod")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let rule = match period {
+                "today" => Some(ConditionalFormatDateRule::Today),
+                "yesterday" => Some(ConditionalFormatDateRule::Yesterday),
+                "tomorrow" => Some(ConditionalFormatDateRule::Tomorrow),
+                "last7Days" => Some(ConditionalFormatDateRule::Last7Days),
+                "thisWeek" => Some(ConditionalFormatDateRule::ThisWeek),
+                "lastWeek" => Some(ConditionalFormatDateRule::LastWeek),
+                "nextWeek" => Some(ConditionalFormatDateRule::NextWeek),
+                "thisMonth" => Some(ConditionalFormatDateRule::ThisMonth),
+                "lastMonth" => Some(ConditionalFormatDateRule::LastMonth),
+                "nextMonth" => Some(ConditionalFormatDateRule::NextMonth),
+                _ => None,
+            };
+            let Some(rule) = rule else {
+                return false;
+            };
+            let mut cf = ConditionalFormatDate::new()
+                .set_rule(rule)
+                .set_multi_range(sqref)
+                .set_stop_if_true(stop_if_true);
+            if let Some(f) = style_format {
+                cf = cf.set_format(f);
+            }
+            worksheet
+                .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
+                .is_ok()
+        }
+        // colorScale / dataBar / iconSet still require gradient/icon
+        // authoring UI that isn't on the dialog yet. When imported from
+        // existing xlsx they round-trip via the verbatim raw_xml path
+        // (parse_sheet_conditional_formatting line 3319) so files keep
+        // their visuals — we just don't generate new rules of these
+        // shapes from the Coco dialog.
         _ => false,
     }
 }
@@ -4052,6 +4237,20 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     let mut data_validations_by_sheet: HashMap<String, Vec<DataValidationEntry>> = HashMap::new();
     let mut conditional_formats_by_sheet: HashMap<String, Vec<ConditionalFormattingEntry>> =
         HashMap::new();
+    // #37: read xl/styles.xml's <dxfs> block once so per-sheet CF parsing
+    // can resolve dxfId → bold/color hints. Best-effort — empty when the
+    // workbook has no styles or no dxfs.
+    let dxfs_table: Vec<DxfStyle> = {
+        let mut sx = String::new();
+        if let Ok(mut entry) = archive.by_name("xl/styles.xml") {
+            let _ = entry.read_to_string(&mut sx);
+        }
+        if sx.is_empty() {
+            Vec::new()
+        } else {
+            parse_dxfs_from_styles(&sx)
+        }
+    };
     let mut dimensions_by_sheet: HashMap<String, SheetDimensions> = HashMap::new();
     let mut merges_by_sheet: HashMap<String, Vec<(u32, u32, u32, u32)>> = HashMap::new();
     let mut freeze_panes_by_sheet: HashMap<String, FreezePaneEntry> = HashMap::new();
@@ -4077,7 +4276,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             data_validations_by_sheet.insert(sheet_name.clone(), dvs);
         }
 
-        let cfs = parse_sheet_conditional_formatting(&xml);
+        let cfs = parse_sheet_conditional_formatting(&xml, &dxfs_table);
         if !cfs.is_empty() {
             conditional_formats_by_sheet.insert(sheet_name.clone(), cfs);
         }
@@ -4528,6 +4727,31 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                         if !e.raw.is_empty() {
                             obj.insert("raw".into(), Value::String(e.raw.clone()));
                         }
+                        // #37: dxf-referenced visual format (bold / font
+                        // color / fill color) reads through to the same
+                        // `style` shape the dialog authors. apply_*_from_snapshot
+                        // then re-emits the dxf via rust_xlsxwriter on
+                        // re-export, closing the round-trip.
+                        if let Some(dxf) = &e.dxf_style {
+                            let mut sty = Map::new();
+                            if dxf.bold {
+                                sty.insert("bold".into(), Value::Bool(true));
+                            }
+                            if dxf.italic {
+                                sty.insert("italic".into(), Value::Bool(true));
+                            }
+                            if let Some(c) = &dxf.font_color {
+                                sty.insert("fontColor".into(), Value::String(c.clone()));
+                            }
+                            if let Some(c) = &dxf.bg_color {
+                                sty.insert("bgColor".into(), Value::String(c.clone()));
+                            }
+                            if !sty.is_empty() {
+                                obj.insert("style".into(), Value::Object(sty));
+                            }
+                        }
+                        // dxfId for raw-preserved rules: carry alongside the
+                        // raw XML so the splice path doesn't have to re-parse.
                         Value::Object(obj)
                     })
                     .collect();

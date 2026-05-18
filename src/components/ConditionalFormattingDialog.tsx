@@ -6,7 +6,16 @@ import "./ConditionalFormattingDialog.css";
 // fields are omitted (not nulled) when empty so the JSON stays compact.
 export interface CfRule {
   sqref: string;
-  type: "cellIs" | "containsText" | "top10" | "duplicateValues" | "uniqueValues";
+  type:
+    | "cellIs"
+    | "containsText"
+    | "top10"
+    | "duplicateValues"
+    | "uniqueValues"
+    // #38: above/below the average of the rule's range.
+    | "aboveAverage"
+    // #38: date in the named relative range (today / yesterday / lastWeek / etc).
+    | "timePeriod";
   operator?: string;
   formula1?: string;
   formula2?: string;
@@ -14,12 +23,26 @@ export interface CfRule {
   rank?: number;
   percent?: boolean;
   bottom?: boolean;
+  /** #38: aboveAverage variants — Excel uses bool flags rather than an operator.
+   *  When type === "aboveAverage", true means "below average". */
+  aboveAverage?: { below?: boolean; equalAverage?: boolean };
+  /** #38: timePeriod selector. One of the OOXML period codes Excel writes. */
+  timePeriod?:
+    | "today"
+    | "yesterday"
+    | "tomorrow"
+    | "last7Days"
+    | "thisWeek"
+    | "lastWeek"
+    | "nextWeek"
+    | "thisMonth"
+    | "lastMonth"
+    | "nextMonth";
   priority?: number;
   stopIfTrue?: boolean;
-  // TODO(cf): emit dxf-referenced visual format on export (see docs/TODOS.md#medium-cf-dxf-emit)
-  // Style hints — these don't round-trip through the Rust xlsx_io path yet,
-  // but we carry them through the snapshot so the user's choices are
-  // preserved on save/reopen.
+  // #37: style hints round-trip through xlsx via dxf entries written into
+  // xl/styles.xml on export. The cfRule references the dxf via dxfId so
+  // Excel renders the user's chosen bold/colors on cells that match.
   style?: { bold?: boolean; fontColor?: string; bgColor?: string };
 }
 
@@ -47,7 +70,22 @@ const RULE_TYPE_LABELS: Record<CfRule["type"], string> = {
   top10: "上位/下位 (top10)",
   duplicateValues: "重複値",
   uniqueValues: "一意値",
+  aboveAverage: "平均値より上/下 (aboveAverage)",
+  timePeriod: "期間 (timePeriod)",
 };
+
+const TIME_PERIOD_OPTIONS: { value: NonNullable<CfRule["timePeriod"]>; label: string }[] = [
+  { value: "today", label: "今日" },
+  { value: "yesterday", label: "昨日" },
+  { value: "tomorrow", label: "明日" },
+  { value: "last7Days", label: "過去7日間" },
+  { value: "thisWeek", label: "今週" },
+  { value: "lastWeek", label: "先週" },
+  { value: "nextWeek", label: "翌週" },
+  { value: "thisMonth", label: "今月" },
+  { value: "lastMonth", label: "先月" },
+  { value: "nextMonth", label: "翌月" },
+];
 
 const CELLIS_OPERATORS = [
   { value: "greaterThan", label: "より大きい" },
@@ -81,6 +119,13 @@ function validate(form: CfRule): string | null {
       break;
     case "duplicateValues":
     case "uniqueValues":
+      break;
+    case "aboveAverage":
+      // No inputs required — the cfRule defaults to "above the average of
+      // the selected range". `aboveAverage.below` flips to below-average.
+      break;
+    case "timePeriod":
+      if (!form.timePeriod) return "期間を選択してください";
       break;
   }
   return null;
@@ -117,6 +162,15 @@ function summarize(r: CfRule): string {
       return `${RULE_TYPE_LABELS[r.type]} · ${r.bottom ? "下位" : "上位"} ${r.rank ?? 10}${
         r.percent ? "%" : ""
       }`;
+    case "aboveAverage": {
+      const dir = r.aboveAverage?.below ? "未満" : "より上";
+      const eq = r.aboveAverage?.equalAverage ? " (平均含む)" : "";
+      return `${RULE_TYPE_LABELS[r.type]} · 平均値${dir}${eq}`;
+    }
+    case "timePeriod": {
+      const opt = TIME_PERIOD_OPTIONS.find((o) => o.value === r.timePeriod);
+      return `${RULE_TYPE_LABELS[r.type]} · ${opt?.label ?? r.timePeriod ?? ""}`;
+    }
     default:
       return RULE_TYPE_LABELS[r.type];
   }
@@ -210,6 +264,16 @@ export default function ConditionalFormattingDialog({
       clean.rank = form.rank ?? 10;
       if (form.percent) clean.percent = true;
       if (form.bottom) clean.bottom = true;
+    } else if (form.type === "aboveAverage") {
+      // #38: aboveAverage carries only its two bool toggles.
+      if (form.aboveAverage?.below || form.aboveAverage?.equalAverage) {
+        clean.aboveAverage = {};
+        if (form.aboveAverage.below) clean.aboveAverage.below = true;
+        if (form.aboveAverage.equalAverage) clean.aboveAverage.equalAverage = true;
+      }
+    } else if (form.type === "timePeriod") {
+      // #38: timePeriod carries the chosen period code.
+      clean.timePeriod = form.timePeriod;
     }
     const styleHasValue =
       form.style && (form.style.bold || form.style.fontColor || form.style.bgColor);
@@ -419,6 +483,67 @@ export default function ConditionalFormattingDialog({
                     <span>パーセント指定</span>
                   </label>
                 </>
+              )}
+
+              {form.type === "aboveAverage" && (
+                <>
+                  <label className="cf-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={!!form.aboveAverage?.below}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          aboveAverage: {
+                            ...(form.aboveAverage ?? {}),
+                            below: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    <span>平均値より下（チェックなしは平均値より上）</span>
+                  </label>
+                  <label className="cf-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={!!form.aboveAverage?.equalAverage}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          aboveAverage: {
+                            ...(form.aboveAverage ?? {}),
+                            equalAverage: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    <span>平均値ちょうども含める</span>
+                  </label>
+                </>
+              )}
+
+              {form.type === "timePeriod" && (
+                <label className="cf-field">
+                  <span className="cf-field-label">期間</span>
+                  <select
+                    className="cf-select"
+                    value={form.timePeriod ?? ""}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        timePeriod:
+                          (e.target.value as NonNullable<CfRule["timePeriod"]>) || undefined,
+                      })
+                    }
+                  >
+                    <option value="">（選択してください）</option>
+                    {TIME_PERIOD_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               )}
 
               <fieldset className="cf-style">

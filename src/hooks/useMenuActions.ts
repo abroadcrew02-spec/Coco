@@ -88,6 +88,11 @@ const EDITOR_COMMAND_IDS = new Set([
   "view-workbook-stats",
   "view-show-all-comments",
   "file-quick-print",
+  "view-hyperlink-manager",
+  "format-borders",
+  "format-quick-cf",
+  "insert-cell-link",
+  "data-filter-search",
 ]);
 
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route

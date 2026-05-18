@@ -303,6 +303,25 @@ import { type WorkbookStatsBundle, collectWorkbookStats } from "../store/workboo
 import { patchShowAllCommentsView } from "./showAllCommentsRender";
 import CommentsAllOverlay from "./CommentsAllOverlay";
 import QuickPrintDialog from "./QuickPrintDialog";
+import HyperlinkManagerDialog from "./HyperlinkManagerDialog";
+import {
+  listAllHyperlinks,
+  deleteHyperlink as deleteHyperlinkInline,
+  bulkDeleteHyperlinksByKind,
+  validateUrl,
+} from "../store/hyperlinkManager";
+import BordersDialog from "./BordersDialog";
+import { type BorderParams, applyBorders } from "../store/borders";
+import QuickCfDialog from "./QuickCfDialog";
+import { applyQuickCfPreset } from "../store/quickCfPresets";
+import CellLinkerDialog from "./CellLinkerDialog";
+import {
+  type CellLinkParams,
+  buildLinkFormula,
+  resolveSourceValue,
+} from "../store/cellLinker";
+import FilterSearchDialog from "./FilterSearchDialog";
+import { type FilterSearchParams, applyFilterSearch } from "../store/filterSearch";
 // Single-thread InsertCommentDialog superseded by ThreadedCommentDialog;
 // its CommentEntry type lives in its own module for other consumers.
 import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
@@ -699,6 +718,21 @@ export default function EditorScreen() {
   const [quickPrintDialog, setQuickPrintDialog] = useState<{
     snapshot: object;
     activeSheetId: string | null;
+  } | null>(null);
+  // Wave 12
+  const [hyperlinkManagerOpen, setHyperlinkManagerOpen] = useState(false);
+  const [hyperlinkValidation, setHyperlinkValidation] = useState<Record<string, boolean> | undefined>(undefined);
+  const [bordersDialog, setBordersDialog] = useState<{ sheetId: string; range: string } | null>(null);
+  const [quickCfDialog, setQuickCfDialog] = useState<{ sheetId: string; range: string } | null>(null);
+  const [cellLinkerCtx, setCellLinkerCtx] = useState<{
+    activeSheetId: string;
+    initialTargetCell: string;
+    availableSheets: Array<{ id: string; name: string }>;
+  } | null>(null);
+  const [filterSearchDialog, setFilterSearchDialog] = useState<{
+    sheetId: string;
+    range: string;
+    snapshot: { cellData?: Record<string, Record<string, unknown>> };
   } | null>(null);
   // Format Painter (書式コピー) state. Excel's paintbrush:
   //   - "idle"   : tool is off.
@@ -3123,6 +3157,142 @@ export default function EditorScreen() {
     setQuickPrintDialog({ snapshot: snap, activeSheetId: activeId });
   }, [currentSnapshotJson]);
 
+  // --- Wave 12: HyperlinkManager / Borders / QuickCF / CellLinker / FilterSearch ---
+  const openBordersDialog = useCallback(() => {
+    const ready = getReadyWorkbook("罫線");
+    if (!ready) return;
+    const sheet = ready.workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let range = "A1";
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) range = r.getA1Notation();
+    } catch {
+      // best-effort
+    }
+    setBordersDialog({ sheetId, range });
+  }, [getReadyWorkbook]);
+
+  const applyBordersFromDialog = useCallback(
+    (params: BorderParams) => {
+      if (!bordersDialog) return;
+      const wb = fUniverRef.current?.getActiveWorkbook();
+      if (!wb) return;
+      try {
+        const fresh = wb.save();
+        const { snapshotMutated } = applyBorders(fresh as object, bordersDialog.sheetId, params);
+        applyMutatedSnapshot(JSON.stringify(snapshotMutated));
+      } catch (e) {
+        setEditorOperationError(`罫線: ${(e as Error).message}`);
+      }
+    },
+    [bordersDialog, applyMutatedSnapshot],
+  );
+
+  const openQuickCfDialog = useCallback(() => {
+    const ready = getReadyWorkbook("クイック条件付き書式");
+    if (!ready) return;
+    const sheet = ready.workbook.getActiveSheet();
+    if (!sheet) return;
+    const r = sheet.getSelection()?.getActiveRange();
+    const range = r?.getA1Notation() ?? "A1";
+    setQuickCfDialog({ sheetId: sheet.getSheetId(), range });
+  }, [getReadyWorkbook]);
+
+  const openCellLinkerDialog = useCallback(() => {
+    const ready = getReadyWorkbook("セルリンク");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const activeSheetId = sheet.getSheetId();
+    let initialTargetCell = "A1";
+    try {
+      const a1 = sheet.getSelection()?.getActiveRange()?.getA1Notation();
+      if (a1) initialTargetCell = a1.includes(":") ? a1.split(":")[0] : a1;
+    } catch {
+      // best-effort
+    }
+    const snap = workbook.save() as unknown as {
+      sheetOrder?: string[];
+      sheets?: Record<string, { name?: string } | undefined>;
+    };
+    const sheets = snap.sheets ?? {};
+    const order = snap.sheetOrder ?? Object.keys(sheets);
+    const availableSheets = order
+      .map((id) => ({ id, name: sheets[id]?.name ?? id }))
+      .filter((s) => typeof s.name === "string");
+    setCellLinkerCtx({ activeSheetId, initialTargetCell, availableSheets });
+  }, [getReadyWorkbook]);
+
+  const applyCellLink = useCallback(
+    (params: CellLinkParams) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      try {
+        const sheet = workbook.getSheetBySheetId
+          ? workbook.getSheetBySheetId(params.targetSheetId)
+          : null;
+        if (!sheet) return;
+        const range = (sheet as unknown as { getRange?: (a1: string) => unknown }).getRange?.(params.targetCellRef);
+        if (!range) return;
+        const r = range as { setValue?: (v: unknown) => void };
+        if (params.liveLink) {
+          r.setValue?.(buildLinkFormula(params.sourceSheetName, params.sourceCellRef));
+        } else {
+          const snap = workbook.save() as unknown;
+          const v = resolveSourceValue(snap, params.sourceSheetName, params.sourceCellRef);
+          r.setValue?.(v ?? "");
+        }
+      } catch {
+        // best-effort
+      }
+    },
+    [],
+  );
+
+  const openFilterSearchDialog = useCallback(() => {
+    const ready = getReadyWorkbook("値で検索フィルター");
+    if (!ready) return;
+    const sheet = ready.workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let range = "A1:A1";
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) {
+        const a1 = r.getA1Notation();
+        range = a1.includes(":") ? a1 : `${a1}:${a1}`;
+      }
+    } catch {
+      // best-effort
+    }
+    const fresh = ready.workbook.save() as {
+      sheets?: Record<string, { cellData?: Record<string, Record<string, unknown>> }>;
+    };
+    const snap = fresh.sheets?.[sheetId] ?? {};
+    setFilterSearchDialog({ sheetId, range, snapshot: snap });
+  }, [getReadyWorkbook]);
+
+  const applyFilterSearchAction = useCallback(
+    (params: FilterSearchParams) => {
+      if (!filterSearchDialog) return;
+      const wb = fUniverRef.current?.getActiveWorkbook();
+      if (!wb) return;
+      const fresh = wb.save() as object;
+      const { snapshotMutated, matchedRows, hiddenRows } = applyFilterSearch(
+        fresh,
+        filterSearchDialog.sheetId,
+        params,
+      );
+      applyMutatedSnapshot(JSON.stringify(snapshotMutated));
+      setEditorOperationError(`値で検索フィルター: ${matchedRows} 行表示 / ${hiddenRows} 行非表示`);
+    },
+    [filterSearchDialog, applyMutatedSnapshot],
+  );
+
   // Shared utility: jump active selection to A1 cell/range on a given sheet.
   // Used by TableInfoPanel and SparklineListPanel.
   const jumpToA1OnSheet = useCallback((sheetId: string, a1: string) => {
@@ -4623,6 +4793,21 @@ export default function EditorScreen() {
       case "file-quick-print":
         openQuickPrintDialog();
         break;
+      case "view-hyperlink-manager":
+        setHyperlinkManagerOpen((v) => !v);
+        break;
+      case "format-borders":
+        openBordersDialog();
+        break;
+      case "format-quick-cf":
+        openQuickCfDialog();
+        break;
+      case "insert-cell-link":
+        openCellLinkerDialog();
+        break;
+      case "data-filter-search":
+        openFilterSearchDialog();
+        break;
     }
   }, [
     openHyperlinkDialog,
@@ -4683,6 +4868,10 @@ export default function EditorScreen() {
     openFilterByColorDialog,
     openWorkbookStatsDialog,
     openQuickPrintDialog,
+    openBordersDialog,
+    openQuickCfDialog,
+    openCellLinkerDialog,
+    openFilterSearchDialog,
   ]);
 
   // Export every sheet in the workbook as a separate <sheetName>.csv file
@@ -6178,6 +6367,100 @@ export default function EditorScreen() {
           snapshot={quickPrintDialog.snapshot}
           activeSheetId={quickPrintDialog.activeSheetId}
           onClose={() => setQuickPrintDialog(null)}
+        />
+      )}
+      {hyperlinkManagerOpen && currentSnapshotJson && (
+        <HyperlinkManagerDialog
+          links={listAllHyperlinks(currentSnapshotJson)}
+          onJumpTo={(sheetId, cellRef) => {
+            jumpToA1OnSheet(sheetId, cellRef);
+            setHyperlinkManagerOpen(false);
+          }}
+          onEdit={(sheetId, cellRef) => {
+            jumpToA1OnSheet(sheetId, cellRef);
+            setHyperlinkManagerOpen(false);
+            openHyperlinkDialog();
+          }}
+          onDelete={(sheetId, cellRef) => {
+            if (!currentSnapshotJson) return;
+            try {
+              const next = deleteHyperlinkInline(currentSnapshotJson, sheetId, cellRef);
+              applyMutatedSnapshot(JSON.stringify(next));
+            } catch {
+              // best-effort
+            }
+          }}
+          onBulkDelete={(kind) => {
+            if (!currentSnapshotJson) return;
+            try {
+              const { snapshotMutated, deletedCount } = bulkDeleteHyperlinksByKind(currentSnapshotJson, kind);
+              if (deletedCount > 0) applyMutatedSnapshot(JSON.stringify(snapshotMutated));
+            } catch {
+              // best-effort
+            }
+          }}
+          onValidate={() => {
+            const out: Record<string, boolean> = {};
+            for (const l of listAllHyperlinks(currentSnapshotJson)) {
+              out[`${l.sheetId}!${l.cellRef}`] = validateUrl(l.target).ok;
+            }
+            setHyperlinkValidation(out);
+          }}
+          validationResults={hyperlinkValidation}
+          onClose={() => setHyperlinkManagerOpen(false)}
+        />
+      )}
+      {bordersDialog && (
+        <BordersDialog
+          initialRange={bordersDialog.range}
+          sheetId={bordersDialog.sheetId}
+          onApply={(params) => {
+            applyBordersFromDialog(params);
+            setBordersDialog(null);
+          }}
+          onClose={() => setBordersDialog(null)}
+        />
+      )}
+      {quickCfDialog && (
+        <QuickCfDialog
+          initialRange={quickCfDialog.range}
+          sheetId={quickCfDialog.sheetId}
+          onApply={(range, presetId) => {
+            const ready = getReadyWorkbook("クイック条件付き書式");
+            if (!ready) {
+              setQuickCfDialog(null);
+              return;
+            }
+            const fresh = ready.workbook.save() as unknown as object;
+            const { snapshotMutated, ruleAdded } = applyQuickCfPreset(fresh, quickCfDialog.sheetId, range, presetId);
+            if (ruleAdded) applyMutatedSnapshot(JSON.stringify(snapshotMutated));
+            setQuickCfDialog(null);
+          }}
+          onClose={() => setQuickCfDialog(null)}
+        />
+      )}
+      {cellLinkerCtx && (
+        <CellLinkerDialog
+          initialTargetCell={cellLinkerCtx.initialTargetCell}
+          availableSheets={cellLinkerCtx.availableSheets}
+          activeSheetId={cellLinkerCtx.activeSheetId}
+          onApply={(params) => {
+            applyCellLink(params);
+            setCellLinkerCtx(null);
+          }}
+          onClose={() => setCellLinkerCtx(null)}
+        />
+      )}
+      {filterSearchDialog && (
+        <FilterSearchDialog
+          initialRange={filterSearchDialog.range}
+          sheetId={filterSearchDialog.sheetId}
+          sheetSnapshot={filterSearchDialog.snapshot}
+          onApply={(params) => {
+            applyFilterSearchAction(params);
+            setFilterSearchDialog(null);
+          }}
+          onClose={() => setFilterSearchDialog(null)}
         />
       )}
       {snapshotControlsState.open && (

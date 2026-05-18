@@ -62,6 +62,7 @@ interface WorkbookState {
   exportXlsx: () => Promise<void>;
   exportHtml: () => Promise<void>;
   exportPdf: () => Promise<void>;
+  exportWorkspaceBundle: () => Promise<void>;
   listSheetNames: () => Promise<{ id: string; name: string }[]>;
   exportCsvToPath: (path: string, sheetId: string) => Promise<void>;
   dismissExportWarnings: () => void;
@@ -754,6 +755,54 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         saveStatus: result.success ? "export_done" : "export_failed",
         exportWarnings: result.warnings ?? [],
         lastError: result.success ? null : friendlyError(result.error) ?? "PDF エクスポートに失敗しました",
+      });
+    } catch (e) {
+      set({ isExporting: false, saveStatus: "export_failed", lastError: friendlyError(String(e)) });
+    }
+  },
+
+  exportWorkspaceBundle: async () => {
+    await waitForAutoSave();
+    await flushPendingSnapshot();
+    const { currentHandle, currentSnapshotJson } = get();
+    if (!currentHandle) return;
+    if (!hasSnapshotJson(currentSnapshotJson)) {
+      set({ saveStatus: "export_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+      return;
+    }
+    const defaultName = currentHandle.path
+      ? defaultSaveAsName(currentHandle.path).replace(/\.xlsx$/i, ".zip").split(/[\\/]/).pop()
+      : "Workspace.zip";
+    const chosen = await saveDialog({
+      title: "ワークスペースバンドル出力",
+      defaultPath: defaultName,
+      filters: [{ name: "Workspace Bundle", extensions: ["zip"] }],
+    });
+    if (!chosen) return;
+    const priorDirty = isDirtySaveStatusValue(get().saveStatus);
+    set({
+      isExporting: true,
+      saveStatus: "exporting",
+      exportWarnings: [],
+      wasDirtyBeforeExport: priorDirty,
+    });
+    try {
+      const result = await invoke<{
+        success: boolean;
+        bundleSizeBytes: number;
+        sheetCount: number;
+        warnings: CompatibilityWarning[];
+        error?: string;
+      }>("workbook_export_workspace_bundle", {
+        workbookPath: currentHandle.path ?? null,
+        snapshotJson: currentSnapshotJson,
+        outputPath: chosen,
+      });
+      set({
+        isExporting: false,
+        saveStatus: result.success ? "export_done" : "export_failed",
+        exportWarnings: result.warnings ?? [],
+        lastError: result.success ? null : friendlyError(result.error) ?? "バンドル出力に失敗しました",
       });
     } catch (e) {
       set({ isExporting: false, saveStatus: "export_failed", lastError: friendlyError(String(e)) });

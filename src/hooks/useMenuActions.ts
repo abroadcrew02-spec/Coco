@@ -62,6 +62,10 @@ const EDITOR_COMMAND_IDS = new Set([
   "insert-recommended-charts",
   "format-cf-manage-rules",
   "view-snapshot-diff",
+  "tools-spell-check",
+  "data-form",
+  "edit-find-replace-all",
+  "view-comments-manager",
 ]);
 
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route
@@ -77,6 +81,7 @@ export function useMenuActions() {
   const exportXlsx = useWorkbookStore((s) => s.exportXlsx);
   const exportHtml = useWorkbookStore((s) => s.exportHtml);
   const exportPdf = useWorkbookStore((s) => s.exportPdf);
+  const exportWorkspaceBundle = useWorkbookStore((s) => s.exportWorkspaceBundle);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -138,6 +143,12 @@ export function useMenuActions() {
         case "export-pdf":
           await exportPdf();
           break;
+        case "export-workspace-bundle":
+          await exportWorkspaceBundle();
+          break;
+        case "import-workspace-bundle":
+          window.dispatchEvent(new CustomEvent("coco:menu-import-workspace-bundle"));
+          break;
         case "settings":
           requestSettings();
           break;
@@ -166,5 +177,5 @@ export function useMenuActions() {
       cancelled = true;
       if (unlisten) unlisten();
     };
-  }, [newWorkbook, openCoco, importXlsx, importCsv, save, promptSaveAs, exportXlsx, exportHtml, exportPdf]);
+  }, [newWorkbook, openCoco, importXlsx, importCsv, save, promptSaveAs, exportXlsx, exportHtml, exportPdf, exportWorkspaceBundle]);
 }

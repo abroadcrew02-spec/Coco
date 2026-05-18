@@ -66,6 +66,9 @@ pub fn run() {
                 .text("export-html", "HTML エクスポート...")
                 .text("export-pdf", "PDF エクスポート...")
                 .separator()
+                .text("export-workspace-bundle", "ワークスペースバンドル出力 (.zip)...")
+                .text("import-workspace-bundle", "ワークスペースバンドル読込 (.zip)...")
+                .separator()
                 .text("close", "終了")
                 .build()?;
             let edit_menu = SubmenuBuilder::new(app, "編集")
@@ -76,6 +79,7 @@ pub fn run() {
                 .separator()
                 .text("edit-flash-fill", format!("フラッシュフィル\t{MOD}+E"))
                 .text("edit-quick-analysis", format!("クイック分析\t{MOD}+Q"))
+                .text("edit-find-replace-all", format!("検索と置換 (全シート)...\t{MOD}+Shift+H"))
                 .build()?;
             let view_menu = SubmenuBuilder::new(app, "表示")
                 .text("view-snapshots", "スナップショット...")
@@ -88,6 +92,7 @@ pub fn run() {
                 .text("view-trace-panel", "依存関係...")
                 .text("view-watch-window", "ウォッチウィンドウ")
                 .text("view-snapshot-diff", "スナップショット比較...")
+                .text("view-comments-manager", "コメント一覧...")
                 .separator()
                 .text("view-show-formulas", format!("数式の表示\t{MOD}+`"))
                 .separator()
@@ -136,12 +141,14 @@ pub fn run() {
                 .text("data-advanced-filter", "フィルターの詳細設定...")
                 .separator()
                 .text("data-forecast-sheet", "予測シート...")
+                .text("data-form", "データフォーム...")
                 .build()?;
             let tools_menu = SubmenuBuilder::new(app, "ツール")
                 .text("tools-sheet-protection", "シート保護...")
                 .separator()
                 .text("tools-goal-seek", "ゴールシーク...")
                 .text("tools-error-checking", "エラーチェック...")
+                .text("tools-spell-check", "スペルチェック (英語)...")
                 .separator()
                 .text("tools-scenarios", "シナリオの管理...")
                 .separator()
@@ -201,6 +208,8 @@ pub fn run() {
             commands::csv_io::list_sheet_names,
             commands::html_export::workbook_export_html,
             commands::pdf_export::workbook_export_pdf,
+            commands::workspace_bundle::workbook_export_workspace_bundle,
+            commands::workspace_bundle::workbook_import_workspace_bundle,
             commands::settings::get_setting,
             commands::settings::set_setting,
             commands::settings::list_settings,

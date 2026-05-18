@@ -208,6 +208,32 @@ import {
   deleteRule as deleteCfRule,
 } from "../store/cfRuleManager";
 import SnapshotDiffDialog from "./SnapshotDiffDialog";
+import SpellCheckDialog from "./SpellCheckDialog";
+import {
+  type SpellIssue,
+  collectSpellIssues,
+  loadUserDictionary,
+  addToUserDictionary,
+} from "../store/spellCheck";
+import DataFormDialog from "./DataFormDialog";
+import {
+  type DataFormRow,
+  type DataFormRange,
+  type SnapshotCellData,
+  readRow,
+  writeRow,
+  appendBlankRow,
+  deleteRowAt,
+  getColumnHeaders,
+  getDataRowCount,
+} from "../store/dataForm";
+import FindReplaceAllDialog from "./FindReplaceAllDialog";
+import CommentsManagerDialog from "./CommentsManagerDialog";
+import {
+  setCommentResolved as setCmResolved,
+  deleteComment as deleteCmInline,
+  bulkDeleteResolved as bulkDeleteResolvedComments,
+} from "../store/commentsManager";
 // Single-thread InsertCommentDialog superseded by ThreadedCommentDialog;
 // its CommentEntry type lives in its own module for other consumers.
 import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
@@ -530,6 +556,22 @@ export default function EditorScreen() {
   const [cfManagerOpen, setCfManagerOpen] = useState(false);
   const [snapshotDiffOpen, setSnapshotDiffOpen] = useState(false);
   const [snapshotDiffOptions, setSnapshotDiffOptions] = useState<Array<{ id: string; label: string }>>([]);
+  // Wave 7
+  const [spellCheckOpen, setSpellCheckOpen] = useState(false);
+  const [spellCheckIssues, setSpellCheckIssues] = useState<SpellIssue[]>([]);
+  const [dataFormDialog, setDataFormDialog] = useState<{
+    sheetId: string;
+    range: DataFormRange;
+    rangeLabel: string;
+    hasHeader: boolean;
+    headers: string[];
+    rows: DataFormRow[];
+  } | null>(null);
+  const [findReplaceAllDialog, setFindReplaceAllDialog] = useState<{
+    activeSheetId: string | null;
+    snapshotJson: string;
+  } | null>(null);
+  const [commentsManagerOpen, setCommentsManagerOpen] = useState(false);
   // Format Painter (書式コピー) state. Excel's paintbrush:
   //   - "idle"   : tool is off.
   //   - "single" : armed for one paste; next selection-change applies + deactivates.
@@ -2292,6 +2334,135 @@ export default function EditorScreen() {
     [currentHandle],
   );
 
+  // --- Spell Check -----------------------------------------------------------
+  const openSpellCheckDialog = useCallback(() => {
+    if (!currentSnapshotJson) return;
+    try {
+      const snap = JSON.parse(currentSnapshotJson);
+      const userDict = loadUserDictionary();
+      setSpellCheckIssues(collectSpellIssues(snap, userDict));
+      setSpellCheckOpen(true);
+    } catch {
+      setSpellCheckIssues([]);
+      setSpellCheckOpen(true);
+    }
+  }, [currentSnapshotJson]);
+
+  const applySpellCheckReplacement = useCallback(
+    (issue: SpellIssue, replacement: string) => {
+      if (!currentSnapshotJson) return;
+      try {
+        const snap = JSON.parse(currentSnapshotJson);
+        // Resolve cellRef to row/col indices
+        const m = /^([A-Z]+)(\d+)$/.exec(issue.cellRef);
+        if (!m) return;
+        let col = 0;
+        for (const c of m[1]) col = col * 26 + (c.charCodeAt(0) - 64);
+        col -= 1;
+        const row = parseInt(m[2], 10) - 1;
+        const sheet = snap?.sheets?.[issue.sheetId];
+        const cell = sheet?.cellData?.[String(row)]?.[String(col)];
+        if (cell && typeof cell.v === "string") {
+          cell.v =
+            cell.v.slice(0, issue.offset) +
+            replacement +
+            cell.v.slice(issue.offset + issue.word.length);
+          applyMutatedSnapshot(JSON.stringify(snap));
+          setSpellCheckIssues(collectSpellIssues(snap, loadUserDictionary()));
+        }
+      } catch {
+        // best-effort
+      }
+    },
+    [currentSnapshotJson, applyMutatedSnapshot],
+  );
+
+  // --- Data Form -------------------------------------------------------------
+  const openDataFormDialog = useCallback(() => {
+    const ready = getReadyWorkbook("データフォーム");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let rangeA1 = "A1:A1";
+    let rect: DataFormRange = { r1: 0, c1: 0, r2: 0, c2: 0 };
+    try {
+      const sel = sheet.getSelection();
+      const r = sel?.getActiveRange();
+      if (r) {
+        const a1 = r.getA1Notation();
+        rangeA1 = a1.includes(":") ? a1 : `${a1}:${a1}`;
+        const height = (r as unknown as { getHeight?: () => number }).getHeight?.() ?? 1;
+        const width = (r as unknown as { getWidth?: () => number }).getWidth?.() ?? 1;
+        rect = {
+          r1: r.getRow(),
+          c1: r.getColumn(),
+          r2: r.getRow() + height - 1,
+          c2: r.getColumn() + width - 1,
+        };
+      }
+    } catch {
+      // best-effort
+    }
+    const snap = workbook.save() as unknown as {
+      sheets?: Record<string, { cellData?: SnapshotCellData }>;
+    };
+    const cellData = snap.sheets?.[sheetId]?.cellData;
+    const headers = getColumnHeaders(cellData, rect, true);
+    const rows: DataFormRow[] = [];
+    for (let i = 0; i < getDataRowCount(rect, true); i++) {
+      rows.push(readRow(cellData, rect, i, true));
+    }
+    setDataFormDialog({ sheetId, range: rect, rangeLabel: rangeA1, hasHeader: true, headers, rows });
+  }, [getReadyWorkbook]);
+
+  // --- Find & Replace All ----------------------------------------------------
+  const openFindReplaceAllDialog = useCallback(() => {
+    const ready = getReadyWorkbook("検索と置換");
+    if (!ready) return;
+    const activeSheetId = ready.workbook.getActiveSheet()?.getSheetId() ?? null;
+    const snapshotJson = currentSnapshotJson ?? "{}";
+    setFindReplaceAllDialog({ activeSheetId, snapshotJson });
+  }, [getReadyWorkbook, currentSnapshotJson]);
+
+  // --- Comments Manager ------------------------------------------------------
+  const resolveCommentInline = useCallback(
+    (sheetId: string, cellRef: string, resolved: boolean) => {
+      if (!currentSnapshotJson) return;
+      try {
+        const next = setCmResolved(currentSnapshotJson, sheetId, cellRef, resolved);
+        applyMutatedSnapshot(JSON.stringify(next));
+      } catch {
+        // best-effort
+      }
+    },
+    [currentSnapshotJson, applyMutatedSnapshot],
+  );
+
+  const deleteCommentInline = useCallback(
+    (sheetId: string, cellRef: string) => {
+      if (!currentSnapshotJson) return;
+      try {
+        const next = deleteCmInline(currentSnapshotJson, sheetId, cellRef);
+        applyMutatedSnapshot(JSON.stringify(next));
+      } catch {
+        // best-effort
+      }
+    },
+    [currentSnapshotJson, applyMutatedSnapshot],
+  );
+
+  const bulkDeleteResolvedAction = useCallback(() => {
+    if (!currentSnapshotJson) return;
+    try {
+      const { snapshotMutated } = bulkDeleteResolvedComments(currentSnapshotJson);
+      applyMutatedSnapshot(JSON.stringify(snapshotMutated));
+    } catch {
+      // best-effort
+    }
+  }, [currentSnapshotJson, applyMutatedSnapshot]);
+
   // Shared utility: jump active selection to A1 cell/range on a given sheet.
   // Used by TableInfoPanel and SparklineListPanel.
   const jumpToA1OnSheet = useCallback((sheetId: string, a1: string) => {
@@ -3714,6 +3885,18 @@ export default function EditorScreen() {
       case "view-snapshot-diff":
         void openSnapshotDiffDialog();
         break;
+      case "tools-spell-check":
+        openSpellCheckDialog();
+        break;
+      case "data-form":
+        openDataFormDialog();
+        break;
+      case "edit-find-replace-all":
+        openFindReplaceAllDialog();
+        break;
+      case "view-comments-manager":
+        setCommentsManagerOpen((v) => !v);
+        break;
     }
   }, [
     openHyperlinkDialog,
@@ -3754,6 +3937,9 @@ export default function EditorScreen() {
     openForecastSheetDialog,
     openRecommendedChartsDialog,
     openSnapshotDiffDialog,
+    openSpellCheckDialog,
+    openDataFormDialog,
+    openFindReplaceAllDialog,
   ]);
 
   // Export every sheet in the workbook as a separate <sheetName>.csv file
@@ -4842,6 +5028,134 @@ export default function EditorScreen() {
             setSnapshotDiffOpen(false);
           }}
           onClose={() => setSnapshotDiffOpen(false)}
+        />
+      )}
+      {spellCheckOpen && (
+        <SpellCheckDialog
+          issues={spellCheckIssues}
+          onChange={applySpellCheckReplacement}
+          onIgnore={() => {}}
+          onIgnoreAll={() => {}}
+          onAddToDictionary={(w) => addToUserDictionary(w)}
+          onJumpToCell={(sheetId, cellRef) => {
+            jumpToA1OnSheet(sheetId, cellRef);
+            setSpellCheckOpen(false);
+          }}
+          onClose={() => setSpellCheckOpen(false)}
+        />
+      )}
+      {dataFormDialog && (
+        <DataFormDialog
+          range={dataFormDialog.rangeLabel}
+          columnHeaders={dataFormDialog.headers}
+          initialRows={dataFormDialog.rows}
+          onCommitRow={(rowIdx, row) => {
+            const fUniver = fUniverRef.current;
+            const wb = fUniver?.getActiveWorkbook();
+            if (!wb) return;
+            const snap = wb.save() as unknown as { sheets?: Record<string, { cellData?: SnapshotCellData }> };
+            const sheetObj = snap.sheets?.[dataFormDialog.sheetId];
+            if (!sheetObj) return;
+            const { newCellData } = writeRow(sheetObj.cellData, dataFormDialog.range, rowIdx, row, dataFormDialog.hasHeader);
+            sheetObj.cellData = newCellData;
+            applyMutatedSnapshot(JSON.stringify(snap));
+            setDataFormDialog((d) =>
+              d ? { ...d, rows: d.rows.map((r, i) => (i === rowIdx ? { ...row } : r)) } : d,
+            );
+          }}
+          onAddRow={() => {
+            const fUniver = fUniverRef.current;
+            const wb = fUniver?.getActiveWorkbook();
+            if (!wb) return;
+            const snap = wb.save() as unknown as { sheets?: Record<string, { cellData?: SnapshotCellData }> };
+            const sheetObj = snap.sheets?.[dataFormDialog.sheetId];
+            if (!sheetObj) return;
+            const { newCellData } = appendBlankRow(sheetObj.cellData, dataFormDialog.range, dataFormDialog.hasHeader);
+            sheetObj.cellData = newCellData;
+            applyMutatedSnapshot(JSON.stringify(snap));
+            setDataFormDialog((d) =>
+              d
+                ? {
+                    ...d,
+                    range: { ...d.range, r2: d.range.r2 + 1 },
+                    rows: [...d.rows, {}],
+                  }
+                : d,
+            );
+          }}
+          onDeleteRow={(rowIdx) => {
+            const fUniver = fUniverRef.current;
+            const wb = fUniver?.getActiveWorkbook();
+            if (!wb) return;
+            const snap = wb.save() as unknown as { sheets?: Record<string, { cellData?: SnapshotCellData }> };
+            const sheetObj = snap.sheets?.[dataFormDialog.sheetId];
+            if (!sheetObj) return;
+            sheetObj.cellData = deleteRowAt(sheetObj.cellData, dataFormDialog.range, rowIdx, dataFormDialog.hasHeader);
+            applyMutatedSnapshot(JSON.stringify(snap));
+            setDataFormDialog((d) =>
+              d
+                ? {
+                    ...d,
+                    range: { ...d.range, r2: Math.max(d.range.r1, d.range.r2 - 1) },
+                    rows: d.rows.filter((_, i) => i !== rowIdx),
+                  }
+                : d,
+            );
+          }}
+          onClose={() => setDataFormDialog(null)}
+        />
+      )}
+      {findReplaceAllDialog && (
+        <FindReplaceAllDialog
+          activeSheetId={findReplaceAllDialog.activeSheetId}
+          workbookSnapshotJson={findReplaceAllDialog.snapshotJson}
+          onReplaceCommit={(json) => applyMutatedSnapshot(json)}
+          onJumpToCell={(sheetId, cellRef) => {
+            jumpToA1OnSheet(sheetId, cellRef);
+            setFindReplaceAllDialog(null);
+          }}
+          onClose={() => setFindReplaceAllDialog(null)}
+        />
+      )}
+      {commentsManagerOpen && currentSnapshotJson && (
+        <CommentsManagerDialog
+          workbookSnapshotJson={currentSnapshotJson}
+          onResolveToggle={resolveCommentInline}
+          onDelete={deleteCommentInline}
+          onBulkDeleteResolved={bulkDeleteResolvedAction}
+          onJumpToCell={(sheetId, cellRef) => {
+            jumpToA1OnSheet(sheetId, cellRef);
+            setCommentsManagerOpen(false);
+          }}
+          onExportMarkdown={(text) => {
+            void saveDialog({
+              title: "コメントを Markdown にエクスポート",
+              defaultPath: "comments.md",
+              filters: [{ name: "Markdown", extensions: ["md"] }],
+            }).then(async (path) => {
+              if (!path) return;
+              try {
+                await invoke("plugin:fs|write_text_file", { path, contents: text });
+              } catch {
+                setEditorOperationError("コメント Markdown 出力に失敗しました。");
+              }
+            });
+          }}
+          onExportCsv={(text) => {
+            void saveDialog({
+              title: "コメントを CSV にエクスポート",
+              defaultPath: "comments.csv",
+              filters: [{ name: "CSV", extensions: ["csv"] }],
+            }).then(async (path) => {
+              if (!path) return;
+              try {
+                await invoke("plugin:fs|write_text_file", { path, contents: text });
+              } catch {
+                setEditorOperationError("コメント CSV 出力に失敗しました。");
+              }
+            });
+          }}
+          onClose={() => setCommentsManagerOpen(false)}
         />
       )}
       {quickAnalysisDialog && (

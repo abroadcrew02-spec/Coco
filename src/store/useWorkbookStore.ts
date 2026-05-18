@@ -42,6 +42,12 @@ interface WorkbookState {
   pinnedPaths: string[]; // recent files the user has pinned; sorts to top of home list
   pinnedOrder: string[]; // user-defined ordering for pinned items (drag-to-reorder)
   suppressCsvPocWarning: boolean; // hide the always-fires "CSV PoC" info banner
+  /** #97: Coco-managed snapshot history for apply-style operations
+   *  (AutoSum, format painter, hyperlink, CF, DV, etc.) that bypass
+   *  Univer's commandService. Each entry is a `currentSnapshotJson` that
+   *  predated the next mutation. Bounded to keep memory in check. */
+  cocoUndoStack: string[];
+  cocoRedoStack: string[];
 
   // Actions
   newWorkbook: () => Promise<void>;
@@ -60,6 +66,17 @@ interface WorkbookState {
   restoreCandidate: (candidateId: string) => Promise<void>;
   dismissCandidate: (candidateId: string) => Promise<void>;
   updateSnapshot: (snapshotJson: string) => void;
+  /** #97: snapshot a pre-mutation state so it can be reverted via cocoUndo.
+   *  Apply-style operations (AutoSum, format painter, hyperlink, etc.) call
+   *  this with the *previous* `currentSnapshotJson` immediately before
+   *  calling `updateSnapshot` with the post-mutation state. Pushes onto
+   *  `cocoUndoStack` and clears `cocoRedoStack`. No-op for null inputs. */
+  pushCocoCheckpoint: (prevSnapshotJson: string | null) => void;
+  /** #97: pop the last checkpoint, swap it in as currentSnapshotJson, push
+   *  the current state onto the redo stack. No-op when the stack is empty. */
+  cocoUndo: () => void;
+  /** #97: pop from redo stack, swap in, push current onto undo. */
+  cocoRedo: () => void;
   markDirty: () => void;
   loadRecentFiles: () => Promise<void>;
   removeRecent: (path: string) => Promise<void>;
@@ -160,10 +177,6 @@ let autoSaveInFlight: Promise<void> | null = null;
 // invocations against the same path. Both call `rotate_backups`, shifting the
 // backup chain twice for one logical save.
 let saveInFlight: Promise<void> | null = null;
-const waitForSave = async () => {
-  const pending = saveInFlight;
-  if (pending) await pending;
-};
 // #70: counts edits arriving while a save is in-flight. markDirty bumps it
 // instead of stomping `saveStatus`; on save resolution we honor a non-zero
 // counter by transitioning to "unsaved" rather than "saved", closing the
@@ -201,6 +214,8 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   pinnedPaths: [],
   pinnedOrder: [],
   suppressCsvPocWarning: false,
+  cocoUndoStack: [],
+  cocoRedoStack: [],
 
   newWorkbook: async () => {
     const mySeq = ++openSeq;
@@ -729,6 +744,55 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     }));
   },
 
+  pushCocoCheckpoint: (prevSnapshotJson: string | null) => {
+    if (!prevSnapshotJson) return;
+    set((s) => {
+      const stack = [...s.cocoUndoStack, prevSnapshotJson];
+      // Bound the history so a long editing session doesn't accumulate
+      // hundreds of MB of snapshots in memory.
+      const MAX = 20;
+      if (stack.length > MAX) stack.shift();
+      return { cocoUndoStack: stack, cocoRedoStack: [] };
+    });
+  },
+
+  cocoUndo: () => {
+    const { cocoUndoStack, currentSnapshotJson } = get();
+    if (cocoUndoStack.length === 0) return;
+    const prev = cocoUndoStack[cocoUndoStack.length - 1];
+    const nextStack = cocoUndoStack.slice(0, -1);
+    set((s) => ({
+      cocoUndoStack: nextStack,
+      cocoRedoStack: currentSnapshotJson
+        ? [...s.cocoRedoStack, currentSnapshotJson]
+        : s.cocoRedoStack,
+      currentSnapshotJson: prev,
+      // editorRevision bump re-mounts Univer with the restored snapshot.
+      // View state (scroll, selection) resets, but the data integrity of
+      // the undo is preserved — better UX than a stale grid.
+      editorRevision: s.editorRevision + 1,
+      saveStatus: "unsaved",
+      dirtyRevision: s.dirtyRevision + 1,
+    }));
+  },
+
+  cocoRedo: () => {
+    const { cocoRedoStack, currentSnapshotJson } = get();
+    if (cocoRedoStack.length === 0) return;
+    const next = cocoRedoStack[cocoRedoStack.length - 1];
+    const nextRedo = cocoRedoStack.slice(0, -1);
+    set((s) => ({
+      cocoRedoStack: nextRedo,
+      cocoUndoStack: currentSnapshotJson
+        ? [...s.cocoUndoStack, currentSnapshotJson]
+        : s.cocoUndoStack,
+      currentSnapshotJson: next,
+      editorRevision: s.editorRevision + 1,
+      saveStatus: "unsaved",
+      dirtyRevision: s.dirtyRevision + 1,
+    }));
+  },
+
   markDirty: () => {
     const { saveStatus } = get();
     if (saveStatus === "saving" || saveStatus === "exporting" || saveStatus === "loading") {
@@ -838,6 +902,9 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       blockingImport: null,
       lastError: null,
       lastSavedAt: null,
+      // #97: drop undo history when leaving the workbook.
+      cocoUndoStack: [],
+      cocoRedoStack: [],
     }),
 
   setSaveStatus: (status) => set({ saveStatus: status }),

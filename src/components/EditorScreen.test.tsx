@@ -152,7 +152,9 @@ describe("EditorScreen Univer plugin wiring", () => {
     expect(editorSource).toMatch(/case "data-autosum":\s*applyAutoSum\(\);/);
     expect(editorSource).toMatch(/case "tools-sheet-protection":\s*toggleSheetProtection\(\);/);
     expect(toolbarSource).not.toMatch(/data-testid="sheet-protection-toggle"/);
-    expect(editorSource).toMatch(/updateSnapshot\(JSON\.stringify\(fresh\)\)/);
+    // #97: apply-style mutations now go through applyMutatedSnapshot so the
+    // pre-mutation state is checkpointed for Coco undo (Ctrl+Alt+Z).
+    expect(editorSource).toMatch(/applyMutatedSnapshot\(JSON\.stringify\(fresh\)\)/);
     expect(editorSource).toMatch(/_protected/);
   });
 });

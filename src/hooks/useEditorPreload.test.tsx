@@ -17,12 +17,14 @@ interface IdleWindow {
   cancelIdleCallback?: (handle: number) => void;
 }
 
-let setTimeoutSpy: ReturnType<typeof vi.spyOn>;
-let clearTimeoutSpy: ReturnType<typeof vi.spyOn>;
+// vi.spyOn's generic gets stricter with vitest 2 — relax to the loose Mock
+// shape the rest of the tests use, since we only assert call counts.
+let setTimeoutSpy: ReturnType<typeof vi.fn>;
+let clearTimeoutSpy: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
-  setTimeoutSpy = vi.spyOn(window, "setTimeout");
-  clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+  setTimeoutSpy = vi.spyOn(window, "setTimeout") as unknown as ReturnType<typeof vi.fn>;
+  clearTimeoutSpy = vi.spyOn(window, "clearTimeout") as unknown as ReturnType<typeof vi.fn>;
 });
 
 afterEach(() => {

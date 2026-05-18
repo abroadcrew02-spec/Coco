@@ -155,12 +155,27 @@ export default function EditorScreen() {
     dismissWarnings,
     dismissExportWarnings,
     updateSnapshot,
+    pushCocoCheckpoint,
     markDirty,
     newWorkbook,
     openCoco,
     importXlsx,
     importCsv,
   } = useWorkbookStore();
+
+  // #97: wrapper for apply-style snapshot mutations (AutoSum, format painter,
+  // hyperlink, CF, DV, chart, image, comment, quick number format). These
+  // operations bypass Univer's commandService — without this checkpoint,
+  // Ctrl+Alt+Z (Coco undo) can't roll them back. Univer-mediated mutations
+  // (typing, insertDefinedName, etc.) keep using updateSnapshot directly so
+  // Univer's own Ctrl+Z still owns those.
+  const applyMutatedSnapshot = useCallback(
+    (newSnapshotJson: string) => {
+      pushCocoCheckpoint(useWorkbookStore.getState().currentSnapshotJson);
+      updateSnapshot(newSnapshotJson);
+    },
+    [pushCocoCheckpoint, updateSnapshot],
+  );
 
   const [sheetPicker, setSheetPicker] = useState<{ id: string; name: string }[] | null>(null);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
@@ -414,9 +429,9 @@ export default function EditorScreen() {
       } else {
         sheet._dataValidations = next;
       }
-      updateSnapshot(JSON.stringify(snap));
+      applyMutatedSnapshot(JSON.stringify(snap));
     },
-    [dvDialog, getSnapshotForTool, updateSnapshot],
+    [dvDialog, getSnapshotForTool, applyMutatedSnapshot],
   );
 
   // TODO(cf): live in-grid CF highlighting (see docs/TODOS.md#high-cf-live-render)
@@ -472,9 +487,9 @@ export default function EditorScreen() {
       } else {
         sheetObj._conditionalFormatting = next;
       }
-      updateSnapshot(JSON.stringify(fresh));
+      applyMutatedSnapshot(JSON.stringify(fresh));
     },
-    [getReadyWorkbook, updateSnapshot],
+    [getReadyWorkbook, applyMutatedSnapshot],
   );
 
   // Snapshot the active sheet + cell when the user invokes Insert Hyperlink.
@@ -548,7 +563,7 @@ export default function EditorScreen() {
       if (value.display) entry.display = value.display;
       if (value.tooltip) entry.tooltip = value.tooltip;
       sheetObj._hyperlinks = [...filtered, entry];
-      updateSnapshot(JSON.stringify(snapshot));
+      applyMutatedSnapshot(JSON.stringify(snapshot));
 
       // Imperative restyle so the link appears blue+underlined immediately.
       // Best-effort: any facade exception is swallowed (the snapshot patch
@@ -573,7 +588,7 @@ export default function EditorScreen() {
         // The snapshot path already succeeded so the link is still saved.
       }
     },
-    [getReadyWorkbook, hyperlinkCtx, updateSnapshot],
+    [getReadyWorkbook, hyperlinkCtx, applyMutatedSnapshot],
   );
 
   // Resolve a default author for new comments. localStorage > navigator hints
@@ -657,7 +672,7 @@ export default function EditorScreen() {
         list.push(entry);
       }
       snap.sheets[sheetId]._comments = list;
-      updateSnapshot(JSON.stringify(snap));
+      applyMutatedSnapshot(JSON.stringify(snap));
       // Persist the chosen author so the next new-comment dialog pre-fills it.
       if (entry.author && entry.author.trim()) {
         try {
@@ -667,7 +682,7 @@ export default function EditorScreen() {
         }
       }
     },
-    [getSnapshotForTool, updateSnapshot],
+    [getSnapshotForTool, applyMutatedSnapshot],
   );
 
   // Toggle sheet protection (read-only marker) on the active sheet. Writes
@@ -696,8 +711,8 @@ export default function EditorScreen() {
     } else {
       sheet._protected = { protected: true };
     }
-    updateSnapshot(JSON.stringify(fresh));
-  }, [getReadyWorkbook, updateSnapshot]);
+    applyMutatedSnapshot(JSON.stringify(fresh));
+  }, [getReadyWorkbook, applyMutatedSnapshot]);
 
   // Open the tab-color dialog targeting the active sheet. We re-derive the
   // snapshot from Univer so the dialog sees the current `_tabColor` even if
@@ -741,9 +756,9 @@ export default function EditorScreen() {
       } else {
         sheet._tabColor = color;
       }
-      updateSnapshot(JSON.stringify(fresh));
+      applyMutatedSnapshot(JSON.stringify(fresh));
     },
-    [updateSnapshot],
+    [applyMutatedSnapshot],
   );
 
   // Reactive flag: is the active sheet currently protected per the snapshot?
@@ -802,9 +817,9 @@ export default function EditorScreen() {
       } else {
         snap.sheets![sheetId]._comments = next;
       }
-      updateSnapshot(JSON.stringify(snap));
+      applyMutatedSnapshot(JSON.stringify(snap));
     },
-    [currentSnapshotJson, updateSnapshot],
+    [currentSnapshotJson, applyMutatedSnapshot],
   );
 
   // Derive the comment indicator list from the live snapshot so the panel
@@ -951,9 +966,9 @@ export default function EditorScreen() {
       };
       if (value.title) entry.title = value.title;
       sheetObj._charts = [...existing, entry];
-      updateSnapshot(JSON.stringify(snapshot));
+      applyMutatedSnapshot(JSON.stringify(snapshot));
     },
-    [chartDialog, updateSnapshot],
+    [chartDialog, applyMutatedSnapshot],
   );
 
   // Number-format dialog plumbing. Captures the active selection's bounding
@@ -1070,9 +1085,9 @@ export default function EditorScreen() {
           }
         }
       }
-      updateSnapshot(JSON.stringify(snapshot));
+      applyMutatedSnapshot(JSON.stringify(snapshot));
     },
-    [numFmtDialog, updateSnapshot],
+    [numFmtDialog, applyMutatedSnapshot],
   );
 
   // AutoSum (Σ / Alt+=). Excel's heuristic: look for a contiguous run of
@@ -1143,8 +1158,8 @@ export default function EditorScreen() {
     // Drop any stale literal value — Univer will recompute via the formula.
     delete cell.v;
     cellData[rowKey][String(col)] = cell;
-    updateSnapshot(JSON.stringify(snapshot));
-  }, [getReadyWorkbook, updateSnapshot]);
+    applyMutatedSnapshot(JSON.stringify(snapshot));
+  }, [getReadyWorkbook, applyMutatedSnapshot]);
 
   // Quick-format buttons (通貨 / %). Reuses the same snapshot-level _fmt path
   // as the Number Format dialog but skips the dialog — one click applies a
@@ -1185,9 +1200,9 @@ export default function EditorScreen() {
         { startRow, endRow, startCol, endCol },
         code,
       );
-      updateSnapshot(nextJson);
+      applyMutatedSnapshot(nextJson);
     },
-    [getReadyWorkbook, updateSnapshot],
+    [getReadyWorkbook, applyMutatedSnapshot],
   );
 
   // Insert-image dialog plumbing. Snapshots the active sheet + the top-left of
@@ -1366,10 +1381,10 @@ export default function EditorScreen() {
         sheetRefs,
       };
 
-      updateSnapshot(JSON.stringify(snapshot));
+      applyMutatedSnapshot(JSON.stringify(snapshot));
       return null;
     },
-    [imageDialog, updateSnapshot],
+    [imageDialog, applyMutatedSnapshot],
   );
 
   // Open the sort dialog with the active sheet + a default range derived from
@@ -1531,9 +1546,9 @@ export default function EditorScreen() {
         }
       }
 
-      updateSnapshot(JSON.stringify(snapshot));
+      applyMutatedSnapshot(JSON.stringify(snapshot));
     },
-    [getReadyWorkbook, sortDialog, updateSnapshot],
+    [getReadyWorkbook, sortDialog, applyMutatedSnapshot],
   );
 
   // Format Painter: capture the anchor cell's style from the live workbook
@@ -1669,7 +1684,7 @@ export default function EditorScreen() {
         );
       }
       if (next !== snapJson) {
-        updateSnapshot(next);
+        applyMutatedSnapshot(next);
       }
       if (formatPainterMode === "single") {
         deactivateFormatPainter();
@@ -1677,7 +1692,7 @@ export default function EditorScreen() {
     });
 
     return () => disposable.dispose();
-  }, [formatPainterMode, updateSnapshot, deactivateFormatPainter]);
+  }, [formatPainterMode, applyMutatedSnapshot, deactivateFormatPainter]);
 
   // Open-file flow for the command palette. Mirrors useGlobalShortcuts' Ctrl+O
   // logic so the palette and the keyboard binding stay in lock step. We can't
@@ -2453,11 +2468,11 @@ export default function EditorScreen() {
     });
 
     return () => disposable.dispose();
-    // #88: re-register the listener whenever the underlying workbook changes
-    // (open/import/restore bump editorRevision). Without this dep, the
-    // listener stays bound to the first workbook for the lifetime of the
-    // component and later workbooks' clicks never fire.
-  }, [editorRevision]);
+    // #88: re-register the listener whenever the underlying workbook
+    // identity changes (open/import/restore replace currentHandle). Without
+    // this dep, the listener stays bound to the first workbook for the
+    // lifetime of the component and later workbooks' clicks never fire.
+  }, [currentHandle]);
 
   const statusLabel = SAVE_STATUS_LABELS[saveStatus] ?? saveStatus;
   const statusClass = `status-bar__status status-bar__status--${saveStatus}`;

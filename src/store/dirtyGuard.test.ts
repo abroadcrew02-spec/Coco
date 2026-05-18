@@ -23,8 +23,7 @@ beforeEach(() => {
   });
   // happy-dom doesn't provide window.confirm — install our own mock.
   confirmFn = vi.fn();
-  // @ts-expect-error - overriding the DOM stub for testing
-  window.confirm = confirmFn;
+  window.confirm = confirmFn as unknown as typeof window.confirm;
 });
 
 describe("confirmDiscardIfUnsaved", () => {

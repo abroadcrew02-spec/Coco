@@ -36,8 +36,10 @@ const PHASE2_SHORTCUTS: Shortcut[] = [
 ];
 
 const UNIVER_SHORTCUTS: Shortcut[] = [
-  { keys: ["Ctrl", "Z"], description: "元に戻す" },
-  { keys: ["Ctrl", "Y"], description: "やり直し" },
+  { keys: ["Ctrl", "Z"], description: "元に戻す（セル入力）" },
+  { keys: ["Ctrl", "Y"], description: "やり直し（セル入力）" },
+  { keys: ["Ctrl", "Alt", "Z"], description: "元に戻す（書式・図形などCoco操作）" },
+  { keys: ["Ctrl", "Alt", "Shift", "Z"], description: "やり直し（Coco操作）" },
   { keys: ["Ctrl", "C"], description: "コピー" },
   { keys: ["Ctrl", "X"], description: "切り取り" },
   { keys: ["Ctrl", "V"], description: "貼り付け" },

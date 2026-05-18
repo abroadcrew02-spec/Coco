@@ -42,8 +42,14 @@ describe("HelpDialog", () => {
 
     it("lists the Univer-standard editing shortcuts", () => {
       render(<HelpDialog onClose={onClose} />);
-      expect(screen.getByText("元に戻す")).toBeTruthy();
-      expect(screen.getByText("やり直し")).toBeTruthy();
+      // #97: undo/redo labels disambiguate between Univer-native (cell typing)
+      // and Coco-managed (apply-style mutations).
+      expect(screen.getByText("元に戻す（セル入力）")).toBeTruthy();
+      expect(screen.getByText("やり直し（セル入力）")).toBeTruthy();
+      expect(
+        screen.getByText("元に戻す（書式・図形などCoco操作）"),
+      ).toBeTruthy();
+      expect(screen.getByText("やり直し（Coco操作）")).toBeTruthy();
       expect(screen.getByText("検索")).toBeTruthy();
       expect(screen.getByText("置換")).toBeTruthy();
     });

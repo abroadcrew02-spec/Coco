@@ -96,6 +96,36 @@ import { patchErrorIndicators } from "./errorIndicatorRender";
 import { collectAuditIssues } from "../store/formulaAudit";
 import ErrorIndicatorsPanel from "./ErrorIndicatorsPanel";
 import ErrorCheckingDialog from "./ErrorCheckingDialog";
+import SubtotalDialog from "./SubtotalDialog";
+import {
+  type SubtotalParams,
+  applySubtotals,
+  stripSubtotalRows,
+} from "../store/subtotals";
+import RemoveDuplicatesDialog from "./RemoveDuplicatesDialog";
+import {
+  type RemoveDuplicatesParams,
+  applyToSheet as applyRemoveDupesToSheet,
+} from "../store/removeDuplicates";
+import TextToColumnsDialog from "./TextToColumnsDialog";
+import {
+  type TextToColumnsParams,
+  type SheetData as TtcSheetData,
+} from "../store/textToColumns";
+import {
+  applyToSheet as applyTextToColumnsToSheet,
+} from "../store/textToColumns";
+import AdvancedFilterDialog from "./AdvancedFilterDialog";
+import {
+  type AdvancedFilterParams,
+  applyAdvancedFilter,
+} from "../store/advancedFilter";
+import FlashFillDialog from "./FlashFillDialog";
+import {
+  type FlashFillTransform,
+  runFlashFill,
+  describeTransform,
+} from "../store/flashFill";
 // Single-thread InsertCommentDialog superseded by ThreadedCommentDialog;
 // its CommentEntry type lives in its own module for other consumers.
 import InsertChartDialog, { type ChartFormValue } from "./InsertChartDialog";
@@ -344,6 +374,34 @@ export default function EditorScreen() {
   const [showFormulasMode, setShowFormulasMode] = useState(false);
   const [errorsPanelOpen, setErrorsPanelOpen] = useState(false);
   const [errorCheckingOpen, setErrorCheckingOpen] = useState(false);
+  // Wave 3 data-tab features.
+  const [subtotalDialog, setSubtotalDialog] = useState<{
+    sheetId: string;
+    range: string;
+    sheetSnapshot: { cellData?: Record<string, Record<string, unknown>>; rowData?: Record<string, unknown> };
+  } | null>(null);
+  const [removeDuplicatesDialog, setRemoveDuplicatesDialog] = useState<{
+    sheetId: string;
+    range: string;
+    sheetSnapshot: { cellData?: Record<string, Record<string, unknown>> };
+  } | null>(null);
+  const [textToColumnsDialog, setTextToColumnsDialog] = useState<{
+    sheetId: string;
+    range: string;
+    sampleRows: string[];
+  } | null>(null);
+  const [advancedFilterDialog, setAdvancedFilterDialog] = useState<{
+    sheetId: string;
+    range: string;
+  } | null>(null);
+  const [flashFillDialog, setFlashFillDialog] = useState<{
+    sheetId: string;
+    col: number;
+    transform: FlashFillTransform;
+    filled: string[];
+    sourceCol: string[];
+    examplesMask: boolean[];
+  } | null>(null);
   // Format Painter (書式コピー) state. Excel's paintbrush:
   //   - "idle"   : tool is off.
   //   - "single" : armed for one paste; next selection-change applies + deactivates.
@@ -1191,6 +1249,305 @@ export default function EditorScreen() {
     };
     setGoalSeekState({ targetCell: activeRef, changingCell: "A1", adapter });
   }, []);
+
+  // --- Subtotals -------------------------------------------------------------
+  const openSubtotalDialog = useCallback(() => {
+    const ready = getReadyWorkbook("小計");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    const snap = workbook.save() as unknown as {
+      sheets?: Record<string, { cellData?: Record<string, Record<string, unknown>>; rowData?: Record<string, unknown> }>;
+    };
+    let range = "A1:A1";
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) {
+        const a1 = r.getA1Notation();
+        range = a1.includes(":") ? a1 : `${a1}:${a1}`;
+      }
+    } catch {
+      // best-effort
+    }
+    setSubtotalDialog({ sheetId, range, sheetSnapshot: snap.sheets?.[sheetId] ?? {} });
+  }, [getReadyWorkbook]);
+
+  const applySubtotal = useCallback(
+    (sheetId: string, params: SubtotalParams) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as {
+        sheets?: Record<string, {
+          cellData?: Record<string, Record<string, unknown>>;
+          rowData?: Record<string, unknown>;
+          _outlineRows?: Array<{ start: number; end: number; level: number; collapsed?: boolean }>;
+        }>;
+      };
+      const sheet = fresh.sheets?.[sheetId];
+      if (!sheet) return;
+      const result = applySubtotals(sheet, params);
+      sheet.cellData = result.newCellData;
+      if (params.addOutline && result.outlineGroups && result.outlineGroups.length > 0) {
+        const existing = Array.isArray(sheet._outlineRows) ? sheet._outlineRows : [];
+        sheet._outlineRows = [...existing, ...result.outlineGroups];
+      }
+      applyMutatedSnapshot(JSON.stringify(fresh));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  const clearSubtotals = useCallback(
+    (sheetId: string, groupCol: number) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as {
+        sheets?: Record<string, { cellData?: Record<string, Record<string, unknown>> }>;
+      };
+      const sheet = fresh.sheets?.[sheetId];
+      if (!sheet?.cellData) return;
+      sheet.cellData = stripSubtotalRows(sheet.cellData, groupCol);
+      applyMutatedSnapshot(JSON.stringify(fresh));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // --- Remove Duplicates -----------------------------------------------------
+  const openRemoveDuplicatesDialog = useCallback(() => {
+    const ready = getReadyWorkbook("重複の削除");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    const snap = workbook.save() as unknown as {
+      sheets?: Record<string, { cellData?: Record<string, Record<string, unknown>> }>;
+    };
+    let range = "A1:A1";
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) {
+        const a1 = r.getA1Notation();
+        range = a1.includes(":") ? a1 : `${a1}:${a1}`;
+      }
+    } catch {
+      // best-effort
+    }
+    setRemoveDuplicatesDialog({ sheetId, range, sheetSnapshot: snap.sheets?.[sheetId] ?? {} });
+  }, [getReadyWorkbook]);
+
+  const applyRemoveDuplicates = useCallback(
+    (params: RemoveDuplicatesParams) => {
+      if (!removeDuplicatesDialog) return;
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as {
+        sheets?: Record<string, { cellData?: Record<string, Record<string, unknown>> }>;
+      };
+      const sheet = fresh.sheets?.[removeDuplicatesDialog.sheetId];
+      if (!sheet) return;
+      const result = applyRemoveDupesToSheet(sheet, params);
+      fresh.sheets![removeDuplicatesDialog.sheetId] = result.sheetWithRemoved as typeof sheet;
+      applyMutatedSnapshot(JSON.stringify(fresh));
+      setEditorOperationError(
+        `重複削除: ${result.removedCount} 行を削除しました。${result.keptCount} 行残っています。`,
+      );
+    },
+    [removeDuplicatesDialog, applyMutatedSnapshot],
+  );
+
+  // --- Text to Columns -------------------------------------------------------
+  const openTextToColumnsDialog = useCallback(() => {
+    const ready = getReadyWorkbook("区切り位置");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    const snap = workbook.save() as unknown as {
+      sheets?: Record<string, { cellData?: Record<string, Record<string, { v?: unknown }>> }>;
+    };
+    let range = "A1";
+    let sampleRows: string[] = [];
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) range = r.getA1Notation();
+      const m = /^\$?([A-Za-z]+)\$?(\d+)(?::\$?[A-Za-z]+\$?(\d+))?$/.exec(range);
+      if (m) {
+        const colLetters = m[1].toUpperCase();
+        let col = 0;
+        for (const ch of colLetters) col = col * 26 + (ch.charCodeAt(0) - 64);
+        col -= 1;
+        const startRow = parseInt(m[2], 10) - 1;
+        const endRow = m[3] ? parseInt(m[3], 10) - 1 : startRow;
+        const cellData = snap.sheets?.[sheetId]?.cellData ?? {};
+        for (let r2 = startRow; r2 <= Math.min(startRow + 4, endRow); r2++) {
+          const v = cellData[String(r2)]?.[String(col)]?.v;
+          sampleRows.push(v == null ? "" : String(v));
+        }
+      }
+    } catch {
+      // best-effort
+    }
+    setTextToColumnsDialog({ sheetId, range, sampleRows });
+  }, [getReadyWorkbook]);
+
+  const applyTextToColumns = useCallback(
+    (params: TextToColumnsParams) => {
+      if (!textToColumnsDialog) return;
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as {
+        sheets?: Record<string, TtcSheetData>;
+      };
+      const sheet = fresh.sheets?.[textToColumnsDialog.sheetId];
+      if (!sheet) return;
+      const result = applyTextToColumnsToSheet(sheet, params);
+      fresh.sheets![textToColumnsDialog.sheetId] = result.sheetMutated;
+      applyMutatedSnapshot(JSON.stringify(fresh));
+      if (result.overwrittenCells > 0) {
+        setEditorOperationError(`区切り位置: ${result.overwrittenCells} セルを上書きしました。`);
+      }
+    },
+    [textToColumnsDialog, applyMutatedSnapshot],
+  );
+
+  // --- Advanced Filter -------------------------------------------------------
+  const openAdvancedFilterDialog = useCallback(() => {
+    const ready = getReadyWorkbook("フィルターの詳細設定");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let range = "A1:A1";
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) {
+        const a1 = r.getA1Notation();
+        range = a1.includes(":") ? a1 : `${a1}:${a1}`;
+      }
+    } catch {
+      // best-effort
+    }
+    setAdvancedFilterDialog({ sheetId, range });
+  }, [getReadyWorkbook]);
+
+  const applyAdvancedFilterAction = useCallback(
+    (params: AdvancedFilterParams) => {
+      if (!advancedFilterDialog) return;
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as {
+        sheets?: Record<string, unknown>;
+      };
+      const sheet = fresh.sheets?.[advancedFilterDialog.sheetId];
+      if (!sheet) return;
+      const result = applyAdvancedFilter(sheet, params);
+      if (params.mode === "inPlace" && result.mutatedSheet) {
+        fresh.sheets![advancedFilterDialog.sheetId] = result.mutatedSheet;
+      } else if (params.mode === "copyTo" && result.copyOutput && params.destination) {
+        // Write copyOutput into cellData starting at destination.
+        const s = sheet as { cellData?: Record<string, Record<string, unknown>> };
+        if (!s.cellData) s.cellData = {};
+        result.copyOutput.forEach((row, ri) => {
+          const targetRow = params.destination!.row + ri;
+          if (!s.cellData![String(targetRow)]) s.cellData![String(targetRow)] = {};
+          row.forEach((val, ci) => {
+            const targetCol = params.destination!.col + ci;
+            s.cellData![String(targetRow)][String(targetCol)] = { v: val };
+          });
+        });
+      }
+      applyMutatedSnapshot(JSON.stringify(fresh));
+      setEditorOperationError(`フィルター: ${result.matchedRows.length} 件一致しました。`);
+    },
+    [advancedFilterDialog, applyMutatedSnapshot],
+  );
+
+  // --- Flash Fill ------------------------------------------------------------
+  const openFlashFillDialog = useCallback(() => {
+    const ready = getReadyWorkbook("フラッシュフィル");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let col = -1;
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) col = r.getColumn();
+    } catch {
+      // best-effort
+    }
+    if (col <= 0) {
+      setEditorOperationError("フラッシュフィル: 2 列目以降の列を選択してください。");
+      return;
+    }
+    const snap = workbook.save() as unknown as {
+      sheets?: Record<string, { cellData?: Record<string, Record<string, { v?: unknown }>> }>;
+    };
+    const cellData = snap.sheets?.[sheetId]?.cellData ?? {};
+    const rowKeys = Object.keys(cellData).map(Number).filter(Number.isFinite);
+    const maxRow = rowKeys.length ? Math.max(...rowKeys) : 0;
+    const sourceCol: string[] = [];
+    const targetCol: (string | null)[] = [];
+    for (let r2 = 0; r2 <= maxRow; r2++) {
+      const src = cellData[String(r2)]?.[String(col - 1)]?.v;
+      const tgt = cellData[String(r2)]?.[String(col)]?.v;
+      sourceCol.push(src == null ? "" : String(src));
+      targetCol.push(tgt == null || tgt === "" ? null : String(tgt));
+    }
+    const result = runFlashFill(sourceCol, targetCol);
+    if (!result) {
+      setEditorOperationError("フラッシュフィル: パターンを検出できませんでした。");
+      return;
+    }
+    const examplesMask = targetCol.map((v) => v !== null);
+    setFlashFillDialog({
+      sheetId,
+      col,
+      transform: result.transform,
+      filled: result.filled,
+      sourceCol,
+      examplesMask,
+    });
+  }, [getReadyWorkbook]);
+
+  const acceptFlashFill = useCallback(() => {
+    if (!flashFillDialog) return;
+    const fUniver = fUniverRef.current;
+    const workbook = fUniver?.getActiveWorkbook();
+    if (!workbook) {
+      setFlashFillDialog(null);
+      return;
+    }
+    const fresh = workbook.save() as unknown as {
+      sheets?: Record<string, { cellData?: Record<string, Record<string, unknown>> }>;
+    };
+    const sheet = fresh.sheets?.[flashFillDialog.sheetId];
+    if (!sheet) {
+      setFlashFillDialog(null);
+      return;
+    }
+    if (!sheet.cellData) sheet.cellData = {};
+    const colKey = String(flashFillDialog.col);
+    flashFillDialog.filled.forEach((v, r) => {
+      if (flashFillDialog.examplesMask[r]) return; // user-typed examples: keep
+      if (v === "") return;
+      const rowKey = String(r);
+      if (!sheet.cellData![rowKey]) sheet.cellData![rowKey] = {};
+      (sheet.cellData![rowKey] as Record<string, unknown>)[colKey] = { v };
+    });
+    applyMutatedSnapshot(JSON.stringify(fresh));
+    setFlashFillDialog(null);
+  }, [flashFillDialog, applyMutatedSnapshot]);
 
   // Shared utility: jump active selection to A1 cell/range on a given sheet.
   // Used by TableInfoPanel and SparklineListPanel.
@@ -2533,6 +2890,21 @@ export default function EditorScreen() {
       case "view-errors-panel":
         setErrorsPanelOpen((v) => !v);
         break;
+      case "data-subtotal":
+        openSubtotalDialog();
+        break;
+      case "data-remove-duplicates":
+        openRemoveDuplicatesDialog();
+        break;
+      case "data-text-to-columns":
+        openTextToColumnsDialog();
+        break;
+      case "data-advanced-filter":
+        openAdvancedFilterDialog();
+        break;
+      case "edit-flash-fill":
+        openFlashFillDialog();
+        break;
     }
   }, [
     openHyperlinkDialog,
@@ -2555,6 +2927,11 @@ export default function EditorScreen() {
     openPageSetupDialog,
     openCellStylesDialog,
     openGoalSeekDialog,
+    openSubtotalDialog,
+    openRemoveDuplicatesDialog,
+    openTextToColumnsDialog,
+    openAdvancedFilterDialog,
+    openFlashFillDialog,
   ]);
 
   // Export every sheet in the workbook as a separate <sheetName>.csv file
@@ -3367,6 +3744,71 @@ export default function EditorScreen() {
             setErrorCheckingOpen(false);
           }}
           onClose={() => setErrorCheckingOpen(false)}
+        />
+      )}
+      {subtotalDialog && (
+        <SubtotalDialog
+          initialRange={subtotalDialog.range}
+          sheetId={subtotalDialog.sheetId}
+          sheetSnapshot={subtotalDialog.sheetSnapshot}
+          onApply={(params) => {
+            applySubtotal(subtotalDialog.sheetId, params);
+            setSubtotalDialog(null);
+          }}
+          onRemoveAll={(groupCol) => {
+            clearSubtotals(subtotalDialog.sheetId, groupCol);
+            setSubtotalDialog(null);
+          }}
+          onClose={() => setSubtotalDialog(null)}
+        />
+      )}
+      {removeDuplicatesDialog && (
+        <RemoveDuplicatesDialog
+          initialRange={removeDuplicatesDialog.range}
+          sheetId={removeDuplicatesDialog.sheetId}
+          sheetSnapshot={removeDuplicatesDialog.sheetSnapshot}
+          onApply={(params) => {
+            applyRemoveDuplicates(params);
+            setRemoveDuplicatesDialog(null);
+          }}
+          onClose={() => setRemoveDuplicatesDialog(null)}
+        />
+      )}
+      {textToColumnsDialog && (
+        <TextToColumnsDialog
+          initialRange={textToColumnsDialog.range}
+          sampleRows={textToColumnsDialog.sampleRows}
+          onApply={(params) => {
+            applyTextToColumns(params);
+            setTextToColumnsDialog(null);
+          }}
+          onClose={() => setTextToColumnsDialog(null)}
+        />
+      )}
+      {advancedFilterDialog && (
+        <AdvancedFilterDialog
+          initialSourceRange={advancedFilterDialog.range}
+          onApply={(params) => {
+            applyAdvancedFilterAction(params);
+            setAdvancedFilterDialog(null);
+          }}
+          onClose={() => setAdvancedFilterDialog(null)}
+        />
+      )}
+      {flashFillDialog && (
+        <FlashFillDialog
+          transformDescription={describeTransform(flashFillDialog.transform)}
+          preview={flashFillDialog.sourceCol
+            .map((src, i) => ({
+              source: src,
+              filled: flashFillDialog.filled[i] ?? "",
+              isExample: flashFillDialog.examplesMask[i],
+            }))
+            .filter((p) => !p.isExample && p.filled !== "")
+            .slice(0, 5)
+            .map((p) => ({ source: p.source, filled: p.filled }))}
+          onAccept={acceptFlashFill}
+          onClose={() => setFlashFillDialog(null)}
         />
       )}
       {warningsDialog === "import" && (

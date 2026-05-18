@@ -57,6 +57,11 @@ const jaJP = {
   "menu.showFormulas": "数式の表示",
   "menu.exportHtml": "HTML エクスポート...",
   "menu.exportPdf": "PDF エクスポート...",
+  "dialog.subtotal": "小計",
+  "dialog.removeDuplicates": "重複の削除",
+  "dialog.textToColumns": "区切り位置",
+  "dialog.advancedFilter": "フィルターの詳細設定",
+  "dialog.flashFill": "フラッシュフィル",
   // Settings dialog — language section (new)
   "settings.language": "言語 / Language",
   "settings.languageHint": "表示言語を切り替えます。変更後は再読み込みで反映されます。",
@@ -103,6 +108,11 @@ const enUS: Record<StringKey, string> = {
   "menu.showFormulas": "Show Formulas",
   "menu.exportHtml": "Export HTML...",
   "menu.exportPdf": "Export PDF...",
+  "dialog.subtotal": "Subtotal",
+  "dialog.removeDuplicates": "Remove Duplicates",
+  "dialog.textToColumns": "Text to Columns",
+  "dialog.advancedFilter": "Advanced Filter",
+  "dialog.flashFill": "Flash Fill",
   "settings.language": "Language / 言語",
   "settings.languageHint":
     "Switch UI language. Reload the app to apply the change.",

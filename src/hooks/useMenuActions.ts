@@ -35,6 +35,11 @@ const EDITOR_COMMAND_IDS = new Set([
   "view-sparklines-panel",
   "view-errors-panel",
   "view-show-formulas",
+  "data-subtotal",
+  "data-remove-duplicates",
+  "data-text-to-columns",
+  "data-advanced-filter",
+  "edit-flash-fill",
 ]);
 
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route

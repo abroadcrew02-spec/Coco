@@ -73,6 +73,8 @@ pub fn run() {
                     "edit-command-palette",
                     format!("コマンドパレット...\t{MOD}+Shift+P"),
                 )
+                .separator()
+                .text("edit-flash-fill", format!("フラッシュフィル\t{MOD}+E"))
                 .build()?;
             let view_menu = SubmenuBuilder::new(app, "表示")
                 .text("view-snapshots", "スナップショット...")
@@ -110,6 +112,11 @@ pub fn run() {
                 .text("data-autosum", "オートSUM")
                 .separator()
                 .text("data-outline-groups", "グループ化 / アウトライン...")
+                .text("data-subtotal", "小計...")
+                .separator()
+                .text("data-text-to-columns", "区切り位置...")
+                .text("data-remove-duplicates", "重複の削除...")
+                .text("data-advanced-filter", "フィルターの詳細設定...")
                 .build()?;
             let tools_menu = SubmenuBuilder::new(app, "ツール")
                 .text("tools-sheet-protection", "シート保護...")

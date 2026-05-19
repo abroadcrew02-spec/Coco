@@ -38,7 +38,8 @@
 //   - `addSlicer(workbook, sheetId, entry)` — pure clone with entry appended
 //   - `removeSlicer(workbook, name)` — pure clone with named slicer dropped
 //   - `toggleSlicerValue(workbook, name, value)` — toggles inclusion; returns
-//     new selected-values length, or -1 when the named slicer is missing
+//     a NEW workbook snapshot (deep-cloned) with the toggle applied, or null
+//     when the named slicer is missing
 //   - `applySlicerFilters(snapshot)` — pure clone with hd:1 applied to rows
 //     whose values fail any slicer's predicate
 //   - `listAllSlicers(workbook)` — flat listing with sheet ids/names
@@ -92,6 +93,10 @@ export function generateSlicerName(existingNames: string[]): string {
     }
   }
   let i = 1;
+  // Intentional 1,000,000 cap: at that scale users almost certainly have
+  // a broken naming scheme (or are programmatically generating slicers in
+  // a loop) and `Slicer1000001` is a fine fallback. We deliberately do not
+  // grow the search further to keep this loop bounded.
   while (i < 1_000_000) {
     if (!used.has(i) && !verbatim.has(`Slicer${i}`)) return `Slicer${i}`;
     i++;
@@ -248,18 +253,29 @@ export function removeSlicer(
 
 /**
  * Toggle a value's inclusion in the named slicer's `selectedValues`. When the
- * value is already selected it gets removed; otherwise it's added. Returns
- * true on a successful toggle, false when no slicer matches the name. This
- * is the only mutation helper in this module — callers MUST clone the
- * workbook first (the panel does so via `JSON.parse(currentSnapshotJson)`).
+ * value is already selected it gets removed; otherwise it's added.
+ *
+ * Contract: the input `workbook` is treated as immutable. This helper
+ * deep-clones the snapshot before applying the toggle so callers can pass a
+ * shared / live reference safely. Returns the cloned workbook with the toggle
+ * applied, or `null` when no slicer matches the name (signal for "do nothing"
+ * — distinct from the pre-2026 boolean return, which silently mutated the
+ * caller's object).
  */
 export function toggleSlicerValue(
   workbook: WorkbookSlicerSnapshot,
   name: string,
   value: string,
-): boolean {
-  const sheets = workbook?.sheets;
-  if (!sheets || typeof sheets !== "object") return false;
+): WorkbookSlicerSnapshot | null {
+  if (!workbook || typeof workbook !== "object") return null;
+  let cloned: WorkbookSlicerSnapshot;
+  try {
+    cloned = JSON.parse(JSON.stringify(workbook)) as WorkbookSlicerSnapshot;
+  } catch {
+    return null;
+  }
+  const sheets = cloned.sheets;
+  if (!sheets || typeof sheets !== "object") return null;
   for (const sid of Object.keys(sheets)) {
     const sh = sheets[sid];
     const list = sh?._slicers;
@@ -273,10 +289,10 @@ export function toggleSlicerValue(
       if (idx >= 0) sel.splice(idx, 1);
       else sel.push(value);
       slicer.selectedValues = sel;
-      return true;
+      return cloned;
     }
   }
-  return false;
+  return null;
 }
 
 /**

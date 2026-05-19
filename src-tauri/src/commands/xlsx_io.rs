@@ -4906,6 +4906,16 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     // extras). For files Excel saved (no extension parts), this is a no-op.
     let coco_extensions = read_coco_extensions(&mut archive);
 
+    // Bug 4 fix: detect when this looks like a Coco-authored workbook but no
+    // cocoExtensions parts are present. That indicates Excel (or another
+    // tool) re-saved the file and silently dropped the extension parts, so
+    // tables / pivots / slicers / sparklines / outline / scenarios / sheet
+    // notes / threaded-comment extras have been lost. We don't auto-recover
+    // anything — just surface a warning so the user knows the original
+    // structure may not be intact.
+    let coco_extensions_missing_after_external_edit =
+        coco_extensions.is_empty() && xlsx_looks_coco_authored(&mut archive);
+
     let mut snapshot = json!({
         "id": workbook_id,
         "name": "Imported Workbook",
@@ -4954,6 +4964,19 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                 "One or more sheets exceed {LARGE_SHEET_THRESHOLD} non-empty cells; import may be slow."
             ),
             affected_sheets: Some(large_sheets),
+        });
+    }
+
+    // Bug 4 fix: surface silent data loss when a Coco-authored xlsx loses its
+    // cocoExtensions parts (typical when the file was re-saved in Excel).
+    if coco_extensions_missing_after_external_edit {
+        warnings.push(CompatibilityWarning {
+            severity: "warning".to_string(),
+            code: "XLSX_COCO_EXTENSIONS_MISSING".to_string(),
+            message:
+                "このファイルは Coco で作成された可能性がありますが、Coco 拡張データ (テーブル / ピボット / スパークライン等) が含まれていません。Excel 等の他ツールで上書き保存された場合、これらの機能は失われている可能性があります。"
+                    .to_string(),
+            affected_sheets: None,
         });
     }
 
@@ -7315,6 +7338,54 @@ fn read_coco_extensions<R: Read + Seek>(
     }
 
     out
+}
+
+/// Detect whether the archive looks like a Coco-authored workbook by
+/// scanning `docProps/core.xml` for the literal string "Coco" inside either
+/// `<dc:creator>` or `<cp:lastModifiedBy>`. Returns true on a match. This is
+/// a coarse heuristic — false positives only matter when paired with the
+/// "no cocoExtensions parts present" condition (see Bug 4): together they
+/// mean the file used to carry Coco extension data that has since been
+/// stripped (most likely by Excel re-saving the file). False negatives are
+/// preferable to crashing on a malformed core.xml so any read/parse error
+/// short-circuits to `false`.
+fn xlsx_looks_coco_authored<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> bool {
+    let Ok(mut entry) = archive.by_name("docProps/core.xml") else {
+        return false;
+    };
+    let mut buf = String::new();
+    if std::io::Read::read_to_string(&mut entry, &mut buf).is_err() {
+        return false;
+    }
+    // Scan only the dc:creator and cp:lastModifiedBy elements so a stray
+    // "Coco" in a title/subject field doesn't trigger a false positive.
+    contains_coco_in_element(&buf, "dc:creator")
+        || contains_coco_in_element(&buf, "cp:lastModifiedBy")
+}
+
+// True when the named XML element (taking the first occurrence) has a body
+// that contains the substring "Coco" (case-sensitive — matches the exported
+// app name). Skips closing tags and empty / self-closed elements.
+fn contains_coco_in_element(xml: &str, tag: &str) -> bool {
+    // Find `<tag` (open) and then the matching close `</tag>`. We don't try
+    // to handle full XML namespaces — `dc:creator` and `cp:lastModifiedBy`
+    // are stable in OOXML core.xml.
+    let open_marker = format!("<{tag}");
+    let close_marker = format!("</{tag}>");
+    let Some(open_idx) = xml.find(&open_marker) else {
+        return false;
+    };
+    // Move past the opening tag itself (find the `>` that terminates it).
+    let after_open = &xml[open_idx..];
+    let Some(gt_off) = after_open.find('>') else {
+        return false;
+    };
+    let body_start = open_idx + gt_off + 1;
+    let Some(close_off) = xml[body_start..].find(&close_marker) else {
+        return false;
+    };
+    let body = &xml[body_start..body_start + close_off];
+    body.contains("Coco")
 }
 
 /// Merge the cocoExtensions bundles back into the snapshot at the locations

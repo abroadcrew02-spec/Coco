@@ -1,3 +1,10 @@
+import {
+  hasKnownDecoration,
+  ICONSET_GLYPHS,
+  ICONSET_MULTI_PREFIXES,
+  stripKnownDecorations,
+} from "./renderGlyphs";
+
 // In-grid conditional formatting rendering (Phase 2).
 //
 // The xlsx round-trip stores per-sheet rules at `sheets.<sid>._conditionalFormatting`
@@ -498,13 +505,12 @@ const ICON_GLYPHS: Record<string, string[]> = {
   "5rating": ["★☆☆☆☆", "★★☆☆☆", "★★★☆☆", "★★★★☆", "★★★★★"],
 };
 
-// #118A: flat union of every iconSet glyph across all known styles. Used to
-// strip a stale glyph that a higher-priority overlapping iconSet rule (with a
-// different iconStyle) already prefixed onto the cell text. Without this, two
-// overlapping iconSet rules can stack glyphs (e.g. "🟢 ↑ value").
-const KNOWN_ICON_GLYPHS_SET: Set<string> = new Set(
-  Object.values(ICON_GLYPHS).flat(),
-);
+// Note (#118A → audit): the previous "strip known iconSet glyphs" guard
+// lived here, but it only knew about iconSet glyphs and so missed sparkline /
+// comment / error / formula prefixes written by sibling render patches. The
+// guard has been replaced by `stripKnownDecorations` from `./renderGlyphs`,
+// which knows about ALL sibling-patch decorations and prevents stacking like
+// "↑ 💬  ▁▃▆▇█". See the iconSet branch of `patchCfRenders` below.
 
 /** Pick an icon glyph for `value` based on its band in [min,max] using the
  *  given iconStyle's bucket count. Returns "" when value is non-numeric. */
@@ -1086,18 +1092,47 @@ export function patchCfRenders<T>(snapshot: T): T {
             // the deep-cloned snapshot so the source isn't mutated.
             const cur = existing.v;
             let text = cur === undefined || cur === null ? "" : String(cur);
-            // #118A: strip ANY leading known-iconSet glyph (followed by a
-            // space) before prefixing the current rule's glyph. Previously we
-            // only matched the current rule's exact prefix, which let a
-            // higher-priority overlapping iconSet rule (different iconStyle)
-            // leave its glyph stacked in front, producing "🟢 ↑ value". Now
-            // overlapping iconSet rules replace each other cleanly.
-            for (const known of KNOWN_ICON_GLYPHS_SET) {
-              const knownPrefix = `${known} `;
-              if (text.startsWith(knownPrefix)) {
-                text = text.slice(knownPrefix.length);
-                break;
-              }
+            // Bug #1 from the audit: previously this only stripped a leading
+            // iconSet glyph (the original #118A guard). Any OTHER sibling-patch
+            // decoration written earlier in the pipeline (sparkline bars,
+            // "💬 ", "⚠ ", "=formula") would stack underneath the iconSet
+            // prefix, producing visible junk like "↑ ▁▃▆▇█" or "↑ 💬 note".
+            //
+            // Policy:
+            //   - Cell already shows a formula ("=...") via show-formulas →
+            //     skip the iconSet glyph entirely. Prepending "↑ =SUM(...)"
+            //     would be misleading and visually wrong.
+            //   - Cell already shows a sparkline / error / comment glyph →
+            //     skip the iconSet glyph entirely (audit-recommended: "don't
+            //     add another iconSet glyph; skip rather than stack"). The
+            //     style fill / fontColor still applies via the iconSet rule's
+            //     stats-driven path, but the in-cell glyph stays the sibling
+            //     patch's marker.
+            //   - Cell starts with another iconSet glyph (overlapping rules
+            //     with different iconStyles) → strip and replace, preserving
+            //     the original #118A behavior so the higher-priority rule
+            //     wins cleanly.
+            if (text.startsWith("=")) continue;
+            // Detect an overlapping iconSet glyph at the start so we can
+            // strip-and-replace (the original #118A behavior — higher-priority
+            // overlapping iconSet rule with a different iconStyle wins).
+            const cp = text.length > 0 ? text.codePointAt(0) : undefined;
+            const firstGlyph = cp !== undefined ? String.fromCodePoint(cp) : "";
+            const startsWithSingleIconGlyph =
+              firstGlyph !== "" &&
+              ICONSET_GLYPHS.has(firstGlyph) &&
+              text.slice(firstGlyph.length).startsWith(" ");
+            const startsWithMultiIconPrefix = ICONSET_MULTI_PREFIXES.some((p) =>
+              text.startsWith(p),
+            );
+            if (startsWithSingleIconGlyph || startsWithMultiIconPrefix) {
+              text = stripKnownDecorations(text);
+            } else if (hasKnownDecoration(text)) {
+              // Sparkline / comment / error / formula prefix is already on the
+              // cell — skip rather than stack. The CF rule's style still
+              // applies if it has a `style` field (handled by the
+              // styleForRule path) — only the in-cell glyph is suppressed.
+              continue;
             }
             const prefix = `${glyph} `;
             const next = prefix + text;

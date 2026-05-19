@@ -2089,8 +2089,9 @@ export default function EditorScreen() {
       const workbook = fUniver?.getActiveWorkbook();
       if (!workbook) return;
       const fresh = workbook.save() as unknown as WorkbookSlicerSnapshot;
-      if (toggleSlicerValueHelper(fresh, name, value)) {
-        applyMutatedSnapshot(JSON.stringify(fresh));
+      const next = toggleSlicerValueHelper(fresh, name, value);
+      if (next) {
+        applyMutatedSnapshot(JSON.stringify(next));
       }
     },
     [applyMutatedSnapshot],

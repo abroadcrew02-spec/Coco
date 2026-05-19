@@ -32,6 +32,11 @@ import {
   type SparklineSnapshot,
   type SparklineType,
 } from "../store/sparklines";
+import {
+  hasKnownDecoration,
+  isPureSparklineString,
+  stripKnownDecorations,
+} from "./renderGlyphs";
 
 const MONOSPACE_FONT = "Consolas, 'Courier New', monospace";
 
@@ -68,6 +73,30 @@ export function isSparklineRendered(value: string, type: SparklineType): boolean
   for (const ch of value) {
     if (alphabet.indexOf(ch) < 0) return false;
   }
+  return true;
+}
+
+/**
+ * Decide whether the existing anchor cell value `v` should be treated as a
+ * user-typed override (skip painting) or as something we wrote in a previous
+ * pipeline pass (safe to overwrite).
+ *
+ * Bug #3 from the audit: previously this check used only `isSparklineRendered`,
+ * so once a later patch (e.g. CF iconSet) prefixed `↑ ` onto the cell, the
+ * next pipeline run saw `"↑ ▁▃▆▇█"` — non-empty, not pure sparkline glyphs —
+ * and bailed out, dropping the sparkline. Fix: a cell that starts with ANY
+ * known decoration glyph is treated as a downstream-decorated version of OUR
+ * output, so we can safely re-render. After stripping every known decoration,
+ * the remaining string is the user's actual input — if it's empty or pure
+ * sparkline glyphs, we keep painting.
+ */
+function isUserOverride(value: string, type: SparklineType): boolean {
+  if (value.length === 0) return false;
+  // Decorated by sibling patches — strip those before judging "user typed".
+  const stripped = hasKnownDecoration(value) ? stripKnownDecorations(value) : value;
+  if (stripped.length === 0) return false;
+  if (isSparklineRendered(stripped, type)) return false;
+  if (isPureSparklineString(stripped)) return false;
   return true;
 }
 
@@ -143,15 +172,16 @@ export function patchSparklineRenders<T>(snapshot: T): T {
       >;
       const existing = (rowMap[colKey] as Record<string, unknown> | undefined) ?? {};
       // Respect user-typed overrides: if the anchor cell holds a non-empty
-      // string that is NOT a previously-rendered sparkline glyph string, the
-      // user has typed into it and we must not clobber their input. Leave
+      // string that is NOT a previously-rendered sparkline glyph string (after
+      // stripping any sibling-patch decorations like "↑ " / "💬 " / "⚠ "),
+      // the user has typed into it and we must not clobber their input. Leave
       // both `v` and `s` untouched in that case (re-styling would also feel
       // wrong on an overridden cell). This makes the patch idempotent and
-      // safe to re-apply on every pipeline pass.
+      // safe to re-apply on every pipeline pass, AND robust against later
+      // patches prefixing decorations onto our previously-painted cells.
       if (
         typeof existing.v === "string" &&
-        existing.v.length > 0 &&
-        !isSparklineRendered(existing.v, entry.type)
+        isUserOverride(existing.v, entry.type)
       ) {
         continue;
       }

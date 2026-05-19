@@ -32,6 +32,11 @@ type SnapshotShape = {
 // writes "💬 ", `patchErrorIndicators` writes "⚠ "). When Show-Formulas runs
 // after one of those patches we must preserve the leading glyph(s) so the
 // comment/error markers don't disappear when the user toggles formulas on.
+// CF iconSet glyphs and sparkline glyphs are intentionally NOT preserved —
+// those decorations were derived from `cell.v`'s old value and would be
+// stale once we replace `v` with the formula text. (The cell's iconSet
+// style still re-renders on the next pipeline pass when show-formulas is
+// off again.)
 const COMMENT_GLYPH_PREFIX = "\u{1F4AC} "; // 💬 (U+1F4AC + space)
 const ERROR_GLYPH_PREFIX = "⚠ "; // ⚠  (U+26A0 + space)
 const KNOWN_GLYPH_PREFIXES = [COMMENT_GLYPH_PREFIX, ERROR_GLYPH_PREFIX] as const;

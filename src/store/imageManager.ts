@@ -278,10 +278,23 @@ export function deleteImage(
   const targets = new Set<string>([target.mediaPath]);
   const newXml = stripAnchorsForMedia(drawingXml, drawingPath, rels, targets);
   const nextParts: Record<string, string> = { ...pp.parts };
-  if (newXml !== drawingXml) {
-    const reEncoded = utf8ToBase64(newXml);
-    if (reEncoded) nextParts[drawingPath] = reEncoded;
+  // Atomicity: only delete the media part if we successfully rewrote the
+  // drawing XML to drop the anchor referencing it. If `stripAnchorsForMedia`
+  // returned the input unchanged (no anchor matched) OR `utf8ToBase64` failed
+  // (returns ""), leaving the anchor in place while deleting the media would
+  // produce a dangling rId → media link that Excel may reject on next save.
+  if (newXml === drawingXml) {
+    // No-op: media couldn't be located via the drawing XML — bail out
+    // without mutating parts so the snapshot stays consistent.
+    return out;
   }
+  const reEncoded = utf8ToBase64(newXml);
+  if (!reEncoded) {
+    // Re-encode failed (invalid UTF-16 surrogate / btoa threw). Leave parts
+    // untouched so the workbook keeps its current image set.
+    return out;
+  }
+  nextParts[drawingPath] = reEncoded;
   delete nextParts[target.mediaPath];
   out._preservedParts = { ...pp, parts: nextParts };
   return out;
@@ -324,10 +337,18 @@ export function bulkDeleteImagesOnSheet(
   const targets = new Set(listings.map((l) => l.mediaPath));
   const newXml = stripAnchorsForMedia(drawingXml, drawingPath, rels, targets);
   const nextParts: Record<string, string> = { ...pp.parts };
-  if (newXml !== drawingXml) {
-    const reEncoded = utf8ToBase64(newXml);
-    if (reEncoded) nextParts[drawingPath] = reEncoded;
+  // Atomicity: only delete the media parts if we successfully rewrote the
+  // drawing XML. If stripping produced no change OR utf8ToBase64 returned ""
+  // (catch path on invalid UTF-16), deleting the media while leaving anchors
+  // in place would create dangling rels that Excel may refuse to load.
+  if (newXml === drawingXml) {
+    return { snapshotMutated: out, deletedCount: 0 };
   }
+  const reEncoded = utf8ToBase64(newXml);
+  if (!reEncoded) {
+    return { snapshotMutated: out, deletedCount: 0 };
+  }
+  nextParts[drawingPath] = reEncoded;
   for (const mp of targets) delete nextParts[mp];
   out._preservedParts = { ...pp, parts: nextParts };
   return { snapshotMutated: out, deletedCount: listings.length };

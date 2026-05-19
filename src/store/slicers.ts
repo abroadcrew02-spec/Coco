@@ -93,15 +93,18 @@ export function generateSlicerName(existingNames: string[]): string {
     }
   }
   let i = 1;
-  // Intentional 1,000,000 cap: at that scale users almost certainly have
-  // a broken naming scheme (or are programmatically generating slicers in
-  // a loop) and `Slicer1000001` is a fine fallback. We deliberately do not
-  // grow the search further to keep this loop bounded.
   while (i < 1_000_000) {
     if (!used.has(i) && !verbatim.has(`Slicer${i}`)) return `Slicer${i}`;
     i++;
   }
-  return `Slicer${i}`;
+  // #16: 1M cap exhausted. Random nonce keeps the 1,000,001st slicer name
+  // unique (the previous `Slicer1000000` fallback could collide with an
+  // existing entry). Format tags the overflow case for audits.
+  while (true) {
+    const nonce = Math.random().toString(36).slice(2, 8);
+    const candidate = `Slicer1m_${nonce}`;
+    if (!verbatim.has(candidate)) return candidate;
+  }
 }
 
 /**

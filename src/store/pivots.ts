@@ -132,14 +132,18 @@ export function generatePivotName(existingNames: string[]): string {
     }
   }
   let i = 1;
-  // Intentional 1,000,000 cap — same rationale as generateSlicerName. A user
-  // with a million pivots is in pathological territory and the fallback name
-  // (`Pivot1000001`) is acceptable.
   while (i < 1_000_000) {
     if (!used.has(i) && !verbatim.has(`Pivot${i}`)) return `Pivot${i}`;
     i++;
   }
-  return `Pivot${i}`;
+  // #16: 1M cap exhausted. Use a random nonce instead of `Pivot1000000` so
+  // the 1,000,001st pivot is guaranteed unique. Format keeps the prefix for
+  // filterability + tags the overflow case so it's visible in audits.
+  while (true) {
+    const nonce = Math.random().toString(36).slice(2, 8);
+    const candidate = `Pivot1m_${nonce}`;
+    if (!verbatim.has(candidate)) return candidate;
+  }
 }
 
 // Read the displayable value of a cell. Same convention as subtotals.ts —

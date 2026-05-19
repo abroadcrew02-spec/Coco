@@ -163,8 +163,22 @@ function parseSnapshot(input: string | Snapshot | null | undefined): {
   byteLength: number;
 } {
   if (input === null || input === undefined) return { parsed: null, byteLength: 0 };
+  if (typeof input === "string") {
+    // Already serialized — use string length directly. UTF-16 code units;
+    // matches `snapshotStats.ts` convention. Avoids paying a re-stringify
+    // on 50 MB workbooks where the dialog was stalling for seconds.
+    try {
+      const parsed = JSON.parse(input) as unknown;
+      if (!parsed || typeof parsed !== "object") return { parsed: null, byteLength: input.length };
+      return { parsed: parsed as Snapshot, byteLength: input.length };
+    } catch {
+      return { parsed: null, byteLength: input.length };
+    }
+  }
   if (typeof input === "object") {
-    // Caller already holds the parsed shape; re-stringify for size only.
+    // Caller already holds the parsed shape; re-stringify for size only —
+    // the result is approximate, but the only consumer is the dialog's
+    // human-readable byte counter, where ±a few percent is unobservable.
     let bytes = 0;
     try {
       bytes = JSON.stringify(input).length;
@@ -173,14 +187,7 @@ function parseSnapshot(input: string | Snapshot | null | undefined): {
     }
     return { parsed: input as Snapshot, byteLength: bytes };
   }
-  if (typeof input !== "string") return { parsed: null, byteLength: 0 };
-  try {
-    const parsed = JSON.parse(input) as unknown;
-    if (!parsed || typeof parsed !== "object") return { parsed: null, byteLength: input.length };
-    return { parsed: parsed as Snapshot, byteLength: input.length };
-  } catch {
-    return { parsed: null, byteLength: input.length };
-  }
+  return { parsed: null, byteLength: 0 };
 }
 
 function sheetIdsOrdered(snapshot: Snapshot): string[] {

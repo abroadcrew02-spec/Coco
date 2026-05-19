@@ -40,6 +40,8 @@ export function useGlobalShortcuts() {
   const openCoco = useWorkbookStore((s) => s.openCoco);
   const importXlsx = useWorkbookStore((s) => s.importXlsx);
   const importCsv = useWorkbookStore((s) => s.importCsv);
+  const cocoUndo = useWorkbookStore((s) => s.cocoUndo);
+  const cocoRedo = useWorkbookStore((s) => s.cocoRedo);
 
   useEffect(() => {
     const onKey = async (e: KeyboardEvent) => {
@@ -47,6 +49,21 @@ export function useGlobalShortcuts() {
       if (e.key === "F1") {
         e.preventDefault();
         helpListeners.forEach((fn) => fn());
+        return;
+      }
+
+      // #97: Ctrl/Cmd+Alt+Z / Ctrl/Cmd+Alt+Shift+Z = Coco snapshot undo/redo.
+      // Sits next to (not on top of) Univer's native Ctrl+Z, which still owns
+      // cell-typing undo. This pair rolls back apply-style mutations (AutoSum,
+      // format painter, hyperlink, CF, DV, chart, image, comment) that
+      // bypass Univer's commandService.
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          cocoRedo();
+        } else {
+          cocoUndo();
+        }
         return;
       }
 
@@ -95,5 +112,5 @@ export function useGlobalShortcuts() {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [newWorkbook, openCoco, importXlsx, importCsv]);
+  }, [newWorkbook, openCoco, importXlsx, importCsv, cocoUndo, cocoRedo]);
 }

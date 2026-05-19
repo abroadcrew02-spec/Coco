@@ -17,6 +17,14 @@ interface QuickFmtSnapshot {
   >;
 }
 
+/** #98: hard cap on how many cells a single quick-format invocation can
+ *  touch. Whole-column / whole-row selections (1M rows or 16K cols) would
+ *  otherwise generate cellData entries for every empty cell, blow up the
+ *  snapshot to 100MB+ and freeze the UI. Past this cap we restrict writes
+ *  to cells that already exist in cellData — Excel-style "format only
+ *  used cells" behaviour. */
+const QUICK_FMT_MAX_NEW_CELLS = 100_000;
+
 /**
  * Apply `fmtCode` to every cell in the inclusive rectangle. Returns a new
  * snapshot JSON string. No-ops (returns input) when the snapshot is malformed,
@@ -24,7 +32,8 @@ interface QuickFmtSnapshot {
  *
  * Empty fmtCode deletes the `_fmt` key (mirrors applyNumberFormat's "General"
  * branch). Cells outside cellData are created so the format sticks to blank
- * cells too — Excel does the same.
+ * cells too — Excel does the same. #98: when the range is bigger than
+ * QUICK_FMT_MAX_NEW_CELLS we only touch cells that already exist.
  */
 export function applyQuickNumberFormat(
   snapshotJson: string,
@@ -45,13 +54,20 @@ export function applyQuickNumberFormat(
   if (!sheet.cellData) sheet.cellData = {};
   const cellData = sheet.cellData;
   const code = fmtCode.trim();
+  const rangeCellCount =
+    (range.endRow - range.startRow + 1) * (range.endCol - range.startCol + 1);
+  const usedRangeOnly = rangeCellCount > QUICK_FMT_MAX_NEW_CELLS;
+
   for (let r = range.startRow; r <= range.endRow; r++) {
     const rowKey = String(r);
+    const rowExists = cellData[rowKey] !== undefined;
+    if (usedRangeOnly && !rowExists) continue;
     if (!cellData[rowKey]) cellData[rowKey] = {};
     const row = cellData[rowKey]!;
     for (let c = range.startCol; c <= range.endCol; c++) {
       const colKey = String(c);
       const existing = row[colKey];
+      if (usedRangeOnly && existing === undefined) continue;
       if (code) {
         const cell = (existing ?? {}) as Record<string, unknown>;
         cell._fmt = code;

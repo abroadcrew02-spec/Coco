@@ -638,12 +638,17 @@ fn is_time_only_format(fmt: &str) -> bool {
 }
 
 /// Render a time-fractional value (0.0..1.0) as HH:MM:SS, rounding to whole
-/// seconds. Values outside the range are clamped via wrap (modulo 1) since
-/// Excel time semantics treat the integer part as days.
+/// seconds. #83: when the value rounds to 86400 (i.e. 0.9999… very close to
+/// 1.0) the result was wrapping to 00:00:00 — visually "midnight" rather
+/// than the intended end-of-day. Saturate at 23:59:59 to preserve the
+/// user's intent that the source time was just before the next day.
 fn format_time(value: f64) -> String {
     let frac = value - value.floor();
-    let total_seconds = (frac * 86400.0).round() as i64;
-    let h = (total_seconds / 3600) % 24;
+    let mut total_seconds = (frac * 86400.0).round() as i64;
+    if total_seconds >= 86400 {
+        total_seconds = 86399;
+    }
+    let h = total_seconds / 3600;
     let m = (total_seconds % 3600) / 60;
     let s = total_seconds % 60;
     format!("{:02}:{:02}:{:02}", h, m, s)
@@ -717,14 +722,28 @@ fn is_currency_format(fmt: &str) -> bool {
 
 /// Render `value` as a currency string using the given `fmt` code. Supports
 /// the common patterns: "$#,##0.00", "$#,##0", "¥#,##0", "[$$-409]#,##0.00".
-/// Falls back to plain numeric formatting if the format is unrecognized.
+/// #79: also honours the negative-branch (second section after `;`) so
+/// accounting formats like `$#,##0.00;($#,##0.00)` produce `($1,234.50)`
+/// rather than `-$1,234.50`. Falls back to plain numeric formatting if the
+/// format is unrecognized.
 fn format_currency(value: f64, fmt: &str) -> String {
-    // Extract symbol: first non-digit, non-#, non-comma, non-period, non-bracket char.
-    let symbol = pick_currency_symbol(fmt).unwrap_or('$');
-    // Decimal count: zeros after the `.` in the format string, capped at 6.
+    // OOXML format-code sections are separated by `;`:
+    //   positive ; negative ; zero ; text
+    // Pick the section that matches the value's sign.
+    let sections: Vec<&str> = fmt.split(';').collect();
+    let section = if value < 0.0 && sections.len() >= 2 {
+        sections[1]
+    } else if value == 0.0 && sections.len() >= 3 {
+        sections[2]
+    } else {
+        sections[0]
+    };
+    let active = section.trim();
+
+    let symbol = pick_currency_symbol(active).unwrap_or('$');
     let mut decimals = 0usize;
-    if let Some(dot_idx) = fmt.find('.') {
-        for c in fmt[dot_idx + 1..].chars() {
+    if let Some(dot_idx) = active.find('.') {
+        for c in active[dot_idx + 1..].chars() {
             if c == '0' {
                 decimals += 1;
                 if decimals >= 6 {
@@ -735,7 +754,7 @@ fn format_currency(value: f64, fmt: &str) -> String {
             }
         }
     }
-    let uses_thousands = fmt.contains("#,##");
+    let uses_thousands = active.contains("#,##");
     let abs_value = value.abs();
     let formatted = if uses_thousands {
         format_thousands(abs_value, decimals)
@@ -744,7 +763,17 @@ fn format_currency(value: f64, fmt: &str) -> String {
     } else {
         format!("{:.*}", decimals, abs_value)
     };
-    let sign = if value < 0.0 { "-" } else { "" };
+
+    // If the active section wraps the body in `( ... )` (Excel's accounting
+    // negative convention), preserve those literal parens around the value.
+    let has_paren_open = active.contains('(');
+    let has_paren_close = active.contains(')');
+    if value < 0.0 && has_paren_open && has_paren_close {
+        return format!("({}{})", symbol, formatted);
+    }
+
+    // No explicit negative section → keep historical "-${value}" output.
+    let sign = if value < 0.0 && sections.len() < 2 { "-" } else { "" };
     format!("{}{}{}", sign, symbol, formatted)
 }
 
@@ -878,6 +907,63 @@ fn format_date_or_datetime(dt: chrono::NaiveDateTime, fmt: &str, is_datetime: bo
     out
 }
 
+/// #102: strip RFC4180-style thousand separators only when the layout
+/// clearly matches the US/UK convention (digits in groups of 3 separated
+/// by `,`, optionally followed by a `.` fraction). Returns Some(stripped)
+/// for "1,234", "12,345.67", "1,234,567"; returns None for "1,23",
+/// "12,3456", "a,b", date-like "2024,06,15" etc. so European-locale decimal
+/// commas and other text stay untouched.
+fn strip_thousand_separators(s: &str) -> Option<String> {
+    if !s.contains(',') {
+        return None;
+    }
+    let trimmed = s.trim();
+    // Optional leading sign.
+    let (sign, body) = match trimmed.as_bytes().first() {
+        Some(b'+') | Some(b'-') => trimmed.split_at(1),
+        _ => ("", trimmed),
+    };
+    // Split off optional fractional part. The integer part must follow the
+    // US thousands shape; the fractional part must be plain digits.
+    let (int_part, frac_part) = match body.find('.') {
+        Some(i) => {
+            let frac = &body[i + 1..];
+            if frac.is_empty() || !frac.chars().all(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            (&body[..i], Some(frac))
+        }
+        None => (body, None),
+    };
+    // int_part must be `\d{1,3}(,\d{3})+` — at least one comma group, and
+    // the trailing groups are exactly 3 digits each.
+    let groups: Vec<&str> = int_part.split(',').collect();
+    if groups.len() < 2 {
+        return None;
+    }
+    if groups[0].is_empty() || !groups[0].chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if groups[0].len() > 3 {
+        return None;
+    }
+    for g in &groups[1..] {
+        if g.len() != 3 || !g.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+    }
+    let mut out = String::with_capacity(trimmed.len());
+    out.push_str(sign);
+    for g in &groups {
+        out.push_str(g);
+    }
+    if let Some(frac) = frac_part {
+        out.push('.');
+        out.push_str(frac);
+    }
+    Some(out)
+}
+
 fn infer_csv_cell(raw: &str) -> Option<Value> {
     if raw.is_empty() {
         return None;
@@ -913,6 +999,20 @@ fn infer_csv_cell(raw: &str) -> Option<Value> {
         if let Ok(f) = unescaped.parse::<f64>() {
             if f.is_finite() {
                 return Some(json!({ "v": f }));
+            }
+        }
+        // #102: try again with RFC4180-style thousand separators stripped.
+        // "1,234" / "1,234.56" — Excel and Sheets both number-coerce these
+        // on import. Only when the commas sit strictly between digits do we
+        // strip them, so date-like "2024,06,15" or text "a,b" remain text.
+        if let Some(stripped) = strip_thousand_separators(&unescaped) {
+            if let Ok(n) = stripped.parse::<i64>() {
+                return Some(json!({ "v": n }));
+            }
+            if let Ok(f) = stripped.parse::<f64>() {
+                if f.is_finite() {
+                    return Some(json!({ "v": f, "_fmt": "#,##0" }));
+                }
             }
         }
     }
@@ -1014,8 +1114,10 @@ fn infer_delimiter(path_lower: &str, text: &str) -> u8 {
         return b'\t';
     }
     let first_line = text.lines().find(|l| !l.is_empty()).unwrap_or("");
-    let commas = first_line.matches(',').count();
-    let tabs = first_line.matches('\t').count();
+    // #53: RFC4180 quoted fields can contain tabs/commas that are not
+    // delimiters. Count only the unquoted ones so a quoted tab can't flip
+    // the inference to TSV.
+    let (commas, tabs) = count_unquoted_separators(first_line);
     // Tabs win only when they're a clear majority — otherwise stick with the
     // CSV-standard comma so legit comma data isn't reinterpreted.
     if tabs > commas && tabs >= 2 {
@@ -1023,6 +1125,36 @@ fn infer_delimiter(path_lower: &str, text: &str) -> u8 {
     } else {
         b','
     }
+}
+
+/// Walk the line once, tracking whether we're inside a double-quoted field
+/// per RFC4180 (with doubled `""` as an escaped quote). Only separators
+/// observed outside quotes count toward the inference tally.
+fn count_unquoted_separators(line: &str) -> (usize, usize) {
+    let mut commas = 0;
+    let mut tabs = 0;
+    let mut in_quotes = false;
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'"' {
+            if in_quotes && i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                // Escaped quote inside a quoted field — skip the pair.
+                i += 2;
+                continue;
+            }
+            in_quotes = !in_quotes;
+        } else if !in_quotes {
+            if b == b',' {
+                commas += 1;
+            } else if b == b'\t' {
+                tabs += 1;
+            }
+        }
+        i += 1;
+    }
+    (commas, tabs)
 }
 
 /// Pure-Rust CSV import. `encoding_override` is None for auto-detect.
@@ -1050,6 +1182,44 @@ pub fn import_csv_core(
     // Read the whole file (CSV size capped at ~5M cells later anyway).
     let raw = std::fs::read(&path).map_err(|e| e.to_string())?;
     let (text, encoding_name) = detect_and_decode(&raw, encoding_override.as_deref());
+
+    // #91: csv::Reader's default terminator handles CRLF and LF; bare CR is
+    // not recognised, so a classic-Mac CSV becomes a single mega-record. Do
+    // a cheap pre-pass that owns the buffer only when normalisation is
+    // actually needed.
+    let text: std::borrow::Cow<'_, str> = if text.contains('\r') && !text.contains("\r\n") {
+        std::borrow::Cow::Owned(text.replace('\r', "\n"))
+    } else if text.contains('\r') {
+        // Mixed: keep CRLF intact, but convert lone CRs (rare but legal in
+        // some Excel exports). Convert by mapping CR-not-followed-by-LF → LF.
+        let mut out = String::with_capacity(text.len());
+        let bytes = text.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'\r' {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+                    out.push('\r');
+                    out.push('\n');
+                    i += 2;
+                    continue;
+                }
+                out.push('\n');
+                i += 1;
+                continue;
+            }
+            // Push the full UTF-8 char starting at i.
+            let ch_len = std::str::from_utf8(&bytes[i..])
+                .ok()
+                .and_then(|s| s.chars().next())
+                .map(|c| c.len_utf8())
+                .unwrap_or(1);
+            out.push_str(&text[i..i + ch_len]);
+            i += ch_len;
+        }
+        std::borrow::Cow::Owned(out)
+    } else {
+        text
+    };
 
     let delimiter = infer_delimiter(&lower, &text);
     let mut rdr = csv::ReaderBuilder::new()

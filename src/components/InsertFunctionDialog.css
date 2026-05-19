@@ -1,0 +1,255 @@
+.ifd-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1300;
+}
+
+.ifd-modal {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  max-width: 760px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ifd-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #eee;
+  background-color: #fafafa;
+}
+
+.ifd-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #217346;
+  margin: 0;
+}
+
+.ifd-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  color: #999;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.ifd-close:hover {
+  color: #333;
+  background-color: #eee;
+}
+
+.ifd-toolbar {
+  display: flex;
+  gap: 10px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #eee;
+  background-color: #fafafa;
+}
+
+.ifd-input {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid #c8d0cc;
+  border-radius: 3px;
+  font-family: inherit;
+}
+
+.ifd-input:focus,
+.ifd-select:focus {
+  outline: none;
+  border-color: #217346;
+  box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
+}
+
+.ifd-select {
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid #c8d0cc;
+  border-radius: 3px;
+  background-color: #fff;
+  font-family: inherit;
+  min-width: 160px;
+}
+
+.ifd-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 280px;
+  overflow: hidden;
+}
+
+.ifd-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+  overflow-y: auto;
+  border-right: 1px solid #eee;
+}
+
+.ifd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: #424242;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ifd-row--active {
+  background-color: #eef6f1;
+  color: #1a5c38;
+}
+
+.ifd-row-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+}
+
+.ifd-row-cat {
+  font-size: 11px;
+  color: #777;
+}
+
+.ifd-row--active .ifd-row-cat {
+  color: #1a5c38;
+}
+
+.ifd-empty {
+  margin: 0;
+  padding: 24px 14px;
+  text-align: center;
+  font-size: 13px;
+  color: #777;
+  grid-column: 1 / 2;
+}
+
+.ifd-detail {
+  padding: 14px 18px;
+  overflow-y: auto;
+  background-color: #fcfdfc;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ifd-detail-signature {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a5c38;
+  padding: 8px 10px;
+  background-color: #f1faf4;
+  border: 1px solid #d9ecdf;
+  border-radius: 4px;
+  word-break: break-word;
+}
+
+.ifd-detail-description {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #424242;
+}
+
+.ifd-detail-example {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #555;
+}
+
+.ifd-detail-example-label {
+  font-weight: 600;
+  color: #777;
+}
+
+.ifd-detail-example code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  padding: 6px 8px;
+  background-color: #f5f5f5;
+  border: 1px solid #e4e4e4;
+  border-radius: 3px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ifd-detail-placeholder {
+  margin: 0;
+  font-size: 12px;
+  color: #999;
+  font-style: italic;
+}
+
+.ifd-footer {
+  padding: 12px 20px;
+  background-color: #fafafa;
+  border-top: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ifd-hint {
+  font-size: 11px;
+  color: #888;
+}
+
+.ifd-footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ifd-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #424242;
+  background-color: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.ifd-btn:hover:not(:disabled) {
+  background-color: #f0f0f0;
+  border-color: #b0b0b0;
+}
+
+.ifd-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ifd-btn--primary {
+  background-color: #217346;
+  color: #fff;
+  border-color: #217346;
+}
+
+.ifd-btn--primary:hover:not(:disabled) {
+  background-color: #1a5c38;
+  border-color: #1a5c38;
+}

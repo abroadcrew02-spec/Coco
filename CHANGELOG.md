@@ -116,8 +116,7 @@ Authoring dialogs capture intent into the snapshot and survive xlsx round-trip. 
 
 ### Documentation
 
-- `docs/MVP1_AUDIT.md`: FR-001..FR-014 coverage report with inline TODO markers for known gaps.
-- `docs/COVERAGE.md`: full FR coverage audit (§4.1 / §4.2 / §4.3 / §4.7 + Phase 2 + non-functional gates).
+- `docs/COVERAGE.md`: full FR coverage audit (§4.1 / §4.2 / §4.3 / §4.7 + Phase 2 + non-functional gates). Supersedes the earlier MVP1_AUDIT.md draft.
 - `docs/TODOS.md`: single source of truth for deferred work, grouped by Blocker / High / Medium / Low / Wontfix with effort estimates and inline `TODO(category): description (see docs/TODOS.md#anchor)` cross-references.
 - `docs/CROSS_PLATFORM_PREFLIGHT.md`: §12.3 macOS / Linux build preflight audit (0 BLOCKER, 3 WARNING, 7 NOTE).
 - `docs/STATE.md`: single-page current-state snapshot of the project.

@@ -1,0 +1,227 @@
+.rc-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1250;
+}
+
+.rc-modal {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  max-width: 720px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #eee;
+  background-color: #fafafa;
+}
+
+.rc-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #217346;
+  margin: 0;
+}
+
+.rc-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  color: #999;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.rc-close:hover {
+  color: #333;
+  background-color: #eee;
+}
+
+.rc-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rc-range {
+  margin: 0;
+  font-size: 12px;
+  color: #555;
+}
+
+.rc-range code {
+  background-color: #f0f4f1;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 12px;
+  color: #1a5c38;
+}
+
+.rc-empty {
+  margin: 0;
+  padding: 24px;
+  text-align: center;
+  font-size: 13px;
+  color: #757575;
+  background-color: #fafafa;
+  border-radius: 4px;
+}
+
+.rc-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.rc-card {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rc-card-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  padding: 8px;
+  background-color: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    background-color 120ms ease;
+}
+
+.rc-card-btn:hover {
+  border-color: #217346;
+  background-color: #f7fbf8;
+}
+
+.rc-card-btn:focus-visible {
+  outline: 2px solid #217346;
+  outline-offset: 2px;
+}
+
+.rc-card--selected .rc-card-btn {
+  border-color: #217346;
+  background-color: #eaf4ee;
+  box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.18);
+}
+
+.rc-preview {
+  background-color: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  margin-bottom: 8px;
+  min-height: 120px;
+}
+
+.rc-preview svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.rc-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rc-card-type {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.rc-card-reason {
+  font-size: 11px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.rc-footer {
+  padding: 12px 20px;
+  background-color: #fafafa;
+  border-top: 1px solid #eee;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rc-hint {
+  margin: 0;
+  font-size: 11px;
+  color: #757575;
+  line-height: 1.5;
+}
+
+.rc-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rc-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #424242;
+  background-color: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.rc-btn:hover:not(:disabled) {
+  background-color: #f0f0f0;
+  border-color: #b0b0b0;
+}
+
+.rc-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rc-btn--primary {
+  background-color: #217346;
+  color: #fff;
+  border-color: #217346;
+}
+
+.rc-btn--primary:hover:not(:disabled) {
+  background-color: #1a5c38;
+  border-color: #1a5c38;
+}

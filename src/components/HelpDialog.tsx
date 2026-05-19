@@ -36,8 +36,10 @@ const PHASE2_SHORTCUTS: Shortcut[] = [
 ];
 
 const UNIVER_SHORTCUTS: Shortcut[] = [
-  { keys: ["Ctrl", "Z"], description: "元に戻す" },
-  { keys: ["Ctrl", "Y"], description: "やり直し" },
+  { keys: ["Ctrl", "Z"], description: "元に戻す（セル入力）" },
+  { keys: ["Ctrl", "Y"], description: "やり直し（セル入力）" },
+  { keys: ["Ctrl", "Alt", "Z"], description: "元に戻す（書式・図形などCoco操作）" },
+  { keys: ["Ctrl", "Alt", "Shift", "Z"], description: "やり直し（Coco操作）" },
   { keys: ["Ctrl", "C"], description: "コピー" },
   { keys: ["Ctrl", "X"], description: "切り取り" },
   { keys: ["Ctrl", "V"], description: "貼り付け" },
@@ -50,13 +52,23 @@ export default function HelpDialog({ onClose }: Props) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // #77: stopImmediatePropagation so the global F1 / Ctrl+/ listener in
+      // useGlobalShortcuts doesn't re-open the dialog the instant we close
+      // it. The global listener registers on `window` too, and without
+      // immediate-stop both handlers fire on the same event.
       if (e.key === "Escape" || e.key === "F1") {
         e.preventDefault();
+        e.stopImmediatePropagation();
+        onClose();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
         onClose();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture phase: run before useGlobalShortcuts' bubble-phase listener.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
   useEffect(() => {
@@ -167,6 +179,20 @@ export default function HelpDialog({ onClose }: Props) {
             <p className="help-about">
               Coco{version ? ` v${version}` : ""} · ローカルファースト表計算<br />
               ライセンス: Apache-2.0 · 表計算エンジン: Univer (Apache-2.0)
+            </p>
+            <p style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="help-update-btn"
+                onClick={() => {
+                  window.dispatchEvent(
+                    new CustomEvent("coco:editor-command", { detail: "help-check-update" }),
+                  );
+                  onClose();
+                }}
+              >
+                更新を確認
+              </button>
             </p>
           </section>
         </div>

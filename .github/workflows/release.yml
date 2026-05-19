@@ -1,0 +1,139 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  # Single global lane: only one release can publish at a time.
+  # Trade-off: a release of N+1 must wait for N to finish, but latest.json cannot be raced
+  # by two parallel publishes (which would otherwise produce a corrupt/inconsistent manifest).
+  group: release
+  cancel-in-progress: false # don't cancel a release mid-way
+
+jobs:
+  build:
+    name: Build + Publish (Windows)
+    runs-on: windows-latest
+    if: github.repository == 'abroadcrew02-spec/Coco'
+    timeout-minutes: 60
+    env:
+      WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-release-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-release-cargo-
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Install Windows code-signing certificate (optional)
+        if: ${{ env.WINDOWS_CERT_BASE64 != '' }}
+        shell: pwsh
+        run: |
+          Write-Host "Installing code-signing cert into CurrentUser\My"
+          $bytes = [System.Convert]::FromBase64String($env:WINDOWS_CERT_BASE64)
+          $tmp = Join-Path $env:RUNNER_TEMP "coco-signing.pfx"
+          [System.IO.File]::WriteAllBytes($tmp, $bytes)
+          $secure = ConvertTo-SecureString -String $env:WINDOWS_CERT_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath $tmp -Password $secure -CertStoreLocation Cert:\CurrentUser\My
+          Remove-Item $tmp
+          $thumb = $cert.Thumbprint
+          Write-Host "Imported cert thumbprint: $thumb"
+          "TAURI_WINDOWS_SIGN_THUMBPRINT=$thumb" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Tauri build (signed)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_KEY_PASSWORD }}
+        run: npm run tauri build
+
+      - name: Sign Windows artifacts (optional)
+        if: ${{ env.TAURI_WINDOWS_SIGN_THUMBPRINT != '' }}
+        shell: pwsh
+        run: |
+          $thumb = $env:TAURI_WINDOWS_SIGN_THUMBPRINT
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue | Select-Object -Last 1).FullName
+          if (-not $signtool) {
+            Write-Error "signtool.exe not found in Windows Kits; cannot sign artifacts"
+            exit 1
+          }
+          Write-Host "Using signtool: $signtool"
+          $targets = Get-ChildItem "src-tauri/target/release/bundle" -Recurse -Include *.exe,*.msi -ErrorAction SilentlyContinue
+          foreach ($f in $targets) {
+            Write-Host "Signing $($f.FullName)"
+            & $signtool sign /sha1 $thumb /tr "https://timestamp.digicert.com" /td sha256 /fd sha256 $f.FullName
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "signtool failed for $($f.FullName)"
+              exit $LASTEXITCODE
+            }
+          }
+
+      - name: Generate latest.json
+        run: node scripts/build-latest-json.mjs
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          # Per-tag CHANGELOG file is preferred; otherwise fall back to GitHub auto-generated notes
+          # (do NOT fall back to the entire CHANGELOG.md — it would dump full history into every release)
+          $notesFile = "CHANGELOG/$tag.md"
+          $hasNotes = Test-Path $notesFile
+
+          # Enumerate assets up-front so we can assert count before creating the release
+          $assets = @()
+          $assets += (Resolve-Path "latest.json").Path
+          $assets += Get-ChildItem "src-tauri/target/release/bundle/nsis/*.nsis.zip" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+          $assets += Get-ChildItem "src-tauri/target/release/bundle/nsis/*.nsis.zip.sig" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+          $assets += Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+          $assets += Get-ChildItem "src-tauri/target/release/bundle/msi/*.msi" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+          $assets += Get-ChildItem "src-tauri/target/release/bundle/msi/*.msi.zip" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+          $assets += Get-ChildItem "src-tauri/target/release/bundle/msi/*.msi.zip.sig" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+
+          # Sanity: we expect at least latest.json + .nsis.zip + .sig + setup.exe (4 assets minimum)
+          if ($assets.Count -lt 4) {
+            Write-Error "Expected at least 4 release assets (latest.json + .nsis.zip + .sig + setup.exe), found $($assets.Count): $($assets -join ', ')"
+            exit 1
+          }
+          Write-Host "Found $($assets.Count) release assets"
+
+          # 1) Create as draft (no consumers see it yet)
+          $createArgs = @("release", "create", $tag, "--draft", "--title", "Coco $tag")
+          if ($hasNotes) { $createArgs += @("--notes-file", $notesFile) } else { $createArgs += @("--generate-notes") }
+          & gh @createArgs
+          if ($LASTEXITCODE -ne 0) { Write-Error "gh release create (draft) failed"; exit $LASTEXITCODE }
+
+          # 2) Upload all assets (--clobber so re-runs are idempotent)
+          $uploadArgs = @("release", "upload", $tag) + $assets + @("--clobber")
+          & gh @uploadArgs
+          if ($LASTEXITCODE -ne 0) { Write-Error "gh release upload failed; draft retained for inspection"; exit $LASTEXITCODE }
+
+          # 3) Flip draft -> published atomically (only after all uploads succeed)
+          & gh release edit $tag --draft=false
+          if ($LASTEXITCODE -ne 0) { Write-Error "gh release edit (publish) failed"; exit $LASTEXITCODE }

@@ -1,0 +1,277 @@
+.fsd-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1250;
+}
+
+.fsd-modal {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  max-width: 580px;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fsd-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #eee;
+  background-color: #fafafa;
+}
+
+.fsd-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #217346;
+  margin: 0;
+}
+
+.fsd-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  color: #999;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.fsd-close:hover {
+  color: #333;
+  background-color: #eee;
+}
+
+.fsd-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fsd-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fsd-field-label {
+  font-size: 12px;
+  color: #555;
+  padding: 0;
+}
+
+.fsd-input {
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid #c8d0cc;
+  border-radius: 3px;
+  font-family: inherit;
+}
+
+.fsd-input--num {
+  width: 100px;
+}
+
+.fsd-input:focus,
+.fsd-search:focus {
+  outline: none;
+  border-color: #217346;
+  box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
+}
+
+.fsd-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #424242;
+}
+
+.fsd-values {
+  border: 1px solid #d0d8d4;
+  border-radius: 6px;
+  background-color: #f6fbf8;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.fsd-search {
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid #c8d0cc;
+  border-radius: 3px;
+  font-family: inherit;
+  background-color: #fff;
+}
+
+.fsd-value-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fsd-value-count {
+  font-size: 11px;
+  color: #757575;
+  margin-left: auto;
+}
+
+.fsd-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 4px;
+  background-color: #fff;
+  border: 1px solid #e0e6e3;
+  border-radius: 4px;
+}
+
+.fsd-item {
+  display: grid;
+  grid-template-columns: auto 1fr 90px 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid #f0f3f1;
+  font-size: 12px;
+  color: #424242;
+  cursor: pointer;
+  user-select: none;
+}
+
+.fsd-item:last-child {
+  border-bottom: none;
+}
+
+.fsd-item:hover {
+  background-color: #eef6f1;
+}
+
+.fsd-item--on {
+  background-color: #e3f3e9;
+}
+
+.fsd-item-label {
+  font-family: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fsd-item-label--blank {
+  font-style: italic;
+  color: #909090;
+}
+
+.fsd-item-bar {
+  display: block;
+  height: 6px;
+  background-color: #eef0ec;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.fsd-item-bar-fill {
+  display: block;
+  height: 100%;
+  background-color: #88c5a4;
+  transition: width 80ms linear;
+}
+
+.fsd-item-count {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #757575;
+  text-align: right;
+}
+
+.fsd-empty {
+  margin: 0;
+  font-size: 12px;
+  color: #757575;
+  padding: 6px 0;
+}
+
+.fsd-error {
+  margin: 0;
+  font-size: 12px;
+  color: #b00020;
+}
+
+.fsd-footer {
+  padding: 12px 20px;
+  background-color: #fafafa;
+  border-top: 1px solid #eee;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fsd-hint {
+  margin: 0;
+  font-size: 11px;
+  color: #757575;
+  line-height: 1.5;
+}
+
+.fsd-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.fsd-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #424242;
+  background-color: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.fsd-btn:hover:not(:disabled) {
+  background-color: #f0f0f0;
+  border-color: #b0b0b0;
+}
+
+.fsd-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fsd-btn--primary {
+  background-color: #217346;
+  color: #fff;
+  border-color: #217346;
+}
+
+.fsd-btn--primary:hover:not(:disabled) {
+  background-color: #1a5c38;
+  border-color: #1a5c38;
+}
+
+.fsd-btn--mini {
+  padding: 4px 10px;
+  font-size: 11px;
+}

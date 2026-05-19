@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { getLocale, setLocale, t, type Locale } from "../i18n/locale";
+import {
+  type UpdateChannel,
+  isAutoCheckEnabled,
+  setAutoCheckEnabled,
+  getLastCheckedAt,
+  getChannel,
+  setChannel as persistChannel,
+  checkForUpdate,
+} from "../store/updater";
 import "./SettingsDialog.css";
 
 interface Props {
@@ -48,6 +57,22 @@ export default function SettingsDialog({ onClose }: Props) {
     useState<boolean>(suppressCsvPocWarning);
   const initialLocale = getLocale();
   const [pendingLocale, setPendingLocale] = useState<Locale>(initialLocale);
+  // Auto-update: read current localStorage state at dialog open; persist on apply.
+  const initialAutoUpdate = isAutoCheckEnabled();
+  const [pendingAutoUpdate, setPendingAutoUpdate] = useState<boolean>(initialAutoUpdate);
+  const initialChannel = getChannel();
+  const [pendingChannel, setPendingChannel] = useState<UpdateChannel>(initialChannel);
+  const [manualCheckStatus, setManualCheckStatus] = useState<
+    null | { kind: "checking" } | { kind: "ok"; message: string } | { kind: "error"; message: string }
+  >(null);
+  const [appVersion, setAppVersion] = useState<string>("");
+  useEffect(() => {
+    void import("@tauri-apps/api/app")
+      .then((m) => m.getVersion())
+      .then(setAppVersion)
+      .catch(() => undefined);
+  }, []);
+  const lastChecked = getLastCheckedAt();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -76,6 +101,12 @@ export default function SettingsDialog({ onClose }: Props) {
     if (pendingLocale !== initialLocale) {
       setLocale(pendingLocale);
     }
+    if (pendingAutoUpdate !== initialAutoUpdate) {
+      setAutoCheckEnabled(pendingAutoUpdate);
+    }
+    if (pendingChannel !== initialChannel) {
+      persistChannel(pendingChannel);
+    }
     onClose();
   };
 
@@ -84,7 +115,9 @@ export default function SettingsDialog({ onClose }: Props) {
     pendingEncoding !== csvEncoding ||
     pendingImportEncoding !== csvImportEncoding ||
     pendingSuppressPoc !== suppressCsvPocWarning ||
-    pendingLocale !== initialLocale;
+    pendingLocale !== initialLocale ||
+    pendingAutoUpdate !== initialAutoUpdate ||
+    pendingChannel !== initialChannel;
 
   return (
     <div className="settings-backdrop" onClick={onClose}>
@@ -206,6 +239,114 @@ export default function SettingsDialog({ onClose }: Props) {
                 <span>{t("settings.languageEn")}</span>
               </label>
             </div>
+          </details>
+          <details className="settings-section">
+            <summary className="settings-section-summary">
+              <h3>{t("settings.section.update")}</h3>
+            </summary>
+            <p className="settings-hint">
+              GitHub Releases から起動時に新バージョンを匿名チェックします。OFF にすると外部通信は行いません。
+            </p>
+            <label className="settings-radio">
+              <input
+                type="checkbox"
+                checked={pendingAutoUpdate}
+                onChange={(e) => setPendingAutoUpdate(e.target.checked)}
+              />
+              <span>{t("settings.autoUpdate.label")}</span>
+            </label>
+            <p className="settings-hint" style={{ marginTop: 12 }}>
+              {t("settings.autoUpdate.channel")}
+            </p>
+            <div className="settings-radio-group">
+              <label className="settings-radio">
+                <input
+                  type="radio"
+                  name="updater-channel"
+                  checked={pendingChannel === "stable"}
+                  onChange={() => setPendingChannel("stable")}
+                />
+                <span>{t("settings.autoUpdate.channel.stable")}</span>
+              </label>
+              <label className="settings-radio">
+                <input
+                  type="radio"
+                  name="updater-channel"
+                  checked={pendingChannel === "beta"}
+                  onChange={() => setPendingChannel("beta")}
+                />
+                <span>{t("settings.autoUpdate.channel.beta")}</span>
+              </label>
+            </div>
+            {/* #A9: be honest that the channel toggle is informational-only
+                until Phase 2.1 wires the runtime endpoint switch. */}
+            <p
+              className="settings-hint"
+              style={{ marginTop: 4, color: "#a85a00", fontSize: 12 }}
+            >
+              ※ ベータの切替は次バージョンで有効化されます。現在は記録のみで配信は安定版です。
+            </p>
+            <p className="settings-hint" style={{ marginTop: 8 }}>
+              {t("settings.autoUpdate.current")}: <strong>v{appVersion || "?"}</strong>
+              {lastChecked && (
+                <>
+                  {" · "}
+                  {t("settings.autoUpdate.lastChecked")}:{" "}
+                  {new Date(lastChecked).toLocaleString("ja-JP")}
+                </>
+              )}
+            </p>
+            <button
+              type="button"
+              className="settings-btn"
+              disabled={manualCheckStatus?.kind === "checking"}
+              onClick={() => {
+                // #A8: inline check so the button works regardless of whether
+                // EditorScreen is mounted (the prior event-dispatch path was
+                // silently dropped on HomeScreen).
+                setManualCheckStatus({ kind: "checking" });
+                void (async () => {
+                  try {
+                    const r = await checkForUpdate();
+                    if (!r.available) {
+                      setManualCheckStatus({ kind: "ok", message: "最新バージョンを使用しています。" });
+                      return;
+                    }
+                    // An update IS available — close the Settings dialog and
+                    // re-dispatch to EditorScreen if it's mounted, so the
+                    // existing UpdateAvailableDialog flow opens. If EditorScreen
+                    // isn't around (HomeScreen), inform the user.
+                    setManualCheckStatus({
+                      kind: "ok",
+                      message: `v${r.version} が利用可能です — エディタを開くと案内されます。`,
+                    });
+                    window.dispatchEvent(
+                      new CustomEvent("coco:editor-command", { detail: "help-check-update" }),
+                    );
+                  } catch (e) {
+                    setManualCheckStatus({
+                      kind: "error",
+                      message: (e as Error).message || "更新の確認に失敗しました。",
+                    });
+                  }
+                })();
+              }}
+            >
+              {manualCheckStatus?.kind === "checking"
+                ? "確認中..."
+                : t("settings.autoUpdate.checkNow")}
+            </button>
+            {manualCheckStatus && manualCheckStatus.kind !== "checking" && (
+              <p
+                className="settings-hint"
+                style={{
+                  marginTop: 4,
+                  color: manualCheckStatus.kind === "error" ? "#b00020" : "#137333",
+                }}
+              >
+                {manualCheckStatus.message}
+              </p>
+            )}
           </details>
         </div>
         <footer className="settings-footer">

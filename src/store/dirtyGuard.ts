@@ -17,10 +17,23 @@ export function isDirtySaveStatus(saveStatus: SaveStatus): boolean {
   return saveStatus === "unsaved" || saveStatus === "save_failed";
 }
 
+/** True iff there are unsaved changes worth warning about. Considers both the
+ *  current saveStatus *and* the `wasDirtyBeforeExport` carry-over, so that an
+ *  export_done / export_failed transition cannot silently consume dirty state.
+ */
+export function isWorkbookDirty(): boolean {
+  const { saveStatus, wasDirtyBeforeExport } = useWorkbookStore.getState();
+  if (isDirtySaveStatus(saveStatus)) return true;
+  if ((saveStatus === "export_done" || saveStatus === "export_failed") && wasDirtyBeforeExport) {
+    return true;
+  }
+  return false;
+}
+
 export function confirmDiscardIfUnsaved(message?: string): boolean {
-  const { screen, saveStatus } = useWorkbookStore.getState();
+  const { screen } = useWorkbookStore.getState();
   if (screen !== "editor") return true;
-  if (!isDirtySaveStatus(saveStatus)) return true;
+  if (!isWorkbookDirty()) return true;
   return window.confirm(
     message ?? "未保存の変更があります。破棄して続行しますか？"
   );

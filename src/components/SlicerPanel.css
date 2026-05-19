@@ -1,0 +1,197 @@
+.slp-root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background-color: #fbfdfc;
+  border-left: 1px solid #d6e2da;
+  overflow: hidden;
+  font-family: inherit;
+}
+
+.slp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid #d6e2da;
+  background-color: #f1faf4;
+}
+
+.slp-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #217346;
+}
+
+.slp-count {
+  font-size: 11px;
+  color: #fff;
+  background-color: #217346;
+  border-radius: 10px;
+  padding: 1px 8px;
+  min-width: 22px;
+  text-align: center;
+}
+
+.slp-empty {
+  margin: 0;
+  padding: 16px 14px;
+  font-size: 12px;
+  color: #757575;
+  line-height: 1.5;
+}
+
+.slp-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.slp-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #eef3f0;
+}
+
+.slp-item:last-child {
+  border-bottom: none;
+}
+
+.slp-item-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.slp-name-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.slp-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #217346;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slp-meta {
+  font-size: 11px;
+  color: #757575;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.slp-sep {
+  color: #c0c8c4;
+}
+
+.slp-sheet {
+  color: #424242;
+  font-weight: 500;
+}
+
+.slp-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  border: 1px solid #d0d0d0;
+  border-radius: 3px;
+  background-color: #fff;
+  color: #424242;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.slp-btn:hover:not(:disabled) {
+  background-color: #f0f0f0;
+}
+
+.slp-btn--danger {
+  color: #b00020;
+  border-color: #e7c0c0;
+}
+
+.slp-btn--danger:hover:not(:disabled) {
+  background-color: #fbecec;
+}
+
+.slp-pills {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.slp-pill {
+  padding: 3px 10px;
+  font-size: 11px;
+  border: 1px solid #b9d8c4;
+  border-radius: 12px;
+  background-color: #fff;
+  color: #1a5c38;
+  cursor: pointer;
+  font-family: inherit;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.slp-pill:hover:not(:disabled) {
+  background-color: #e3f3e9;
+}
+
+.slp-pill--active {
+  background-color: #217346;
+  color: #fff;
+  border-color: #217346;
+}
+
+.slp-pill--active:hover:not(:disabled) {
+  background-color: #1a5c38;
+  border-color: #1a5c38;
+}
+
+/* "All shown" state: pills look muted/neutral so the user understands
+   that no filter is currently active. Clicking any pill flips to
+   single-select mode. */
+.slp-pills--all .slp-pill--neutral {
+  background-color: #f1faf4;
+  border-color: #d6e2da;
+  color: #424242;
+}
+
+.slp-pills--all .slp-pill--neutral:hover:not(:disabled) {
+  background-color: #e3f3e9;
+  color: #1a5c38;
+}
+
+.slp-state {
+  margin: 0;
+  font-size: 11px;
+  color: #757575;
+}
+
+.slp-empty-vals {
+  margin: 0;
+  font-size: 11px;
+  color: #b07000;
+  font-style: italic;
+}

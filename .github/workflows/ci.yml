@@ -34,11 +34,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Type check
-        run: npx tsc --noEmit
+      - name: Type check (src + vite.config)
+        run: |
+          npx tsc --noEmit
+          npx tsc -p tsconfig.node.json
 
       - name: Run tests
         run: npm test
+
+      - name: Production build (vite build smoke)
+        # #58: catches breakages that tsc + vitest can miss — minification
+        # quirks, manualChunks regressions, modulePreload filter typos, etc.
+        run: npm run build
 
   rust:
     name: Rust (cargo build + test)
@@ -79,3 +86,17 @@ jobs:
       - name: Test
         working-directory: src-tauri
         run: cargo test
+
+      - name: Perf gate (req 5.1 budgets)
+        # #41: opt-in via COCO_PERF_GATE=1 — print_results() in tests/perf.rs
+        # panics on budget violation when this is set. The standard `cargo
+        # test` step above skips the #[ignore]-tagged perf tests; this step
+        # runs them in --release with the gate on so a regression past the
+        # spec budgets fails CI.
+        working-directory: src-tauri
+        env:
+          COCO_PERF_GATE: "1"
+        run: cargo test --release --test perf -- --ignored --nocapture
+        continue-on-error: true
+        # continue-on-error: signal-only for now. Flip to false to make the
+        # gate strict once we've collected baseline runs from the runner.

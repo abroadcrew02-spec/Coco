@@ -22,6 +22,16 @@ export function useFileDrop(): { isHovering: boolean } {
     let cancelled = false;
 
     const dispatch = async (path: string) => {
+      // #78: ignore the drop while any modal dialog is mounted — otherwise
+      // the file replaces the workbook while a (now-stale) dialog stays
+      // floating over the new editor, hiding the just-loaded grid and
+      // discarding any dialog-local edits the user was making.
+      if (document.querySelector('[role="dialog"], .modal-backdrop, .snapshot-backdrop, .close-confirm-backdrop, .iimg-backdrop, .help-backdrop')) {
+        useWorkbookStore.setState({
+          lastError: "別のダイアログが開いています。閉じてからファイルをドロップしてください。",
+        });
+        return;
+      }
       const route = routeOpenPath(path);
       if (route.kind === "unsupported") {
         // Show a short hint instead of silently swallowing the drop — without

@@ -29,9 +29,10 @@ fn open_coco_missing_path_returns_err() {
 #[test]
 fn restore_backup_missing_temp_file_clears_candidate() {
     let app_dir = TempDir::new().unwrap();
-    autosave_temp_core(app_dir.path(), "wb-missing", "{}").unwrap();
-    // Delete the temp .coco out-of-band (simulates user clearing app data partially).
-    let coco_path = app_dir.path().join("recovery").join("wb-missing.coco");
+    let r = autosave_temp_core(app_dir.path(), "wb-missing", "{}").unwrap();
+    // #72: recovery file now carries a per-session suffix; use the path the
+    // autosave returned rather than reconstructing it from workbook_id.
+    let coco_path = std::path::PathBuf::from(r.path);
     std::fs::remove_file(&coco_path).unwrap();
 
     // Restore should fail with a clear error AND drop the stale row.
@@ -187,11 +188,11 @@ fn restore_backup_opens_temp_coco_snapshot() {
         result.handle.snapshot_json.as_deref(),
         Some("{\"restored\":true}")
     );
-    let expected_path = app_dir.path().join("recovery").join("wb-r.coco");
-    assert_eq!(
-        result.handle.path.as_deref(),
-        Some(path_str(&expected_path).as_str())
-    );
+    // #67: restored snapshots are detached from the recovery file so a
+    // subsequent Ctrl+S routes through Save As (never overwrites the
+    // recovery file that the next cleanup pass would delete).
+    assert_eq!(result.handle.path, None);
+    assert!(result.handle.requires_save_as_on_first_save);
     assert!(result.warnings.is_empty());
 }
 

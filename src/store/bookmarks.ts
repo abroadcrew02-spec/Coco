@@ -99,6 +99,31 @@ function makeId(): string {
 }
 
 /**
+ * Generate a per-session workbook id used to namespace bookmarks when no
+ * stable path is available (e.g. a brand-new untitled workbook). Falls back
+ * to a time + random suffix when `crypto.randomUUID` is unavailable so the
+ * helper never throws in older webview contexts.
+ *
+ * Intended use: the EditorScreen integrator calls this once when opening or
+ * creating a workbook without a `currentHandle?.path` and threads the
+ * returned id through `loadBookmarks` / `saveBookmarks`. This replaces the
+ * previous `"default"` literal that caused different untitled workbooks to
+ * bleed into one another's bookmark lists (issue #109).
+ */
+export function generateWorkbookSessionId(): string {
+  try {
+    const g = globalThis as { crypto?: { randomUUID?: () => string } };
+    if (g.crypto && typeof g.crypto.randomUUID === "function") {
+      return `session-${g.crypto.randomUUID()}`;
+    }
+  } catch {
+    // fall through to the deterministic fallback below.
+  }
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `session-${Date.now().toString(36)}-${rand}`;
+}
+
+/**
  * Append a new bookmark. Unlike addWatch we do NOT dedupe on
  * (sheetId, cellRef) — a user might bookmark the same cell with two
  * different labels ("Q4 total", "needs review") and we shouldn't merge

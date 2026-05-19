@@ -247,8 +247,8 @@ type CfSnapshot = {
 };
 
 export interface ApplyQuickCfResult {
-  /** Mutated snapshot object — the caller serialises and pushes via
-   *  updateSnapshot. When ruleAdded is false this is === the input. */
+  /** New snapshot object with the rule appended. When ruleAdded is false
+   *  this is === the input (no clone is performed on failure paths). */
   snapshotMutated: object;
   /** False when the snapshot is malformed, the sheet is missing, the range
    *  is empty, or the preset id is unknown. */
@@ -267,6 +267,10 @@ export interface ApplyQuickCfResult {
  *   xlsx exporter (xlsx_io.rs dxf writer) produce a visible highlight.
  * - Returns `{ snapshotMutated: snapshot, ruleAdded: false }` on any failure
  *   so the caller can fail open without surfacing an error.
+ * - On success, returns a *deep clone* of the input with the new rule
+ *   appended; the input snapshot (and its nested sheet objects) are never
+ *   mutated. This keeps callers safe from accidental aliasing — see
+ *   issue #114-B.
  */
 export function applyQuickCfPreset(
   snapshot: object,
@@ -285,9 +289,9 @@ export function applyQuickCfPreset(
   if (!sqref) {
     return { snapshotMutated: snapshot, ruleAdded: false };
   }
-  const snap = snapshot as CfSnapshot;
-  const sheet = snap.sheets?.[sheetId];
-  if (!sheet) {
+  const inputSnap = snapshot as CfSnapshot;
+  const sourceSheet = inputSnap.sheets?.[sheetId];
+  if (!sourceSheet) {
     return { snapshotMutated: snapshot, ruleAdded: false };
   }
   const rule = ruleForPreset(preset, sqref);
@@ -300,8 +304,8 @@ export function applyQuickCfPreset(
     bgColor: preset.defaultStyle.bgColor,
     ...(preset.defaultStyle.fontColor ? { fontColor: preset.defaultStyle.fontColor } : {}),
   };
-  const existing = Array.isArray(sheet._conditionalFormatting)
-    ? sheet._conditionalFormatting
+  const existing = Array.isArray(sourceSheet._conditionalFormatting)
+    ? sourceSheet._conditionalFormatting
     : [];
   let maxPriority = 0;
   for (const r of existing) {
@@ -309,8 +313,24 @@ export function applyQuickCfPreset(
     if (p > maxPriority) maxPriority = p;
   }
   rule.priority = (maxPriority > 0 ? maxPriority : existing.length) + 1;
-  sheet._conditionalFormatting = [...existing, rule];
-  return { snapshotMutated: snap, ruleAdded: true };
+  // Deep clone before mutating so the input snapshot is never touched. On
+  // serialization failure (cyclic snapshot, etc) we fail open.
+  let cloned: CfSnapshot;
+  try {
+    cloned = JSON.parse(JSON.stringify(inputSnap)) as CfSnapshot;
+  } catch {
+    return { snapshotMutated: snapshot, ruleAdded: false };
+  }
+  const clonedSheets = cloned.sheets;
+  const clonedSheet = clonedSheets ? clonedSheets[sheetId] : undefined;
+  if (!clonedSheet) {
+    return { snapshotMutated: snapshot, ruleAdded: false };
+  }
+  const clonedExisting = Array.isArray(clonedSheet._conditionalFormatting)
+    ? clonedSheet._conditionalFormatting
+    : [];
+  clonedSheet._conditionalFormatting = [...clonedExisting, rule];
+  return { snapshotMutated: cloned, ruleAdded: true };
 }
 
 /** Convenience grouping used by the dialog's category sections. */

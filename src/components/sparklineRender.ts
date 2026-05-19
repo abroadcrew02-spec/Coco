@@ -30,9 +30,17 @@ import {
   type SparklineEntry,
   type SparklineSheet,
   type SparklineSnapshot,
+  type SparklineType,
 } from "../store/sparklines";
 
 const MONOSPACE_FONT = "Consolas, 'Courier New', monospace";
+
+// Glyph alphabets used by each sparkline render variant. We use these to
+// distinguish "this cell still holds a previously-rendered sparkline string"
+// from "the user has typed an override into the anchor cell" — see
+// `isSparklineRendered` below.
+const LINE_COLUMN_GLYPHS = "▁▂▃▄▅▆▇█"; // ▁▂▃▄▅▆▇█
+const WINLOSS_GLYPHS = "▲▼─…"; // ▲▼─ plus "…" (truncation marker)
 
 function pickRender(entry: SparklineEntry, values: number[]): string {
   switch (entry.type) {
@@ -45,6 +53,22 @@ function pickRender(entry: SparklineEntry, values: number[]): string {
     default:
       return "";
   }
+}
+
+/**
+ * Return true when every character of `value` belongs to the glyph alphabet
+ * for `type` — i.e. the cell still holds a string we (or a previous pass)
+ * rendered, and overwriting is safe. Empty strings count as "not rendered"
+ * so the caller treats them as user-typed overrides only when the existing
+ * value is a non-empty string.
+ */
+export function isSparklineRendered(value: string, type: SparklineType): boolean {
+  if (value.length === 0) return false;
+  const alphabet = type === "winloss" ? WINLOSS_GLYPHS : LINE_COLUMN_GLYPHS;
+  for (const ch of value) {
+    if (alphabet.indexOf(ch) < 0) return false;
+  }
+  return true;
 }
 
 /**
@@ -118,6 +142,19 @@ export function patchSparklineRenders<T>(snapshot: T): T {
         unknown
       >;
       const existing = (rowMap[colKey] as Record<string, unknown> | undefined) ?? {};
+      // Respect user-typed overrides: if the anchor cell holds a non-empty
+      // string that is NOT a previously-rendered sparkline glyph string, the
+      // user has typed into it and we must not clobber their input. Leave
+      // both `v` and `s` untouched in that case (re-styling would also feel
+      // wrong on an overridden cell). This makes the patch idempotent and
+      // safe to re-apply on every pipeline pass.
+      if (
+        typeof existing.v === "string" &&
+        existing.v.length > 0 &&
+        !isSparklineRendered(existing.v, entry.type)
+      ) {
+        continue;
+      }
       const baseStyle =
         typeof existing.s === "object" && existing.s !== null
           ? (existing.s as Record<string, unknown>)

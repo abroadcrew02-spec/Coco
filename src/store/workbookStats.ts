@@ -33,7 +33,6 @@
 //         _tables?: unknown[];                     // see store/tables.ts
 //         _pivots?: unknown[];                     // see store/pivots.ts
 //         _slicers?: unknown[];                    // see store/slicers.ts
-//         _bookmarks?: unknown[];                  // optional snapshot bookmarks (else localStorage)
 //       };
 //     };
 //   }
@@ -70,7 +69,6 @@ export interface FeatureUsageStats {
   tables: number;
   pivots: number;
   slicers: number;
-  bookmarks: number;
   namedRanges: number;
 }
 
@@ -119,7 +117,6 @@ interface SnapshotSheet {
   _tables?: unknown;
   _pivots?: unknown;
   _slicers?: unknown;
-  _bookmarks?: unknown;
   [k: string]: unknown;
 }
 
@@ -150,7 +147,6 @@ const EMPTY_BUNDLE: WorkbookStatsBundle = {
     tables: 0,
     pivots: 0,
     slicers: 0,
-    bookmarks: 0,
     namedRanges: 0,
   },
   dataTypes: { numeric: 0, text: 0, formula: 0, boolean: 0, blank: 0 },
@@ -320,7 +316,6 @@ export function collectWorkbookStats(
     tables: 0,
     pivots: 0,
     slicers: 0,
-    bookmarks: 0,
     namedRanges: arrayLen(parsed.namedRanges),
   };
 
@@ -358,7 +353,6 @@ export function collectWorkbookStats(
     features.tables += arrayLen(sheet?._tables);
     features.pivots += arrayLen(sheet?._pivots);
     features.slicers += arrayLen(sheet?._slicers);
-    features.bookmarks += arrayLen(sheet?._bookmarks);
   }
 
   // Workbook-level styles map contributes too (xlsx round-trip stashes

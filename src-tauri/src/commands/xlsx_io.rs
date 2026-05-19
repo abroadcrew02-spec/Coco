@@ -4900,6 +4900,12 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     let preserved_parts =
         parse_xlsx_preserved_parts(&mut archive, &sheet_paths, &sheet_drawing_rids);
 
+    // #105: re-hydrate any `xl/cocoExtensions/*.json` parts a previous Coco
+    // export wrote (tables / sparklines / outline / pivot meta / slicers /
+    // scenarios / sheet notes / Coco-authored charts / threaded-comment
+    // extras). For files Excel saved (no extension parts), this is a no-op.
+    let coco_extensions = read_coco_extensions(&mut archive);
+
     let mut snapshot = json!({
         "id": workbook_id,
         "name": "Imported Workbook",
@@ -4913,6 +4919,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     if let Some(pp) = preserved_parts {
         snapshot["_preservedParts"] = pp;
     }
+    merge_coco_extensions_into_snapshot(&mut snapshot, &coco_extensions);
 
     let snapshot_json = serde_json::to_string(&snapshot).map_err(|e| e.to_string())?;
 
@@ -5987,6 +5994,28 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
         }
     }
 
+    // #105 / #120: Coco-extension preservation. Snapshot fields that have no
+    // first-class OOXML representation (tables, sparklines, outline groups,
+    // pivot metadata, slicers, scenarios, sheet notes, Coco-authored charts,
+    // threaded-comments extras) are bundled into `xl/cocoExtensions/*.json`
+    // parts. Excel ignores them, but a Coco re-import restores them losslessly.
+    let (coco_ext_bundles, coco_ext_families) =
+        build_coco_extension_bundles(&snapshot, &sheet_order);
+    if let Err(e) = inject_coco_extensions(&tmp_path, &coco_ext_bundles) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Ok(ExportResult {
+            success: false,
+            path: path.clone(),
+            warnings: vec![CompatibilityWarning {
+                severity: "blocking".to_string(),
+                code: "XLSX_COCO_EXTENSIONS_INJECTION_FAILED".to_string(),
+                message: format!("coco extensions injection failed: {e}"),
+                affected_sheets: None,
+            }],
+            error: Some(format!("XLSX_COCO_EXTENSIONS_INJECTION_FAILED: {e}")),
+        });
+    }
+
     // #68: rotate now that the tmp file passed every build / injection
     // step. A rotation failure here is fatal and we still abort cleanly,
     // but at this point the bak chain only shifts when we're truly about
@@ -6064,6 +6093,22 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                 "{} named range(s) could not be exported and were dropped: {}",
                 named_range_failures.len(),
                 named_range_failures.join("; ")
+            ),
+            affected_sheets: None,
+        });
+    }
+
+    // #120: surface per-family notices when a snapshot carried Coco-only data
+    // that we preserved via cocoExtensions parts. The data IS in the file and
+    // will round-trip back into Coco, but Excel won't render it. The wording
+    // makes both halves explicit so users can plan accordingly.
+    for fam in &coco_ext_families {
+        let label = coco_extension_label_ja(fam);
+        warnings.push(CompatibilityWarning {
+            severity: "info".to_string(),
+            code: format!("XLSX_COCO_EXTENSION_{}", fam.to_uppercase()),
+            message: format!(
+                "{label} は Coco 拡張パート (xl/cocoExtensions/{fam}.json) として保存されました (Excel では非表示・Coco で再オープン時に復元されます)"
             ),
             affected_sheets: None,
         });
@@ -6982,4 +7027,403 @@ fn remap_ext_reference_rids(block: &str, rid_remap: &HashMap<String, String>) ->
     }
     out.push_str(rest);
     out
+}
+
+// ============================================================================
+// Coco extension parts (#105 / #120)
+//
+// Several feature snapshots — tables, sparklines, outline groups, pivot
+// metadata, slicers, scenarios, sheet notes, Coco-authored charts, and the
+// threaded-comments extras (replies / resolved / resolvedAt / resolvedBy /
+// createdAt) — have no canonical OOXML representation that Coco's writer can
+// emit. Rather than silently dropping them, we serialize each family into a
+// dedicated JSON part under `xl/cocoExtensions/<feature>.json` inside the
+// output xlsx. Excel itself ignores unknown parts under `xl/` so the file
+// stays valid for Excel/Sheets; Coco re-reads the parts on import and merges
+// the values back into the snapshot at the original locations.
+//
+// Bundle structure for per-sheet families:
+//
+//     { "bySheetIndex": { "0": <field-value>, "1": <field-value>, ... } }
+//
+// The sheet index is the 0-based position in `sheetOrder` (stable across
+// round-trip — import always assigns `sheet-{N}` ids in sheet order, so we
+// never need to track the original snapshot id).
+//
+// For `_scenarios` (workbook-root) the file body is the raw field value.
+//
+// For threaded-comments extras the bundle is per-sheet AND per-cell:
+//
+//     { "bySheetIndex": { "<idx>": { "<cellRef>": { replies?: [...],
+//       resolved?: bool, resolvedAt?: string, resolvedBy?: string,
+//       createdAt?: string } } } }
+// ============================================================================
+
+/// Per-sheet snapshot fields we preserve via cocoExtensions parts.
+/// Tuple: (snapshot key, target file stem). The file stem is appended to
+/// `xl/cocoExtensions/` and gets a `.json` extension.
+const COCO_EXTENSION_SHEET_FIELDS: &[(&str, &str)] = &[
+    ("_outlineRows", "outlineRows"),
+    ("_outlineCols", "outlineCols"),
+    ("_tables", "tables"),
+    ("_sparklines", "sparklines"),
+    ("_pivots", "pivots"),
+    ("_slicers", "slicers"),
+    ("_note", "notes"),
+    ("_charts", "charts"),
+];
+
+/// Workbook-root fields preserved as standalone JSON parts.
+const COCO_EXTENSION_ROOT_FIELDS: &[(&str, &str)] = &[("_scenarios", "scenarios")];
+
+/// Threaded-comments extra-field keys captured per cell inside `_comments[]`.
+const COCO_THREADED_COMMENT_KEYS: &[&str] = &[
+    "replies",
+    "resolved",
+    "resolvedAt",
+    "resolvedBy",
+    "createdAt",
+];
+
+/// User-facing label per family — used by the warning emitter so users see
+/// concrete field names rather than internal snapshot keys.
+fn coco_extension_label_ja(file_stem: &str) -> &'static str {
+    match file_stem {
+        "outlineRows" => "アウトライン(行)",
+        "outlineCols" => "アウトライン(列)",
+        "tables" => "テーブル",
+        "sparklines" => "スパークライン",
+        "pivots" => "ピボットテーブル設定",
+        "slicers" => "スライサー",
+        "notes" => "シートメモ",
+        "charts" => "Coco作成のチャート",
+        "scenarios" => "シナリオ",
+        "threadedComments" => "コメント返信/解決状態",
+        _ => "Coco拡張データ",
+    }
+}
+
+/// Build the per-feature JSON bundles that must be written into the output
+/// xlsx as `xl/cocoExtensions/*.json` parts. Returns:
+///   - `bundles`: map from full zip part path → JSON bytes
+///   - `families`: ordered list of file stems that actually produced a bundle,
+///     used by the export path to emit one CompatibilityWarning per family.
+fn build_coco_extension_bundles(
+    snapshot: &Value,
+    sheet_order: &[Value],
+) -> (HashMap<String, Vec<u8>>, Vec<String>) {
+    let mut bundles: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut families: Vec<String> = Vec::new();
+
+    let sheets_obj = snapshot.get("sheets").and_then(|v| v.as_object());
+
+    // Per-sheet families.
+    for (snap_key, file_stem) in COCO_EXTENSION_SHEET_FIELDS {
+        let mut by_idx: Map<String, Value> = Map::new();
+        if let Some(sheets) = sheets_obj {
+            for (idx, sid_val) in sheet_order.iter().enumerate() {
+                let Some(sid) = sid_val.as_str() else { continue };
+                let Some(sheet) = sheets.get(sid) else { continue };
+                if let Some(val) = sheet.get(*snap_key) {
+                    if !val.is_null() {
+                        by_idx.insert(idx.to_string(), val.clone());
+                    }
+                }
+            }
+        }
+        if !by_idx.is_empty() {
+            let body = json!({ "bySheetIndex": Value::Object(by_idx) });
+            if let Ok(bytes) = serde_json::to_vec(&body) {
+                bundles.insert(
+                    format!("xl/cocoExtensions/{file_stem}.json"),
+                    bytes,
+                );
+                families.push((*file_stem).to_string());
+            }
+        }
+    }
+
+    // Workbook-root families.
+    for (snap_key, file_stem) in COCO_EXTENSION_ROOT_FIELDS {
+        if let Some(val) = snapshot.get(*snap_key) {
+            if !val.is_null() {
+                if let Ok(bytes) = serde_json::to_vec(val) {
+                    bundles.insert(
+                        format!("xl/cocoExtensions/{file_stem}.json"),
+                        bytes,
+                    );
+                    families.push((*file_stem).to_string());
+                }
+            }
+        }
+    }
+
+    // Threaded-comments extras. Walk every sheet's `_comments[]`; capture any
+    // entry that carries one of `COCO_THREADED_COMMENT_KEYS` keyed by cell
+    // ref. The legacy `xl/commentsN.xml` body still carries cell/author/text,
+    // so this part only covers the additive fields Excel can't store natively.
+    let mut threaded_by_idx: Map<String, Value> = Map::new();
+    if let Some(sheets) = sheets_obj {
+        for (idx, sid_val) in sheet_order.iter().enumerate() {
+            let Some(sid) = sid_val.as_str() else { continue };
+            let Some(sheet) = sheets.get(sid) else { continue };
+            let Some(arr) = sheet.get("_comments").and_then(|v| v.as_array()) else {
+                continue;
+            };
+            let mut per_cell: Map<String, Value> = Map::new();
+            for entry in arr {
+                let Some(obj) = entry.as_object() else { continue };
+                let cell_ref = obj
+                    .get("cell")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| obj.get("cellRef").and_then(|v| v.as_str()))
+                    .map(|s| s.to_string());
+                let Some(cell_ref) = cell_ref else { continue };
+                let mut extras: Map<String, Value> = Map::new();
+                for k in COCO_THREADED_COMMENT_KEYS {
+                    if let Some(v) = obj.get(*k) {
+                        if !v.is_null() {
+                            extras.insert((*k).to_string(), v.clone());
+                        }
+                    }
+                }
+                if !extras.is_empty() {
+                    per_cell.insert(cell_ref, Value::Object(extras));
+                }
+            }
+            if !per_cell.is_empty() {
+                threaded_by_idx.insert(idx.to_string(), Value::Object(per_cell));
+            }
+        }
+    }
+    if !threaded_by_idx.is_empty() {
+        let body = json!({ "bySheetIndex": Value::Object(threaded_by_idx) });
+        if let Ok(bytes) = serde_json::to_vec(&body) {
+            bundles.insert(
+                "xl/cocoExtensions/threadedComments.json".to_string(),
+                bytes,
+            );
+            families.push("threadedComments".to_string());
+        }
+    }
+
+    (bundles, families)
+}
+
+/// Reopen the freshly-written xlsx at `tmp_path` and append the cocoExtensions
+/// JSON parts. Excel ignores unknown `xl/` parts so we don't have to touch
+/// `[Content_Types].xml` — Excel only complains when an Override declares a
+/// part that doesn't exist, not the other way around. (We deliberately skip
+/// declaring our own content type so that the file stays maximally compatible
+/// with strict OOXML validators that reject unknown content types.)
+fn inject_coco_extensions(
+    tmp_path: &std::path::Path,
+    bundles: &HashMap<String, Vec<u8>>,
+) -> Result<(), String> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::{write::FileOptions, ZipArchive, ZipWriter};
+
+    if bundles.is_empty() {
+        return Ok(());
+    }
+
+    let original_bytes = fs::read(tmp_path).map_err(|e| e.to_string())?;
+    let mut src = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+
+    let mut out_buf: Vec<u8> = Vec::with_capacity(original_bytes.len() + 4096);
+    {
+        let mut out = ZipWriter::new(Cursor::new(&mut out_buf));
+        let opts: FileOptions =
+            FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+        // Skip any pre-existing entries with the same target paths so a
+        // round-trip (import → export with the same snapshot) overwrites
+        // rather than duplicates.
+        let skip: HashSet<String> = bundles.keys().cloned().collect();
+
+        for i in 0..src.len() {
+            let mut entry = src.by_index(i).map_err(|e| e.to_string())?;
+            let name = entry.name().to_string();
+            if skip.contains(&name) {
+                continue;
+            }
+            let mut buf = Vec::with_capacity(entry.size() as usize);
+            std::io::Read::read_to_end(&mut entry, &mut buf).map_err(|e| e.to_string())?;
+            out.start_file(&name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, &buf).map_err(|e| e.to_string())?;
+        }
+
+        for (name, bytes) in bundles {
+            out.start_file(name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, bytes).map_err(|e| e.to_string())?;
+        }
+
+        out.finish().map_err(|e| e.to_string())?;
+    }
+
+    fs::write(tmp_path, &out_buf).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Per-family upper bound on the JSON body we'll merge back from a
+/// cocoExtensions part. Defense-in-depth: a hostile or corrupt xlsx must not
+/// inflate the snapshot beyond what the export path will accept.
+const COCO_EXTENSION_PART_CAP_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Read all `xl/cocoExtensions/*.json` parts from the input archive. Returns
+/// a map from file stem (e.g. `"tables"`) → parsed JSON value (the bundle
+/// object as produced by `build_coco_extension_bundles`).
+fn read_coco_extensions<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> HashMap<String, Value> {
+    let mut out: HashMap<String, Value> = HashMap::new();
+
+    // Collect names first to avoid re-borrowing the archive while iterating.
+    let mut names: Vec<String> = Vec::new();
+    for i in 0..archive.len() {
+        if let Ok(entry) = archive.by_index(i) {
+            let name = entry.name().to_string();
+            if name.starts_with("xl/cocoExtensions/")
+                && name.ends_with(".json")
+                && entry.size() <= COCO_EXTENSION_PART_CAP_BYTES
+            {
+                names.push(name);
+            }
+        }
+    }
+
+    for name in names {
+        let Ok(mut entry) = archive.by_name(&name) else {
+            continue;
+        };
+        let mut buf = String::new();
+        if std::io::Read::read_to_string(&mut entry, &mut buf).is_err() {
+            continue;
+        }
+        let Ok(val) = serde_json::from_str::<Value>(&buf) else {
+            continue;
+        };
+        // Strip path prefix and `.json` suffix to recover the family stem.
+        let stem = name
+            .strip_prefix("xl/cocoExtensions/")
+            .and_then(|s| s.strip_suffix(".json"))
+            .unwrap_or("");
+        if !stem.is_empty() {
+            out.insert(stem.to_string(), val);
+        }
+    }
+
+    out
+}
+
+/// Merge the cocoExtensions bundles back into the snapshot at the locations
+/// the export path captured them from. Skips families we don't recognize so
+/// future cocoExtension parts written by a newer Coco can round-trip without
+/// requiring this reader to know about them (they just won't surface in the
+/// in-memory snapshot — an acceptable loss for forward compatibility).
+fn merge_coco_extensions_into_snapshot(
+    snapshot: &mut Value,
+    bundles: &HashMap<String, Value>,
+) {
+    if bundles.is_empty() {
+        return;
+    }
+    let snap_obj = match snapshot.as_object_mut() {
+        Some(o) => o,
+        None => return,
+    };
+
+    let sheet_order: Vec<String> = snap_obj
+        .get("sheetOrder")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Helper: extract `bySheetIndex` object from a bundle.
+    let by_sheet = |bundle: &Value| -> Option<Map<String, Value>> {
+        bundle
+            .get("bySheetIndex")
+            .and_then(|v| v.as_object())
+            .cloned()
+    };
+
+    // Per-sheet families.
+    for (snap_key, file_stem) in COCO_EXTENSION_SHEET_FIELDS {
+        let Some(bundle) = bundles.get(*file_stem) else {
+            continue;
+        };
+        let Some(map) = by_sheet(bundle) else { continue };
+        let sheets_obj = match snap_obj
+            .get_mut("sheets")
+            .and_then(|v| v.as_object_mut())
+        {
+            Some(o) => o,
+            None => continue,
+        };
+        for (idx_str, val) in map {
+            let Ok(idx) = idx_str.parse::<usize>() else { continue };
+            let Some(sid) = sheet_order.get(idx) else { continue };
+            let Some(sheet) = sheets_obj.get_mut(sid).and_then(|v| v.as_object_mut()) else {
+                continue;
+            };
+            sheet.insert((*snap_key).to_string(), val);
+        }
+    }
+
+    // Workbook-root families.
+    for (snap_key, file_stem) in COCO_EXTENSION_ROOT_FIELDS {
+        if let Some(bundle) = bundles.get(*file_stem) {
+            snap_obj.insert((*snap_key).to_string(), bundle.clone());
+        }
+    }
+
+    // Threaded-comments extras: merge per-cell extras back into each sheet's
+    // `_comments[]` row that matches by cell ref. Skips silently when no
+    // `_comments` row matches a recorded cell — the legacy comment must
+    // survive even if the extras can't be re-anchored.
+    if let Some(bundle) = bundles.get("threadedComments") {
+        if let Some(map) = by_sheet(bundle) {
+            let sheets_obj = snap_obj
+                .get_mut("sheets")
+                .and_then(|v| v.as_object_mut());
+            if let Some(sheets_obj) = sheets_obj {
+                for (idx_str, per_cell_val) in map {
+                    let Ok(idx) = idx_str.parse::<usize>() else { continue };
+                    let Some(sid) = sheet_order.get(idx) else { continue };
+                    let Some(per_cell) = per_cell_val.as_object() else { continue };
+                    let Some(sheet) = sheets_obj
+                        .get_mut(sid)
+                        .and_then(|v| v.as_object_mut())
+                    else {
+                        continue;
+                    };
+                    let Some(arr) = sheet
+                        .get_mut("_comments")
+                        .and_then(|v| v.as_array_mut())
+                    else {
+                        continue;
+                    };
+                    for entry in arr.iter_mut() {
+                        let Some(obj) = entry.as_object_mut() else { continue };
+                        let cell_ref = obj
+                            .get("cell")
+                            .and_then(|v| v.as_str())
+                            .or_else(|| obj.get("cellRef").and_then(|v| v.as_str()))
+                            .map(|s| s.to_string());
+                        let Some(cell_ref) = cell_ref else { continue };
+                        if let Some(extras) = per_cell.get(&cell_ref).and_then(|v| v.as_object()) {
+                            for (k, v) in extras {
+                                obj.insert(k.clone(), v.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -233,6 +233,23 @@ function markHidden(
   }
 }
 
+// Clear `hd` on a given index, preserving any other fields (e.g. width/height).
+// If the existing record reduces to an empty object after removing `hd`, drop
+// the whole record so the snapshot stays small.
+function clearHidden(
+  data: Record<string, Record<string, unknown>>,
+  idx: number,
+): void {
+  const key = String(idx);
+  const existing = data[key];
+  if (!existing || typeof existing !== "object") return;
+  if (!("hd" in existing)) return;
+  delete existing.hd;
+  if (Object.keys(existing).length === 0) {
+    delete data[key];
+  }
+}
+
 /**
  * Apply collapsed-state to a sheet's rowData/columnData by setting `hd: 1`
  * on every index that lives inside a collapsed group. The input sheet is
@@ -240,21 +257,30 @@ function markHidden(
  * calling so the original snapshot stays intact. Returns the same sheet
  * reference for caller convenience.
  *
- * We deliberately *don't* clear `hd` on non-collapsed indices: a user may
- * have hidden rows/columns directly (Univer's hide-row command), and we
- * shouldn't reveal those just because they weren't part of a collapsed
- * group. Expanding a group writes `collapsed: false` (or removes the flag)
- * which causes the next render to simply skip marking the indices.
+ * To make un-collapse actually reveal the rows again (issue #114-A), we
+ * first clear `hd` on every index that lives inside ANY outline group
+ * (collapsed or not), then re-set `hd: 1` only on indices inside currently
+ * collapsed groups. This is safe vs user-hidden rows because user-hidden
+ * rows live outside outline group ranges (the user cannot drag-hide a row
+ * that is part of an outline structure without going through the outline
+ * collapse mechanism).
  */
 export function applyOutlineToSheet<T extends WritableSheet>(sheet: T): T {
   if (!sheet || typeof sheet !== "object") return sheet;
 
   const rows = Array.isArray(sheet._outlineRows) ? sheet._outlineRows : [];
-  if (rows.some((g) => g && g.collapsed === true)) {
+  if (rows.length > 0) {
     const rowData = (sheet.rowData ?? (sheet.rowData = {})) as Record<
       string,
       Record<string, unknown>
     >;
+    // First pass: clear `hd` on every index inside any outline group so a
+    // previous collapse doesn't leak into the new render.
+    for (const g of rows) {
+      if (!g) continue;
+      for (let r = g.start; r <= g.end; r++) clearHidden(rowData, r);
+    }
+    // Second pass: re-set `hd: 1` on indices in currently-collapsed groups.
     for (const g of rows) {
       if (!g || g.collapsed !== true) continue;
       for (let r = g.start; r <= g.end; r++) markHidden(rowData, r);
@@ -262,11 +288,15 @@ export function applyOutlineToSheet<T extends WritableSheet>(sheet: T): T {
   }
 
   const cols = Array.isArray(sheet._outlineCols) ? sheet._outlineCols : [];
-  if (cols.some((g) => g && g.collapsed === true)) {
+  if (cols.length > 0) {
     const columnData = (sheet.columnData ?? (sheet.columnData = {})) as Record<
       string,
       Record<string, unknown>
     >;
+    for (const g of cols) {
+      if (!g) continue;
+      for (let c = g.start; c <= g.end; c++) clearHidden(columnData, c);
+    }
     for (const g of cols) {
       if (!g || g.collapsed !== true) continue;
       for (let c = g.start; c <= g.end; c++) markHidden(columnData, c);

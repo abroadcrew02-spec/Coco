@@ -174,6 +174,7 @@ import {
 import InsertFunctionDialog from "./InsertFunctionDialog";
 import CustomListsDialog from "./CustomListsDialog";
 import CalculationOptionsDialog from "./CalculationOptionsDialog";
+import CalculationModeIndicator from "./CalculationModeIndicator";
 import {
   type CalcMode,
   getCalcMode,
@@ -261,7 +262,12 @@ import { resolveNamedRange as resolveNavNamed } from "../store/navigationBox";
 import SheetImportDialog from "./SheetImportDialog";
 import { addImportedSheetToSnapshot } from "../store/sheetImport";
 import BookmarksPanel from "./BookmarksPanel";
-import { addBookmark, loadBookmarks, saveBookmarks } from "../store/bookmarks";
+import {
+  addBookmark,
+  loadBookmarks,
+  saveBookmarks,
+  generateWorkbookSessionId,
+} from "../store/bookmarks";
 import NumberFormatManagerDialog from "./NumberFormatManagerDialog";
 import {
   type FormatCodeEntry,
@@ -657,7 +663,6 @@ export default function EditorScreen() {
   } | null>(null);
   const [findReplaceAllDialog, setFindReplaceAllDialog] = useState<{
     activeSheetId: string | null;
-    snapshotJson: string;
   } | null>(null);
   const [commentsManagerOpen, setCommentsManagerOpen] = useState(false);
   // Wave 8
@@ -684,6 +689,16 @@ export default function EditorScreen() {
   const [goToOpen, setGoToOpen] = useState(false);
   const [sheetImportOpen, setSheetImportOpen] = useState(false);
   const [bookmarksPanelOpen, setBookmarksPanelOpen] = useState(false);
+  // #109: per-workbook session id so bookmarks for unsaved workbooks don't
+  // bleed across "default". Regenerated whenever the workbook handle changes
+  // (new file opened / new workbook created / save-as to new path).
+  const [workbookSessionId, setWorkbookSessionId] = useState<string>(() =>
+    generateWorkbookSessionId(),
+  );
+  useEffect(() => {
+    setWorkbookSessionId(generateWorkbookSessionId());
+  }, [currentHandle?.path]);
+  const bookmarkWorkbookId = currentHandle?.path ?? workbookSessionId;
   const [numberFormatManagerOpen, setNumberFormatManagerOpen] = useState(false);
   const [rangeCompareState, setRangeCompareState] = useState<{
     initialA: string;
@@ -1358,11 +1373,18 @@ export default function EditorScreen() {
       const workbook = fUniver.getActiveWorkbook();
       if (!workbook) return;
       const fresh = workbook.save() as unknown as {
-        sheets?: Record<string, { _tables?: TableEntry[] }>;
+        sheets?: Record<string, { _tables?: TableEntry[]; _slicers?: SlicerEntry[] }>;
       };
       if (!fresh.sheets || !fresh.sheets[sheetId]) return;
       const sheet = fresh.sheets[sheetId];
       sheet._tables = removeTable(sheet as { _tables?: TableEntry[] }, name);
+      // #115: cascade-delete every slicer (workbook-wide) that referenced the
+      // dropped table; otherwise SlicerPanel keeps a broken row that toggles inert.
+      for (const sid of Object.keys(fresh.sheets)) {
+        const otherSheet = fresh.sheets[sid];
+        if (!otherSheet || !Array.isArray(otherSheet._slicers)) continue;
+        otherSheet._slicers = otherSheet._slicers.filter((s) => s?.targetTable !== name);
+      }
       applyMutatedSnapshot(JSON.stringify(fresh));
     },
     [applyMutatedSnapshot],
@@ -1377,9 +1399,9 @@ export default function EditorScreen() {
       const fresh = workbook.save() as unknown as {
         sheets?: Record<string, { _tables?: TableEntry[] }>;
       };
-      const ok = renameWorkbookTable(fresh as { sheets?: Record<string, { _tables?: TableEntry[] }> }, oldName, newName);
-      if (!ok) return;
-      applyMutatedSnapshot(JSON.stringify(fresh));
+      const next = renameWorkbookTable(fresh as { sheets?: Record<string, { _tables?: TableEntry[] }> }, oldName, newName);
+      if (next === null) return;
+      applyMutatedSnapshot(JSON.stringify(next));
     },
     [applyMutatedSnapshot],
   );
@@ -2447,7 +2469,9 @@ export default function EditorScreen() {
       const fUniver = fUniverRef.current;
       const wb = fUniver?.getActiveWorkbook();
       if (!wb) return;
-      const snap = wb.save() as unknown as Record<string, unknown>;
+      // #106: deep-clone the live snapshot so we don't mutate the
+      // Univer-internal save() reference (could race with React renders).
+      const snap = JSON.parse(JSON.stringify(wb.save())) as Record<string, unknown>;
       const sheets = (snap.sheets as Record<string, Record<string, unknown>>) ?? {};
       const sheetObj = sheets[recommendedChartsDialog.sheetId];
       if (!sheetObj) return;
@@ -2580,13 +2604,16 @@ export default function EditorScreen() {
   }, [getReadyWorkbook]);
 
   // --- Find & Replace All ----------------------------------------------------
+  // #106: do NOT capture the snapshot at open time — the dialog stays open
+  // arbitrarily and the user can keep editing. We only pin the activeSheetId.
+  // The snapshot is passed as a prop on every render so the dialog always
+  // searches/replaces against fresh state.
   const openFindReplaceAllDialog = useCallback(() => {
     const ready = getReadyWorkbook("検索と置換");
     if (!ready) return;
     const activeSheetId = ready.workbook.getActiveSheet()?.getSheetId() ?? null;
-    const snapshotJson = currentSnapshotJson ?? "{}";
-    setFindReplaceAllDialog({ activeSheetId, snapshotJson });
-  }, [getReadyWorkbook, currentSnapshotJson]);
+    setFindReplaceAllDialog({ activeSheetId });
+  }, [getReadyWorkbook]);
 
   // --- Comments Manager ------------------------------------------------------
   const resolveCommentInline = useCallback(
@@ -2818,24 +2845,34 @@ export default function EditorScreen() {
   // --- Wave 9: Sheet Import / Bookmarks / NumberFormatManager / RangeCompare / Go To ---
   const applySheetImport = useCallback(
     async (filePath: string, sheetNames: string[]) => {
-      const snapJson = currentSnapshotJson;
-      if (!snapJson) return;
       try {
-        const merged = JSON.parse(snapJson);
+        // #106: extract all fragments first (async work). Don't bind to a
+        // snapshot until the final write, so concurrent user edits during the
+        // multi-second extract pass survive instead of being silently erased.
+        const fragments: unknown[] = [];
         for (const name of sheetNames) {
           const fragJson = await invoke<string>("workbook_extract_sheet_as_snapshot", {
             path: filePath,
             sheetName: name,
           });
-          const frag = JSON.parse(fragJson);
-          addImportedSheetToSnapshot(merged, frag);
+          fragments.push(JSON.parse(fragJson));
+        }
+        // Re-read the live snapshot now — captures any edits made during the
+        // extract awaits.
+        const liveSnap = useWorkbookStore.getState().currentSnapshotJson;
+        if (!liveSnap) return;
+        const merged = JSON.parse(liveSnap);
+        for (const frag of fragments) {
+          // `frag` is the parsed JSON the Rust extractor produced — its shape
+          // matches SheetFragment by construction; cast to satisfy strict TS.
+          addImportedSheetToSnapshot(merged, frag as Parameters<typeof addImportedSheetToSnapshot>[1]);
         }
         applyMutatedSnapshot(JSON.stringify(merged));
       } catch (e) {
         setEditorOperationError(`シート取り込みに失敗しました: ${(e as Error).message}`);
       }
     },
-    [currentSnapshotJson, applyMutatedSnapshot],
+    [applyMutatedSnapshot],
   );
 
   const addCurrentCellAsBookmark = useCallback(() => {
@@ -2844,7 +2881,7 @@ export default function EditorScreen() {
     const sheet = workbook?.getActiveSheet();
     const r = sheet?.getSelection()?.getActiveRange();
     if (!sheet || !r) return;
-    const wbId = currentHandle?.path ?? "default";
+    const wbId = bookmarkWorkbookId;
     const current = loadBookmarks(wbId);
     const label = `Bookmark ${current.length + 1}`;
     const next = addBookmark(current, {
@@ -3062,9 +3099,10 @@ export default function EditorScreen() {
     })();
   }, []);
 
+  // #116: autoSave() already creates a snapshot row as a side effect; the
+  // window dispatch had no listener and is removed as dead code.
   const triggerSnapshotNow = useCallback(() => {
     void useWorkbookStore.getState().autoSave();
-    window.dispatchEvent(new CustomEvent("coco:snapshot-now"));
   }, []);
 
   // --- Wave 11: Sort by Color / Filter by Color / Workbook Stats / Show All Comments / Quick Print ---
@@ -4946,6 +4984,88 @@ export default function EditorScreen() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
+  // #107: bind F9 / Shift+F9 to the recalc events so the keyboard shortcut
+  // documented in the menu actually fires. Tab/textarea-focus is ignored
+  // since recalc is workbook-scope.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "F9") return;
+      e.preventDefault();
+      const scope = e.shiftKey ? "sheet" : "all";
+      window.dispatchEvent(new CustomEvent("coco:calc-recalc", { detail: { scope } }));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // #107: consume the coco:calc-recalc events. Calls Univer's facade calc()
+  // when available (the public surface in 0.5.x exposes a workbook-level
+  // calculate via formula plugin); best-effort otherwise.
+  useEffect(() => {
+    const onRecalc = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent<{ scope?: string }>).detail;
+        const wb = fUniverRef.current?.getActiveWorkbook();
+        if (!wb) return;
+        const target =
+          detail?.scope === "sheet"
+            ? (wb.getActiveSheet() as unknown as { calculate?: () => void } | null)
+            : (wb as unknown as { calculate?: () => void });
+        target?.calculate?.();
+        // If the facade doesn't expose calculate, fall back: round-trip the
+        // snapshot — this forces Univer to re-derive computed cells.
+        if (!target?.calculate) {
+          const fresh = wb.save();
+          updateSnapshot(JSON.stringify(fresh));
+        }
+      } catch {
+        // best-effort
+      }
+    };
+    window.addEventListener("coco:calc-recalc", onRecalc);
+    return () => window.removeEventListener("coco:calc-recalc", onRecalc);
+  }, [updateSnapshot]);
+
+  // #111: consume the import-workspace-bundle event dispatched from
+  // useMenuActions (the menu sends an event because the dialog flow needs
+  // editor-level state). Opens a .zip picker and invokes the backend.
+  useEffect(() => {
+    const onImportBundle = () => {
+      void (async () => {
+        try {
+          const { open: openFileDialog } = await import("@tauri-apps/plugin-dialog");
+          const selected = await openFileDialog({
+            multiple: false,
+            filters: [{ name: "Workspace Bundle", extensions: ["zip"] }],
+          });
+          if (!selected) return;
+          const path = typeof selected === "string" ? selected : selected[0];
+          // Restore into a temp dir derived from the workspace; the backend
+          // returns a manifest with the restored .coco path which we then open.
+          const result = await invoke<{
+            restoredWorkbookPath: string;
+            restoredSettingsCount: number;
+            sheetCount: number;
+          }>("workbook_import_workspace_bundle", {
+            bundlePath: path,
+            targetDir: "",
+          });
+          if (result?.restoredWorkbookPath) {
+            if (!confirmDiscardIfUnsaved()) return;
+            await openCoco(result.restoredWorkbookPath);
+            setEditorOperationError(
+              `バンドルを復元しました (シート ${result.sheetCount} / 設定 ${result.restoredSettingsCount} 件)。`,
+            );
+          }
+        } catch (e) {
+          setEditorOperationError(`バンドル取り込みに失敗しました: ${(e as Error).message}`);
+        }
+      })();
+    };
+    window.addEventListener("coco:menu-import-workspace-bundle", onImportBundle);
+    return () => window.removeEventListener("coco:menu-import-workspace-bundle", onImportBundle);
+  }, [openCoco]);
+
   // Sync the openX refs with the current useCallback identities every
   // render. The Univer context-menu commands (registered once at mount)
   // read .current at invocation time, so this keeps them up to date
@@ -5506,7 +5626,7 @@ export default function EditorScreen() {
         )}
         {bookmarksPanelOpen && (
           <BookmarksPanel
-            workbookId={currentHandle?.path ?? "default"}
+            workbookId={bookmarkWorkbookId}
             sheetNamesById={sheetNamesById}
             onJumpTo={jumpToA1OnSheet}
             onRequestAddCurrent={addCurrentCellAsBookmark}
@@ -5556,6 +5676,12 @@ export default function EditorScreen() {
         {statsLabel && (
           <span className="status-bar__stats">· {statsLabel}</span>
         )}
+        {/* #116: surface the calc-mode setting in the status bar so users can
+            see Manual mode at a glance + click to open the options dialog. */}
+        <CalculationModeIndicator
+          mode={calcMode}
+          onClick={() => setCalcOptionsOpen(true)}
+        />
       </div>
       {saveStatus === "save_failed" && (
         <SaveFailureDialog
@@ -5881,9 +6007,13 @@ export default function EditorScreen() {
         />
       )}
       {scenariosOpen && scenarioAdapter && (() => {
-        const wb = fUniverRef.current?.getActiveWorkbook();
-        const snap = (wb ? wb.save() : {}) as unknown as WorkbookScenarioSnapshot;
-        const scenarios = listScenarios(snap);
+        // #106: derive scenarios LIST from the live snapshot at render time
+        // (not closure-captured at open time). Mutating handlers re-read
+        // the live snapshot inside their bodies so rapid add/delete sequences
+        // don't drop entries to a stale base.
+        const liveWb = fUniverRef.current?.getActiveWorkbook();
+        const liveSnap = (liveWb ? liveWb.save() : {}) as unknown as WorkbookScenarioSnapshot;
+        const scenarios = listScenarios(liveSnap);
         return (
           <ScenarioManagerDialog
             scenarios={scenarios}
@@ -5895,15 +6025,20 @@ export default function EditorScreen() {
             onAdd={(entry) => {
               const values = captureFromCurrentValues(scenarioAdapter, entry.changingCells);
               const full: ScenarioEntry = { ...entry, values, createdAt: new Date().toISOString() };
-              const next = addScenario(snap, full);
-              applyMutatedSnapshot(JSON.stringify({ ...((wb?.save() as unknown as object) ?? {}), _scenarios: next._scenarios }));
+              const wb2 = fUniverRef.current?.getActiveWorkbook();
+              if (!wb2) return;
+              const freshSnap = wb2.save() as unknown as WorkbookScenarioSnapshot;
+              const next = addScenario(freshSnap, full);
+              applyMutatedSnapshot(JSON.stringify({ ...(freshSnap as unknown as object), _scenarios: next._scenarios }));
             }}
             onDelete={(name) => {
-              const next = removeScenario(snap, name);
-              applyMutatedSnapshot(JSON.stringify({ ...((wb?.save() as unknown as object) ?? {}), _scenarios: next._scenarios }));
+              const wb2 = fUniverRef.current?.getActiveWorkbook();
+              if (!wb2) return;
+              const freshSnap = wb2.save() as unknown as WorkbookScenarioSnapshot;
+              const next = removeScenario(freshSnap, name);
+              applyMutatedSnapshot(JSON.stringify({ ...(freshSnap as unknown as object), _scenarios: next._scenarios }));
             }}
             onSummary={() => {
-              // Summary creation deferred — needs result-range UX (TODO)
               setEditorOperationError("シナリオサマリー: 集約セル指定 UI は未実装です。");
             }}
             onClose={() => {
@@ -6058,7 +6193,7 @@ export default function EditorScreen() {
       {findReplaceAllDialog && (
         <FindReplaceAllDialog
           activeSheetId={findReplaceAllDialog.activeSheetId}
-          workbookSnapshotJson={findReplaceAllDialog.snapshotJson}
+          workbookSnapshotJson={currentSnapshotJson ?? "{}"}
           onReplaceCommit={(json) => applyMutatedSnapshot(json)}
           onJumpToCell={(sheetId, cellRef) => {
             jumpToA1OnSheet(sheetId, cellRef);

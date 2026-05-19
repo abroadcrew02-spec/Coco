@@ -194,6 +194,27 @@ function readCellValue(cellData: Record<string, Record<string, unknown>> | undef
 }
 
 /**
+ * #113: detect a cell hidden by the slicer pipeline (`hd:1`). Excel computes
+ * range-aware CF statistics (top10, duplicates, uniques, dataBar, colorScale,
+ * iconSet) over visible cells only, and never paints hidden cells. We need
+ * this check in BOTH the rangeValues collection (so min/max/median/rank
+ * exclude hidden values) and the per-cell apply loop (so we don't write a
+ * style onto a hidden cell that would surface again if the row is unhidden).
+ */
+function isCellHidden(
+  cellData: Record<string, Record<string, unknown>> | undefined,
+  row: number,
+  col: number,
+): boolean {
+  if (!cellData) return false;
+  const r = cellData[String(row)];
+  if (!r) return false;
+  const cell = r[String(col)] as Record<string, unknown> | undefined;
+  if (!cell) return false;
+  return cell.hd === 1;
+}
+
+/**
  * Coerce a cfRule formula token into a number. Excel formulas can be:
  *   - bare numbers ("100", "3.14")
  *   - quoted strings (for text comparison)
@@ -476,6 +497,14 @@ const ICON_GLYPHS: Record<string, string[]> = {
   "3traffic": ["🔴", "🟡", "🟢"],
   "5rating": ["★☆☆☆☆", "★★☆☆☆", "★★★☆☆", "★★★★☆", "★★★★★"],
 };
+
+// #118A: flat union of every iconSet glyph across all known styles. Used to
+// strip a stale glyph that a higher-priority overlapping iconSet rule (with a
+// different iconStyle) already prefixed onto the cell text. Without this, two
+// overlapping iconSet rules can stack glyphs (e.g. "🟢 ↑ value").
+const KNOWN_ICON_GLYPHS_SET: Set<string> = new Set(
+  Object.values(ICON_GLYPHS).flat(),
+);
 
 /** Pick an icon glyph for `value` based on its band in [min,max] using the
  *  given iconStyle's bucket count. Returns "" when value is non-numeric. */
@@ -912,9 +941,27 @@ export function patchCfRenders<T>(snapshot: T): T {
     // Ascending priority = highest-priority first (Excel convention).
     // We iterate low-to-high and let later (lower-priority) writes only
     // fill keys not already set, so the first rule wins per style key.
+    // #118B: rules without an explicit priority used to all collapse to the
+    // same effective priority (1), making tiebreak resolution dependent on
+    // array order — which the xlsx round-trip doesn't preserve. Assign a
+    // synthetic priority of (originalIndex + 1) when undefined/null so the
+    // ordering is at least deterministic given the same input, and use the
+    // original index as the secondary tiebreaker for explicit-priority ties.
     const sorted = [...rules]
       .filter((r) => r && typeof r === "object" && typeof r.sqref === "string")
-      .sort((a, b) => (a.priority ?? 1) - (b.priority ?? 1));
+      .map((r, originalIndex) => ({
+        rule: r,
+        originalIndex,
+        effectivePriority:
+          r.priority === undefined || r.priority === null
+            ? originalIndex + 1
+            : r.priority,
+      }))
+      .sort((a, b) => {
+        const d = a.effectivePriority - b.effectivePriority;
+        return d !== 0 ? d : a.originalIndex - b.originalIndex;
+      })
+      .map((x) => x.rule);
 
     for (const rule of sorted) {
       const coords = parseSqrefToCells(rule.sqref, usedRange);
@@ -932,7 +979,12 @@ export function patchCfRenders<T>(snapshot: T): T {
         t === "colorScale" ||
         t === "iconSet"
       ) {
-        rangeValues = coords.map((c) => readCellValue(cellData, c.row, c.col));
+        // #113: Excel computes range stats over visible cells only. Skip
+        // cells marked hidden by the slicer pipeline (`hd:1`) so they don't
+        // pollute min/max/median/rank for visible cells in the same range.
+        rangeValues = coords
+          .filter((c) => !isCellHidden(cellData, c.row, c.col))
+          .map((c) => readCellValue(cellData, c.row, c.col));
       }
       // new in this round: dataBar/colorScale/iconSet are styled per-cell
       // based on the cell's value relative to range stats — branch out so we
@@ -946,6 +998,10 @@ export function patchCfRenders<T>(snapshot: T): T {
       const styleDelta = isAdvancedScale || isExpression ? {} : styleForRule(rule);
 
       for (const { row, col } of coords) {
+        // #113: never paint a CF style on a cell marked hidden by the slicer
+        // pipeline. Mirrors the rangeValues filter above and prevents stale
+        // styles surfacing when the row is later unhidden.
+        if (isCellHidden(cellData, row, col)) continue;
         const value = readCellValue(cellData, row, col);
 
         // new in this round: expression branch — evaluate per cell.
@@ -1029,11 +1085,22 @@ export function patchCfRenders<T>(snapshot: T): T {
             // Prefix the glyph onto the cell's display value `v`. We work on
             // the deep-cloned snapshot so the source isn't mutated.
             const cur = existing.v;
-            const text = cur === undefined || cur === null ? "" : String(cur);
-            // Avoid double-prefixing if the same glyph is already there
-            // (e.g. a re-render of the same snapshot — patch idempotence).
+            let text = cur === undefined || cur === null ? "" : String(cur);
+            // #118A: strip ANY leading known-iconSet glyph (followed by a
+            // space) before prefixing the current rule's glyph. Previously we
+            // only matched the current rule's exact prefix, which let a
+            // higher-priority overlapping iconSet rule (different iconStyle)
+            // leave its glyph stacked in front, producing "🟢 ↑ value". Now
+            // overlapping iconSet rules replace each other cleanly.
+            for (const known of KNOWN_ICON_GLYPHS_SET) {
+              const knownPrefix = `${known} `;
+              if (text.startsWith(knownPrefix)) {
+                text = text.slice(knownPrefix.length);
+                break;
+              }
+            }
             const prefix = `${glyph} `;
-            const next = text.startsWith(prefix) ? text : prefix + text;
+            const next = prefix + text;
             rowMap[colKey] = {
               ...existing,
               v: next,

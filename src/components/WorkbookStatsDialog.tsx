@@ -224,10 +224,6 @@ export default function WorkbookStatsDialog({ stats, onRefresh, onClose }: Props
                     <td>{fmt(stats.features.slicers)}</td>
                   </tr>
                   <tr>
-                    <th>ブックマーク</th>
-                    <td>{fmt(stats.features.bookmarks)}</td>
-                  </tr>
-                  <tr>
                     <th>名前付き範囲</th>
                     <td>{fmt(stats.features.namedRanges)}</td>
                   </tr>

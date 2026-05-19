@@ -20,10 +20,47 @@ type SnapshotShape = {
   sheets?: Record<
     string,
     {
-      cellData?: Record<string, Record<string, { v?: unknown; f?: unknown } | undefined>>;
+      cellData?: Record<
+        string,
+        Record<string, { v?: unknown; f?: unknown; s?: unknown } | undefined>
+      >;
     } | undefined
   >;
 };
+
+// Glyph prefixes written by sibling view-patches (`patchShowAllCommentsView`
+// writes "💬 ", `patchErrorIndicators` writes "⚠ "). When Show-Formulas runs
+// after one of those patches we must preserve the leading glyph(s) so the
+// comment/error markers don't disappear when the user toggles formulas on.
+const COMMENT_GLYPH_PREFIX = "\u{1F4AC} "; // 💬 (U+1F4AC + space)
+const ERROR_GLYPH_PREFIX = "⚠ "; // ⚠  (U+26A0 + space)
+const KNOWN_GLYPH_PREFIXES = [COMMENT_GLYPH_PREFIX, ERROR_GLYPH_PREFIX] as const;
+
+/**
+ * Strip any leading known glyph prefixes ("💬 ", "⚠ ") off `value` and return
+ * `{ prefix, rest }` where `prefix` is the concatenation of the prefixes we
+ * found (in order) and `rest` is whatever remained. Idempotent — calling on
+ * an already-stripped value returns `{ prefix: "", rest: value }`. Order of
+ * the prefixes in the input is preserved in the output `prefix`. We loop so
+ * a cell that's been marked by both patches (`💬 ⚠ ...`) still strips both.
+ */
+export function extractKnownPrefixes(value: string): { prefix: string; rest: string } {
+  let prefix = "";
+  let rest = value;
+  let progressed = true;
+  while (progressed) {
+    progressed = false;
+    for (const glyph of KNOWN_GLYPH_PREFIXES) {
+      if (rest.startsWith(glyph)) {
+        prefix += glyph;
+        rest = rest.slice(glyph.length);
+        progressed = true;
+        break;
+      }
+    }
+  }
+  return { prefix, rest };
+}
 
 /**
  * Return a snapshot with every formula cell's display value replaced by
@@ -69,10 +106,19 @@ export function patchShowFormulasView<T>(snapshot: T, enabled: boolean): T {
         if (typeof f !== "string" || f.length === 0) continue;
         // Allow round-tripped formulas that already carry a leading "=" —
         // don't double it.
-        const display = f.startsWith("=") ? f : `=${f}`;
-        // Replace v unconditionally — we derive purely from f so the
-        // result is idempotent even after multiple applications.
-        cell.v = display;
+        const formula = f.startsWith("=") ? f : `=${f}`;
+        // Preserve any leading 💬 / ⚠ glyphs that the comments / error
+        // patches wrote BEFORE us — otherwise toggling Show-Formulas
+        // clobbers those markers (#112). We strip the existing prefix
+        // off the current `v` first so re-applying this patch doesn't
+        // double-prepend, then re-emit `<prefix><=formula>`. Pure
+        // function of `cell.f` + `cell.v`'s prefix, so idempotent.
+        const currentV = typeof cell.v === "string" ? cell.v : "";
+        const { prefix } = extractKnownPrefixes(currentV);
+        cell.v = `${prefix}${formula}`;
+        // We deliberately do NOT touch `cell.s` here: ErrorIndicators may
+        // have set `cl: { rgb: "#C00000" }` and we want the red font to
+        // remain when the user toggles Show-Formulas on top of an error.
       }
     }
   }

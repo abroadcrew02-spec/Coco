@@ -51,7 +51,8 @@ export default function CommentsAllOverlay({
     <aside
       className="cao-overlay"
       role="region"
-      aria-label="すべてのコメントを表示"
+      aria-label="コメント一覧"
+      tabIndex={-1}
     >
       <header className="cao-header">
         <span className="cao-title">

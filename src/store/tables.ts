@@ -218,31 +218,37 @@ export function removeTable(sheet: SheetWithTables, name: string): TableEntry[] 
 }
 
 /**
- * Rename a table workbook-wide. Walks every sheet's `_tables` and mutates
- * matching entries in place. Returns false (and does nothing) when:
- *   - oldName === newName (no-op)
- *   - newName is empty / whitespace-only
- *   - newName already exists on any table (case-insensitive — Excel treats
- *     table names case-insensitively for uniqueness but preserves the
- *     authored casing)
+ * Rename a table workbook-wide. Returns a *new* WorkbookTableSnapshot with
+ * matching entries renamed; the input snapshot (and its nested sheet / table
+ * objects) is never mutated — see issue #114-C.
  *
- * Returns true on a successful rename, even if the old name wasn't found
- * (idempotent from the caller's perspective — if there's nothing to rename
- * and the new name is otherwise valid, the workbook is already in the
- * desired state).
+ * Returns null (and does nothing) when:
+ *   - newName is empty / whitespace-only
+ *   - newName already exists on any other table (case-insensitive — Excel
+ *     treats table names case-insensitively for uniqueness but preserves the
+ *     authored casing)
+ *   - the snapshot is structurally malformed (no `sheets` map)
+ *
+ * Returns the original workbook unchanged on a no-op (`trimmedNew === oldName`).
+ * Returns a new snapshot on a successful rename, even if the old name wasn't
+ * found (idempotent from the caller's perspective — if there's nothing to
+ * rename and the new name is otherwise valid, we still hand back a fresh
+ * snapshot reflecting the validated desired state).
  */
 export function renameTable(
   workbook: WorkbookTableSnapshot,
   oldName: string,
   newName: string,
-): boolean {
+): WorkbookTableSnapshot | null {
   const trimmedNew = (newName ?? "").trim();
-  if (!trimmedNew) return false;
-  if (trimmedNew === oldName) return true;
+  if (!trimmedNew) return null;
   const sheets = workbook?.sheets;
-  if (!sheets || typeof sheets !== "object") return false;
+  if (!sheets || typeof sheets !== "object") return null;
+  if (trimmedNew === oldName) return workbook;
   const newLower = trimmedNew.toLowerCase();
-  // Collision check: scan every table once.
+  // Collision check: scan every table once. A table currently named
+  // `oldName` is excluded so we can rename it onto a case-only variant of
+  // itself (e.g. "Sales" → "SALES").
   for (const sid of Object.keys(sheets)) {
     const sh = sheets[sid];
     const list = sh?._tables;
@@ -251,19 +257,23 @@ export function renameTable(
       if (!t || typeof t !== "object") continue;
       if (t.name === oldName) continue;
       if (typeof t.name === "string" && t.name.toLowerCase() === newLower) {
-        return false;
+        return null;
       }
     }
   }
+  // Build a new sheets map, cloning only the sheets/tables we touch.
+  const nextSheets: Record<string, SheetWithTables | undefined> = { ...sheets };
   for (const sid of Object.keys(sheets)) {
     const sh = sheets[sid];
     const list = sh?._tables;
-    if (!Array.isArray(list)) continue;
-    for (const t of list) {
-      if (t && t.name === oldName) t.name = trimmedNew;
-    }
+    if (!sh || !Array.isArray(list)) continue;
+    if (!list.some((t) => t && t.name === oldName)) continue;
+    const nextList = list.map((t) =>
+      t && t.name === oldName ? { ...t, name: trimmedNew } : t,
+    );
+    nextSheets[sid] = { ...sh, _tables: nextList };
   }
-  return true;
+  return { ...workbook, sheets: nextSheets };
 }
 
 export interface TableListing {

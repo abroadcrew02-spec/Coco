@@ -65,23 +65,9 @@ function parseSnapshot(input: unknown): CommentsSnapshot | null {
   return null;
 }
 
-/**
- * Walks every sheet's `_comments` array and emits a flat list of
- * `CommentListing` rows in (sheetOrder, original-array-order) order.
- *
- * Accepts either a snapshot JSON string or a pre-parsed snapshot object so
- * callers that already have the parsed shape don't pay a re-parse cost.
- *
- * Tolerates malformed snapshots, missing sheets, missing `_comments`, and
- * bad rows (silently skipped). Returns [] for null/undefined input so the
- * dialog can render unconditionally.
- */
-export function listAllComments(
-  snapshot: string | CommentsSnapshot | null | undefined,
+function listAllCommentsInternal(
+  parsed: CommentsSnapshot,
 ): CommentListing[] {
-  if (snapshot === null || snapshot === undefined) return [];
-  const parsed = parseSnapshot(snapshot);
-  if (!parsed || typeof parsed !== "object") return [];
   const sheets = parsed.sheets;
   if (!sheets || typeof sheets !== "object") return [];
 
@@ -118,6 +104,70 @@ export function listAllComments(
     }
   }
   return out;
+}
+
+// ---------- Module-level string-identity cache ----------
+//
+// CommentsManagerDialog re-runs `listAllComments(workbookSnapshotJson)` on
+// every parent re-render. Typing in any cell — even one with no comments —
+// changes the snapshot JSON string and forces a fresh JSON.parse + scan,
+// which costs seconds on 50k-comment workbooks.
+//
+// The string-identity cache trades a single reference comparison for the
+// full parse + walk: identical string inputs (memoized parent state, same
+// dialog session with no edits) return the cached result instantly. When
+// the snapshot mutates, the new string is a fresh allocation → cache miss
+// → recompute. Doesn't solve the worst-case (heavy typing while dialog is
+// open) but eliminates the no-op cost.
+//
+// `clearListAllCommentsCache` is exported so tests / callers that mutate
+// behind the scenes can force a recompute.
+
+let lastListInput: string | null = null;
+let lastListResult: CommentListing[] = [];
+
+/** Test / caller hook: drop the identity cache so the next call recomputes. */
+export function clearListAllCommentsCache(): void {
+  lastListInput = null;
+  lastListResult = [];
+}
+
+/**
+ * Walks every sheet's `_comments` array and emits a flat list of
+ * `CommentListing` rows in (sheetOrder, original-array-order) order.
+ *
+ * Accepts either a snapshot JSON string or a pre-parsed snapshot object so
+ * callers that already have the parsed shape don't pay a re-parse cost.
+ *
+ * When called with a string input, the result is cached against that exact
+ * string reference — subsequent calls with the same string return the
+ * cached array instantly. The cache is invalidated automatically when a
+ * different string is passed in; tests can force invalidation via
+ * {@link clearListAllCommentsCache}.
+ *
+ * Tolerates malformed snapshots, missing sheets, missing `_comments`, and
+ * bad rows (silently skipped). Returns [] for null/undefined input so the
+ * dialog can render unconditionally.
+ */
+export function listAllComments(
+  snapshot: string | CommentsSnapshot | null | undefined,
+): CommentListing[] {
+  if (snapshot === null || snapshot === undefined) return [];
+  if (typeof snapshot === "string") {
+    if (snapshot === lastListInput) return lastListResult;
+    const parsed = parseSnapshot(snapshot);
+    if (!parsed || typeof parsed !== "object") {
+      lastListInput = snapshot;
+      lastListResult = [];
+      return lastListResult;
+    }
+    lastListInput = snapshot;
+    lastListResult = listAllCommentsInternal(parsed);
+    return lastListResult;
+  }
+  const parsed = parseSnapshot(snapshot);
+  if (!parsed || typeof parsed !== "object") return [];
+  return listAllCommentsInternal(parsed);
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   getLastCheckedAt,
   getChannel,
   setChannel as persistChannel,
+  checkForUpdate,
 } from "../store/updater";
 import "./SettingsDialog.css";
 
@@ -61,6 +62,9 @@ export default function SettingsDialog({ onClose }: Props) {
   const [pendingAutoUpdate, setPendingAutoUpdate] = useState<boolean>(initialAutoUpdate);
   const initialChannel = getChannel();
   const [pendingChannel, setPendingChannel] = useState<UpdateChannel>(initialChannel);
+  const [manualCheckStatus, setManualCheckStatus] = useState<
+    null | { kind: "checking" } | { kind: "ok"; message: string } | { kind: "error"; message: string }
+  >(null);
   const [appVersion, setAppVersion] = useState<string>("");
   useEffect(() => {
     void import("@tauri-apps/api/app")
@@ -274,6 +278,14 @@ export default function SettingsDialog({ onClose }: Props) {
                 <span>{t("settings.autoUpdate.channel.beta")}</span>
               </label>
             </div>
+            {/* #A9: be honest that the channel toggle is informational-only
+                until Phase 2.1 wires the runtime endpoint switch. */}
+            <p
+              className="settings-hint"
+              style={{ marginTop: 4, color: "#a85a00", fontSize: 12 }}
+            >
+              ※ ベータの切替は次バージョンで有効化されます。現在は記録のみで配信は安定版です。
+            </p>
             <p className="settings-hint" style={{ marginTop: 8 }}>
               {t("settings.autoUpdate.current")}: <strong>v{appVersion || "?"}</strong>
               {lastChecked && (
@@ -287,15 +299,54 @@ export default function SettingsDialog({ onClose }: Props) {
             <button
               type="button"
               className="settings-btn"
+              disabled={manualCheckStatus?.kind === "checking"}
               onClick={() => {
-                window.dispatchEvent(
-                  new CustomEvent("coco:editor-command", { detail: "help-check-update" }),
-                );
-                onClose();
+                // #A8: inline check so the button works regardless of whether
+                // EditorScreen is mounted (the prior event-dispatch path was
+                // silently dropped on HomeScreen).
+                setManualCheckStatus({ kind: "checking" });
+                void (async () => {
+                  try {
+                    const r = await checkForUpdate();
+                    if (!r.available) {
+                      setManualCheckStatus({ kind: "ok", message: "最新バージョンを使用しています。" });
+                      return;
+                    }
+                    // An update IS available — close the Settings dialog and
+                    // re-dispatch to EditorScreen if it's mounted, so the
+                    // existing UpdateAvailableDialog flow opens. If EditorScreen
+                    // isn't around (HomeScreen), inform the user.
+                    setManualCheckStatus({
+                      kind: "ok",
+                      message: `v${r.version} が利用可能です — エディタを開くと案内されます。`,
+                    });
+                    window.dispatchEvent(
+                      new CustomEvent("coco:editor-command", { detail: "help-check-update" }),
+                    );
+                  } catch (e) {
+                    setManualCheckStatus({
+                      kind: "error",
+                      message: (e as Error).message || "更新の確認に失敗しました。",
+                    });
+                  }
+                })();
               }}
             >
-              {t("settings.autoUpdate.checkNow")}
+              {manualCheckStatus?.kind === "checking"
+                ? "確認中..."
+                : t("settings.autoUpdate.checkNow")}
             </button>
+            {manualCheckStatus && manualCheckStatus.kind !== "checking" && (
+              <p
+                className="settings-hint"
+                style={{
+                  marginTop: 4,
+                  color: manualCheckStatus.kind === "error" ? "#b00020" : "#137333",
+                }}
+              >
+                {manualCheckStatus.message}
+              </p>
+            )}
           </details>
         </div>
         <footer className="settings-footer">

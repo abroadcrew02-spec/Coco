@@ -19,10 +19,11 @@
 //       baked at build time. Wiring beta to a separate manifest URL is
 //       deferred to Phase 2.1 (would require either a build-time variant
 //       or extending the plugin config with a second endpoint).
-//   localStorage["coco.installationId"]         = uuid v4 | absent
+//   localStorage["coco.updater.installationId"] = uuid v4 | absent
 //     - Stable per-installation random identifier used to bucket the
 //       staged rollout deterministically. Generated lazily on first
-//       read; never reset by us.
+//       read; never reset by us. Legacy key was `coco.installationId`
+//       (unnamespaced) — migrated once at module load.
 //
 // All localStorage access is wrapped in try/catch because the renderer may
 // run with storage disabled (private mode, sandboxed iframe in tests, etc.).
@@ -79,7 +80,9 @@ export const SKIP_VERSION_KEY = "coco.updater.skipVersion";
 export const CHECK_ON_LAUNCH_KEY = "coco.updater.checkOnLaunch";
 export const LAST_CHECKED_KEY = "coco.updater.lastChecked";
 export const CHANNEL_KEY = "coco.updater.channel";
-export const INSTALLATION_ID_KEY = "coco.installationId";
+export const INSTALLATION_ID_KEY = "coco.updater.installationId";
+// Legacy key — migrated to INSTALLATION_ID_KEY once at module load below.
+const LEGACY_INSTALLATION_ID_KEY = "coco.installationId";
 
 // Manifest URL. Kept exported so test code can mock it via module-level
 // replacement. Must mirror the `endpoints[0]` value in
@@ -155,6 +158,35 @@ export function setChannel(c: UpdateChannel): void {
 }
 
 /**
+ * One-time migration: copy the legacy `coco.installationId` value to the
+ * new namespaced `coco.updater.installationId` key and delete the old
+ * key. Safe to call repeatedly — a no-op once the new key exists.
+ *
+ * Module-load invocation below ensures every importing surface (renderer
+ * boot, dialog, settings page) sees the migrated key without needing an
+ * explicit call.
+ */
+function migrateInstallationIdKey(): void {
+  const newKey = safeGet(INSTALLATION_ID_KEY);
+  if (newKey && newKey.length > 0) return;
+  const legacy = safeGet(LEGACY_INSTALLATION_ID_KEY);
+  if (legacy && legacy.length > 0) {
+    safeSet(INSTALLATION_ID_KEY, legacy);
+    safeRemove(LEGACY_INSTALLATION_ID_KEY);
+  }
+}
+
+// Run the migration once at module load. Wrapped in try/catch because
+// localStorage access can throw in sandboxed contexts even with our
+// safe* helpers (e.g. if typeof localStorage check passes but the
+// getter itself throws on access).
+try {
+  migrateInstallationIdKey();
+} catch {
+  /* swallow — migration is best-effort; getInstallationId() still works. */
+}
+
+/**
  * Stable per-installation identifier (UUID v4). Generated on first call
  * and persisted to localStorage; subsequent calls return the same value.
  *
@@ -216,11 +248,15 @@ function fnv1a32(s: string): number {
  * — the same device + same release pin always returns the same bool.
  *
  * - `null` rollout → always true (no gating)
+ * - non-finite percent (NaN, Infinity) → true (fail open: better to
+ *   ship an update than silently block every device on a malformed
+ *   manifest field)
  * - `percent >= 100` → always true (fully rolled out)
  * - `percent <= 0`  → always false (paused / nobody)
  */
 export function isInRolloutBucket(rollout: RolloutBucket | null): boolean {
   if (rollout == null) return true;
+  if (!Number.isFinite(rollout.percent)) return true; // fail open
   if (rollout.percent >= 100) return true;
   if (rollout.percent <= 0) return false;
   const bucket = fnv1a32(`${getInstallationId()}::${rollout.seed}`) % 100;
@@ -228,42 +264,140 @@ export function isInRolloutBucket(rollout: RolloutBucket | null): boolean {
 }
 
 /**
- * Compare two semver strings. Returns -1, 0, 1 for a<b, a==b, a>b.
- * Tolerates pre-release suffixes by stripping everything from `-`
- * onward (so `0.1.0-rc1` compares equal to `0.1.0`).
+ * Sentinel returned by compareSemver when either input contains a
+ * non-integer numeric component (e.g. "abc", "1.x.0"). Callers that
+ * care (isForcedUpgrade) should treat this as "cannot compare" rather
+ * than coerce to an ordering.
+ */
+const SEMVER_INVALID = Number.NaN;
+
+const INT_RE = /^\d+$/;
+
+/**
+ * Split a SemVer string into [coreNumbers, prereleaseIdentifiers].
+ * Returns null if any core component is not a clean integer.
+ * Prerelease identifiers are dot-separated strings; numeric-looking
+ * ones are returned as numbers, the rest as strings (per SemVer 2.0.0).
+ */
+function parseSemver(
+  v: string,
+): { core: number[]; pre: Array<number | string> } | null {
+  const trimmed = v.trim();
+  // Strip build metadata (+...) — irrelevant to precedence per spec.
+  const noBuild = trimmed.split("+")[0];
+  const dashIdx = noBuild.indexOf("-");
+  const corePart = dashIdx === -1 ? noBuild : noBuild.slice(0, dashIdx);
+  const prePart = dashIdx === -1 ? "" : noBuild.slice(dashIdx + 1);
+
+  const coreTokens = corePart.split(".");
+  const core: number[] = [];
+  for (const tok of coreTokens) {
+    if (!INT_RE.test(tok)) return null;
+    core.push(parseInt(tok, 10));
+  }
+
+  const pre: Array<number | string> =
+    prePart.length === 0
+      ? []
+      : prePart.split(".").map((id) => (INT_RE.test(id) ? parseInt(id, 10) : id));
+  return { core, pre };
+}
+
+/**
+ * Compare two SemVer 2.0.0 version strings. Returns -1, 0, 1 for a<b,
+ * a==b, a>b. Returns NaN (SEMVER_INVALID) if either input has a
+ * non-integer numeric component — callers must check via
+ * `Number.isNaN`.
+ *
+ * Pre-release precedence rules (SemVer 2.0.0 §11):
+ *   - A version with a pre-release tag is LESS than the same X.Y.Z
+ *     without one (e.g. 0.1.0-rc1 < 0.1.0).
+ *   - When both have pre-release tags, dot-separated identifiers are
+ *     compared left-to-right: numeric < non-numeric; numerics
+ *     compared numerically; non-numerics lexicographically; a shorter
+ *     set with equal prefix is lower precedence.
+ *
+ * Inline test cases (verified by reading; no test file per spec):
+ *   compareSemver("0.1.0", "0.1.0")             === 0
+ *   compareSemver("0.1.0-rc1", "0.1.0")         === -1
+ *   compareSemver("0.1.0", "0.1.0-rc1")         === 1
+ *   compareSemver("0.1.0-rc1", "0.1.0-rc2")     === -1
+ *   compareSemver("0.1.10", "0.1.9")            === 1
+ *   compareSemver("0.10.0", "0.9.0")            === 1
+ *   Number.isNaN(compareSemver("abc", "0.1.0")) === true
+ *   Number.isNaN(compareSemver("0.1.0", "x.y")) === true
  */
 function compareSemver(a: string, b: string): number {
-  const norm = (v: string) =>
-    v
-      .trim()
-      .split("-")[0]
-      .split(".")
-      .map((p) => {
-        const n = parseInt(p, 10);
-        return Number.isFinite(n) ? n : 0;
-      });
-  const pa = norm(a);
-  const pb = norm(b);
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i++) {
-    const av = pa[i] ?? 0;
-    const bv = pb[i] ?? 0;
+  const pa = parseSemver(a);
+  const pb = parseSemver(b);
+  if (pa === null || pb === null) return SEMVER_INVALID;
+
+  // 1) Compare core (major.minor.patch...) numerically.
+  const coreLen = Math.max(pa.core.length, pb.core.length);
+  for (let i = 0; i < coreLen; i++) {
+    const av = pa.core[i] ?? 0;
+    const bv = pb.core[i] ?? 0;
     if (av < bv) return -1;
     if (av > bv) return 1;
   }
+
+  // 2) Core equal — apply pre-release precedence.
+  const aHasPre = pa.pre.length > 0;
+  const bHasPre = pb.pre.length > 0;
+  if (!aHasPre && !bHasPre) return 0;
+  if (!aHasPre && bHasPre) return 1; // A is the released X.Y.Z; B is a pre
+  if (aHasPre && !bHasPre) return -1; // A is a pre; B is released X.Y.Z
+
+  // 3) Both have pre-release: compare identifier-by-identifier.
+  const preLen = Math.min(pa.pre.length, pb.pre.length);
+  for (let i = 0; i < preLen; i++) {
+    const ai = pa.pre[i];
+    const bi = pb.pre[i];
+    const aIsNum = typeof ai === "number";
+    const bIsNum = typeof bi === "number";
+    if (aIsNum && bIsNum) {
+      if (ai < bi) return -1;
+      if (ai > bi) return 1;
+    } else if (aIsNum && !bIsNum) {
+      return -1; // numeric < non-numeric
+    } else if (!aIsNum && bIsNum) {
+      return 1;
+    } else {
+      // both strings — lexicographic
+      const as = ai as string;
+      const bs = bi as string;
+      if (as < bs) return -1;
+      if (as > bs) return 1;
+    }
+  }
+  // Longer prerelease list with otherwise-equal prefix is higher precedence.
+  if (pa.pre.length < pb.pre.length) return -1;
+  if (pa.pre.length > pb.pre.length) return 1;
   return 0;
 }
 
 /**
  * Whether the installed `currentVersion` is below the manifest's
  * `minRequiredVersion` floor. Empty / null floor → never forced.
+ *
+ * If either string is malformed (compareSemver returns NaN) we
+ * fail-open — return false and warn rather than lock the user out
+ * because of a corrupt local version string.
  */
 export function isForcedUpgrade(
   currentVersion: string,
   minRequiredVersion: string | null,
 ): boolean {
   if (!minRequiredVersion) return false;
-  return compareSemver(currentVersion, minRequiredVersion) < 0;
+  const cmp = compareSemver(currentVersion, minRequiredVersion);
+  if (Number.isNaN(cmp)) {
+    console.warn(
+      `[updater] isForcedUpgrade: unparseable version(s); skipping force gate. ` +
+        `current=${JSON.stringify(currentVersion)} min=${JSON.stringify(minRequiredVersion)}`,
+    );
+    return false;
+  }
+  return cmp < 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -284,9 +418,24 @@ interface UpdateHandleLike {
   ) => Promise<void>;
 }
 
+// Plugin versions differ slightly on the field names for the total
+// content length and per-chunk size, so we accept several shapes
+// defensively (see downloadAndInstall progress handling).
 type DownloadEvent =
-  | { event: "Started"; data: { contentLength?: number | null } }
-  | { event: "Progress"; data: { chunkLength: number } }
+  | {
+      event: "Started";
+      data: {
+        contentLength?: number | null;
+        total?: number | null;
+      };
+    }
+  | {
+      event: "Progress";
+      data: {
+        chunkLength?: number | null;
+        chunk_length?: number | null;
+      };
+    }
   | { event: "Finished" };
 
 // Cache the last positive check() so downloadAndInstall() can reuse it
@@ -297,6 +446,23 @@ let cachedUpdate: UpdateHandleLike | null = null;
 // so downloadAndInstall() can gate without re-fetching.
 let cachedRollout: RolloutBucket | null = null;
 let cachedIsForced = false;
+
+/**
+ * Clear all module-level cached update state. Called:
+ *   - at the start of every `checkForUpdate()` (fresh slate per check)
+ *   - inside the `downloadAndInstall()` catch block (don't strand
+ *     gating state after a failed download)
+ *   - implicitly when `check()` returns null (no update) — handled
+ *     inside `checkForUpdate()` by the leading clear
+ *
+ * Exposed so callers (e.g. a manual "cancel" button) can reset state
+ * without triggering a network call.
+ */
+export function clearUpdateCache(): void {
+  cachedUpdate = null;
+  cachedRollout = null;
+  cachedIsForced = false;
+}
 
 interface RawManifest {
   version?: unknown;
@@ -345,14 +511,16 @@ function parseChannel(raw: unknown): UpdateChannel {
  * caller is responsible for surfacing the message to the user.
  */
 export async function checkForUpdate(): Promise<UpdaterCheckResult> {
+  // Every check starts with a clean slate so a previous run's stale
+  // cache cannot influence gating after a cancellation / error.
+  clearUpdateCache();
   const mod = await import("@tauri-apps/plugin-updater");
   // The plugin exposes a free function `check()` that returns Update | null.
   const update = (await mod.check()) as unknown as UpdateHandleLike | null;
   markCheckedNow();
   if (!update) {
-    cachedUpdate = null;
-    cachedRollout = null;
-    cachedIsForced = false;
+    // Cache was already cleared above; this branch confirms the
+    // "no update returned" path leaves all three fields null/false.
     return { available: false };
   }
   cachedUpdate = update;
@@ -402,42 +570,86 @@ export async function downloadAndInstall(
   onProgress: (state: { downloaded: number; total: number | null }) => void,
   gateOverride = false,
 ): Promise<void> {
-  let update = cachedUpdate;
-  if (!update) {
-    const mod = await import("@tauri-apps/plugin-updater");
-    update = (await mod.check()) as unknown as UpdateHandleLike | null;
+  try {
+    let update = cachedUpdate;
+    let installedVersion: string | null = null;
     if (!update) {
-      throw new Error("No update available to install.");
+      const mod = await import("@tauri-apps/plugin-updater");
+      update = (await mod.check()) as unknown as UpdateHandleLike | null;
+      if (!update) {
+        throw new Error("No update available to install.");
+      }
+      cachedUpdate = update;
     }
-    cachedUpdate = update;
-  }
+    installedVersion = update.version;
 
-  // Rollout gate. Forced upgrades and explicit overrides bypass it.
-  if (!gateOverride && !cachedIsForced && !isInRolloutBucket(cachedRollout)) {
-    throw new Error("This release is still in staged rollout. Try again later.");
-  }
-
-  let downloaded = 0;
-  let total: number | null = null;
-
-  await update.downloadAndInstall((event) => {
-    switch (event.event) {
-      case "Started":
-        total =
-          typeof event.data.contentLength === "number"
-            ? event.data.contentLength
-            : null;
-        onProgress({ downloaded, total });
-        break;
-      case "Progress":
-        downloaded += event.data.chunkLength;
-        onProgress({ downloaded, total });
-        break;
-      case "Finished":
-        onProgress({ downloaded, total });
-        break;
+    // Rollout gate. Forced upgrades and explicit overrides bypass it.
+    if (!gateOverride && !cachedIsForced && !isInRolloutBucket(cachedRollout)) {
+      throw new Error("This release is still in staged rollout. Try again later.");
     }
-  });
+
+    let downloaded = 0;
+    let total: number | null = null;
+
+    await update.downloadAndInstall((event) => {
+      switch (event.event) {
+        case "Started": {
+          // Different plugin versions emit `contentLength` or `total`.
+          // When neither is a finite number, treat as indeterminate
+          // (total stays null and the UI can render an indeterminate
+          // progress bar).
+          const raw =
+            typeof event.data.contentLength === "number"
+              ? event.data.contentLength
+              : typeof event.data.total === "number"
+                ? event.data.total
+                : null;
+          total = typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+          onProgress({ downloaded, total });
+          break;
+        }
+        case "Progress": {
+          // Accept both camelCase and snake_case naming. If neither is
+          // a finite number, skip the event entirely rather than add
+          // `undefined`/NaN to `downloaded` (which would corrupt the
+          // accumulator and break the UI bar).
+          const chunk =
+            typeof event.data.chunkLength === "number"
+              ? event.data.chunkLength
+              : typeof event.data.chunk_length === "number"
+                ? event.data.chunk_length
+                : null;
+          if (chunk == null || !Number.isFinite(chunk)) {
+            // No usable chunk size — drop the event silently.
+            break;
+          }
+          downloaded += chunk;
+          onProgress({ downloaded, total });
+          break;
+        }
+        case "Finished":
+          onProgress({ downloaded, total });
+          break;
+      }
+    });
+
+    // Install completed successfully. If the user previously skipped
+    // *this exact version* (e.g. clicked "Skip" then later accepted
+    // via Help → Check for Updates), clear the stale skip record so
+    // post-install state inspection doesn't show contradictory data.
+    // We only clear on an exact match to avoid wiping a deliberate
+    // skip of some other release.
+    if (installedVersion && getSkippedVersion() === installedVersion) {
+      clearSkippedVersion();
+    }
+  } catch (err) {
+    // Any failure leaves potentially-stale gating state in the cache
+    // (e.g. cachedIsForced from a check that succeeded earlier this
+    // session). A subsequent manual retry should re-probe from
+    // scratch, so wipe the cache before rethrowing.
+    clearUpdateCache();
+    throw err;
+  }
 }
 
 /** Restart the application after a staged install. */

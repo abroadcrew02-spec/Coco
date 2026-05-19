@@ -5180,6 +5180,13 @@ export default function EditorScreen() {
           setUpdaterState({ kind: "idle" });
           return;
         }
+        // Race fix (#A10): if the user toggled auto-check OFF while this
+        // check was in flight, swallow the result. Forced upgrades still
+        // win — security/CVE fixes shouldn't be silenced by a preference.
+        if (!isAutoCheckEnabled() && !r.isForced) {
+          setUpdaterState({ kind: "idle" });
+          return;
+        }
         // Forced upgrades (min_required_version) override both the skip-version
         // flag and the staged-rollout gate — security/CVE fixes must reach everyone.
         if (!r.isForced) {
@@ -6813,6 +6820,9 @@ export default function EditorScreen() {
             });
             void (async () => {
               try {
+                // gateOverride=true: the user explicitly clicked Update, so
+                // bypass the staged-rollout bucket check (auditor finding #A7).
+                // Forced upgrades already bypass internally.
                 await downloadAndInstall(({ downloaded, total }) => {
                   const progress = total && total > 0 ? downloaded / total : 0;
                   setUpdaterState({
@@ -6822,7 +6832,7 @@ export default function EditorScreen() {
                     downloaded,
                     total,
                   });
-                });
+                }, true);
                 setUpdaterState({ kind: "ready", version: targetVersion });
                 // Offer immediate relaunch; user can decline (status bar
                 // button stays visible until they restart manually).

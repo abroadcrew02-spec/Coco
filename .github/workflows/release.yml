@@ -8,14 +8,21 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  # Single global lane: only one release can publish at a time.
+  # Trade-off: a release of N+1 must wait for N to finish, but latest.json cannot be raced
+  # by two parallel publishes (which would otherwise produce a corrupt/inconsistent manifest).
+  group: release
   cancel-in-progress: false # don't cancel a release mid-way
 
 jobs:
   build:
     name: Build + Publish (Windows)
     runs-on: windows-latest
+    if: github.repository == 'abroadcrew02-spec/Coco'
     timeout-minutes: 60
+    env:
+      WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,10 +51,7 @@ jobs:
         run: npm ci
 
       - name: Install Windows code-signing certificate (optional)
-        if: ${{ secrets.WINDOWS_CERT_BASE64 != '' }}
-        env:
-          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
-          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        if: ${{ env.WINDOWS_CERT_BASE64 != '' }}
         shell: pwsh
         run: |
           Write-Host "Installing code-signing cert into CurrentUser\My"
@@ -81,7 +85,7 @@ jobs:
           $targets = Get-ChildItem "src-tauri/target/release/bundle" -Recurse -Include *.exe,*.msi -ErrorAction SilentlyContinue
           foreach ($f in $targets) {
             Write-Host "Signing $($f.FullName)"
-            & $signtool sign /sha1 $thumb /tr "http://timestamp.digicert.com" /td sha256 /fd sha256 $f.FullName
+            & $signtool sign /sha1 $thumb /tr "https://timestamp.digicert.com" /td sha256 /fd sha256 $f.FullName
             if ($LASTEXITCODE -ne 0) {
               Write-Error "signtool failed for $($f.FullName)"
               exit $LASTEXITCODE
@@ -97,19 +101,39 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
+          # Per-tag CHANGELOG file is preferred; otherwise fall back to GitHub auto-generated notes
+          # (do NOT fall back to the entire CHANGELOG.md — it would dump full history into every release)
           $notesFile = "CHANGELOG/$tag.md"
-          if (-not (Test-Path $notesFile)) { $notesFile = "CHANGELOG.md" }
           $hasNotes = Test-Path $notesFile
-          $ghArgs = @("release", "create", $tag, "--title", "Coco $tag")
-          if ($hasNotes) { $ghArgs += @("--notes-file", $notesFile) } else { $ghArgs += @("--generate-notes") }
-          # Asset list — use Get-ChildItem to expand globs (gh's globbing on Windows is unreliable)
+
+          # Enumerate assets up-front so we can assert count before creating the release
           $assets = @()
-          $assets += "latest.json"
+          $assets += (Resolve-Path "latest.json").Path
           $assets += Get-ChildItem "src-tauri/target/release/bundle/nsis/*.nsis.zip" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
           $assets += Get-ChildItem "src-tauri/target/release/bundle/nsis/*.nsis.zip.sig" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
           $assets += Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
           $assets += Get-ChildItem "src-tauri/target/release/bundle/msi/*.msi" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
           $assets += Get-ChildItem "src-tauri/target/release/bundle/msi/*.msi.zip" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
           $assets += Get-ChildItem "src-tauri/target/release/bundle/msi/*.msi.zip.sig" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
-          $ghArgs += $assets
-          & gh @ghArgs
+
+          # Sanity: we expect at least latest.json + .nsis.zip + .sig + setup.exe (4 assets minimum)
+          if ($assets.Count -lt 4) {
+            Write-Error "Expected at least 4 release assets (latest.json + .nsis.zip + .sig + setup.exe), found $($assets.Count): $($assets -join ', ')"
+            exit 1
+          }
+          Write-Host "Found $($assets.Count) release assets"
+
+          # 1) Create as draft (no consumers see it yet)
+          $createArgs = @("release", "create", $tag, "--draft", "--title", "Coco $tag")
+          if ($hasNotes) { $createArgs += @("--notes-file", $notesFile) } else { $createArgs += @("--generate-notes") }
+          & gh @createArgs
+          if ($LASTEXITCODE -ne 0) { Write-Error "gh release create (draft) failed"; exit $LASTEXITCODE }
+
+          # 2) Upload all assets (--clobber so re-runs are idempotent)
+          $uploadArgs = @("release", "upload", $tag) + $assets + @("--clobber")
+          & gh @uploadArgs
+          if ($LASTEXITCODE -ne 0) { Write-Error "gh release upload failed; draft retained for inspection"; exit $LASTEXITCODE }
+
+          # 3) Flip draft -> published atomically (only after all uploads succeed)
+          & gh release edit $tag --draft=false
+          if ($LASTEXITCODE -ne 0) { Write-Error "gh release edit (publish) failed"; exit $LASTEXITCODE }

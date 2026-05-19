@@ -38,8 +38,8 @@
     },
     "windows": {
       "digestAlgorithm": "sha256",
-      "timestampUrl": "http://timestamp.digicert.com",
-      "wix": { "language": "en-US" },
+      "timestampUrl": "https://timestamp.digicert.com",
+      "wix": { "language": ["ja-JP", "en-US"] },
       "nsis": { "displayLanguageSelector": false, "languages": ["English", "Japanese"] }
     }
   },

@@ -38,6 +38,8 @@ GitHub repo → Settings → Secrets and variables → Actions → **New reposit
 | `TAURI_UPDATER_PRIVATE_KEY` | `coco_updater.key` のファイル全体 (改行含む、`untrusted comment:` から始まる行を含む全文) |
 | `TAURI_UPDATER_KEY_PASSWORD` | パスフレーズ。パスフレーズなしで生成した場合も空文字で登録しておく |
 
+**IMPORTANT**: `TAURI_UPDATER_PRIVATE_KEY` には `coco_updater.key` (**秘密鍵** のファイル) の内容を貼り付ける。`coco_updater.key.pub` (公開鍵) を間違えて貼ると、署名検証はサイレントに壊れる (CI ビルドは通るが、生成された `.sig` が無効になり、ユーザー側の更新が「署名検証失敗」で常に落ちる) ので絶対に間違えないこと。
+
 これらは Release workflow が `tauri-action` 経由で minisign 署名を作成するときに参照する。
 
 ### 2-3. 公開鍵の確認
@@ -180,3 +182,14 @@ gh release delete v0.1.1-rc1 --cleanup-tag --yes
 | `gh release create` が `release already exists` で失敗 | 同タグでの再ビルド | `gh release delete v<x> --cleanup-tag --yes` してから再 push |
 | ユーザーが「更新が来ない」と報告 | `latest.json` のキャッシュ / バージョン番号の比較不一致 | `latest.json` を直接ブラウザで開き `version` フィールドを確認、3 ファイル (package.json / Cargo.toml / tauri.conf.json) が同期しているか確認 |
 | 更新後にアプリが起動しない | 新バージョンのバグ | section 6 で hotfix を出す。緊急なら旧バージョン `.exe` を Releases から再配布 |
+
+## 10. 自動更新導入前ビルドからの移行
+
+`v0.1.0` は自動更新機能を搭載する前のビルドである。このバージョンを使っているユーザーは、updater プラグインが組み込まれていないため、`latest.json` を取りに行く処理自体が存在しない。したがって以下のように扱う。
+
+- **`v0.1.0` ユーザー** → 自動更新は届かない。次の更新 (`v0.1.1` 以降) は **1 回だけ手動ダウンロード + 再インストール** が必要。
+  - 案内テンプレ: 「お手数ですが [Releases ページ](https://github.com/abroadcrew02-spec/Coco/releases/latest) から最新版 `Coco_x.y.z_x64-setup.exe` をダウンロードして上書きインストールしてください。次回以降はアプリ内から自動更新されます。」
+- **`v0.1.1` 以降のユーザー** → updater プラグイン入りのため、それ以降のバージョンは全自動で配信される。手動操作は不要。
+- 設定・ユーザーデータ・最近開いたファイルなどは手動再インストールでも引き継がれる (`%AppData%/com.coco.app/` 配下なのでインストーラの影響を受けない)。
+
+リリースノート (`CHANGELOG/v0.1.1.md`) の冒頭に「v0.1.0 からの初回のみ手動 DL が必要」の旨を 1 行入れておくと社内サポート工数が下がる。

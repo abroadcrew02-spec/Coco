@@ -180,6 +180,20 @@ export default function HelpDialog({ onClose }: Props) {
               Coco{version ? ` v${version}` : ""} · ローカルファースト表計算<br />
               ライセンス: Apache-2.0 · 表計算エンジン: Univer (Apache-2.0)
             </p>
+            <p style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="help-update-btn"
+                onClick={() => {
+                  window.dispatchEvent(
+                    new CustomEvent("coco:editor-command", { detail: "help-check-update" }),
+                  );
+                  onClose();
+                }}
+              >
+                更新を確認
+              </button>
+            </p>
           </section>
         </div>
       </div>

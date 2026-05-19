@@ -36,6 +36,8 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // #82: best-effort startup sweep of orphan recovery .coco files
             // (file present, no recovery_candidates row). Scoped to the
@@ -190,6 +192,8 @@ pub fn run() {
                 .build()?;
             let help_menu = SubmenuBuilder::new(app, "ヘルプ")
                 .text("help", "ヘルプ\tF1")
+                .separator()
+                .text("help-check-update", "更新を確認...")
                 .build()?;
             let menu = MenuBuilder::new(app)
                 .item(&file_menu)

@@ -92,6 +92,7 @@ const EDITOR_COMMAND_IDS = new Set([
   "format-borders",
   "format-quick-cf",
   "insert-cell-link",
+  "help-check-update",
   "data-filter-search",
 ]);
 

@@ -311,6 +311,16 @@ import { patchShowAllCommentsView } from "./showAllCommentsRender";
 import CommentsAllOverlay from "./CommentsAllOverlay";
 import QuickPrintDialog from "./QuickPrintDialog";
 import HyperlinkManagerDialog from "./HyperlinkManagerDialog";
+import UpdateAvailableDialog from "./UpdateAvailableDialog";
+import {
+  type UpdaterState,
+  checkForUpdate,
+  downloadAndInstall,
+  relaunchApp,
+  isAutoCheckEnabled,
+  getSkippedVersion,
+  skipVersion as persistSkipVersion,
+} from "../store/updater";
 import {
   listAllHyperlinks,
   deleteHyperlink as deleteHyperlinkInline,
@@ -458,6 +468,10 @@ export default function EditorScreen() {
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
   const [editorInitError, setEditorInitError] = useState<string | null>(null);
   const [editorOperationError, setEditorOperationError] = useState<string | null>(null);
+  // Auto-update state machine (Phase 1, Windows-only). Drives a status-bar
+  // indicator + UpdateAvailableDialog. See src/store/updater.ts for the
+  // UpdaterState union and lazy-loaded plugin wrappers.
+  const [updaterState, setUpdaterState] = useState<UpdaterState>({ kind: "idle" });
   // Command palette (Ctrl+Shift+P / Cmd+Shift+P). Boolean state — the command
   // list is rebuilt on every render so the palette always sees the latest
   // handler closures and store actions.
@@ -4852,6 +4866,31 @@ export default function EditorScreen() {
       case "data-filter-search":
         openFilterSearchDialog();
         break;
+      case "help-check-update":
+        // Manual check: ignore skip-version flag so user can re-see a dialog
+        // they previously dismissed.
+        void (async () => {
+          setUpdaterState({ kind: "checking" });
+          try {
+            const r = await checkForUpdate();
+            if (!r.available) {
+              setUpdaterState({ kind: "idle" });
+              setEditorOperationError("最新バージョンを使用しています。");
+              return;
+            }
+            setUpdaterState({
+              kind: "available",
+              version: r.version,
+              currentVersion: r.currentVersion,
+              notes: r.notes,
+              pubDate: r.pubDate,
+            });
+          } catch (e) {
+            setUpdaterState({ kind: "error", message: (e as Error).message });
+            setEditorOperationError(`更新の確認に失敗しました: ${(e as Error).message}`);
+          }
+        })();
+        break;
     }
   }, [
     openHyperlinkDialog,
@@ -5117,6 +5156,44 @@ export default function EditorScreen() {
     window.addEventListener("coco:menu-import-workspace-bundle", onImportBundle);
     return () => window.removeEventListener("coco:menu-import-workspace-bundle", onImportBundle);
   }, [openCoco]);
+
+  // Auto-update: startup check. Fires once on mount (empty deps) unless the
+  // user has disabled it in Settings (localStorage `coco.updater.checkOnLaunch
+  // === "false"`). The skip-version flag suppresses the modal for a version
+  // the user explicitly dismissed; manual check (help-check-update) ignores
+  // skip so users can opt back in.
+  useEffect(() => {
+    if (!isAutoCheckEnabled()) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await checkForUpdate();
+        if (cancelled) return;
+        if (!r.available) {
+          setUpdaterState({ kind: "idle" });
+          return;
+        }
+        if (getSkippedVersion() === r.version) {
+          setUpdaterState({ kind: "idle" });
+          return;
+        }
+        setUpdaterState({
+          kind: "available",
+          version: r.version,
+          currentVersion: r.currentVersion,
+          notes: r.notes,
+          pubDate: r.pubDate,
+        });
+      } catch (e) {
+        // Silent fail on first launch — log to console only. Don't show a
+        // toast since this is the *automatic* check and the user didn't ask
+        // for it. Manual check (help-check-update) surfaces errors.
+        // eslint-disable-next-line no-console
+        console.warn("[updater] startup check failed:", (e as Error).message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Sync the openX refs with the current useCallback identities every
   // render. The Univer context-menu commands (registered once at mount)
@@ -5742,6 +5819,27 @@ export default function EditorScreen() {
           mode={calcMode}
           onClick={() => setCalcOptionsOpen(true)}
         />
+        {/* Auto-update status (non-blocking). Hidden while idle. */}
+        {updaterState.kind === "checking" && (
+          <span className="status-bar__update" role="status" aria-live="polite">
+            · {t("status.update.checking")}
+          </span>
+        )}
+        {updaterState.kind === "downloading" && (
+          <span className="status-bar__update" role="status" aria-live="polite">
+            · {t("status.update.downloading")} {Math.round(updaterState.progress * 100)}%
+          </span>
+        )}
+        {updaterState.kind === "ready" && (
+          <button
+            type="button"
+            className="status-bar__update status-bar__update--ready"
+            onClick={() => { void relaunchApp(); }}
+            title={t("status.update.ready")}
+          >
+            · {t("status.update.ready")}
+          </button>
+        )}
       </div>
       {saveStatus === "save_failed" && (
         <SaveFailureDialog
@@ -6671,6 +6769,58 @@ export default function EditorScreen() {
             setFilterSearchDialog(null);
           }}
           onClose={() => setFilterSearchDialog(null)}
+        />
+      )}
+      {updaterState.kind === "available" && (
+        <UpdateAvailableDialog
+          currentVersion={updaterState.currentVersion}
+          newVersion={updaterState.version}
+          pubDate={updaterState.pubDate}
+          notes={updaterState.notes}
+          onUpdate={() => {
+            // Capture the target version so progress events can label it.
+            const targetVersion = updaterState.kind === "available"
+              ? updaterState.version
+              : "";
+            setUpdaterState({
+              kind: "downloading",
+              version: targetVersion,
+              progress: 0,
+              downloaded: 0,
+              total: null,
+            });
+            void (async () => {
+              try {
+                await downloadAndInstall(({ downloaded, total }) => {
+                  const progress = total && total > 0 ? downloaded / total : 0;
+                  setUpdaterState({
+                    kind: "downloading",
+                    version: targetVersion,
+                    progress,
+                    downloaded,
+                    total,
+                  });
+                });
+                setUpdaterState({ kind: "ready", version: targetVersion });
+                // Offer immediate relaunch; user can decline (status bar
+                // button stays visible until they restart manually).
+                if (window.confirm("更新を適用するため再起動しますか?")) {
+                  await relaunchApp();
+                }
+              } catch (e) {
+                setUpdaterState({ kind: "error", message: (e as Error).message });
+                setEditorOperationError(`更新のダウンロードに失敗しました: ${(e as Error).message}`);
+              }
+            })();
+          }}
+          onSkip={() => {
+            if (updaterState.kind === "available") {
+              persistSkipVersion(updaterState.version);
+            }
+            setUpdaterState({ kind: "idle" });
+          }}
+          onLater={() => setUpdaterState({ kind: "idle" })}
+          onClose={() => setUpdaterState({ kind: "idle" })}
         />
       )}
       {snapshotControlsState.open && (

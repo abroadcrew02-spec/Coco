@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { getLocale, setLocale, t, type Locale } from "../i18n/locale";
+import {
+  isAutoCheckEnabled,
+  setAutoCheckEnabled,
+  getLastCheckedAt,
+} from "../store/updater";
 import "./SettingsDialog.css";
 
 interface Props {
@@ -48,6 +53,17 @@ export default function SettingsDialog({ onClose }: Props) {
     useState<boolean>(suppressCsvPocWarning);
   const initialLocale = getLocale();
   const [pendingLocale, setPendingLocale] = useState<Locale>(initialLocale);
+  // Auto-update: read current localStorage state at dialog open; persist on apply.
+  const initialAutoUpdate = isAutoCheckEnabled();
+  const [pendingAutoUpdate, setPendingAutoUpdate] = useState<boolean>(initialAutoUpdate);
+  const [appVersion, setAppVersion] = useState<string>("");
+  useEffect(() => {
+    void import("@tauri-apps/api/app")
+      .then((m) => m.getVersion())
+      .then(setAppVersion)
+      .catch(() => undefined);
+  }, []);
+  const lastChecked = getLastCheckedAt();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -76,6 +92,9 @@ export default function SettingsDialog({ onClose }: Props) {
     if (pendingLocale !== initialLocale) {
       setLocale(pendingLocale);
     }
+    if (pendingAutoUpdate !== initialAutoUpdate) {
+      setAutoCheckEnabled(pendingAutoUpdate);
+    }
     onClose();
   };
 
@@ -84,7 +103,8 @@ export default function SettingsDialog({ onClose }: Props) {
     pendingEncoding !== csvEncoding ||
     pendingImportEncoding !== csvImportEncoding ||
     pendingSuppressPoc !== suppressCsvPocWarning ||
-    pendingLocale !== initialLocale;
+    pendingLocale !== initialLocale ||
+    pendingAutoUpdate !== initialAutoUpdate;
 
   return (
     <div className="settings-backdrop" onClick={onClose}>
@@ -206,6 +226,44 @@ export default function SettingsDialog({ onClose }: Props) {
                 <span>{t("settings.languageEn")}</span>
               </label>
             </div>
+          </details>
+          <details className="settings-section">
+            <summary className="settings-section-summary">
+              <h3>{t("settings.section.update")}</h3>
+            </summary>
+            <p className="settings-hint">
+              GitHub Releases から起動時に新バージョンを匿名チェックします。OFF にすると外部通信は行いません。
+            </p>
+            <label className="settings-radio">
+              <input
+                type="checkbox"
+                checked={pendingAutoUpdate}
+                onChange={(e) => setPendingAutoUpdate(e.target.checked)}
+              />
+              <span>{t("settings.autoUpdate.label")}</span>
+            </label>
+            <p className="settings-hint" style={{ marginTop: 8 }}>
+              {t("settings.autoUpdate.current")}: <strong>v{appVersion || "?"}</strong>
+              {lastChecked && (
+                <>
+                  {" · "}
+                  {t("settings.autoUpdate.lastChecked")}:{" "}
+                  {new Date(lastChecked).toLocaleString("ja-JP")}
+                </>
+              )}
+            </p>
+            <button
+              type="button"
+              className="settings-btn"
+              onClick={() => {
+                window.dispatchEvent(
+                  new CustomEvent("coco:editor-command", { detail: "help-check-update" }),
+                );
+                onClose();
+              }}
+            >
+              {t("settings.autoUpdate.checkNow")}
+            </button>
           </details>
         </div>
         <footer className="settings-footer">

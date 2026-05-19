@@ -168,7 +168,7 @@ gh release delete v0.1.1-rc1 --cleanup-tag --yes
   A: GitHub Releases ページ (`https://github.com/abroadcrew02-spec/Coco/releases`) から旧バージョンの `.exe` を手動ダウンロードして再インストールする。設定とユーザーデータはそのまま引き継がれる。
 
 - **Q: Windows のセキュリティ警告が出ます。**
-  A: SmartScreen の「詳細情報」リンクをクリック → 「実行」で進められる。Phase 2 で EV コードサイニング証明書を取得する予定で、それ以降は警告が出なくなる。
+  A: SmartScreen の「詳細情報」リンクをクリック → 「実行」で進められる。Phase 2 で EV コードサイニング証明書を取得する予定で、それ以降は警告が出なくなる。Windows コード署名証明書 (オプション): [docs/CODE_SIGNING.md](CODE_SIGNING.md) 参照。
 
 ## 9. トラブルシューティング
 

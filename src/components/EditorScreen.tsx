@@ -320,6 +320,7 @@ import {
   isAutoCheckEnabled,
   getSkippedVersion,
   skipVersion as persistSkipVersion,
+  isInRolloutBucket,
 } from "../store/updater";
 import {
   listAllHyperlinks,
@@ -4878,12 +4879,18 @@ export default function EditorScreen() {
               setEditorOperationError("最新バージョンを使用しています。");
               return;
             }
+            // Manual check: always show the dialog (ignore both skip-version
+            // and staged-rollout gate). User explicitly asked.
             setUpdaterState({
               kind: "available",
               version: r.version,
               currentVersion: r.currentVersion,
               notes: r.notes,
               pubDate: r.pubDate,
+              minRequiredVersion: r.minRequiredVersion,
+              isForced: r.isForced,
+              rollout: r.rollout,
+              channel: r.channel,
             });
           } catch (e) {
             setUpdaterState({ kind: "error", message: (e as Error).message });
@@ -5173,9 +5180,19 @@ export default function EditorScreen() {
           setUpdaterState({ kind: "idle" });
           return;
         }
-        if (getSkippedVersion() === r.version) {
-          setUpdaterState({ kind: "idle" });
-          return;
+        // Forced upgrades (min_required_version) override both the skip-version
+        // flag and the staged-rollout gate — security/CVE fixes must reach everyone.
+        if (!r.isForced) {
+          if (getSkippedVersion() === r.version) {
+            setUpdaterState({ kind: "idle" });
+            return;
+          }
+          if (!isInRolloutBucket(r.rollout)) {
+            // User isn't in this rollout bucket yet — silently skip and wait
+            // for either a higher percent or a manual check from Settings.
+            setUpdaterState({ kind: "idle" });
+            return;
+          }
         }
         setUpdaterState({
           kind: "available",
@@ -5183,6 +5200,10 @@ export default function EditorScreen() {
           currentVersion: r.currentVersion,
           notes: r.notes,
           pubDate: r.pubDate,
+          minRequiredVersion: r.minRequiredVersion,
+          isForced: r.isForced,
+          rollout: r.rollout,
+          channel: r.channel,
         });
       } catch (e) {
         // Silent fail on first launch — log to console only. Don't show a
@@ -6777,6 +6798,7 @@ export default function EditorScreen() {
           newVersion={updaterState.version}
           pubDate={updaterState.pubDate}
           notes={updaterState.notes}
+          isForced={updaterState.isForced}
           onUpdate={() => {
             // Capture the target version so progress events can label it.
             const targetVersion = updaterState.kind === "available"

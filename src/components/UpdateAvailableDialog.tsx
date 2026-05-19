@@ -1,16 +1,23 @@
 import { useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
 import "./UpdateAvailableDialog.css";
 
 interface Props {
   currentVersion: string;
   newVersion: string;
   pubDate: string | null;
-  /** Plain-text release notes. Markdown rendering arrives in Phase 2. */
+  /** Markdown release notes. Rendered via react-markdown (Phase 2). */
   notes: string;
   onUpdate: () => void;
   onSkip: () => void;
   onLater: () => void;
   onClose: () => void;
+  /**
+   * When true, the update is mandatory: Skip + Later buttons are hidden, the
+   * dialog cannot be dismissed via Escape or backdrop click, and a prominent
+   * security banner is shown. Defaults to false (Phase 1 behavior).
+   */
+  isForced?: boolean;
 }
 
 function formatPubDate(raw: string | null): string {
@@ -33,11 +40,14 @@ export default function UpdateAvailableDialog({
   onSkip,
   onLater,
   onClose,
+  isForced = false,
 }: Props) {
   const updateBtnRef = useRef<HTMLButtonElement | null>(null);
 
-  // Esc closes ("Later" semantics handled by the parent via onClose).
+  // Esc closes ("Later" semantics handled by the parent via onClose), unless
+  // the update is forced — in which case the user must take action.
   useEffect(() => {
+    if (isForced) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -46,7 +56,7 @@ export default function UpdateAvailableDialog({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, isForced]);
 
   // Basic focus management: primary action gets focus on mount so keyboard
   // users can press Enter to update without tabbing through the modal.
@@ -54,8 +64,13 @@ export default function UpdateAvailableDialog({
     updateBtnRef.current?.focus();
   }, []);
 
+  const handleBackdropClick = () => {
+    if (isForced) return;
+    onClose();
+  };
+
   return (
-    <div className="uad-backdrop" onClick={onClose}>
+    <div className="uad-backdrop" onClick={handleBackdropClick}>
       <div
         className="uad-modal"
         role="dialog"
@@ -67,16 +82,23 @@ export default function UpdateAvailableDialog({
           <h2 id="uad-title" className="uad-title">
             Coco v{newVersion} が利用可能です
           </h2>
-          <button
-            type="button"
-            className="uad-close"
-            onClick={onClose}
-            aria-label="閉じる"
-          >
-            ×
-          </button>
+          {!isForced && (
+            <button
+              type="button"
+              className="uad-close"
+              onClick={onClose}
+              aria-label="閉じる"
+            >
+              ×
+            </button>
+          )}
         </header>
         <div className="uad-body">
+          {isForced && (
+            <div className="uad-forced-banner" role="alert">
+              ⚠ このバージョンの更新は必須です (セキュリティ修正)
+            </div>
+          )}
           <p className="uad-meta">
             <span className="uad-meta-label">現在のバージョン:</span>
             <span className="uad-meta-value">v{currentVersion}</span>
@@ -88,21 +110,44 @@ export default function UpdateAvailableDialog({
           <hr className="uad-divider" />
           <div className="uad-notes-wrap">
             <span className="uad-field-label">リリースノート</span>
-            <pre className="uad-notes">{notes || "(リリースノートはありません)"}</pre>
+            <div className="uad-notes-md">
+              {notes ? (
+                <ReactMarkdown
+                  skipHtml
+                  components={{
+                    a: ({ node: _node, ...props }) => (
+                      <a
+                        {...props}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      />
+                    ),
+                  }}
+                >
+                  {notes}
+                </ReactMarkdown>
+              ) : (
+                <p className="uad-notes-empty">(リリースノートはありません)</p>
+              )}
+            </div>
           </div>
         </div>
         <footer className="uad-footer">
-          <button
-            type="button"
-            className="uad-btn uad-btn--danger"
-            onClick={onSkip}
-          >
-            このバージョンをスキップ
-          </button>
-          <div className="uad-footer-right">
-            <button type="button" className="uad-btn" onClick={onLater}>
-              後で
+          {!isForced && (
+            <button
+              type="button"
+              className="uad-btn uad-btn--danger"
+              onClick={onSkip}
+            >
+              このバージョンをスキップ
             </button>
+          )}
+          <div className="uad-footer-right">
+            {!isForced && (
+              <button type="button" className="uad-btn" onClick={onLater}>
+                後で
+              </button>
+            )}
             <button
               ref={updateBtnRef}
               type="button"

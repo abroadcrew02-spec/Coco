@@ -43,11 +43,50 @@ jobs:
       - name: Install npm deps
         run: npm ci
 
+      - name: Install Windows code-signing certificate (optional)
+        if: ${{ secrets.WINDOWS_CERT_BASE64 != '' }}
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          Write-Host "Installing code-signing cert into CurrentUser\My"
+          $bytes = [System.Convert]::FromBase64String($env:WINDOWS_CERT_BASE64)
+          $tmp = Join-Path $env:RUNNER_TEMP "coco-signing.pfx"
+          [System.IO.File]::WriteAllBytes($tmp, $bytes)
+          $secure = ConvertTo-SecureString -String $env:WINDOWS_CERT_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath $tmp -Password $secure -CertStoreLocation Cert:\CurrentUser\My
+          Remove-Item $tmp
+          $thumb = $cert.Thumbprint
+          Write-Host "Imported cert thumbprint: $thumb"
+          "TAURI_WINDOWS_SIGN_THUMBPRINT=$thumb" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Tauri build (signed)
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_KEY_PASSWORD }}
         run: npm run tauri build
+
+      - name: Sign Windows artifacts (optional)
+        if: ${{ env.TAURI_WINDOWS_SIGN_THUMBPRINT != '' }}
+        shell: pwsh
+        run: |
+          $thumb = $env:TAURI_WINDOWS_SIGN_THUMBPRINT
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue | Select-Object -Last 1).FullName
+          if (-not $signtool) {
+            Write-Error "signtool.exe not found in Windows Kits; cannot sign artifacts"
+            exit 1
+          }
+          Write-Host "Using signtool: $signtool"
+          $targets = Get-ChildItem "src-tauri/target/release/bundle" -Recurse -Include *.exe,*.msi -ErrorAction SilentlyContinue
+          foreach ($f in $targets) {
+            Write-Host "Signing $($f.FullName)"
+            & $signtool sign /sha1 $thumb /tr "http://timestamp.digicert.com" /td sha256 /fd sha256 $f.FullName
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "signtool failed for $($f.FullName)"
+              exit $LASTEXITCODE
+            }
+          }
 
       - name: Generate latest.json
         run: node scripts/build-latest-json.mjs

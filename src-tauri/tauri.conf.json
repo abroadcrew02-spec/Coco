@@ -35,6 +35,12 @@
     ],
     "macOS": {
       "minimumSystemVersion": "12.0"
+    },
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "wix": { "language": "en-US" },
+      "nsis": { "displayLanguageSelector": false, "languages": ["English", "Japanese"] }
     }
   },
   "plugins": {

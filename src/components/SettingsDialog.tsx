@@ -2,9 +2,12 @@ import { useEffect, useState } from "react";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { getLocale, setLocale, t, type Locale } from "../i18n/locale";
 import {
+  type UpdateChannel,
   isAutoCheckEnabled,
   setAutoCheckEnabled,
   getLastCheckedAt,
+  getChannel,
+  setChannel as persistChannel,
 } from "../store/updater";
 import "./SettingsDialog.css";
 
@@ -56,6 +59,8 @@ export default function SettingsDialog({ onClose }: Props) {
   // Auto-update: read current localStorage state at dialog open; persist on apply.
   const initialAutoUpdate = isAutoCheckEnabled();
   const [pendingAutoUpdate, setPendingAutoUpdate] = useState<boolean>(initialAutoUpdate);
+  const initialChannel = getChannel();
+  const [pendingChannel, setPendingChannel] = useState<UpdateChannel>(initialChannel);
   const [appVersion, setAppVersion] = useState<string>("");
   useEffect(() => {
     void import("@tauri-apps/api/app")
@@ -95,6 +100,9 @@ export default function SettingsDialog({ onClose }: Props) {
     if (pendingAutoUpdate !== initialAutoUpdate) {
       setAutoCheckEnabled(pendingAutoUpdate);
     }
+    if (pendingChannel !== initialChannel) {
+      persistChannel(pendingChannel);
+    }
     onClose();
   };
 
@@ -104,7 +112,8 @@ export default function SettingsDialog({ onClose }: Props) {
     pendingImportEncoding !== csvImportEncoding ||
     pendingSuppressPoc !== suppressCsvPocWarning ||
     pendingLocale !== initialLocale ||
-    pendingAutoUpdate !== initialAutoUpdate;
+    pendingAutoUpdate !== initialAutoUpdate ||
+    pendingChannel !== initialChannel;
 
   return (
     <div className="settings-backdrop" onClick={onClose}>
@@ -242,6 +251,29 @@ export default function SettingsDialog({ onClose }: Props) {
               />
               <span>{t("settings.autoUpdate.label")}</span>
             </label>
+            <p className="settings-hint" style={{ marginTop: 12 }}>
+              {t("settings.autoUpdate.channel")}
+            </p>
+            <div className="settings-radio-group">
+              <label className="settings-radio">
+                <input
+                  type="radio"
+                  name="updater-channel"
+                  checked={pendingChannel === "stable"}
+                  onChange={() => setPendingChannel("stable")}
+                />
+                <span>{t("settings.autoUpdate.channel.stable")}</span>
+              </label>
+              <label className="settings-radio">
+                <input
+                  type="radio"
+                  name="updater-channel"
+                  checked={pendingChannel === "beta"}
+                  onChange={() => setPendingChannel("beta")}
+                />
+                <span>{t("settings.autoUpdate.channel.beta")}</span>
+              </label>
+            </div>
             <p className="settings-hint" style={{ marginTop: 8 }}>
               {t("settings.autoUpdate.current")}: <strong>v{appVersion || "?"}</strong>
               {lastChecked && (

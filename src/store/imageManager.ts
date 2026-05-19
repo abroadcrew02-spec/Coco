@@ -354,17 +354,13 @@ export async function exportImageToFile(
 ): Promise<void> {
   if (!targetPath) throw new Error("EMPTY_TARGET_PATH");
   if (!bytesBase64) throw new Error("EMPTY_PAYLOAD");
-  // Decode base64 → Uint8Array. atob fails loudly on malformed input which
-  // is what we want — caller surfaces the rejection as an error toast.
-  const bin = atob(bytesBase64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  // Tauri 2 fs plugin expects `contents` as either a byte array (JSON
-  // serialised) or a TypedArray via the binary channel. Plain `Array.from`
-  // is the broadest-compat shape — the invoke layer auto-wraps it.
+  // Pass the base64 string straight to the backend — the Rust command
+  // (write_file_bytes_base64) re-decodes and verifies the magic bytes,
+  // matching the read_file_bytes_base64 protections. Avoids dragging in
+  // @tauri-apps/plugin-fs just for one binary write.
   const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("plugin:fs|write_file", {
+  await invoke("write_file_bytes_base64", {
     path: targetPath,
-    contents: Array.from(bytes),
+    base64: bytesBase64,
   });
 }

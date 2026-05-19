@@ -290,6 +290,7 @@ import {
   listAllImages,
   deleteImage as deleteImageInSnapshot,
   bulkDeleteImagesOnSheet,
+  exportImageToFile,
 } from "../store/imageManager";
 import TemplatesGalleryDialog from "./TemplatesGalleryDialog";
 import { buildTemplateSnapshot } from "../store/templates";
@@ -687,6 +688,11 @@ export default function EditorScreen() {
   const [csvWizard, setCsvWizard] = useState<{ filePath: string; previewBytes: Uint8Array } | null>(null);
   // Wave 9
   const [goToOpen, setGoToOpen] = useState(false);
+  // #116-followup: toolbar-embedded NavigationBox needs reactive active-cell
+  // tracking. Same 300ms poll pattern used by FormulaTracePanel since
+  // Univer 0.5.x's selection observable API isn't stable.
+  const [navActiveSheetName, setNavActiveSheetName] = useState("Sheet1");
+  const [navActiveCellRef, setNavActiveCellRef] = useState("A1");
   const [sheetImportOpen, setSheetImportOpen] = useState(false);
   const [bookmarksPanelOpen, setBookmarksPanelOpen] = useState(false);
   // #109: per-workbook session id so bookmarks for unsaved workbooks don't
@@ -4984,6 +4990,52 @@ export default function EditorScreen() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
+  // Poll Univer's active selection for the toolbar NavigationBox display.
+  useEffect(() => {
+    const tick = () => {
+      try {
+        const wb = fUniverRef.current?.getActiveWorkbook();
+        const sheet = wb?.getActiveSheet();
+        const r = sheet?.getSelection()?.getActiveRange();
+        if (!sheet || !r) return;
+        setNavActiveSheetName(sheet.getSheetName());
+        const startCol = r.getColumn();
+        const startRow = r.getRow();
+        const width = (r as unknown as { getWidth?: () => number }).getWidth?.() ?? 1;
+        const height = (r as unknown as { getHeight?: () => number }).getHeight?.() ?? 1;
+        const cellA1 = (() => {
+          let n = startCol + 1;
+          let out = "";
+          while (n > 0) {
+            const rem = (n - 1) % 26;
+            out = String.fromCharCode(65 + rem) + out;
+            n = Math.floor((n - 1) / 26);
+          }
+          return `${out}${startRow + 1}`;
+        })();
+        if (width === 1 && height === 1) {
+          setNavActiveCellRef(cellA1);
+        } else {
+          const endCol = startCol + width - 1;
+          const endRow = startRow + height - 1;
+          let n = endCol + 1;
+          let endCellLetters = "";
+          while (n > 0) {
+            const rem = (n - 1) % 26;
+            endCellLetters = String.fromCharCode(65 + rem) + endCellLetters;
+            n = Math.floor((n - 1) / 26);
+          }
+          setNavActiveCellRef(`${cellA1}:${endCellLetters}${endRow + 1}`);
+        }
+      } catch {
+        // best-effort
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 300);
+    return () => window.clearInterval(id);
+  }, []);
+
   // #107: bind F9 / Shift+F9 to the recalc events so the keyboard shortcut
   // documented in the menu actually fires. Tab/textarea-focus is ignored
   // since recalc is workbook-scope.
@@ -5473,6 +5525,14 @@ export default function EditorScreen() {
           >
             {fileLabel}
           </span>
+          {/* Excel-like Name Box: persistent toolbar widget for cell/range/
+              named-range navigation (Ctrl+G modal still available as fallback). */}
+          <NavigationBox
+            activeSheetName={navActiveSheetName}
+            activeCellRef={navActiveCellRef}
+            availableNamedRanges={readNamedRanges().map((r) => ({ name: r.name, target: r.formula }))}
+            onNavigate={handleGoToNavigate}
+          />
         </div>
       </div>
       {sheetPicker && (
@@ -6453,8 +6513,23 @@ export default function EditorScreen() {
               // best-effort
             }
           }}
-          onExport={() => {
-            setEditorOperationError("画像書き出しは未実装です (画像はバイナリで保全されています)。");
+          onExport={(image) => {
+            void (async () => {
+              try {
+                const { save: saveDlg } = await import("@tauri-apps/plugin-dialog");
+                const ext = (image.name.split(".").pop() ?? "png").toLowerCase();
+                const chosen = await saveDlg({
+                  title: "画像を書き出し",
+                  defaultPath: image.name,
+                  filters: [{ name: "Image", extensions: [ext] }],
+                });
+                if (!chosen) return;
+                await exportImageToFile(image.name, image.bytesBase64, chosen);
+                setEditorOperationError(`画像を書き出しました: ${chosen}`);
+              } catch (e) {
+                setEditorOperationError(`画像書き出しに失敗しました: ${(e as Error).message}`);
+              }
+            })();
           }}
           onClose={() => setImageManagerOpen(false)}
         />

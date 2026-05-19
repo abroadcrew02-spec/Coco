@@ -74,11 +74,19 @@ interface CellData {
   s?: string;
 }
 
+interface MergeEntry {
+  startRow?: number;
+  endRow?: number;
+  startCol?: number;
+  endCol?: number;
+}
+
 interface SheetSnapshot {
   name?: string;
   cellData?: Record<string, Record<string, CellData> | undefined>;
   columnData?: Record<string, { w?: number } | undefined>;
   rowData?: Record<string, { h?: number } | undefined>;
+  mergeData?: MergeEntry[];
   _pageSetup?: { header?: string; footer?: string };
 }
 
@@ -162,8 +170,17 @@ function renderCell(
   out: string[],
   cell: CellData | undefined,
   styles: Record<string, StyleObject | undefined> | undefined,
+  colspan?: number,
+  rowspan?: number,
 ): void {
   if (!cell) {
+    if ((colspan && colspan > 1) || (rowspan && rowspan > 1)) {
+      out.push("<td");
+      if (colspan && colspan > 1) out.push(` colspan="${colspan}"`);
+      if (rowspan && rowspan > 1) out.push(` rowspan="${rowspan}"`);
+      out.push("></td>");
+      return;
+    }
     out.push("<td></td>");
     return;
   }
@@ -223,6 +240,8 @@ function renderCell(
   }
 
   out.push("<td");
+  if (colspan && colspan > 1) out.push(` colspan="${colspan}"`);
+  if (rowspan && rowspan > 1) out.push(` rowspan="${rowspan}"`);
   if (styleStr) {
     out.push(` style="${styleStr}"`);
   }
@@ -233,6 +252,47 @@ function renderCell(
   if (wrapItalic) out.push("</i>");
   if (wrapBold) out.push("</b>");
   out.push("</td>");
+}
+
+// Build a merge lookup keyed by `r,c`. Each (r,c) cell that's a merge anchor
+// (top-left) maps to {anchor: true, colspan, rowspan}. Every other cell
+// inside a merge rectangle maps to {anchor: false}. Cells outside any merge
+// are absent. Tolerates malformed entries (non-integer indices, inverted
+// rects) by silently dropping them — a hostile snapshot must not crash
+// print preview.
+type MergeMapEntry = { anchor: true; colspan: number; rowspan: number } | { anchor: false };
+
+function buildMergeMap(merges: MergeEntry[] | undefined): Map<string, MergeMapEntry> {
+  const map = new Map<string, MergeMapEntry>();
+  if (!Array.isArray(merges)) return map;
+  for (const m of merges) {
+    if (!m || typeof m !== "object") continue;
+    const sr = m.startRow;
+    const er = m.endRow;
+    const sc = m.startCol;
+    const ec = m.endCol;
+    if (!Number.isInteger(sr) || !Number.isInteger(er) || !Number.isInteger(sc) || !Number.isInteger(ec)) continue;
+    if (sr! < 0 || sc! < 0 || er! < sr! || ec! < sc!) continue;
+    const rowspan = (er as number) - (sr as number) + 1;
+    const colspan = (ec as number) - (sc as number) + 1;
+    for (let r = sr as number; r <= (er as number); r++) {
+      for (let c = sc as number; c <= (ec as number); c++) {
+        if (r === sr && c === sc) {
+          // Don't overwrite an existing anchor — if a later merge covers the
+          // same anchor, keep the first one (Excel's last-write-wins is hard
+          // to reason about; first-wins is deterministic and safe).
+          if (!map.has(`${r},${c}`)) {
+            map.set(`${r},${c}`, { anchor: true, colspan, rowspan });
+          }
+        } else {
+          if (!map.has(`${r},${c}`)) {
+            map.set(`${r},${c}`, { anchor: false });
+          }
+        }
+      }
+    }
+  }
+  return map;
 }
 
 function renderSheetTable(
@@ -267,6 +327,10 @@ function renderSheetTable(
     out.push("</colgroup>\n");
   }
 
+  // Build merge lookup so the cell loop can emit colspan/rowspan on anchors
+  // and skip the covered cells. Mirrors what Excel's print preview shows.
+  const mergeMap = buildMergeMap(sheet.mergeData);
+
   out.push("<tbody>\n");
   for (let r = 0; r < rows; r++) {
     const h = sheet.rowData?.[String(r)]?.h;
@@ -278,7 +342,17 @@ function renderSheetTable(
     }
     const rowObj = sheet.cellData?.[String(r)];
     for (let c = 0; c < cols; c++) {
-      renderCell(out, rowObj?.[String(c)], styles);
+      const me = mergeMap.get(`${r},${c}`);
+      if (me && !me.anchor) {
+        // Covered by a merge but not the anchor — skip emitting a <td> so the
+        // anchor's colspan/rowspan can claim this slot.
+        continue;
+      }
+      if (me && me.anchor) {
+        renderCell(out, rowObj?.[String(c)], styles, me.colspan, me.rowspan);
+      } else {
+        renderCell(out, rowObj?.[String(c)], styles);
+      }
     }
     out.push("</tr>\n");
   }

@@ -179,12 +179,28 @@ function groupKey(value: unknown): string {
 type SheetSnapshot = {
   cellData?: Record<string, Record<string, unknown> | undefined>;
   rowData?: Record<string, unknown>;
+  mergeData?: unknown[];
+  _conditionalFormatting?: unknown[];
+  _dataValidations?: unknown[];
+  _hyperlinks?: unknown[];
+  _comments?: unknown[];
+  _sparklines?: unknown[];
+  _outlineRows?: Array<{ start: number; end: number; level: number; collapsed?: boolean }>;
 };
 
 /**
- * Compute new cellData with subtotal + grand-total rows inserted. Pure: the
- * input sheet object is never mutated. Returns the *full* new cellData map
- * so the caller can assign it directly.
+ * Compute new cellData with subtotal + grand-total rows inserted. Returns
+ * the *full* new cellData map so the caller can assign it directly.
+ *
+ * Side effects (Bug 2 fix): when `insertedCount > 0`, the helper also shifts
+ * every row-indexed structure on `sheet` (mergeData / _conditionalFormatting
+ * / _dataValidations / _hyperlinks / _comments / _sparklines / _outlineRows
+ * / rowData) down by `insertedCount` for any entry whose row was below the
+ * subtotal range. Without this, adjacent CF rules, merges, comments,
+ * hyperlinks etc. silently mis-target after the insert. The mutation is
+ * applied directly on `sheet` because the caller already re-assigns
+ * `sheet.cellData = result.newCellData` immediately after — so the input is
+ * already understood to be writable.
  *
  * Algorithm:
  *  1. Clone the rows above the range as-is.
@@ -195,6 +211,7 @@ type SheetSnapshot = {
  *     total summary across all detail rows.
  *  4. Append any rows below the range unchanged, shifted down by the total
  *     number of inserted summary rows.
+ *  5. Shift all sheet-level row-indexed structures (see "Side effects").
  *
  * When `targetCols` is empty, no aggregated values are written but the
  * summary rows are still inserted so the structure remains visible.
@@ -258,7 +275,6 @@ export function applySubtotals(
   // mutated band (header included if hasHeader is false, since the header
   // row's content is preserved verbatim above).
   const out: Record<string, Record<string, unknown>> = {};
-  const sourceMaxRow = computeMaxRow(cellData);
   // 1) Rows above the affected region (and the header row when hasHeader).
   const aboveCutoff = hasHeader ? r1 + 1 : r1;
   for (const key of Object.keys(cellData)) {
@@ -358,13 +374,286 @@ export function applySubtotals(
     out[String(r + insertedCount)] = shallowCloneRow(row);
   }
 
-  const newRowCount = Math.max(sourceMaxRow + 1 + insertedCount, grandRow + 1);
+  // Bug 1 fix: rather than rely on `sourceMaxRow + 1 + insertedCount` (which
+  // undercounts when `sourceMaxRow` lived inside the replaced band), derive
+  // the new row count from the actual keys of the result. The grand-total row
+  // is always the bottom of the inserted summary block, so we also take the
+  // max against `grandRow + 1` for the empty-below case.
+  const outMaxRow = computeMaxRow(out);
+  const newRowCount = Math.max(outMaxRow + 1, grandRow + 1);
+
+  // Bug 2 fix: shift every row-indexed sheet structure that lived below the
+  // affected range so adjacent CF rules / merges / hyperlinks / comments /
+  // sparklines / outline groups / row-data don't dangle after the insert.
+  // The shift is applied directly to `sheet` because the caller already
+  // re-assigns `sheet.cellData = result.newCellData` immediately after this
+  // call returns.
+  if (sheet && insertedCount > 0) {
+    shiftSheetRowsBelow(sheet as Record<string, unknown>, r2 + 1, insertedCount);
+  }
 
   return {
     newCellData: out,
     newRowCount,
     outlineGroups: addOutline ? outlineGroups : undefined,
   };
+}
+
+/**
+ * Shift every row-indexed structure on a sheet down by `delta` when the row
+ * is at or below `fromRow`. Mirrors what Excel does when rows are inserted:
+ * merges, conditional-formatting sqrefs, data-validation sqrefs, hyperlinks,
+ * comments, sparklines, outline groups, and the `rowData` map all need to be
+ * kept in sync with the new row positions, otherwise the user sees CF
+ * rules mis-target, merges silently dangle, comments stick to the wrong cell,
+ * etc.
+ *
+ * The function is intentionally non-mutating at the field level: it rebuilds
+ * each affected array/map so the caller can freely assign without worrying
+ * about aliasing. Returns void; mutations are applied in-place on `sheet`
+ * because that mirrors how `applySubtotals` already writes back `cellData`.
+ *
+ * Test-case expectations (kept here so behavior is auditable without unit
+ * tests):
+ *
+ *   // sheet with merge {2,3,0,1} (rows 2-3, cols A-B) + subtotal range
+ *   // {0,0,5,5} inserts 2 rows
+ *   // → merge unchanged (rows 2-3 are inside the range and get replaced)
+ *   // → merge at {10,11} becomes {12,13}
+ *
+ *   // sheet with CF sqref "A8:A20" and 3 rows inserted at fromRow=6
+ *   // → sqref becomes "A11:A23"
+ *
+ *   // sheet with hyperlink at "B12" and 2 rows inserted at fromRow=8
+ *   // → hyperlink moves to "B14"
+ *
+ *   // sheet with outline group {start:8, end:10} and 2 rows inserted at
+ *   // fromRow=7 → outline becomes {start:10, end:12}
+ *
+ * @param sheet Mutable sheet snapshot object (mergeData, _conditionalFormatting,
+ *   _dataValidations, _hyperlinks, _comments, _sparklines, _outlineRows,
+ *   rowData are inspected/updated).
+ * @param fromRow 0-based row index — rows with index >= fromRow shift down.
+ * @param delta Number of rows to insert (must be positive to insert; pass a
+ *   negative number to shift up, used by removal flows).
+ */
+export function shiftSheetRowsBelow(
+  sheet: Record<string, unknown> | undefined | null,
+  fromRow: number,
+  delta: number,
+): void {
+  if (!sheet || delta === 0) return;
+  if (!Number.isInteger(fromRow) || fromRow < 0) return;
+  if (!Number.isInteger(delta)) return;
+
+  // 1) mergeData[]: array of { startRow, endRow, startCol, endCol }.
+  const merges = (sheet as { mergeData?: unknown }).mergeData;
+  if (Array.isArray(merges)) {
+    const out: unknown[] = [];
+    for (const m of merges) {
+      if (!m || typeof m !== "object") {
+        out.push(m);
+        continue;
+      }
+      const obj = m as { startRow?: unknown; endRow?: unknown; startCol?: unknown; endCol?: unknown };
+      const startRow = typeof obj.startRow === "number" ? obj.startRow : NaN;
+      const endRow = typeof obj.endRow === "number" ? obj.endRow : NaN;
+      if (!Number.isFinite(startRow) || !Number.isFinite(endRow)) {
+        out.push(m);
+        continue;
+      }
+      // Only shift merges whose top is at/below fromRow. Merges fully above
+      // fromRow are unaffected; merges that straddle fromRow are also left
+      // untouched (Excel's behavior — straddled merges are typically inside
+      // the replaced region and were either preserved verbatim or removed
+      // by the caller before invoking us).
+      if (startRow >= fromRow) {
+        out.push({ ...obj, startRow: startRow + delta, endRow: endRow + delta });
+      } else {
+        out.push(m);
+      }
+    }
+    (sheet as { mergeData?: unknown[] }).mergeData = out;
+  }
+
+  // 2) _conditionalFormatting[]: each entry has a `sqref` string with one or
+  // more space-separated A1 tokens. Rewrite each token.
+  const cf = (sheet as { _conditionalFormatting?: unknown }).
+    _conditionalFormatting;
+  if (Array.isArray(cf)) {
+    for (const entry of cf) {
+      if (!entry || typeof entry !== "object") continue;
+      const obj = entry as { sqref?: unknown };
+      if (typeof obj.sqref !== "string") continue;
+      obj.sqref = shiftSqrefRows(obj.sqref, fromRow, delta);
+    }
+  }
+
+  // 3) _dataValidations[]: same shape — `sqref` string with A1 tokens.
+  const dv = (sheet as { _dataValidations?: unknown })._dataValidations;
+  if (Array.isArray(dv)) {
+    for (const entry of dv) {
+      if (!entry || typeof entry !== "object") continue;
+      const obj = entry as { sqref?: unknown };
+      if (typeof obj.sqref !== "string") continue;
+      obj.sqref = shiftSqrefRows(obj.sqref, fromRow, delta);
+    }
+  }
+
+  // 4) _hyperlinks[]: `cell` is a single A1 cell ref.
+  const hyperlinks = (sheet as { _hyperlinks?: unknown })._hyperlinks;
+  if (Array.isArray(hyperlinks)) {
+    for (const entry of hyperlinks) {
+      if (!entry || typeof entry !== "object") continue;
+      const obj = entry as { cell?: unknown };
+      if (typeof obj.cell !== "string") continue;
+      obj.cell = shiftA1CellRow(obj.cell, fromRow, delta);
+    }
+  }
+
+  // 5) _comments[]: `cell` or `cellRef` is a single A1 cell ref.
+  const comments = (sheet as { _comments?: unknown })._comments;
+  if (Array.isArray(comments)) {
+    for (const entry of comments) {
+      if (!entry || typeof entry !== "object") continue;
+      const obj = entry as { cell?: unknown; cellRef?: unknown };
+      if (typeof obj.cell === "string") {
+        obj.cell = shiftA1CellRow(obj.cell, fromRow, delta);
+      }
+      if (typeof obj.cellRef === "string") {
+        obj.cellRef = shiftA1CellRow(obj.cellRef, fromRow, delta);
+      }
+    }
+  }
+
+  // 6) _sparklines[]: `cell` (anchor) is a single A1 cell ref; `sourceRange`
+  // can be a range, optionally sheet-qualified (`Sheet1!A5:C5`).
+  const sparklines = (sheet as { _sparklines?: unknown })._sparklines;
+  if (Array.isArray(sparklines)) {
+    for (const entry of sparklines) {
+      if (!entry || typeof entry !== "object") continue;
+      const obj = entry as { cell?: unknown; sourceRange?: unknown };
+      if (typeof obj.cell === "string") {
+        obj.cell = shiftA1CellRow(obj.cell, fromRow, delta);
+      }
+      if (typeof obj.sourceRange === "string") {
+        obj.sourceRange = shiftA1RangeRow(obj.sourceRange, fromRow, delta);
+      }
+    }
+  }
+
+  // 7) _outlineRows[]: array of { start, end, level, collapsed? }. Shift any
+  // group whose start is at/below fromRow.
+  const outline = (sheet as { _outlineRows?: unknown })._outlineRows;
+  if (Array.isArray(outline)) {
+    for (const entry of outline) {
+      if (!entry || typeof entry !== "object") continue;
+      const obj = entry as { start?: unknown; end?: unknown };
+      const start = typeof obj.start === "number" ? obj.start : NaN;
+      const end = typeof obj.end === "number" ? obj.end : NaN;
+      if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+      if (start >= fromRow) {
+        obj.start = start + delta;
+        obj.end = end + delta;
+      }
+    }
+  }
+
+  // 8) rowData map (Record<rowIndex, {...}>): shift keys at/below fromRow.
+  const rowData = (sheet as { rowData?: unknown }).rowData;
+  if (rowData && typeof rowData === "object" && !Array.isArray(rowData)) {
+    const src = rowData as Record<string, unknown>;
+    const next: Record<string, unknown> = {};
+    for (const k of Object.keys(src)) {
+      const n = Number(k);
+      if (!Number.isFinite(n)) {
+        next[k] = src[k];
+        continue;
+      }
+      if (n >= fromRow) {
+        next[String(n + delta)] = src[k];
+      } else {
+        next[k] = src[k];
+      }
+    }
+    (sheet as { rowData?: Record<string, unknown> }).rowData = next;
+  }
+}
+
+// Parse a single A1 column-letter run into a 0-based column index. Returns
+// -1 on malformed input. Kept local to subtotals.ts so the row-shift helpers
+// don't acquire a hard dependency on dataValidation.ts.
+function colLettersToIndexLocal(letters: string): number {
+  const up = letters.toUpperCase();
+  let n = 0;
+  for (let i = 0; i < up.length; i++) {
+    const c = up.charCodeAt(i);
+    if (c < 65 || c > 90) return -1;
+    n = n * 26 + (c - 64);
+  }
+  return n - 1;
+}
+
+// Rewrite a single A1 cell ref (e.g. "B12") so its row shifts by `delta` if
+// the original row is at/below `fromRow`. Returns the input unchanged if
+// parsing fails — defense-in-depth so a malformed snapshot doesn't crash.
+function shiftA1CellRow(ref: string, fromRow: number, delta: number): string {
+  const m = /^(\$?)([A-Za-z]+)(\$?)(\d+)$/.exec(ref.trim());
+  if (!m) return ref;
+  const row = parseInt(m[4], 10) - 1;
+  if (!Number.isFinite(row) || row < 0) return ref;
+  if (row < fromRow) return ref;
+  const newRow = row + delta;
+  if (newRow < 0) return ref;
+  return `${m[1]}${m[2]}${m[3]}${newRow + 1}`;
+}
+
+// Rewrite a single A1 range token (e.g. "A1:B10", "B12", "Sheet1!A5:C5") so
+// any row inside the token shifts by `delta` if it was at/below `fromRow`.
+function shiftA1RangeToken(token: string, fromRow: number, delta: number): string {
+  const trimmed = token.trim();
+  if (!trimmed) return token;
+  // Strip optional sheet prefix.
+  let sheetPrefix = "";
+  let body = trimmed;
+  const bangIdx = body.indexOf("!");
+  if (bangIdx >= 0) {
+    sheetPrefix = body.slice(0, bangIdx + 1);
+    body = body.slice(bangIdx + 1);
+  }
+  const m = /^(\$?)([A-Za-z]+)(\$?)(\d+)(?::(\$?)([A-Za-z]+)(\$?)(\d+))?$/.exec(body);
+  if (!m) return token;
+  const r1 = parseInt(m[4], 10) - 1;
+  if (!Number.isFinite(r1) || r1 < 0) return token;
+  const c1Letters = m[2];
+  // Validate column letters (we won't shift columns but we want to reject
+  // malformed tokens early so we don't emit a garbled rewrite).
+  if (colLettersToIndexLocal(c1Letters) < 0) return token;
+  const newR1 = r1 >= fromRow ? Math.max(0, r1 + delta) : r1;
+  if (m[5] === undefined) {
+    return `${sheetPrefix}${m[1]}${c1Letters}${m[3]}${newR1 + 1}`;
+  }
+  const r2 = parseInt(m[8], 10) - 1;
+  if (!Number.isFinite(r2) || r2 < 0) return token;
+  const c2Letters = m[6];
+  if (colLettersToIndexLocal(c2Letters) < 0) return token;
+  const newR2 = r2 >= fromRow ? Math.max(0, r2 + delta) : r2;
+  return `${sheetPrefix}${m[1]}${c1Letters}${m[3]}${newR1 + 1}:${m[5]}${c2Letters}${m[7]}${newR2 + 1}`;
+}
+
+// Rewrite a whole sqref expression (space-separated A1 tokens) by shifting
+// every token's rows. Preserves the original separators.
+function shiftSqrefRows(sqref: string, fromRow: number, delta: number): string {
+  return sqref
+    .split(/(\s+)/)
+    .map((part) => (/^\s+$/.test(part) || part === "" ? part : shiftA1RangeToken(part, fromRow, delta)))
+    .join("");
+}
+
+// Wrapper for a single sparkline-style sourceRange (single token, but we go
+// through the same helper to handle the optional sheet prefix uniformly).
+function shiftA1RangeRow(range: string, fromRow: number, delta: number): string {
+  return shiftA1RangeToken(range, fromRow, delta);
 }
 
 // Build a SubtotalResult that's just a verbatim clone of the input cellData —

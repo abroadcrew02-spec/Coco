@@ -23,6 +23,7 @@
 // value.
 
 import { ERROR_FONT_COLOR, ERROR_PREFIX, isErrorValue } from "../store/formulaAudit";
+import { hasKnownDecoration, stripKnownDecorations } from "./renderGlyphs";
 
 type SnapshotShape = {
   sheets?: Record<
@@ -64,12 +65,37 @@ export function patchErrorIndicators<T>(snapshot: T): T {
         const cell = rowObj[colKey];
         if (!cell || typeof cell !== "object") continue;
         // isErrorValue tolerates the "⚠ " prefix so a second pass over a
-        // patched snapshot still classifies the cell as an error.
-        if (!isErrorValue(cell.v)) continue;
+        // patched snapshot still classifies the cell as an error. To also
+        // tolerate sibling-patch decorations (CF iconSet glyph, sparkline
+        // bars, "💬 ", "=formula") we strip every known decoration first.
+        const rawV = cell.v;
+        const checkV = typeof rawV === "string" && hasKnownDecoration(rawV)
+          ? stripKnownDecorations(rawV)
+          : rawV;
+        if (!isErrorValue(checkV)) continue;
 
-        // Idempotent prefix — skip when the marker is already present.
+        // Idempotent prefix — skip when the marker is already present, and
+        // peel off any other sibling-patch decoration (iconSet / sparkline /
+        // comment / formula prefix) before re-prefixing so we don't stack.
         const text = typeof cell.v === "string" ? cell.v : String(cell.v ?? "");
-        const prefixed = text.startsWith(ERROR_PREFIX) ? text : ERROR_PREFIX + text;
+        let body = text;
+        if (body.startsWith(ERROR_PREFIX)) {
+          // Already marked — leave the existing prefix in place but strip any
+          // additional decoration that may have stacked on top of US in a
+          // later pipeline pass before this re-application.
+          body = ERROR_PREFIX + (
+            hasKnownDecoration(body.slice(ERROR_PREFIX.length))
+              ? stripKnownDecorations(body.slice(ERROR_PREFIX.length))
+              : body.slice(ERROR_PREFIX.length)
+          );
+        } else if (hasKnownDecoration(body)) {
+          // Sibling patch decorated the cell first — strip it so the error
+          // marker is the only prefix on the bare value.
+          body = ERROR_PREFIX + stripKnownDecorations(body);
+        } else {
+          body = ERROR_PREFIX + body;
+        }
+        const prefixed = body;
 
         // Merge the red font color into the existing inline style. We
         // only set `cl` when the cell doesn't already carry our marker

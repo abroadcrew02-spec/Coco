@@ -213,6 +213,15 @@ import {
   runLinearRegression,
   runOneWayANOVA,
   buildHistogram,
+  runTwoWayANOVA,
+  runTTest,
+  runChiSquareGoodnessOfFit,
+  runChiSquareIndependence,
+  runCorrelationMatrix,
+  generateRandomNumbers,
+  runSimpleMovingAverage,
+  runExponentialMovingAverage,
+  runFourierTransform,
 } from "../store/analysisToolpak";
 import RecommendedChartsDialog from "./RecommendedChartsDialog";
 import { type ChartRecommendation, analyzeRange } from "../store/recommendedCharts";
@@ -2629,6 +2638,61 @@ export default function EditorScreen() {
         return out;
       };
 
+      // Read a range as a single flat column, preserving position: blank /
+      // non-numeric cells become NaN instead of being skipped. Used by the
+      // correlation matrix so every variable column has the same length and
+      // listwise deletion can drop incomplete rows consistently.
+      const readColumn = (a1: string): number[] => {
+        const pr = parseRange(a1);
+        if (!pr) return [];
+        const out: number[] = [];
+        for (let r = pr.r1; r <= pr.r2; r++) {
+          for (let c = pr.c1; c <= pr.c2; c++) {
+            const cell = (sourceSheet.cellData?.[String(r)] as
+              | Record<string, { v?: unknown }>
+              | undefined)?.[String(c)];
+            const v = cell?.v;
+            if (typeof v === "number" && Number.isFinite(v)) {
+              out.push(v);
+            } else if (typeof v === "string" && v.trim() !== "") {
+              const num = Number(v);
+              out.push(Number.isFinite(num) ? num : Number.NaN);
+            } else {
+              out.push(Number.NaN);
+            }
+          }
+        }
+        return out;
+      };
+
+      // Read a rectangular block as a row-major 2D number grid. Blank /
+      // non-numeric cells become NaN so the analysis helpers can decide how
+      // to treat them (most reject NaN in grid inputs).
+      const readGrid = (a1: string): number[][] => {
+        const pr = parseRange(a1);
+        if (!pr) return [];
+        const grid: number[][] = [];
+        for (let r = pr.r1; r <= pr.r2; r++) {
+          const row: number[] = [];
+          for (let c = pr.c1; c <= pr.c2; c++) {
+            const cell = (sourceSheet.cellData?.[String(r)] as
+              | Record<string, { v?: unknown }>
+              | undefined)?.[String(c)];
+            const v = cell?.v;
+            if (typeof v === "number" && Number.isFinite(v)) {
+              row.push(v);
+            } else if (typeof v === "string" && v.trim() !== "") {
+              const num = Number(v);
+              row.push(Number.isFinite(num) ? num : Number.NaN);
+            } else {
+              row.push(Number.NaN);
+            }
+          }
+          grid.push(row);
+        }
+        return grid;
+      };
+
       // Allocate a fresh sheet id + name without collisions.
       const sheets = snap.sheets;
       const order = Array.isArray(snap.sheetOrder) ? snap.sheetOrder : [];
@@ -2645,12 +2709,19 @@ export default function EditorScreen() {
       for (const s of Object.values(sheets)) {
         if (s && typeof s.name === "string") existingNames.add(s.name);
       }
-      const baseName =
-        p.kind === "regression"
-          ? "分析-回帰"
-          : p.kind === "anova"
-            ? "分析-ANOVA"
-            : "分析-ヒストグラム";
+      const baseNameByKind: Record<AnalysisApplyParams["kind"], string> = {
+        regression: "分析-回帰",
+        anova: "分析-ANOVA",
+        histogram: "分析-ヒストグラム",
+        anova2: "分析-二元ANOVA",
+        ttest: "分析-t検定",
+        chisquare: "分析-カイ二乗",
+        correlation: "分析-相関",
+        random: "分析-乱数",
+        movingAverage: "分析-移動平均",
+        fourier: "分析-フーリエ",
+      };
+      const baseName = baseNameByKind[p.kind] ?? "分析";
       let finalName = baseName;
       let nameN = 2;
       while (existingNames.has(finalName)) {
@@ -2738,8 +2809,7 @@ export default function EditorScreen() {
           ]);
           rows.push(["合計", res.dfTotal, fmt(res.ssTotal), "", "", ""]);
         }
-      } else {
-        // histogram
+      } else if (p.kind === "histogram") {
         const data = readNums(p.primaryRange);
         const res = buildHistogram(data, p.binEdges ?? []);
         rows.push(["ヒストグラム"]);
@@ -2758,6 +2828,301 @@ export default function EditorScreen() {
           });
           if (res.underflow > 0) rows.push(["下方外れ", "", "", res.underflow]);
           if (res.overflow > 0) rows.push(["上方外れ", "", "", res.overflow]);
+        }
+      } else if (p.kind === "anova2") {
+        // Two-way ANOVA. The block range is a (levelsA·replicates) × levelsB
+        // grid laid out row-major: factor-A levels stacked, replicates within.
+        const grid = readGrid(p.primaryRange);
+        const a = Math.max(0, Math.floor(p.levelsA ?? 0));
+        const b = Math.max(0, Math.floor(p.levelsB ?? 0));
+        const r = Math.max(0, Math.floor(p.replicates ?? 0));
+        rows.push(["二元配置 分散分析 (ANOVA)"]);
+        rows.push(["データ範囲", p.primaryRange]);
+        rows.push(["因子 A 水準数", a]);
+        rows.push(["因子 B 水準数", b]);
+        rows.push(["セルあたり繰り返し数", r]);
+        rows.push([]);
+        const expectedRows = a * r;
+        if (
+          a < 2 ||
+          b < 2 ||
+          r < 1 ||
+          grid.length !== expectedRows ||
+          grid.some((row) => row.length !== b)
+        ) {
+          rows.push([
+            "エラー",
+            `データブロックは ${expectedRows} 行 × ${b} 列である必要があります (現在 ${grid.length} 行)`,
+          ]);
+        } else {
+          // Re-shape the flat grid into cells[a][b][r].
+          const cells: number[][][] = [];
+          for (let i = 0; i < a; i++) {
+            const rowCells: number[][] = [];
+            for (let j = 0; j < b; j++) {
+              const reps: number[] = [];
+              for (let k = 0; k < r; k++) {
+                reps.push(grid[i * r + k][j]);
+              }
+              rowCells.push(reps);
+            }
+            cells.push(rowCells);
+          }
+          const res = runTwoWayANOVA(cells);
+          if (res.error) {
+            rows.push(["エラー", res.error]);
+          } else {
+            rows.push(["総平均", fmt(res.grandMean)]);
+            rows.push(["総観測数", res.totalN]);
+            rows.push([]);
+            rows.push(["分散分析表"]);
+            rows.push(["要因", "df", "SS", "MS", "F", "p 値"]);
+            const labelOf = (s: string) =>
+              s === "factorA"
+                ? "因子 A"
+                : s === "factorB"
+                  ? "因子 B"
+                  : s === "interaction"
+                    ? "交互作用 (A×B)"
+                    : s === "error"
+                      ? "誤差"
+                      : "合計";
+            res.terms.forEach((t) => {
+              rows.push([
+                labelOf(t.source),
+                t.df,
+                fmt(t.ss),
+                Number.isFinite(t.ms) ? fmt(t.ms) : "",
+                t.f !== undefined ? fmt(t.f) : "",
+                t.pValue !== undefined ? fmt(t.pValue) : "",
+              ]);
+            });
+          }
+        }
+      } else if (p.kind === "ttest") {
+        const variant = p.tTestVariant ?? "twoSamplePooled";
+        const s1 = readNums(p.primaryRange);
+        const s2 = p.secondaryRange ? readNums(p.secondaryRange) : [];
+        const res = runTTest(s1, s2, variant, p.hypothesizedMean ?? 0);
+        const variantLabel =
+          variant === "oneSample"
+            ? "1 標本"
+            : variant === "twoSamplePooled"
+              ? "2 標本 (等分散プール)"
+              : variant === "welch"
+                ? "2 標本 (Welch)"
+                : "対応あり";
+        rows.push(["t 検定"]);
+        rows.push(["検定タイプ", variantLabel]);
+        rows.push(["標本 1 の範囲", p.primaryRange]);
+        if (variant !== "oneSample") {
+          rows.push(["標本 2 の範囲", p.secondaryRange ?? ""]);
+        }
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push(["", "標本 1", variant === "oneSample" ? "" : "標本 2"]);
+          rows.push([
+            "平均",
+            fmt(res.mean1),
+            variant === "oneSample" ? "" : fmt(res.mean2),
+          ]);
+          rows.push([
+            "観測数 n",
+            res.n1,
+            variant === "oneSample" ? "" : res.n2,
+          ]);
+          rows.push([]);
+          rows.push([
+            variant === "oneSample" ? "仮説平均 (μ₀)" : "仮説平均差",
+            fmt(res.hypothesizedMean),
+          ]);
+          rows.push(["平均差", fmt(res.meanDiff)]);
+          rows.push(["標準誤差", fmt(res.standardError)]);
+          rows.push(["t 統計", fmt(res.t)]);
+          rows.push(["自由度", fmt(res.df)]);
+          rows.push(["p 値 (両側)", fmt(res.pValueTwoSided)]);
+          rows.push(["p 値 (片側)", fmt(res.pValueOneSided)]);
+        }
+      } else if (p.kind === "chisquare") {
+        const variant = p.chiSquareVariant ?? "goodnessOfFit";
+        if (variant === "goodnessOfFit") {
+          const observed = readNums(p.primaryRange);
+          const expected = p.expectedRange
+            ? readNums(p.expectedRange)
+            : undefined;
+          const res = runChiSquareGoodnessOfFit(observed, expected);
+          rows.push(["カイ二乗 適合度検定"]);
+          rows.push(["観測度数の範囲", p.primaryRange]);
+          rows.push([
+            "期待度数の範囲",
+            p.expectedRange ?? "一様分布 (自動)",
+          ]);
+          rows.push([]);
+          if (res.error) {
+            rows.push(["エラー", res.error]);
+          } else {
+            rows.push(["χ² 統計", fmt(res.chiSquare)]);
+            rows.push(["自由度", res.df]);
+            rows.push(["p 値", fmt(res.pValue)]);
+            rows.push([]);
+            rows.push(["カテゴリ", "観測度数", "期待度数"]);
+            res.colTotals.forEach((obs, i) => {
+              rows.push([
+                `カテゴリ ${i + 1}`,
+                fmt(obs),
+                fmt(res.expected[0]?.[i] ?? Number.NaN),
+              ]);
+            });
+          }
+        } else {
+          const table = readGrid(p.primaryRange);
+          const res = runChiSquareIndependence(table);
+          rows.push(["カイ二乗 独立性検定"]);
+          rows.push(["分割表の範囲", p.primaryRange]);
+          rows.push([]);
+          if (res.error) {
+            rows.push(["エラー", res.error]);
+          } else {
+            rows.push(["χ² 統計", fmt(res.chiSquare)]);
+            rows.push(["自由度", res.df]);
+            rows.push(["p 値", fmt(res.pValue)]);
+            rows.push(["総度数", res.total]);
+            rows.push([]);
+            rows.push(["期待度数表"]);
+            const header: Array<string | number> = [""];
+            for (let j = 0; j < res.colTotals.length; j++) {
+              header.push(`列 ${j + 1}`);
+            }
+            rows.push(header);
+            res.expected.forEach((expRow, i) => {
+              rows.push([`行 ${i + 1}`, ...expRow.map((e) => fmt(e))]);
+            });
+          }
+        }
+      } else if (p.kind === "correlation") {
+        const ranges = p.variableRanges ?? [];
+        // Keep blank/non-numeric cells as NaN (not skipped) so each variable
+        // column stays the same length; runCorrelationMatrix then drops
+        // incomplete rows via listwise deletion.
+        const columns = ranges.map((rng) => readColumn(rng));
+        const labels = ranges.map((rng, i) => `変数 ${i + 1} (${rng})`);
+        const res = runCorrelationMatrix(columns, labels);
+        rows.push(["相関行列"]);
+        ranges.forEach((rng, i) => {
+          rows.push([`変数 ${i + 1} の範囲`, rng]);
+        });
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push(["完全ケース数 n", res.n]);
+          rows.push([]);
+          rows.push(["相関係数行列 (Pearson)"]);
+          rows.push(["", ...res.labels]);
+          res.correlation.forEach((corrRow, i) => {
+            rows.push([res.labels[i], ...corrRow.map((v) => fmt(v))]);
+          });
+          rows.push([]);
+          rows.push(["共分散行列 (標本, n-1)"]);
+          rows.push(["", ...res.labels]);
+          res.covariance.forEach((covRow, i) => {
+            rows.push([res.labels[i], ...covRow.map((v) => fmt(v))]);
+          });
+        }
+      } else if (p.kind === "random") {
+        const res = generateRandomNumbers({
+          distribution: p.randomDistribution ?? "normal",
+          count: p.randomCount ?? 0,
+          seed: p.randomSeed,
+          min: p.randomMin,
+          max: p.randomMax,
+          mean: p.randomMean,
+          stdDev: p.randomStdDev,
+          probability: p.randomProbability,
+          lambda: p.randomLambda,
+        });
+        const distLabel =
+          res.distribution === "uniform"
+            ? "一様分布"
+            : res.distribution === "normal"
+              ? "正規分布"
+              : res.distribution === "bernoulli"
+                ? "ベルヌーイ分布"
+                : "ポアソン分布";
+        rows.push(["乱数生成"]);
+        rows.push(["分布", distLabel]);
+        rows.push([
+          "シード",
+          p.randomSeed !== undefined ? p.randomSeed : "ランダム",
+        ]);
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push(["i", "値"]);
+          res.values.forEach((v, i) => {
+            rows.push([i + 1, fmt(v)]);
+          });
+        }
+      } else if (p.kind === "movingAverage") {
+        const variant = p.movingAverageVariant ?? "simple";
+        const data = readNums(p.primaryRange);
+        const res =
+          variant === "simple"
+            ? runSimpleMovingAverage(data, p.movingWindow ?? 0)
+            : runExponentialMovingAverage(data, p.movingAlpha ?? 0);
+        rows.push([
+          variant === "simple" ? "単純移動平均" : "指数移動平均",
+        ]);
+        rows.push(["データ範囲", p.primaryRange]);
+        if (variant === "simple") {
+          rows.push(["窓幅", p.movingWindow ?? ""]);
+        } else {
+          rows.push(["平滑化係数 α", p.movingAlpha ?? ""]);
+        }
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push(["i", "元データ", "移動平均"]);
+          res.values.forEach((v, i) => {
+            rows.push([
+              i + 1,
+              fmt(data[i]),
+              Number.isFinite(v) ? fmt(v) : "—",
+            ]);
+          });
+        }
+      } else {
+        // fourier
+        const signal = readNums(p.primaryRange);
+        const res = runFourierTransform(signal);
+        rows.push(["フーリエ変換 (FFT)"]);
+        rows.push(["信号データ範囲", p.primaryRange]);
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push([
+            "アルゴリズム",
+            res.method === "radix2"
+              ? "Cooley-Tukey (基数2)"
+              : "Bluestein (任意長)",
+          ]);
+          rows.push(["サンプル数 n", res.n]);
+          rows.push([]);
+          rows.push(["k", "実部", "虚部", "振幅", "位相 (rad)"]);
+          for (let k = 0; k < res.n; k++) {
+            rows.push([
+              k,
+              fmt(res.real[k]),
+              fmt(res.imag[k]),
+              fmt(res.amplitude[k]),
+              fmt(res.phase[k]),
+            ]);
+          }
         }
       }
 

@@ -61,20 +61,14 @@
   gap: 12px;
 }
 
-.atp-kind-group {
+.atp-row {
   display: flex;
-  gap: 16px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #eee;
+  gap: 12px;
 }
 
-.atp-kind {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: #333;
-  cursor: pointer;
+.atp-row .atp-field {
+  flex: 1;
+  min-width: 0;
 }
 
 .atp-field {

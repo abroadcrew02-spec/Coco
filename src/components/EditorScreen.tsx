@@ -175,6 +175,11 @@ import InsertFunctionDialog from "./InsertFunctionDialog";
 import CustomListsDialog from "./CustomListsDialog";
 import CalculationOptionsDialog from "./CalculationOptionsDialog";
 import CalculationModeIndicator from "./CalculationModeIndicator";
+import StatusBarStats from "./StatusBarStats";
+import {
+  type SelectionStats,
+  computeSelectionStats,
+} from "../store/selectionStats";
 import {
   type CalcMode,
   getCalcMode,
@@ -473,6 +478,9 @@ export default function EditorScreen() {
   // indicator + UpdateAvailableDialog. See src/store/updater.ts for the
   // UpdaterState union and lazy-loaded plugin wrappers.
   const [updaterState, setUpdaterState] = useState<UpdaterState>({ kind: "idle" });
+  // #192: live aggregates for the current selection, shown on the status bar.
+  // null = single-cell / empty selection (nothing worth summarizing).
+  const [selectionStats, setSelectionStats] = useState<SelectionStats | null>(null);
   // Command palette (Ctrl+Shift+P / Cmd+Shift+P). Boolean state — the command
   // list is rebuilt on every render so the palette always sees the latest
   // handler closures and store actions.
@@ -2167,6 +2175,74 @@ export default function EditorScreen() {
     const id = window.setInterval(tick, 300);
     return () => window.clearInterval(id);
   }, [tracePanelOpen]);
+
+  // #192: keep the status-bar selection summary (合計 / 平均 / 個数 ...) in
+  // sync with the live selection. We poll the active range every 250ms —
+  // mirroring the Trace panel above — because Univer 0.5.x's selection
+  // observable isn't stable across patches, and `onSelectionChange` doesn't
+  // carry cell values (we'd still have to re-read the range). A single-cell
+  // selection (or no selection) yields null so the summary stays hidden.
+  const lastSelectionRangeKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Cap the per-poll read: a whole-column selection is ~1M cells and
+    // re-serializing it every 250ms would stutter the UI.
+    const MAX_SELECTION_CELLS = 100_000;
+    const tick = () => {
+      const workbook = fUniverRef.current?.getActiveWorkbook();
+      if (!workbook) {
+        lastSelectionRangeKeyRef.current = null;
+        setSelectionStats(null);
+        return;
+      }
+      try {
+        const sheet = workbook.getActiveSheet();
+        const r = sheet?.getSelection()?.getActiveRange();
+        if (!r) {
+          lastSelectionRangeKeyRef.current = null;
+          setSelectionStats(null);
+          return;
+        }
+        const range = r as unknown as {
+          getHeight?: () => number;
+          getWidth?: () => number;
+          getRow?: () => number;
+          getColumn?: () => number;
+          getValues?: () => unknown[][];
+        };
+        const height = range.getHeight?.() ?? 1;
+        const width = range.getWidth?.() ?? 1;
+        if (height <= 1 && width <= 1) {
+          lastSelectionRangeKeyRef.current = null;
+          setSelectionStats(null);
+          return;
+        }
+        // Skip the (potentially large) getValues() read when the selection
+        // hasn't moved since the last poll — recompute only on change.
+        const sheetId =
+          (sheet as unknown as { getSheetId?: () => string }).getSheetId?.() ??
+          "";
+        const rangeKey = `${sheetId}:${range.getRow?.() ?? 0},${
+          range.getColumn?.() ?? 0
+        },${height},${width}`;
+        if (rangeKey === lastSelectionRangeKeyRef.current) return;
+        lastSelectionRangeKeyRef.current = rangeKey;
+        if (height * width > MAX_SELECTION_CELLS) {
+          setSelectionStats(null);
+          return;
+        }
+        const values = range.getValues?.();
+        const stats = computeSelectionStats(values);
+        // Excel hides the summary when the selection has no countable data.
+        setSelectionStats(stats.count > 0 ? stats : null);
+      } catch {
+        lastSelectionRangeKeyRef.current = null;
+        setSelectionStats(null);
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, []);
 
   // --- Sheet Visibility (Hide/Unhide) ---------------------------------------
   const hideActiveSheet = useCallback(() => {
@@ -5842,6 +5918,8 @@ export default function EditorScreen() {
         {statsLabel && (
           <span className="status-bar__stats">· {statsLabel}</span>
         )}
+        {/* #192: live aggregates for the current multi-cell selection. */}
+        <StatusBarStats stats={selectionStats} />
         {/* #116: surface the calc-mode setting in the status bar so users can
             see Manual mode at a glance + click to open the options dialog. */}
         <CalculationModeIndicator

@@ -182,6 +182,7 @@ pub fn run() {
                 .text("tools-document-inspector", "ドキュメント検査...")
                 .separator()
                 .text("tools-scenarios", "シナリオの管理...")
+                .text("tools-analysis-toolpak", "分析ツールパック...")
                 .separator()
                 .text("calc-options", "計算オプション...")
                 .text("calc-recalc-all", "再計算\tF9")

@@ -206,6 +206,14 @@ import {
 } from "../store/scenarios";
 import ForecastSheetDialog, { type ForecastApplyParams } from "./ForecastSheetDialog";
 import { runForecast, parseXValues } from "../store/forecastSheet";
+import AnalysisToolpakDialog, {
+  type AnalysisApplyParams,
+} from "./AnalysisToolpakDialog";
+import {
+  runLinearRegression,
+  runOneWayANOVA,
+  buildHistogram,
+} from "../store/analysisToolpak";
 import RecommendedChartsDialog from "./RecommendedChartsDialog";
 import { type ChartRecommendation, analyzeRange } from "../store/recommendedCharts";
 import CfRuleManagerDialog from "./CfRuleManagerDialog";
@@ -668,6 +676,7 @@ export default function EditorScreen() {
   const [scenariosOpen, setScenariosOpen] = useState(false);
   const [scenarioAdapter, setScenarioAdapter] = useState<ScenarioAdapter | null>(null);
   const [forecastDialog, setForecastDialog] = useState<{ xRange: string; yRange: string } | null>(null);
+  const [analysisToolpakDialog, setAnalysisToolpakDialog] = useState<{ initialRange: string } | null>(null);
   const [recommendedChartsDialog, setRecommendedChartsDialog] = useState<{
     sheetId: string;
     range: string;
@@ -2533,6 +2542,245 @@ export default function EditorScreen() {
           }
         }
       }
+      applyMutatedSnapshot(JSON.stringify(snap));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // --- Analysis ToolPak ------------------------------------------------------
+  const openAnalysisToolpakDialog = useCallback(() => {
+    const ready = getReadyWorkbook("分析ツールパック");
+    if (!ready) return;
+    const sheet = ready.workbook.getActiveSheet();
+    if (!sheet) return;
+    let initialRange = "A2:A10";
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) initialRange = r.getA1Notation();
+    } catch {
+      // best-effort
+    }
+    setAnalysisToolpakDialog({ initialRange });
+  }, [getReadyWorkbook]);
+
+  const applyAnalysisToolpak = useCallback(
+    (p: AnalysisApplyParams) => {
+      const fUniver = fUniverRef.current;
+      const wb = fUniver?.getActiveWorkbook();
+      if (!wb) return;
+      const snap = JSON.parse(JSON.stringify(wb.save())) as {
+        sheets?: Record<string, {
+          id?: string;
+          name?: string;
+          cellData?: Record<string, Record<string, unknown>>;
+        }>;
+        sheetOrder?: string[];
+      };
+      const sheetId = wb.getActiveSheet()?.getSheetId();
+      const sourceSheet = sheetId ? snap.sheets?.[sheetId] : undefined;
+      if (!snap.sheets || !sourceSheet) {
+        setEditorOperationError("分析ツールパック: アクティブシートが取得できません。");
+        return;
+      }
+
+      // Local A1 parser — single cell or rectangle, optional sheet qualifier
+      // (the qualifier is ignored; we always read from the active sheet).
+      const parseRange = (a1: string): { r1: number; c1: number; r2: number; c2: number } | null => {
+        const trimmed = a1.replace(/^[^!]+!/, "").trim();
+        const m = /^\$?([A-Za-z]+)\$?(\d+)(?::\$?([A-Za-z]+)\$?(\d+))?$/.exec(trimmed);
+        if (!m) return null;
+        const colToIdx = (s: string) => {
+          let n = 0;
+          for (const c of s.toUpperCase()) n = n * 26 + (c.charCodeAt(0) - 64);
+          return n - 1;
+        };
+        const c1 = colToIdx(m[1]);
+        const r1 = parseInt(m[2], 10) - 1;
+        const c2 = m[3] ? colToIdx(m[3]) : c1;
+        const r2 = m[4] ? parseInt(m[4], 10) - 1 : r1;
+        return {
+          r1: Math.min(r1, r2),
+          r2: Math.max(r1, r2),
+          c1: Math.min(c1, c2),
+          c2: Math.max(c1, c2),
+        };
+      };
+
+      const readNums = (a1: string): number[] => {
+        const pr = parseRange(a1);
+        if (!pr) return [];
+        const out: number[] = [];
+        for (let r = pr.r1; r <= pr.r2; r++) {
+          for (let c = pr.c1; c <= pr.c2; c++) {
+            const cell = (sourceSheet.cellData?.[String(r)] as
+              | Record<string, { v?: unknown }>
+              | undefined)?.[String(c)];
+            const v = cell?.v;
+            if (typeof v === "number" && Number.isFinite(v)) {
+              out.push(v);
+            } else if (typeof v === "string" && v.trim() !== "") {
+              const n = Number(v);
+              if (Number.isFinite(n)) out.push(n);
+            }
+            // blanks / non-numeric are skipped (analysis helpers tolerate
+            // gaps; for regression they're filtered pair-wise downstream).
+          }
+        }
+        return out;
+      };
+
+      // Allocate a fresh sheet id + name without collisions.
+      const sheets = snap.sheets;
+      const order = Array.isArray(snap.sheetOrder) ? snap.sheetOrder : [];
+      snap.sheetOrder = order;
+      const existingIds = new Set(Object.keys(sheets));
+      for (const id of order) existingIds.add(id);
+      let n = 1;
+      let newSheetId = `sheet-analysis-${n}`;
+      while (existingIds.has(newSheetId)) {
+        n += 1;
+        newSheetId = `sheet-analysis-${n}`;
+      }
+      const existingNames = new Set<string>();
+      for (const s of Object.values(sheets)) {
+        if (s && typeof s.name === "string") existingNames.add(s.name);
+      }
+      const baseName =
+        p.kind === "regression"
+          ? "分析-回帰"
+          : p.kind === "anova"
+            ? "分析-ANOVA"
+            : "分析-ヒストグラム";
+      let finalName = baseName;
+      let nameN = 2;
+      while (existingNames.has(finalName)) {
+        finalName = `${baseName} (${nameN})`;
+        nameN += 1;
+      }
+
+      // Build the result table as a row-major 2D array of cell values.
+      const rows: Array<Array<string | number>> = [];
+      const fmt = (n: number) => (Number.isFinite(n) ? n : "—");
+
+      if (p.kind === "regression") {
+        const xs = readNums(p.primaryRange);
+        const ys = p.secondaryRange ? readNums(p.secondaryRange) : [];
+        const res = runLinearRegression(xs, ys);
+        rows.push(["線形回帰分析"]);
+        rows.push(["X 範囲", p.primaryRange]);
+        rows.push(["Y 範囲", p.secondaryRange ?? ""]);
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push(["観測数 n", res.n]);
+          rows.push(["切片 (b)", fmt(res.intercept)]);
+          rows.push(["傾き (a)", fmt(res.slope)]);
+          rows.push(["R²", fmt(res.r2)]);
+          rows.push(["自由度調整 R²", fmt(res.adjustedR2)]);
+          rows.push(["残差標準誤差", fmt(res.residualSE)]);
+          rows.push(["傾きの標準誤差", fmt(res.seSlope)]);
+          rows.push(["切片の標準誤差", fmt(res.seIntercept)]);
+          rows.push(["F 統計", fmt(res.f)]);
+          rows.push(["p 値", fmt(res.pValue)]);
+          rows.push([]);
+          rows.push(["分散分析表"]);
+          rows.push(["要因", "df", "SS", "MS"]);
+          rows.push(["回帰", 1, fmt(res.ssr), fmt(res.ssr / 1)]);
+          rows.push([
+            "残差",
+            res.n - 2,
+            fmt(res.sse),
+            fmt(res.sse / Math.max(1, res.n - 2)),
+          ]);
+          rows.push(["合計", res.n - 1, fmt(res.sst), ""]);
+          rows.push([]);
+          rows.push(["残差テーブル"]);
+          rows.push(["i", "ŷ", "残差"]);
+          for (let i = 0; i < res.fitted.length; i++) {
+            rows.push([i + 1, fmt(res.fitted[i]), fmt(res.residuals[i])]);
+          }
+        }
+      } else if (p.kind === "anova") {
+        const groups = (p.groupRanges ?? []).map((r) => readNums(r));
+        const res = runOneWayANOVA(groups);
+        rows.push(["一元配置 分散分析 (ANOVA)"]);
+        (p.groupRanges ?? []).forEach((r, i) => {
+          rows.push([`群 ${i + 1} の範囲`, r]);
+        });
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push(["群ごとの要約"]);
+          rows.push(["群", "n", "平均", "分散"]);
+          res.groups.forEach((g, i) => {
+            rows.push([`群 ${i + 1}`, g.n, fmt(g.mean), fmt(g.variance)]);
+          });
+          rows.push([]);
+          rows.push(["分散分析表"]);
+          rows.push(["要因", "df", "SS", "MS", "F", "p 値"]);
+          rows.push([
+            "群間",
+            res.dfBetween,
+            fmt(res.ssBetween),
+            fmt(res.msBetween),
+            fmt(res.f),
+            fmt(res.pValue),
+          ]);
+          rows.push([
+            "群内",
+            res.dfWithin,
+            fmt(res.ssWithin),
+            fmt(res.msWithin),
+            "",
+            "",
+          ]);
+          rows.push(["合計", res.dfTotal, fmt(res.ssTotal), "", "", ""]);
+        }
+      } else {
+        // histogram
+        const data = readNums(p.primaryRange);
+        const res = buildHistogram(data, p.binEdges ?? []);
+        rows.push(["ヒストグラム"]);
+        rows.push(["データ範囲", p.primaryRange]);
+        rows.push([
+          "ビン境界",
+          (p.binEdges ?? []).length > 0 ? (p.binEdges ?? []).join(", ") : "自動 (Sturges)",
+        ]);
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push(["範囲", "下限", "上限", "頻度"]);
+          res.bins.forEach((b) => {
+            rows.push([b.label, fmt(b.binStart), fmt(b.binEnd), b.frequency]);
+          });
+          if (res.underflow > 0) rows.push(["下方外れ", "", "", res.underflow]);
+          if (res.overflow > 0) rows.push(["上方外れ", "", "", res.overflow]);
+        }
+      }
+
+      // Materialise the rows into a fresh sheet fragment. We mirror the
+      // shape Univer expects (cellData[row][col] = { v }) and include
+      // rowCount/columnCount for a snug viewport.
+      const cellData: Record<string, Record<string, { v: unknown }>> = {};
+      let maxCols = 0;
+      rows.forEach((row, r) => {
+        if (row.length === 0) return;
+        if (row.length > maxCols) maxCols = row.length;
+        const rowObj: Record<string, { v: unknown }> = {};
+        row.forEach((cell, c) => {
+          rowObj[String(c)] = { v: cell };
+        });
+        cellData[String(r)] = rowObj;
+      });
+      sheets[newSheetId] = {
+        id: newSheetId,
+        name: finalName,
+        cellData,
+      };
+      order.push(newSheetId);
       applyMutatedSnapshot(JSON.stringify(snap));
     },
     [applyMutatedSnapshot],
@@ -4844,6 +5092,9 @@ export default function EditorScreen() {
       case "data-forecast-sheet":
         openForecastSheetDialog();
         break;
+      case "tools-analysis-toolpak":
+        openAnalysisToolpakDialog();
+        break;
       case "insert-recommended-charts":
         openRecommendedChartsDialog();
         break;
@@ -5015,6 +5266,7 @@ export default function EditorScreen() {
     addActiveCellToWatch,
     openScenarioManagerDialog,
     openForecastSheetDialog,
+    openAnalysisToolpakDialog,
     openRecommendedChartsDialog,
     openSnapshotDiffDialog,
     openSpellCheckDialog,
@@ -6341,6 +6593,16 @@ export default function EditorScreen() {
             setForecastDialog(null);
           }}
           onClose={() => setForecastDialog(null)}
+        />
+      )}
+      {analysisToolpakDialog && (
+        <AnalysisToolpakDialog
+          initialRange={analysisToolpakDialog.initialRange}
+          onApply={(p) => {
+            applyAnalysisToolpak(p);
+            setAnalysisToolpakDialog(null);
+          }}
+          onClose={() => setAnalysisToolpakDialog(null)}
         />
       )}
       {recommendedChartsDialog && (

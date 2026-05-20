@@ -59,6 +59,7 @@ const EDITOR_COMMAND_IDS = new Set([
   "watch-add-active",
   "tools-scenarios",
   "data-forecast-sheet",
+  "tools-analysis-toolpak",
   "insert-recommended-charts",
   "format-cf-manage-rules",
   "view-snapshot-diff",

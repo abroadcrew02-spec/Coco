@@ -3,6 +3,7 @@ import type {
   InspectionCategory,
   InspectionResult,
 } from "../store/documentInspector";
+import { t } from "../i18n/locale";
 import "./DocumentInspectorDialog.css";
 
 interface Props {
@@ -73,7 +74,7 @@ export default function DocumentInspectorDialog({
     if (count === 0) return;
     const title = CATEGORY_TITLES[cat];
     const ok = window.confirm(
-      `「${title}」(${count} 件) をすべて削除します。よろしいですか？\n(この操作は Coco の元に戻す履歴に記録されます。)`,
+      t("confirm.documentInspector.strip", title, count),
     );
     if (!ok) return;
     onStrip(cat);

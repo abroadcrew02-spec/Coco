@@ -33,6 +33,7 @@ import "@univerjs/find-replace/lib/index.css";
 
 import { undoRedoOverride } from "./univerUndoRedoOverride";
 import { registerCocoContextMenu } from "./univerContextMenu";
+import { registerFormulaNormalizer } from "./univerFormulaNormalizer";
 import { buildCocoUniverLocale } from "./cocoUniverLocale";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { useAutoSave } from "../hooks/useAutoSave";
@@ -388,7 +389,8 @@ import {
   type ImagePreview,
 } from "../store/imagePreviews";
 import { validateMutation, extractCellWrites } from "../store/dataValidation";
-import { getLocale, t } from "../i18n/locale";
+import { getLocale, subscribeLocale, t } from "../i18n/locale";
+import { swapUniverLocale } from "./univerLocaleSwap";
 import "./EditorScreen.css";
 
 // req 5.4.1: "loading" blocks editing (snapshot is being replaced); "saving"
@@ -3843,7 +3845,7 @@ export default function EditorScreen() {
         existing.v !== undefined ? String(existing.v) : String(existing.f ?? "");
       const trimmed = preview.length > 40 ? preview.slice(0, 40) + "…" : preview;
       const ok = window.confirm(
-        `アクティブセルに値 "${trimmed}" があります。${formula} で上書きしますか？`,
+        t("confirm.cell.overwrite", trimmed, formula),
       );
       if (!ok) return;
     }
@@ -5076,7 +5078,7 @@ export default function EditorScreen() {
       });
       if (existing.length > 0) {
         const ok = window.confirm(
-          `既存の CSV ファイル ${existing.length} 件を上書きします。続行しますか？`
+          t("confirm.csvExport.overwrite", existing.length)
         );
         if (!ok) return;
       }
@@ -5315,6 +5317,7 @@ export default function EditorScreen() {
 
     let univer: Univer | null = null;
     let contextMenuReg: ReturnType<typeof registerCocoContextMenu> | null = null;
+    let formulaNormalizerReg: ReturnType<typeof registerFormulaNormalizer> | null = null;
 
     try {
       // #95 note: Univer 0.5.x does not ship a `JA_JP` LocaleType, so the
@@ -5418,7 +5421,12 @@ export default function EditorScreen() {
         openHyperlinkDialog: () => openHyperlinkDialogRef.current(),
         openNumberFormatDialog: () => openNumberFormatDialogRef.current(),
       });
+
+      // #179 (area C): rewrite Japanese function-name aliases (=合計(...) →
+      // =SUM(...)) before the formula engine sees the cell edit.
+      formulaNormalizerReg = registerFormulaNormalizer(univer);
     } catch (e) {
+      formulaNormalizerReg?.dispose();
       contextMenuReg?.dispose();
       univer?.dispose();
       univerRef.current = null;
@@ -5428,12 +5436,23 @@ export default function EditorScreen() {
     }
 
     return () => {
+      formulaNormalizerReg?.dispose();
       contextMenuReg?.dispose();
       univer?.dispose();
       univerRef.current = null;
       fUniverRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // #179 (area E): hot-swap Univer's locale when the app language changes,
+  // so the editor chrome (ribbon, menus, formula helper) updates without a
+  // page reload. The Coco-side UI re-renders via App's useLocale().
+  useEffect(() => {
+    return subscribeLocale((locale) => {
+      const univer = univerRef.current;
+      if (univer) swapUniverLocale(univer, locale);
+    });
   }, []);
 
   // Sync snapshot to store on data mutations (skip selection/scroll operations).
@@ -6915,7 +6934,7 @@ export default function EditorScreen() {
                 setUpdaterState({ kind: "ready", version: targetVersion });
                 // Offer immediate relaunch; user can decline (status bar
                 // button stays visible until they restart manually).
-                if (window.confirm("更新を適用するため再起動しますか?")) {
+                if (window.confirm(t("confirm.update.relaunch"))) {
                   await relaunchApp();
                 }
               } catch (e) {

@@ -1,4 +1,5 @@
 import { useWorkbookStore } from "./useWorkbookStore";
+import { t } from "../i18n/locale";
 import type { SaveStatus } from "../types/workbook";
 
 /** Single source of truth for "user is trying to leave/replace the current
@@ -35,6 +36,6 @@ export function confirmDiscardIfUnsaved(message?: string): boolean {
   if (screen !== "editor") return true;
   if (!isWorkbookDirty()) return true;
   return window.confirm(
-    message ?? "未保存の変更があります。破棄して続行しますか？"
+    message ?? t("confirm.discardUnsaved.continue")
   );
 }

@@ -16,6 +16,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 
 import { useWorkbookStore } from "./useWorkbookStore";
 import { registerSnapshotFlush } from "./snapshotSync";
+import { friendlyError } from "./errorMessages";
 import type { SaveResult } from "../types/workbook";
 
 const EMPTY_WORKBOOK_SNAPSHOT =
@@ -1045,7 +1046,11 @@ describe("exportXlsx", () => {
     await useWorkbookStore.getState().exportXlsx();
     const s = useWorkbookStore.getState();
     expect(s.saveStatus).toBe("export_failed");
-    expect(s.lastError).toContain("xlsx の構築");
+    // friendlyError is locale-aware (#179); assert the code was mapped to the
+    // exact human-readable message. friendlyError(code) is compared directly
+    // so the assertion stays strict yet locale-independent.
+    expect(s.lastError).toBe(friendlyError("XLSX_BUILD_FAILED"));
+    expect(s.lastError).not.toBe("XLSX_BUILD_FAILED");
   });
 });
 

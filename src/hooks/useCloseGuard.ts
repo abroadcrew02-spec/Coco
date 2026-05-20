@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isDirtySaveStatus, isWorkbookDirty } from "../store/dirtyGuard";
 import { useWorkbookStore } from "../store/useWorkbookStore";
+import { t } from "../i18n/locale";
 
 /** req 5.4.2: when the user attempts to close the window with an unsaved
  *  workbook, intercept and show the close-confirmation dialog instead of
@@ -36,7 +37,7 @@ export function useCloseGuard() {
           if (closeListeners.size === 0) {
             // No dialog mounted — fail-safe: ask the user via window.confirm.
             const ok = window.confirm(
-              "未保存の変更があります。破棄して終了しますか？"
+              t("confirm.discardUnsaved.exit")
             );
             resolve(ok ? "discard" : "cancel");
             return;

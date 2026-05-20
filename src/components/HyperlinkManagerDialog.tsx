@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { HyperlinkListing } from "../store/hyperlinkManager";
+import { t } from "../i18n/locale";
 import "./HyperlinkManagerDialog.css";
 
 interface Props {
@@ -126,12 +127,14 @@ export default function HyperlinkManagerDialog({
     return n;
   }, [links, validationResults]);
 
-  const confirmAndBulkDelete = (kind: HyperlinkListing["kind"], label: string) => {
+  const confirmAndBulkDelete = (kind: HyperlinkListing["kind"]) => {
     const n = counts[kind];
     if (n === 0) return;
-    const ok = window.confirm(
-      `${label}のリンク ${n} 件を削除します。よろしいですか？`,
-    );
+    const label =
+      kind === "internal"
+        ? t("hyperlink.kind.internal")
+        : t("hyperlink.kind.external");
+    const ok = window.confirm(t("confirm.hyperlink.bulkDelete", label, n));
     if (!ok) return;
     onBulkDelete(kind);
   };
@@ -264,7 +267,7 @@ export default function HyperlinkManagerDialog({
                           className="hmd-mini-btn hmd-mini-btn--danger"
                           onClick={() => {
                             if (
-                              window.confirm("このハイパーリンクを削除しますか？")
+                              window.confirm(t("confirm.hyperlink.delete"))
                             ) {
                               onDelete(link.sheetId, link.cellRef);
                             }
@@ -287,7 +290,7 @@ export default function HyperlinkManagerDialog({
             <button
               type="button"
               className="hmd-btn hmd-btn--danger"
-              onClick={() => confirmAndBulkDelete("internal", "ブック内")}
+              onClick={() => confirmAndBulkDelete("internal")}
               disabled={counts.internal === 0}
               title="ブック内リンクを一括削除"
             >
@@ -296,7 +299,7 @@ export default function HyperlinkManagerDialog({
             <button
               type="button"
               className="hmd-btn hmd-btn--danger"
-              onClick={() => confirmAndBulkDelete("external", "外部")}
+              onClick={() => confirmAndBulkDelete("external")}
               disabled={counts.external === 0}
               title="外部 URL を一括削除"
             >

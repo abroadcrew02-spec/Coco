@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { friendlyError } from "./errorMessages";
+import { t } from "../i18n/locale";
 import { flushPendingSnapshot } from "./snapshotSync";
 import type {
   AppScreen,
@@ -152,7 +153,8 @@ const VALID_CSV_IMPORT_ENCODINGS: CsvImportEncoding[] = ["auto", "utf8", "shift_
 const PINNED_PATHS_KEY = "recents.pinned_paths";
 const PINNED_ORDER_KEY = "recents.pinned_order";
 const SUPPRESS_CSV_POC_KEY = "csv.suppress_poc_warning";
-const SNAPSHOT_REQUIRED_ERROR = "保存できるスナップショットがありません";
+// #179: resolved via `t()` at call time so it follows the active locale.
+const snapshotRequiredError = (): string => t("error.snapshotRequired");
 
 const hasSnapshotJson = (snapshotJson: string | null): snapshotJson is string =>
   typeof snapshotJson === "string" && snapshotJson.length > 0;
@@ -382,7 +384,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       if (!currentHandle) return;
 
       if (!hasSnapshotJson(currentSnapshotJson)) {
-        set({ saveStatus: "save_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+        set({ saveStatus: "save_failed", lastError: snapshotRequiredError() });
         return;
       }
 
@@ -426,7 +428,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
             currentHandle: result.success
               ? { ...currentHandle, requiresSaveAsOnFirstSave: false }
               : currentHandle,
-            lastError: result.success ? null : friendlyError(result.error) ?? "保存に失敗しました",
+            lastError: result.success ? null : friendlyError(result.error) ?? t("error.save.failed"),
             lastSavedAt: result.success ? Date.now() : get().lastSavedAt,
           });
           if (result.success) {
@@ -475,7 +477,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     const { currentHandle, currentSnapshotJson } = get();
     if (!currentHandle) return;
     if (!hasSnapshotJson(currentSnapshotJson)) {
-      set({ saveStatus: "save_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+      set({ saveStatus: "save_failed", lastError: snapshotRequiredError() });
       return;
     }
     const lower = path.toLowerCase();
@@ -585,7 +587,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
             // autosave is broken (e.g. disk full, permissions).
             set({
               saveStatus: "save_failed",
-              lastError: friendlyError(result.error) ?? "自動保存に失敗しました",
+              lastError: friendlyError(result.error) ?? t("error.autosave.failed"),
             });
           }
         } else {
@@ -606,7 +608,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
             // #42: temp autosave failure also flips saveStatus + surfaces error.
             set({
               saveStatus: "save_failed",
-              lastError: friendlyError(result.error) ?? "自動保存に失敗しました",
+              lastError: friendlyError(result.error) ?? t("error.autosave.failed"),
             });
           }
         }
@@ -615,7 +617,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         // failure status so the user can see autosave isn't running.
         set({
           saveStatus: "save_failed",
-          lastError: friendlyError(String(e)) ?? "自動保存に失敗しました",
+          lastError: friendlyError(String(e)) ?? t("error.autosave.failed"),
         });
       }
     })();
@@ -634,7 +636,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     const { currentHandle, currentSnapshotJson } = get();
     if (!currentHandle) return;
     if (!hasSnapshotJson(currentSnapshotJson)) {
-      set({ saveStatus: "export_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+      set({ saveStatus: "export_failed", lastError: snapshotRequiredError() });
       return;
     }
 
@@ -668,7 +670,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         isExporting: false,
         saveStatus: result.success ? "export_done" : "export_failed",
         exportWarnings: result.warnings,
-        lastError: result.success ? null : friendlyError(result.error) ?? "エクスポートに失敗しました",
+        lastError: result.success ? null : friendlyError(result.error) ?? t("error.export.failed"),
       });
     } catch (e) {
       set({
@@ -685,7 +687,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     const { currentHandle, currentSnapshotJson } = get();
     if (!currentHandle) return;
     if (!hasSnapshotJson(currentSnapshotJson)) {
-      set({ saveStatus: "export_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+      set({ saveStatus: "export_failed", lastError: snapshotRequiredError() });
       return;
     }
     const defaultName = currentHandle.path
@@ -713,7 +715,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         isExporting: false,
         saveStatus: result.success ? "export_done" : "export_failed",
         exportWarnings: result.warnings ?? [],
-        lastError: result.success ? null : friendlyError(result.error) ?? "HTML エクスポートに失敗しました",
+        lastError: result.success ? null : friendlyError(result.error) ?? t("error.exportHtml.failed"),
       });
     } catch (e) {
       set({ isExporting: false, saveStatus: "export_failed", lastError: friendlyError(String(e)) });
@@ -726,7 +728,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     const { currentHandle, currentSnapshotJson } = get();
     if (!currentHandle) return;
     if (!hasSnapshotJson(currentSnapshotJson)) {
-      set({ saveStatus: "export_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+      set({ saveStatus: "export_failed", lastError: snapshotRequiredError() });
       return;
     }
     const defaultName = currentHandle.path
@@ -754,7 +756,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         isExporting: false,
         saveStatus: result.success ? "export_done" : "export_failed",
         exportWarnings: result.warnings ?? [],
-        lastError: result.success ? null : friendlyError(result.error) ?? "PDF エクスポートに失敗しました",
+        lastError: result.success ? null : friendlyError(result.error) ?? t("error.exportPdf.failed"),
       });
     } catch (e) {
       set({ isExporting: false, saveStatus: "export_failed", lastError: friendlyError(String(e)) });
@@ -767,7 +769,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     const { currentHandle, currentSnapshotJson } = get();
     if (!currentHandle) return;
     if (!hasSnapshotJson(currentSnapshotJson)) {
-      set({ saveStatus: "export_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+      set({ saveStatus: "export_failed", lastError: snapshotRequiredError() });
       return;
     }
     const defaultName = currentHandle.path
@@ -802,7 +804,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         isExporting: false,
         saveStatus: result.success ? "export_done" : "export_failed",
         exportWarnings: result.warnings ?? [],
-        lastError: result.success ? null : friendlyError(result.error) ?? "バンドル出力に失敗しました",
+        lastError: result.success ? null : friendlyError(result.error) ?? t("error.exportBundle.failed"),
       });
     } catch (e) {
       set({ isExporting: false, saveStatus: "export_failed", lastError: friendlyError(String(e)) });
@@ -815,7 +817,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     await flushPendingSnapshot();
     const { currentSnapshotJson } = get();
     if (!hasSnapshotJson(currentSnapshotJson)) {
-      set({ lastError: SNAPSHOT_REQUIRED_ERROR });
+      set({ lastError: snapshotRequiredError() });
       return [];
     }
     try {
@@ -833,7 +835,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     await flushPendingSnapshot();
     const { currentSnapshotJson, csvExportEncoding } = get();
     if (!hasSnapshotJson(currentSnapshotJson)) {
-      set({ isExporting: false, saveStatus: "export_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+      set({ isExporting: false, saveStatus: "export_failed", lastError: snapshotRequiredError() });
       return;
     }
     const priorDirty = isDirtySaveStatusValue(get().saveStatus);
@@ -858,7 +860,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         isExporting: false,
         saveStatus: result.success ? "export_done" : "export_failed",
         exportWarnings: result.warnings,
-        lastError: result.success ? null : friendlyError(result.error) ?? "CSV エクスポートに失敗しました",
+        lastError: result.success ? null : friendlyError(result.error) ?? t("error.exportCsv.failed"),
       });
     } catch (e) {
       set({
@@ -1158,7 +1160,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       // #84: roll back the in-memory change so the UI state stays in sync
       // with persisted state. Otherwise the pin "stays" until the next
       // app restart, surprising the user.
-      set({ pinnedPaths: cur, lastError: friendlyError(String(e)) ?? "ピンの保存に失敗しました" });
+      set({ pinnedPaths: cur, lastError: friendlyError(String(e)) ?? t("error.pin.failed") });
     }
   },
 
@@ -1182,7 +1184,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       await invoke("set_setting", { key: PINNED_ORDER_KEY, value: JSON.stringify(order) });
     } catch (e) {
       // #84: rollback to keep in-memory state aligned with disk.
-      set({ pinnedOrder: prev, lastError: friendlyError(String(e)) ?? "並び順の保存に失敗しました" });
+      set({ pinnedOrder: prev, lastError: friendlyError(String(e)) ?? t("error.pinOrder.failed") });
     }
   },
 
@@ -1231,7 +1233,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       await invoke("set_setting", { key: SUPPRESS_CSV_POC_KEY, value: v ? "true" : "false" });
     } catch (e) {
       // #84: rollback so the toggle reflects the persisted state.
-      set({ suppressCsvPocWarning: prev, lastError: friendlyError(String(e)) ?? "設定保存に失敗しました" });
+      set({ suppressCsvPocWarning: prev, lastError: friendlyError(String(e)) ?? t("error.setting.failed") });
     }
   },
 

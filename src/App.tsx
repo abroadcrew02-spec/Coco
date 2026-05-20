@@ -18,6 +18,7 @@ import { useWindowTitle } from "./hooks/useWindowTitle";
 import { useFileDrop } from "./hooks/useFileDrop";
 import { useCloseGuard, onCloseRequest } from "./hooks/useCloseGuard";
 import { useMenuActions } from "./hooks/useMenuActions";
+import { useLocale } from "./hooks/useLocale";
 import HomeScreen from "./components/HomeScreen";
 import SecurityBlockDialog from "./components/SecurityBlockDialog";
 import HelpDialog from "./components/HelpDialog";
@@ -94,6 +95,10 @@ export default function App() {
     dismissBlockingImport,
     goHome,
   } = useWorkbookStore();
+
+  // #179 (area E): re-render the whole Coco UI tree when the locale changes
+  // so a language switch reflects immediately without a page reload.
+  useLocale();
 
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);

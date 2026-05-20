@@ -6,6 +6,7 @@ import {
   listAllComments,
   type CommentListing,
 } from "../store/commentsManager";
+import { t } from "../i18n/locale";
 import "./CommentsManagerDialog.css";
 
 interface Props {
@@ -113,9 +114,7 @@ export default function CommentsManagerDialog({
   // snapshot in EditorScreen.
   const handleBulkDelete = () => {
     if (resolvedCount === 0) return;
-    const ok = window.confirm(
-      `解決済みのコメント ${resolvedCount} 件を削除します。よろしいですか？`,
-    );
+    const ok = window.confirm(t("confirm.comment.bulkDelete", resolvedCount));
     if (!ok) return;
     // We discard the preview snapshot; EditorScreen runs the same helper
     // against its own state for the actual mutation + undo snapshot.
@@ -262,7 +261,7 @@ export default function CommentsManagerDialog({
                           type="button"
                           className="cmd-mini-btn cmd-mini-btn--danger"
                           onClick={() => {
-                            if (window.confirm("このコメントを削除しますか？")) {
+                            if (window.confirm(t("confirm.comment.delete"))) {
                               onDelete(c.sheetId, c.cellRef);
                             }
                           }}

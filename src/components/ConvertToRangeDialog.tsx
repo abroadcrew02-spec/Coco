@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { t } from "../i18n/locale";
 import "./ConvertToRangeDialog.css";
 
 export interface ConvertToRangeTableSummary {
@@ -56,9 +57,7 @@ export default function ConvertToRangeDialog({ tables, onApply, onClose }: Props
     // Excel-style confirm — the destructive intent (table → range) is
     // surfaced inline so the keyboard-only path still requires a deliberate
     // click. We don't gate on `preserveStyles` because both options are valid.
-    const ok = window.confirm(
-      `テーブル ${selected.name} を通常の範囲に変換します。スタイルは保持されますか？`,
-    );
+    const ok = window.confirm(t("confirm.convertToRange", selected.name));
     if (!ok) return;
     onApply({
       sheetId: selected.sheetId,

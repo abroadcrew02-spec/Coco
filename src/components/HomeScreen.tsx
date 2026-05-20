@@ -7,6 +7,7 @@ import { useEditorPreload } from "../hooks/useEditorPreload";
 import { routeOpenPath } from "../store/pathRouter";
 import { recoveryReasonLabel } from "../store/recoveryLabels";
 import { friendlyError } from "../store/errorMessages";
+import { t } from "../i18n/locale";
 import { timeAgoJa } from "./timeAgo";
 import type { RecentFile, RecoveryCandidate } from "../types/workbook";
 import "./HomeScreen.css";
@@ -327,7 +328,7 @@ export default function HomeScreen() {
               type="button"
               className="link-btn"
               onClick={() => {
-                if (window.confirm("最近使ったファイル一覧をすべて削除しますか？")) {
+                if (window.confirm(t("confirm.recents.clear"))) {
                   clearRecents();
                 }
               }}

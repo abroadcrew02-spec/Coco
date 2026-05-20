@@ -30,6 +30,37 @@ describe("locale strings", () => {
   });
 });
 
+describe("t() positional interpolation", () => {
+  it("substitutes {0} and {1} placeholders with the given args", () => {
+    setLocale("en-US");
+    // "Delete {1} {0} link(s)?"
+    expect(t("confirm.hyperlink.bulkDelete", "external", 3)).toBe(
+      "Delete 3 external link(s)?"
+    );
+  });
+
+  it("leaves a placeholder verbatim when its arg is missing", () => {
+    setLocale("en-US");
+    // Only {0} supplied; {1} has no arg → "{1}" stays literal.
+    expect(t("confirm.hyperlink.bulkDelete", "external")).toBe(
+      "Delete {1} external link(s)?"
+    );
+  });
+
+  it("stringifies numeric arguments", () => {
+    setLocale("ja-JP");
+    // "解決済みのコメント {0} 件を削除します。よろしいですか？"
+    expect(t("confirm.comment.bulkDelete", 5)).toBe(
+      "解決済みのコメント 5 件を削除します。よろしいですか？"
+    );
+  });
+
+  it("returns the raw string unchanged when no args are passed", () => {
+    setLocale("en-US");
+    expect(t("confirm.comment.bulkDelete")).toBe("Delete {0} resolved comment(s)?");
+  });
+});
+
 describe("getLocale", () => {
   it("honours the localStorage override", () => {
     localStorage.setItem(LOCALE_STORAGE_KEY, "en-US");

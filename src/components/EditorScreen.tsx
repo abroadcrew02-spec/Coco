@@ -375,12 +375,21 @@ import SortDialog, { type SortFormValue } from "./SortDialog";
 import SheetTabColorDialog from "./SheetTabColorDialog";
 import CommandPalette, { type PaletteCommand } from "./CommandPalette";
 import MacroDialog from "./MacroDialog";
-import { observeCommand as observeMacroCommand } from "../store/macroRecord";
+import {
+  observeCommand as observeMacroCommand,
+  playback as playbackMacro,
+  summariseDestructive as summariseMacroDestructive,
+} from "../store/macroRecord";
+import { loadAllSecure as loadMacrosSecure } from "../store/secureMacroStore";
 import CommentIndicatorsPanel from "./CommentIndicatorsPanel";
 import ChartPreviewPanel from "./ChartPreviewPanel";
 import { computeChartPreviews, type ChartPreview } from "./chartPreviewData";
 import ImagePreviewPanel from "./ImagePreviewPanel";
-import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
+import {
+  requestSettings,
+  requestHelp,
+  onMacroPlayRequested,
+} from "../hooks/useGlobalShortcuts";
 import { confirmDiscardIfUnsaved } from "../store/dirtyGuard";
 import { routeOpenPath } from "../store/pathRouter";
 import { registerSnapshotFlush } from "../store/snapshotSync";
@@ -6183,6 +6192,33 @@ export default function EditorScreen() {
       });
     });
     return () => disposable.dispose();
+  }, []);
+
+  // #186 — global-shortcut macro playback. `useGlobalShortcuts` (App level)
+  // detects Ctrl/Cmd+Shift+1..9 and emits the bound macro id; we own the
+  // Univer executor so we resolve the macro from the (encrypted) store and
+  // replay it here. Destructive macros still prompt before running.
+  useEffect(() => {
+    const unsub = onMacroPlayRequested((macroId) => {
+      void (async () => {
+        const fUniver = fUniverRef.current;
+        if (!fUniver) return;
+        const { macros } = await loadMacrosSecure();
+        const macro = macros.find((m) => m.id === macroId);
+        if (!macro) return;
+        if (summariseMacroDestructive(macro.events).length > 0) {
+          const ok = window.confirm(
+            `「${macro.name}」には破壊的な操作が含まれます。実行しますか？`,
+          );
+          if (!ok) return;
+        }
+        await playbackMacro(macro.events, {
+          executeCommand: (id, params) =>
+            fUniver.executeCommand(id, (params ?? undefined) as object | undefined),
+        });
+      })();
+    });
+    return () => unsub();
   }, []);
 
   // Live sheet-protection enforcement. G3 marks `_protected` in the snapshot

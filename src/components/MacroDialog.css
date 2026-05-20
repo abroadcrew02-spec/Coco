@@ -159,15 +159,21 @@
 
 .macro-item {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid #eee;
 }
 
 .macro-item:last-child {
   border-bottom: none;
+}
+
+.macro-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .macro-item-meta {
@@ -193,7 +199,83 @@
 .macro-item-actions {
   display: flex;
   gap: 6px;
+  align-items: flex-end;
   flex-shrink: 0;
+}
+
+/* #186 — shortcut slot badge shown next to a bound macro. */
+.macro-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background-color: #e0e7ff;
+  color: #3730a3;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* #186 — per-macro shortcut <select>. */
+.macro-shortcut-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  color: #888;
+}
+
+.macro-select {
+  padding: 5px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 12px;
+  background-color: #fff;
+}
+
+.macro-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* #186 — editable script (DSL) editor. */
+.macro-dsl-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background-color: #fafafa;
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+}
+
+.macro-dsl-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  resize: vertical;
+}
+
+.macro-dsl-errors {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 11px;
+  color: #dc2626;
+}
+
+.macro-dsl-ok {
+  margin: 0;
+  font-size: 11px;
+  color: #16a34a;
+}
+
+.macro-dsl-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .macro-footer {

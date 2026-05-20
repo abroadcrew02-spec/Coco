@@ -1,3 +1,5 @@
+import { flattenBlocks } from "./macroDsl";
+
 // #131 MVP — operation macro record / replay.
 //
 // Subscribes to Univer's high-level COMMAND stream via `FUniver.onCommandExecuted`
@@ -64,6 +66,10 @@ const STORAGE_VERSION = 1;
 // Source: Univer 0.5.x SetRangeValuesCommand etc. — these ids are stable per
 // the Univer 0.5 line.
 export const RECORDABLE_COMMAND_IDS: ReadonlySet<string> = new Set([
+  // Selection — #186 DSL `range` keyword targets this. Selecting a range is a
+  // replayable operation in its own right and a precondition for the
+  // clear-selection-* commands below.
+  "sheet.command.set-selection",
   // Cell content / formula
   "sheet.command.set-range-values",
   "sheet.command.clear-selection-content",
@@ -379,15 +385,20 @@ export interface PlaybackResult {
  * continue) rather than aborting on the first error; aborting partway
  * leaves the workbook in a weird half-state with no easy recovery, while
  * "best-effort + report" matches what other apps do with macros.
+ *
+ * #186: a macro authored via the DSL editor may contain synthetic `for` / `if`
+ * block markers. `flattenBlocks` expands `for` loops and strips the markers so
+ * playback always sees a flat, real-command list.
  */
 export async function playback(
   events: readonly MacroEvent[],
   executor: MacroExecutor,
 ): Promise<PlaybackResult> {
   const result: PlaybackResult = { ran: 0, skipped: 0, errors: [] };
+  const flat = flattenBlocks(events);
   markPlaybackStart();
   try {
-    for (const event of events) {
+    for (const event of flat) {
       if (!isRecordableCommand(event.id)) {
         result.skipped += 1;
         continue;

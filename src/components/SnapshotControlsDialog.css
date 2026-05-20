@@ -1,7 +1,7 @@
 .snapctl-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.42);
+  background: var(--coco-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,14 +9,14 @@
 }
 
 .snapctl-modal {
-  background: #fff;
+  background: var(--coco-bg-elevated);
   border-radius: 6px;
   width: 460px;
   max-width: 92vw;
   max-height: 84vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 8px 32px var(--coco-shadow);
 }
 
 .snapctl-header {
@@ -24,26 +24,27 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 18px;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .snapctl-title {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
+  color: var(--coco-text);
 }
 
 .snapctl-close {
   background: none;
   border: none;
   font-size: 22px;
-  color: #777;
+  color: var(--coco-text-muted);
   cursor: pointer;
   padding: 0 6px;
 }
 
 .snapctl-close:hover {
-  color: #222;
+  color: var(--coco-text);
 }
 
 .snapctl-body {
@@ -64,12 +65,12 @@
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: #333;
+  color: var(--coco-text);
 }
 
 .snapctl-hint {
   font-size: 12px;
-  color: #666;
+  color: var(--coco-text-muted);
   margin: 0;
   line-height: 1.5;
 }
@@ -98,7 +99,7 @@
 }
 
 .snapctl-radio-label:hover {
-  background: #f3f6fb;
+  background: var(--coco-surface-hover);
 }
 
 .snapctl-radio-label input[type="radio"] {
@@ -120,12 +121,12 @@
 }
 
 .snapctl-status-row dt {
-  color: #666;
+  color: var(--coco-text-muted);
 }
 
 .snapctl-status-row dd {
   margin: 0;
-  color: #222;
+  color: var(--coco-text);
   font-weight: 500;
   text-align: right;
 }
@@ -136,21 +137,22 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 18px;
-  border-top: 1px solid #e0e0e0;
-  background: #fafafa;
+  border-top: 1px solid var(--coco-border);
+  background: var(--coco-surface);
 }
 
 .snapctl-btn {
-  background: #fff;
-  border: 1px solid #c0c0c0;
+  background: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   padding: 6px 14px;
   font-size: 12px;
   cursor: pointer;
+  color: var(--coco-text);
 }
 
 .snapctl-btn:hover {
-  background: #f0f0f0;
+  background: var(--coco-surface-hover);
 }
 
 .snapctl-btn--primary {

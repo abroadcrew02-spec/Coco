@@ -1,8 +1,8 @@
 .pvlp-root {
   display: flex;
   flex-direction: column;
-  background-color: #fff;
-  border: 1px solid #e0e0e0;
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -11,16 +11,16 @@
   padding: 10px 14px;
   font-size: 13px;
   font-weight: 600;
-  color: #217346;
-  background-color: #f4faf6;
-  border-bottom: 1px solid #e0e0e0;
+  color: var(--coco-accent);
+  background-color: var(--coco-accent-subtle);
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .pvlp-empty {
   margin: 0;
   padding: 14px;
   font-size: 12px;
-  color: #757575;
+  color: var(--coco-text-muted);
 }
 
 .pvlp-list {
@@ -34,7 +34,7 @@
 .pvlp-row {
   display: flex;
   align-items: stretch;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .pvlp-row:last-child {
@@ -52,17 +52,17 @@
   border: none;
   cursor: pointer;
   font: inherit;
-  color: #424242;
+  color: var(--coco-text);
 }
 
 .pvlp-jump:hover {
-  background-color: #f4faf6;
+  background-color: var(--coco-accent-subtle);
 }
 
 .pvlp-name {
   font-size: 13px;
   font-weight: 600;
-  color: #217346;
+  color: var(--coco-accent);
 }
 
 .pvlp-meta {
@@ -70,45 +70,45 @@
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: #555;
+  color: var(--coco-text-muted);
   font-family: "Consolas", "Courier New", monospace;
 }
 
 .pvlp-anchor {
-  color: #1b6d3c;
+  color: var(--coco-accent);
 }
 
 .pvlp-arrow {
-  color: #999;
+  color: var(--coco-text-faint);
 }
 
 .pvlp-dest {
-  color: #424242;
+  color: var(--coco-text);
 }
 
 .pvlp-counts {
   font-size: 11px;
-  color: #757575;
+  color: var(--coco-text-muted);
 }
 
 .pvlp-refresh,
 .pvlp-delete {
   background: none;
   border: none;
-  color: #999;
+  color: var(--coco-text-faint);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
   padding: 0 12px;
-  border-left: 1px solid #f0f0f0;
+  border-left: 1px solid var(--coco-border);
 }
 
 .pvlp-refresh:hover {
-  color: #1b6d3c;
-  background-color: #eef7f1;
+  color: var(--coco-accent);
+  background-color: var(--coco-accent-subtle);
 }
 
 .pvlp-delete:hover {
-  color: #b00020;
-  background-color: #fbecec;
+  color: var(--coco-danger);
+  background-color: var(--coco-danger-bg);
 }

@@ -1,7 +1,7 @@
 .qcf-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--coco-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .qcf-modal {
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 32px var(--coco-shadow);
   width: 100%;
   max-width: 640px;
   max-height: 85vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid #eee;
-  background-color: #fafafa;
+  border-bottom: 1px solid var(--coco-border);
+  background-color: var(--coco-surface);
 }
 
 .qcf-title {
   font-size: 15px;
   font-weight: 600;
-  color: #217346;
+  color: var(--coco-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: #999;
+  color: var(--coco-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .qcf-close:hover {
-  color: #333;
-  background-color: #eee;
+  color: var(--coco-text);
+  background-color: var(--coco-surface-hover);
 }
 
 .qcf-body {
@@ -69,22 +69,22 @@
 
 .qcf-field-label {
   font-size: 12px;
-  color: #555;
+  color: var(--coco-text-muted);
   font-weight: 600;
 }
 
 .qcf-input {
   padding: 7px 9px;
   font-size: 13px;
-  border: 1px solid #cccccc;
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   outline: none;
-  background-color: #ffffff;
-  color: #222;
+  background-color: var(--coco-bg-elevated);
+  color: var(--coco-text);
 }
 
 .qcf-input:focus {
-  border-color: #217346;
+  border-color: var(--coco-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.18);
 }
 
@@ -97,7 +97,7 @@
 .qcf-section-title {
   font-size: 12px;
   font-weight: 600;
-  color: #444;
+  color: var(--coco-text-muted);
   margin: 0;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -115,8 +115,8 @@
   align-items: flex-start;
   gap: 4px;
   padding: 8px 10px;
-  background-color: #fafafa;
-  border: 1px solid #e0e0e0;
+  background-color: var(--coco-surface);
+  border: 1px solid var(--coco-border);
   border-radius: 5px;
   cursor: pointer;
   text-align: left;
@@ -124,14 +124,14 @@
 }
 
 .qcf-preset:hover {
-  border-color: #92c2a3;
-  background-color: #f3faf6;
+  border-color: var(--coco-border-strong);
+  background-color: var(--coco-accent-subtle);
 }
 
 .qcf-preset--active {
-  border-color: #217346;
-  background-color: #e8f4ec;
-  box-shadow: 0 0 0 1px #217346 inset;
+  border-color: var(--coco-accent);
+  background-color: var(--coco-accent-subtle);
+  box-shadow: 0 0 0 1px var(--coco-accent) inset;
 }
 
 .qcf-preset-swatch {
@@ -150,24 +150,24 @@
 .qcf-preset-label {
   font-size: 13px;
   font-weight: 600;
-  color: #222;
+  color: var(--coco-text);
 }
 
 .qcf-preset-sub {
   font-size: 11px;
-  color: #757575;
+  color: var(--coco-text-muted);
 }
 
 .qcf-error {
   margin: 0;
   font-size: 12px;
-  color: #c0392b;
+  color: var(--coco-danger);
 }
 
 .qcf-footer {
   padding: 12px 20px;
-  border-top: 1px solid #eee;
-  background-color: #fafafa;
+  border-top: 1px solid var(--coco-border);
+  background-color: var(--coco-surface);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -176,7 +176,7 @@
 .qcf-hint {
   margin: 0;
   font-size: 11px;
-  color: #757575;
+  color: var(--coco-text-muted);
   line-height: 1.5;
 }
 
@@ -189,32 +189,32 @@
 .qcf-btn {
   padding: 6px 14px;
   font-size: 13px;
-  background-color: #ffffff;
-  border: 1px solid #cccccc;
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   cursor: pointer;
-  color: #222;
+  color: var(--coco-text);
   transition: background-color 0.12s, border-color 0.12s;
 }
 
 .qcf-btn:hover {
-  background-color: #f4f4f4;
-  border-color: #999;
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-border-strong);
 }
 
 .qcf-btn--primary {
-  background-color: #217346;
-  border-color: #1a5c38;
-  color: #ffffff;
+  background-color: var(--coco-accent);
+  border-color: var(--coco-accent-hover);
+  color: var(--coco-accent-text);
   font-weight: 600;
 }
 
 .qcf-btn--primary:hover:not(:disabled) {
-  background-color: #1a5c38;
+  background-color: var(--coco-accent-hover);
 }
 
 .qcf-btn--primary:disabled {
-  background-color: #a4cdb6;
-  border-color: #a4cdb6;
+  background-color: var(--coco-border-strong);
+  border-color: var(--coco-border-strong);
   cursor: not-allowed;
 }

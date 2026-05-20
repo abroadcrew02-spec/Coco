@@ -10,6 +10,14 @@ import {
   setChannel as persistChannel,
   checkForUpdate,
 } from "../store/updater";
+import {
+  type ThemeMode,
+  getThemeMode,
+  setThemeMode,
+  applyThemeMode,
+  notifyThemeChanged,
+  THEME_MODE_LABELS,
+} from "../store/theme";
 import "./SettingsDialog.css";
 
 interface Props {
@@ -57,6 +65,9 @@ export default function SettingsDialog({ onClose }: Props) {
     useState<boolean>(suppressCsvPocWarning);
   const initialLocale = getLocale();
   const [pendingLocale, setPendingLocale] = useState<Locale>(initialLocale);
+  // Theme (#191): applied immediately on change (no "apply" gate) so the
+  // user sees the result while the dialog is still open.
+  const [theme, setThemeState] = useState<ThemeMode>(getThemeMode);
   // Auto-update: read current localStorage state at dialog open; persist on apply.
   const initialAutoUpdate = isAutoCheckEnabled();
   const [pendingAutoUpdate, setPendingAutoUpdate] = useState<boolean>(initialAutoUpdate);
@@ -238,6 +249,34 @@ export default function SettingsDialog({ onClose }: Props) {
                 />
                 <span>{t("settings.languageEn")}</span>
               </label>
+            </div>
+          </details>
+          <details className="settings-section">
+            <summary className="settings-section-summary">
+              <h3>{t("settings.theme")}</h3>
+            </summary>
+            <p className="settings-hint">{t("settings.themeHint")}</p>
+            <div className="settings-radio-group">
+              {(["light", "dark", "system"] as ThemeMode[]).map((mode) => (
+                <label key={mode} className="settings-radio">
+                  <input
+                    type="radio"
+                    name="coco-theme"
+                    checked={theme === mode}
+                    onChange={() => {
+                      setThemeState(mode);
+                      setThemeMode(mode);
+                      applyThemeMode(mode);
+                      notifyThemeChanged();
+                    }}
+                  />
+                  <span>
+                    {THEME_MODE_LABELS[mode][
+                      initialLocale === "ja-JP" ? "ja" : "en"
+                    ]}
+                  </span>
+                </label>
+              ))}
             </div>
           </details>
           <details className="settings-section">

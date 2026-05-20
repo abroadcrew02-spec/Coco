@@ -1,7 +1,7 @@
 .ff-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--coco-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .ff-modal {
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 32px var(--coco-shadow);
   width: 100%;
   max-width: 520px;
   max-height: 80vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid #eee;
-  background-color: #fafafa;
+  border-bottom: 1px solid var(--coco-border);
+  background-color: var(--coco-surface);
 }
 
 .ff-title {
   font-size: 15px;
   font-weight: 600;
-  color: #217346;
+  color: var(--coco-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: #999;
+  color: var(--coco-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .ff-close:hover {
-  color: #333;
-  background-color: #eee;
+  color: var(--coco-text);
+  background-color: var(--coco-surface-hover);
 }
 
 .ff-body {
@@ -64,16 +64,16 @@
 .ff-description {
   margin: 0;
   font-size: 13px;
-  color: #424242;
-  background-color: #f1faf4;
-  border: 1px solid #b9d8c4;
+  color: var(--coco-text);
+  background-color: var(--coco-accent-subtle);
+  border: 1px solid var(--coco-border);
   padding: 8px 10px;
   border-radius: 4px;
 }
 
 .ff-description-label {
   font-weight: 600;
-  color: #217346;
+  color: var(--coco-accent);
 }
 
 .ff-description-text {
@@ -83,12 +83,12 @@
 .ff-empty {
   margin: 0;
   font-size: 12px;
-  color: #757575;
+  color: var(--coco-text-muted);
   font-style: italic;
 }
 
 .ff-preview-wrap {
-  border: 1px solid #d0d8d4;
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -100,22 +100,22 @@
 }
 
 .ff-preview thead th {
-  background-color: #f6fbf8;
-  color: #217346;
+  background-color: var(--coco-accent-subtle);
+  color: var(--coco-accent);
   font-weight: 600;
   text-align: left;
   padding: 6px 10px;
-  border-bottom: 1px solid #d0d8d4;
+  border-bottom: 1px solid var(--coco-border-strong);
 }
 
 .ff-preview tbody tr:nth-child(even) {
-  background-color: #fafafa;
+  background-color: var(--coco-surface);
 }
 
 .ff-cell {
   padding: 5px 10px;
   font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  color: #424242;
+  color: var(--coco-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -123,18 +123,18 @@
 }
 
 .ff-cell--source {
-  color: #555;
+  color: var(--coco-text-muted);
 }
 
 .ff-cell--filled {
-  color: #217346;
+  color: var(--coco-accent);
   font-weight: 500;
 }
 
 .ff-footer {
   padding: 12px 20px;
-  background-color: #fafafa;
-  border-top: 1px solid #eee;
+  background-color: var(--coco-surface);
+  border-top: 1px solid var(--coco-border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -143,7 +143,7 @@
 .ff-hint {
   margin: 0;
   font-size: 11px;
-  color: #757575;
+  color: var(--coco-text-muted);
   line-height: 1.5;
 }
 
@@ -157,16 +157,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: #424242;
-  background-color: #fff;
-  border: 1px solid #d0d0d0;
+  color: var(--coco-text);
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .ff-btn:hover:not(:disabled) {
-  background-color: #f0f0f0;
-  border-color: #b0b0b0;
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-border-strong);
 }
 
 .ff-btn:disabled {
@@ -175,12 +175,12 @@
 }
 
 .ff-btn--primary {
-  background-color: #217346;
-  color: #fff;
-  border-color: #217346;
+  background-color: var(--coco-accent);
+  color: var(--coco-accent-text);
+  border-color: var(--coco-accent);
 }
 
 .ff-btn--primary:hover:not(:disabled) {
-  background-color: #1a5c38;
-  border-color: #1a5c38;
+  background-color: var(--coco-accent-hover);
+  border-color: var(--coco-accent-hover);
 }

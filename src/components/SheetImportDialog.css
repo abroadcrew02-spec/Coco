@@ -1,7 +1,7 @@
 .sid-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--coco-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .sid-modal {
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 32px var(--coco-shadow);
   width: 100%;
   max-width: 560px;
   max-height: 80vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid #eee;
-  background-color: #fafafa;
+  border-bottom: 1px solid var(--coco-border);
+  background-color: var(--coco-surface);
 }
 
 .sid-title {
   font-size: 15px;
   font-weight: 600;
-  color: #217346;
+  color: var(--coco-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: #999;
+  color: var(--coco-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .sid-close:hover {
-  color: #333;
-  background-color: #eee;
+  color: var(--coco-text);
+  background-color: var(--coco-surface-hover);
 }
 
 .sid-body {
@@ -71,10 +71,10 @@
   flex: 1;
   padding: 6px 10px;
   font-size: 13px;
-  border: 1px solid #d0d0d0;
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
-  background-color: #fafafa;
-  color: #333;
+  background-color: var(--coco-surface);
+  color: var(--coco-text);
   font-family: inherit;
   min-width: 0;
 }
@@ -82,22 +82,22 @@
 .sid-status {
   margin: 6px 0;
   font-size: 13px;
-  color: #777;
+  color: var(--coco-text-muted);
   text-align: center;
 }
 
 .sid-error {
   margin: 6px 0;
   font-size: 13px;
-  color: #b00020;
-  background-color: #fdecea;
-  border: 1px solid #f6c4c0;
+  color: var(--coco-danger);
+  background-color: var(--coco-danger-bg);
+  border: 1px solid var(--coco-danger);
   border-radius: 4px;
   padding: 6px 10px;
 }
 
 .sid-list-header {
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .sid-list {
@@ -117,27 +117,27 @@
   gap: 8px;
   padding: 8px 10px;
   font-size: 13px;
-  color: #333;
-  background-color: #fff;
+  color: var(--coco-text);
+  background-color: var(--coco-bg-elevated);
   border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
 }
 
 .sid-row:hover {
-  background-color: #f3faf6;
-  border-color: #cfe6da;
+  background-color: var(--coco-accent-subtle);
+  border-color: var(--coco-border);
 }
 
 .sid-row--active {
-  background-color: #e7f4ec;
-  border-color: #217346;
+  background-color: var(--coco-accent-subtle);
+  border-color: var(--coco-accent);
 }
 
 .sid-row--header {
   cursor: default;
   font-weight: 600;
-  color: #555;
+  color: var(--coco-text-muted);
   background-color: transparent;
 }
 
@@ -154,7 +154,7 @@
 
 .sid-meta {
   font-size: 12px;
-  color: #666;
+  color: var(--coco-text-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -164,8 +164,8 @@
 
 .sid-footer {
   padding: 12px 20px;
-  background-color: #fafafa;
-  border-top: 1px solid #eee;
+  background-color: var(--coco-surface);
+  border-top: 1px solid var(--coco-border);
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -176,16 +176,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: #424242;
-  background-color: #fff;
-  border: 1px solid #d0d0d0;
+  color: var(--coco-text);
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .sid-btn:hover:not(:disabled) {
-  background-color: #f0f0f0;
-  border-color: #b0b0b0;
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-text-faint);
 }
 
 .sid-btn:disabled {
@@ -194,12 +194,12 @@
 }
 
 .sid-btn--primary {
-  background-color: #217346;
-  color: #fff;
-  border-color: #217346;
+  background-color: var(--coco-accent);
+  color: var(--coco-accent-text);
+  border-color: var(--coco-accent);
 }
 
 .sid-btn--primary:hover:not(:disabled) {
-  background-color: #1a5c38;
-  border-color: #1a5c38;
+  background-color: var(--coco-accent-hover);
+  border-color: var(--coco-accent-hover);
 }

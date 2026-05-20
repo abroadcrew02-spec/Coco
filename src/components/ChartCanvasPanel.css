@@ -10,10 +10,10 @@
   z-index: 24;
   width: 520px;
   max-width: calc(100vw - 48px);
-  background: #fff;
-  border: 1px solid #d1d5db;
+  background: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px var(--coco-shadow);
   font-size: 12px;
   display: flex;
   flex-direction: column;
@@ -25,8 +25,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 10px;
-  background: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
+  background: var(--coco-surface);
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .ccp-title {
@@ -34,7 +34,7 @@
   align-items: center;
   gap: 6px;
   font-weight: 600;
-  color: #374151;
+  color: var(--coco-text);
 }
 
 .ccp-icon {
@@ -49,11 +49,11 @@
   font-size: 16px;
   line-height: 1;
   padding: 0 4px;
-  color: #6b7280;
+  color: var(--coco-text-muted);
 }
 
 .ccp-collapse:hover {
-  color: #111827;
+  color: var(--coco-text);
 }
 
 .ccp-body {
@@ -71,29 +71,29 @@
 
 .ccp-picker-label {
   font-size: 11px;
-  color: #6b7280;
+  color: var(--coco-text-muted);
 }
 
 .ccp-select {
   padding: 4px 6px;
   font-size: 12px;
-  border: 1px solid #c8d0cc;
+  border: 1px solid var(--coco-border-strong);
   border-radius: 3px;
-  background: #fff;
+  background: var(--coco-bg-elevated);
   font-family: inherit;
-  color: #1f2937;
+  color: var(--coco-text);
 }
 
 .ccp-select:focus {
   outline: none;
-  border-color: #217346;
+  border-color: var(--coco-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
 }
 
 .ccp-canvas {
   width: 100%;
   background: #ffffff;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--coco-border);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -110,8 +110,8 @@
   bottom: 8px;
   left: 16px;
   z-index: 24;
-  background: #fff;
-  border: 1px solid #d1d5db;
+  background: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 999px;
   padding: 4px 10px;
   cursor: pointer;
@@ -119,16 +119,16 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 6px var(--coco-shadow);
 }
 
 .ccp-badge:hover,
 .ccp-badge:focus-visible {
-  background: #f3f4f6;
+  background: var(--coco-surface-hover);
   outline: none;
 }
 
 .ccp-badge-count {
   font-weight: 600;
-  color: #374151;
+  color: var(--coco-text);
 }

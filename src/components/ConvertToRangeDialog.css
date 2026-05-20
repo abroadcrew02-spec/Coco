@@ -1,7 +1,7 @@
 .ctr-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--coco-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .ctr-modal {
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 32px var(--coco-shadow);
   width: 100%;
   max-width: 560px;
   max-height: 80vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid #eee;
-  background-color: #fafafa;
+  border-bottom: 1px solid var(--coco-border);
+  background-color: var(--coco-surface);
 }
 
 .ctr-title {
   font-size: 15px;
   font-weight: 600;
-  color: #217346;
+  color: var(--coco-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: #999;
+  color: var(--coco-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .ctr-close:hover {
-  color: #333;
-  background-color: #eee;
+  color: var(--coco-text);
+  background-color: var(--coco-surface-hover);
 }
 
 .ctr-body {
@@ -64,7 +64,7 @@
 .ctr-empty {
   margin: 0;
   font-size: 13px;
-  color: #757575;
+  color: var(--coco-text-muted);
 }
 
 .ctr-field {
@@ -75,22 +75,22 @@
 
 .ctr-field-label {
   font-size: 12px;
-  color: #555;
+  color: var(--coco-text-muted);
 }
 
 .ctr-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid #d6e2da;
+  border: 1px solid var(--coco-border);
   border-radius: 4px;
   max-height: 260px;
   overflow-y: auto;
-  background-color: #fcfdfc;
+  background-color: var(--coco-surface);
 }
 
 .ctr-row {
-  border-bottom: 1px solid #eef3f0;
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .ctr-row:last-child {
@@ -106,11 +106,11 @@
 }
 
 .ctr-row-label:hover {
-  background-color: #f1faf4;
+  background-color: var(--coco-accent-subtle);
 }
 
 .ctr-row-label--active {
-  background-color: #e3f3e9;
+  background-color: var(--coco-accent-subtle);
 }
 
 .ctr-row-main {
@@ -124,7 +124,7 @@
 .ctr-row-name {
   font-size: 13px;
   font-weight: 600;
-  color: #1a5c38;
+  color: var(--coco-accent-hover);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -132,7 +132,7 @@
 
 .ctr-row-meta {
   font-size: 11px;
-  color: #757575;
+  color: var(--coco-text-muted);
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
@@ -140,12 +140,12 @@
 }
 
 .ctr-sheet {
-  color: #424242;
+  color: var(--coco-text);
   font-weight: 500;
 }
 
 .ctr-sep {
-  color: #c0c8c4;
+  color: var(--coco-border-strong);
 }
 
 .ctr-range,
@@ -158,13 +158,13 @@
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: #424242;
+  color: var(--coco-text);
 }
 
 .ctr-footer {
   padding: 12px 20px;
-  background-color: #fafafa;
-  border-top: 1px solid #eee;
+  background-color: var(--coco-surface);
+  border-top: 1px solid var(--coco-border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -173,13 +173,13 @@
 .ctr-hint {
   margin: 0;
   font-size: 11px;
-  color: #757575;
+  color: var(--coco-text-muted);
   line-height: 1.5;
 }
 
 .ctr-hint code {
-  background-color: #f0f4f1;
-  border: 1px solid #d6e2da;
+  background-color: var(--coco-accent-subtle);
+  border: 1px solid var(--coco-border);
   border-radius: 3px;
   padding: 0 4px;
   font-family: "Consolas", "Menlo", monospace;
@@ -196,16 +196,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: #424242;
-  background-color: #fff;
-  border: 1px solid #d0d0d0;
+  color: var(--coco-text);
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .ctr-btn:hover:not(:disabled) {
-  background-color: #f0f0f0;
-  border-color: #b0b0b0;
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-border-strong);
 }
 
 .ctr-btn:disabled {
@@ -214,12 +214,12 @@
 }
 
 .ctr-btn--primary {
-  background-color: #217346;
-  color: #fff;
-  border-color: #217346;
+  background-color: var(--coco-accent);
+  color: var(--coco-accent-text);
+  border-color: var(--coco-accent);
 }
 
 .ctr-btn--primary:hover:not(:disabled) {
-  background-color: #1a5c38;
-  border-color: #1a5c38;
+  background-color: var(--coco-accent-hover);
+  border-color: var(--coco-accent-hover);
 }

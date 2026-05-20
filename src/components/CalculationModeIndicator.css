@@ -5,9 +5,9 @@
   padding: 2px 8px;
   font-size: 11px;
   font-weight: 500;
-  color: #424242;
-  background-color: #f5f5f5;
-  border: 1px solid #d8d8d8;
+  color: var(--coco-text);
+  background-color: var(--coco-bg);
+  border: 1px solid var(--coco-border);
   border-radius: 3px;
   cursor: pointer;
   line-height: 1.5;
@@ -16,37 +16,37 @@
 }
 
 .calc-mode-indicator:hover {
-  background-color: #eaeaea;
-  border-color: #b0b0b0;
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-border-strong);
 }
 
 .calc-mode-indicator__dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background-color: #9e9e9e;
+  background-color: var(--coco-text-faint);
   flex-shrink: 0;
 }
 
 .calc-mode-indicator--auto .calc-mode-indicator__dot {
-  background-color: #2e7d32;
+  background-color: var(--coco-accent);
 }
 
 .calc-mode-indicator--autoNoTables .calc-mode-indicator__dot {
-  background-color: #f9a825;
+  background-color: var(--coco-warning);
 }
 
 .calc-mode-indicator--manual .calc-mode-indicator__dot {
-  background-color: #c62828;
+  background-color: var(--coco-danger);
 }
 
 .calc-mode-indicator--manual {
-  color: #c62828;
-  border-color: #f1c0c0;
-  background-color: #fff5f5;
+  color: var(--coco-danger);
+  border-color: var(--coco-danger);
+  background-color: var(--coco-danger-bg);
 }
 
 .calc-mode-indicator--manual:hover {
-  background-color: #ffeaea;
-  border-color: #e9a8a8;
+  background-color: var(--coco-danger-bg);
+  border-color: var(--coco-danger);
 }

@@ -1,7 +1,7 @@
 .sheet-picker-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.4);
+  background-color: var(--coco-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .sheet-picker-modal {
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 8px 32px var(--coco-shadow);
   width: 100%;
   max-width: 420px;
   max-height: 80vh;
@@ -23,14 +23,14 @@
 .sheet-picker-title {
   font-size: 15px;
   font-weight: 600;
-  color: #212121;
+  color: var(--coco-text);
   padding: 16px 20px 4px;
   margin: 0;
 }
 
 .sheet-picker-hint {
   font-size: 12px;
-  color: #757575;
+  color: var(--coco-text-muted);
   padding: 0 20px 12px;
   margin: 0;
 }
@@ -56,34 +56,34 @@
   cursor: pointer;
   text-align: left;
   font-size: 14px;
-  color: #212121;
+  color: var(--coco-text);
   transition: background-color 0.1s ease;
 }
 
 .sheet-picker-item:hover {
-  background-color: #f0f0f0;
+  background-color: var(--coco-surface-hover);
 }
 
 .sheet-picker-item--active {
-  background-color: #e8f5e9;
-  color: #1b5e20;
+  background-color: var(--coco-accent-subtle);
+  color: var(--coco-accent);
   font-weight: 500;
 }
 
 .sheet-picker-item--active:hover {
-  background-color: #c8e6c9;
+  background-color: var(--coco-accent-subtle);
 }
 
 .sheet-picker-item__index {
   font-size: 11px;
   font-weight: 600;
-  color: #757575;
+  color: var(--coco-text-muted);
   min-width: 24px;
   flex-shrink: 0;
 }
 
 .sheet-picker-item--active .sheet-picker-item__index {
-  color: #2e7d32;
+  color: var(--coco-accent);
 }
 
 .sheet-picker-item__name {
@@ -97,36 +97,36 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 20px 16px;
-  border-top: 1px solid #eee;
-  background-color: #fafafa;
+  border-top: 1px solid var(--coco-border);
+  background-color: var(--coco-surface);
 }
 
 .sheet-picker-btn {
   padding: 8px 16px;
   font-size: 13px;
   font-weight: 500;
-  color: #424242;
-  background-color: #fff;
-  border: 1px solid #d0d0d0;
+  color: var(--coco-text);
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   cursor: pointer;
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
 .sheet-picker-btn:hover:not(:disabled) {
-  background-color: #f0f0f0;
-  border-color: #b0b0b0;
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-border-strong);
 }
 
 .sheet-picker-btn--primary {
-  background-color: #217346;
-  color: #fff;
-  border-color: #217346;
+  background-color: var(--coco-accent);
+  color: var(--coco-accent-text);
+  border-color: var(--coco-accent);
 }
 
 .sheet-picker-btn--primary:hover:not(:disabled) {
-  background-color: #1a5c38;
-  border-color: #1a5c38;
+  background-color: var(--coco-accent-hover);
+  border-color: var(--coco-accent-hover);
 }
 
 .sheet-picker-btn:disabled {

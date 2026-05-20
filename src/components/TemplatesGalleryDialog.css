@@ -1,7 +1,7 @@
 .tgd-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--coco-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .tgd-modal {
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 32px var(--coco-shadow);
   width: 100%;
   max-width: 720px;
   max-height: 80vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid #eee;
-  background-color: #fafafa;
+  border-bottom: 1px solid var(--coco-border);
+  background-color: var(--coco-surface);
 }
 
 .tgd-title {
   font-size: 15px;
   font-weight: 600;
-  color: #217346;
+  color: var(--coco-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: #999;
+  color: var(--coco-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .tgd-close:hover {
-  color: #333;
-  background-color: #eee;
+  color: var(--coco-text);
+  background-color: var(--coco-surface-hover);
 }
 
 .tgd-body {
@@ -76,9 +76,9 @@
   padding: 14px 12px;
   font-family: inherit;
   font-size: 13px;
-  color: #333;
-  background-color: #fff;
-  border: 1px solid #d8d8d8;
+  color: var(--coco-text);
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border);
   border-radius: 6px;
   cursor: pointer;
   text-align: left;
@@ -87,13 +87,13 @@
 }
 
 .tgd-tile:hover {
-  border-color: #cfe6da;
-  background-color: #f3faf6;
+  border-color: var(--coco-border);
+  background-color: var(--coco-accent-subtle);
 }
 
 .tgd-tile--active {
-  border-color: #217346;
-  background-color: #e7f4ec;
+  border-color: var(--coco-accent);
+  background-color: var(--coco-accent-subtle);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
 }
 
@@ -106,19 +106,19 @@
 .tgd-tile-name {
   font-size: 13px;
   font-weight: 600;
-  color: #1a1a1a;
+  color: var(--coco-text);
 }
 
 .tgd-tile-desc {
   font-size: 12px;
-  color: #666;
+  color: var(--coco-text-muted);
   line-height: 1.35;
 }
 
 .tgd-footer {
   padding: 12px 20px;
-  background-color: #fafafa;
-  border-top: 1px solid #eee;
+  background-color: var(--coco-surface);
+  border-top: 1px solid var(--coco-border);
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -129,16 +129,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: #424242;
-  background-color: #fff;
-  border: 1px solid #d0d0d0;
+  color: var(--coco-text);
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .tgd-btn:hover:not(:disabled) {
-  background-color: #f0f0f0;
-  border-color: #b0b0b0;
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-text-faint);
 }
 
 .tgd-btn:disabled {
@@ -147,12 +147,12 @@
 }
 
 .tgd-btn--primary {
-  background-color: #217346;
-  color: #fff;
-  border-color: #217346;
+  background-color: var(--coco-accent);
+  color: var(--coco-accent-text);
+  border-color: var(--coco-accent);
 }
 
 .tgd-btn--primary:hover:not(:disabled) {
-  background-color: #1a5c38;
-  border-color: #1a5c38;
+  background-color: var(--coco-accent-hover);
+  border-color: var(--coco-accent-hover);
 }

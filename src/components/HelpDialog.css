@@ -1,7 +1,7 @@
 .help-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--coco-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .help-modal {
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 32px var(--coco-shadow);
   width: 100%;
   max-width: 540px;
   max-height: 80vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid #eee;
-  background-color: #fafafa;
+  border-bottom: 1px solid var(--coco-border);
+  background-color: var(--coco-surface);
 }
 
 .help-title {
   font-size: 15px;
   font-weight: 600;
-  color: #217346;
+  color: var(--coco-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: #999;
+  color: var(--coco-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .help-close:hover {
-  color: #333;
-  background-color: #eee;
+  color: var(--coco-text);
+  background-color: var(--coco-surface-hover);
 }
 
 .help-body {
@@ -69,12 +69,12 @@
 .help-section h3 {
   font-size: 12px;
   font-weight: 600;
-  color: #757575;
+  color: var(--coco-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin: 0 0 8px;
   padding-bottom: 4px;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .help-table {
@@ -98,9 +98,9 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   font-weight: 600;
-  color: #424242;
-  background-color: #f5f5f5;
-  border: 1px solid #d0d0d0;
+  color: var(--coco-text);
+  background-color: var(--coco-surface);
+  border: 1px solid var(--coco-border-strong);
   border-bottom-width: 2px;
   border-radius: 3px;
   padding: 2px 6px;
@@ -113,13 +113,13 @@
 }
 
 .help-desc {
-  color: #424242;
+  color: var(--coco-text);
   padding-left: 16px;
 }
 
 .help-list {
   font-size: 13px;
-  color: #424242;
+  color: var(--coco-text);
   margin: 0;
   padding-left: 18px;
   line-height: 1.6;
@@ -127,18 +127,18 @@
 
 .help-list b {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: #217346;
+  color: var(--coco-accent);
 }
 
 .help-footnote {
   font-size: 11px;
-  color: #999;
+  color: var(--coco-text-faint);
   margin: 8px 0 0;
 }
 
 .help-about {
   font-size: 12px;
-  color: #757575;
+  color: var(--coco-text-muted);
   margin: 0;
   line-height: 1.6;
 }

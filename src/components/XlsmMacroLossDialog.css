@@ -1,7 +1,7 @@
 .xlsm-macro-loss-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--coco-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .xlsm-macro-loss-modal {
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 8px 32px var(--coco-shadow);
   width: 100%;
   max-width: 480px;
   padding: 0;
@@ -29,7 +29,7 @@
 .xlsm-macro-loss-title {
   font-size: 16px;
   font-weight: 600;
-  color: #e65100;
+  color: var(--coco-warning);
   margin: 0;
 }
 
@@ -38,7 +38,7 @@
   border: none;
   font-size: 20px;
   line-height: 1;
-  color: #757575;
+  color: var(--coco-text-muted);
   cursor: pointer;
   padding: 2px 8px;
   border-radius: 4px;
@@ -46,8 +46,8 @@
 }
 
 .xlsm-macro-loss-close:hover {
-  background-color: #f0f0f0;
-  color: #424242;
+  background-color: var(--coco-surface-hover);
+  color: var(--coco-text);
 }
 
 .xlsm-macro-loss-body {
@@ -56,14 +56,14 @@
 
 .xlsm-macro-loss-hint {
   font-size: 13px;
-  color: #424242;
+  color: var(--coco-text);
   line-height: 1.55;
   margin: 0 0 10px;
 }
 
 .xlsm-macro-loss-detail {
   font-size: 12px;
-  color: #757575;
+  color: var(--coco-text-muted);
   line-height: 1.55;
   margin: 0;
 }
@@ -81,24 +81,24 @@
   font-weight: 500;
   border-radius: 4px;
   cursor: pointer;
-  border: 1px solid #d0d0d0;
-  background-color: #fff;
-  color: #424242;
+  border: 1px solid var(--coco-border-strong);
+  background-color: var(--coco-bg-elevated);
+  color: var(--coco-text);
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
 .xlsm-macro-loss-btn:hover {
-  background-color: #f0f0f0;
-  border-color: #b0b0b0;
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-border-strong);
 }
 
 .xlsm-macro-loss-btn--primary {
-  background-color: #217346;
-  color: #fff;
-  border-color: #217346;
+  background-color: var(--coco-accent);
+  color: var(--coco-accent-text);
+  border-color: var(--coco-accent);
 }
 
 .xlsm-macro-loss-btn--primary:hover {
-  background-color: #1a5c38;
-  border-color: #1a5c38;
+  background-color: var(--coco-accent-hover);
+  border-color: var(--coco-accent-hover);
 }

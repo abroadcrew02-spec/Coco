@@ -16,7 +16,7 @@
   background: #fffdf6;
   border: 1px solid #d4b85a;
   border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 6px 20px var(--coco-shadow);
   font-size: 12px;
   overflow: hidden;
 }
@@ -71,7 +71,7 @@
 }
 
 .cao-card {
-  background: #fff;
+  background: var(--coco-bg-elevated);
   border: 1px solid #f1d572;
   border-radius: 6px;
   padding: 6px 8px;
@@ -98,14 +98,14 @@
 
 .cao-author {
   font-size: 11px;
-  color: #6b7280;
+  color: var(--coco-text-muted);
   font-style: italic;
   white-space: nowrap;
 }
 
 .cao-body {
   margin: 0;
-  color: #1f2937;
+  color: var(--coco-text);
   line-height: 1.4;
   word-break: break-word;
   white-space: pre-wrap;
@@ -130,4 +130,49 @@
 .cao-jump:focus-visible {
   background: #fcd34d;
   outline: none;
+}
+
+/* Dark mode — keep the sticky-note identity but shift the hardcoded paper
+   yellows and dark-brown text to dark-tone equivalents so the floating
+   card reads correctly against a dark editor. */
+[data-theme="dark"] .cao-overlay {
+  background: #2f2a1c;
+  border-color: #5a4d2a;
+}
+
+[data-theme="dark"] .cao-header {
+  background: #3a3520;
+  border-bottom-color: #5a4d2a;
+}
+
+[data-theme="dark"] .cao-title {
+  color: #fcd34d;
+}
+
+[data-theme="dark"] .cao-close {
+  color: #fbbf24;
+}
+
+[data-theme="dark"] .cao-close:hover,
+[data-theme="dark"] .cao-close:focus-visible {
+  color: #fde68a;
+}
+
+[data-theme="dark"] .cao-card {
+  border-color: #5a4d2a;
+}
+
+[data-theme="dark"] .cao-cell-ref {
+  color: #a5b4fc;
+}
+
+[data-theme="dark"] .cao-jump {
+  background: #5a4d2a;
+  border-color: #6e5e30;
+  color: #fde68a;
+}
+
+[data-theme="dark"] .cao-jump:hover,
+[data-theme="dark"] .cao-jump:focus-visible {
+  background: #6e5e30;
 }

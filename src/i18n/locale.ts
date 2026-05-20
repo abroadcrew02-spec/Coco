@@ -134,6 +134,10 @@ const jaJP = {
   "settings.languageHint": "表示言語を切り替えます。変更後は再読み込みで反映されます。",
   "settings.languageJa": "日本語 (ja-JP)",
   "settings.languageEn": "English (en-US)",
+  // Settings dialog — theme section (#191)
+  "settings.theme": "テーマ / 外観",
+  "settings.themeHint":
+    "ライト / ダーク / システム設定に従う から選択します。変更は即座に反映されます。",
 } as const;
 
 type StringKey = keyof typeof jaJP;
@@ -252,6 +256,9 @@ const enUS: Record<StringKey, string> = {
     "Switch UI language. Reload the app to apply the change.",
   "settings.languageJa": "日本語 (ja-JP)",
   "settings.languageEn": "English (en-US)",
+  "settings.theme": "Theme / Appearance",
+  "settings.themeHint":
+    "Choose Light / Dark / Match system. Changes apply immediately.",
 };
 
 export const strings: Record<Locale, Record<StringKey, string>> = {

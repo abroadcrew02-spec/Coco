@@ -26,6 +26,12 @@ import SettingsDialog from "./components/SettingsDialog";
 import CloseConfirmDialog from "./components/CloseConfirmDialog";
 import XlsmMacroLossDialog from "./components/XlsmMacroLossDialog";
 import { confirmDiscardIfUnsaved } from "./store/dirtyGuard";
+import {
+  applyThemeMode,
+  getThemeMode,
+  onThemeChanged,
+  subscribeSystemTheme,
+} from "./store/theme";
 
 // EditorScreen pulls in the ~10MB Univer bundle. Lazy-load it so the Home
 // screen renders instantly without waiting for Univer to parse.
@@ -114,6 +120,28 @@ export default function App() {
       u1();
       u2();
       u3();
+    };
+  }, []);
+
+  // Theme (#191): re-apply on mode change (Settings dialog) and, while the
+  // mode is "system", follow the OS color-scheme as it flips. main.tsx
+  // already applied the persisted theme before the first paint.
+  useEffect(() => {
+    let unsubSystem: (() => void) | null = null;
+    const sync = () => {
+      const mode = getThemeMode();
+      applyThemeMode(mode);
+      unsubSystem?.();
+      unsubSystem = null;
+      if (mode === "system") {
+        unsubSystem = subscribeSystemTheme(() => applyThemeMode("system"));
+      }
+    };
+    sync();
+    const unsubChanged = onThemeChanged(sync);
+    return () => {
+      unsubChanged();
+      unsubSystem?.();
     };
   }, []);
 

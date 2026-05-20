@@ -86,6 +86,64 @@ fn open_workbook_db(path: &str) -> Result<Connection, String> {
     Ok(conn)
 }
 
+/// Sniff `path` as a SQLite file and reject anything that isn't a Coco
+/// workbook. Shared by every maintenance command (vacuum, integrity,
+/// diagnostic) so #74 stays plugged consistently. Returns Ok(()) on a real
+/// Coco workbook, Err with a user-facing message otherwise.
+fn require_coco_schema(path: &str) -> Result<(), String> {
+    let conn = Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(|e| e.to_string())?;
+    let has_meta: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workbook_meta'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    let has_snapshots: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workbook_snapshots'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if !has_meta || !has_snapshots {
+        return Err("Not a Coco workbook (.coco)".to_string());
+    }
+    Ok(())
+}
+
+/// Read-only Coco DB open: rejects files that lack Coco's core tables so we
+/// never write Coco schema onto unrelated SQLite databases.
+fn open_workbook_db_for_read(path: &str) -> Result<Connection, String> {
+    let conn = Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(|e| e.to_string())?;
+    let has_meta: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workbook_meta'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    let has_snapshots: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workbook_snapshots'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if !has_meta || !has_snapshots {
+        return Err("Not a Coco workbook (.coco)".to_string());
+    }
+    Ok(conn)
+}
+
 pub fn bak_path(target: &Path, n: u32) -> PathBuf {
     // Append ".bak.N" to the full target path so multi-dot names like
     // "data.archive.coco" become "data.archive.coco.bak.1" rather than
@@ -203,7 +261,11 @@ fn do_save(
 
     if target.exists() {
         checkpoint_existing_wal(&target).map_err(|e| format!("WAL checkpoint failed: {e}"))?;
-        rotate_backups(&target).map_err(|e| format!("backup rotation failed: {e}"))?;
+        // #68: rotate_backups previously ran here — before the tmp DB was
+        // validated. A run of failing saves would shift the chain on each
+        // attempt and destroy historical bak.1..N. Defer rotation until just
+        // before replace_temp_file (see below) so a failure path can't burn
+        // backup history.
         // Seed the tmp DB from the existing target so that prior workbook_snapshots
         // rows are preserved across saves. Without this, every save rewrites a fresh
         // empty DB and the retention cap is meaningless. After insert + cap, the
@@ -267,6 +329,20 @@ fn do_save(
     // Release the SQLite file handle before renaming — Windows refuses to
     // rename a file that still has an open handle.
     drop(conn);
+
+    // #68: rotate backups now, after the tmp DB has passed integrity_check
+    // and is ready to be committed. A failed save no longer churns the bak
+    // chain.
+    if target.exists() {
+        if let Err(e) = rotate_backups(&target) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Ok(SaveResult {
+                success: false,
+                path: path.to_string(),
+                error: Some(format!("backup rotation failed: {e}")),
+            });
+        }
+    }
 
     if let Err(e) = crate::commands::file_replace::replace_temp_file(&tmp_path, &target) {
         let _ = std::fs::remove_file(&tmp_path);
@@ -333,7 +409,7 @@ pub fn open_coco_core(
     if !std::path::Path::new(path).exists() {
         return Err(format!("File not found: {path}"));
     }
-    let conn = open_workbook_db(path)?;
+    let conn = open_workbook_db_for_read(path)?;
 
     let result: Result<(String, String), rusqlite::Error> = conn.query_row(
         "SELECT workbook_id, snapshot_json FROM workbook_snapshots ORDER BY snapshot_id DESC LIMIT 1",
@@ -556,13 +632,18 @@ pub fn restore_backup_core(
     );
     let (workbook_id, snapshot_json) = result.map_err(|e| e.to_string())?;
 
+    // #67: detach the recovery temp path. Returning `Some(temp_path)` plus
+    // `requires_save_as_on_first_save: false` would silently overwrite the
+    // recovery file on the next Ctrl+S — and the next recovery cleanup pass
+    // would then delete the saved work. Force Save As so the user has to
+    // pick a real location.
     Ok(OpenWorkbookResult {
         handle: WorkbookHandle {
             workbook_id,
-            path: Some(temp_path),
+            path: None,
             source_type: "coco".to_string(),
             snapshot_json: Some(snapshot_json),
-            requires_save_as_on_first_save: false,
+            requires_save_as_on_first_save: true,
         },
         warnings: vec![],
     })
@@ -602,7 +683,7 @@ pub fn list_snapshots_core(path: &str) -> Result<Vec<SnapshotMeta>, String> {
     if !std::path::Path::new(path).exists() {
         return Err(format!("File not found: {path}"));
     }
-    let conn = open_workbook_db(path)?;
+    let conn = open_workbook_db_for_read(path)?;
     let mut stmt = conn
         .prepare(
             "SELECT snapshot_id, created_at, reason FROM workbook_snapshots ORDER BY snapshot_id DESC",
@@ -640,7 +721,7 @@ pub fn open_snapshot_core(path: &str, snapshot_id: i64) -> Result<OpenWorkbookRe
     if !std::path::Path::new(path).exists() {
         return Err(format!("File not found: {path}"));
     }
-    let conn = open_workbook_db(path)?;
+    let conn = open_workbook_db_for_read(path)?;
     let row: Result<(String, String), rusqlite::Error> = conn.query_row(
         "SELECT workbook_id, snapshot_json FROM workbook_snapshots WHERE snapshot_id = ?1",
         rusqlite::params![snapshot_id],
@@ -697,6 +778,11 @@ pub fn vacuum_core(path: &str) -> Result<VacuumResult, String> {
     if !p.exists() {
         return Err(format!("File not found: {path}"));
     }
+    // #74: refuse to VACUUM SQLite files that aren't Coco workbooks. Same
+    // motivation as #51 — Coco's commands accept any path string, so without
+    // a schema sniff a malicious frontend invocation could rewrite an
+    // unrelated database (KeePass, app history, etc.).
+    require_coco_schema(path)?;
     let before_bytes = std::fs::metadata(p).map_err(|e| e.to_string())?.len();
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     conn.execute_batch("VACUUM;").map_err(|e| e.to_string())?;
@@ -735,6 +821,7 @@ pub fn check_integrity_core(path: &str) -> Result<IntegrityCheckResult, String> 
     if !std::path::Path::new(path).exists() {
         return Err(format!("File not found: {path}"));
     }
+    require_coco_schema(path)?; // #74
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("PRAGMA integrity_check")
@@ -782,6 +869,7 @@ pub fn diagnostic_info_core(path: &str) -> Result<DiagnosticInfo, String> {
     if !p.exists() {
         return Err(format!("File not found: {path}"));
     }
+    require_coco_schema(path)?; // #74
     let size_bytes = std::fs::metadata(p).map_err(|e| e.to_string())?.len();
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     let snapshot_count: i64 = conn

@@ -27,7 +27,13 @@ interface Props {
    * user cancels. Injectable so tests can stub the file-system round-trip.
    */
   pickFile: () => Promise<ImagePickResult | null>;
-  onApply: (value: ImageFormValue) => void;
+  /**
+   * Return null on success (dialog closes), or a localized error string to
+   * keep the dialog open and surface in the inline error area. This lets the
+   * caller reject impossible inserts (e.g. sheet already has a drawing —
+   * issue #50) without falling back to a silent console.warn.
+   */
+  onApply: (value: ImageFormValue) => string | null;
   onClose: () => void;
 }
 
@@ -93,11 +99,18 @@ export default function InsertImageDialog({
       return;
     }
     setError(null);
-    onApply({
+    const applyErr = onApply({
       cell: cell.trim(),
       ext: picked.ext,
       base64: picked.base64,
     });
+    if (applyErr) {
+      // #50: keep the dialog open so the user sees why the insert couldn't
+      // proceed (e.g. existing drawing on this sheet) instead of the modal
+      // disappearing as though it succeeded.
+      setError(applyErr);
+      return;
+    }
     onClose();
   };
 

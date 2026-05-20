@@ -21,3 +21,8 @@ Thumbs.db
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
 .claude/worktrees/
+
+# Tauri updater minisign keys — private key must NEVER be committed
+coco_updater.key
+coco_updater.key.pub
+*.minisign.key

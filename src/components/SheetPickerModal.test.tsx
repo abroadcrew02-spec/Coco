@@ -51,14 +51,16 @@ describe("SheetPickerModal", () => {
     const items = Array.from(container.querySelectorAll(".sheet-picker-item")) as HTMLElement[];
     await user.click(items[1]);
     await user.click(screen.getByRole("button", { name: "選択" }));
-    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(1);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onConfirm).toHaveBeenCalledWith(1);
   });
 
   it("double-clicking a sheet item confirms that index immediately", () => {
     const { container } = renderPicker(["A", "B", "C"]);
     const items = Array.from(container.querySelectorAll(".sheet-picker-item")) as HTMLElement[];
     fireEvent.doubleClick(items[2]);
-    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(2);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onConfirm).toHaveBeenCalledWith(2);
   });
 
   it("clicking キャンセル calls onCancel", async () => {
@@ -83,7 +85,8 @@ describe("SheetPickerModal", () => {
   it("Enter confirms the current selection", () => {
     renderPicker(["A", "B"]);
     fireEvent.keyDown(window, { key: "Enter" });
-    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(0);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onConfirm).toHaveBeenCalledWith(0);
   });
 
   it("Escape cancels", () => {
@@ -98,7 +101,8 @@ describe("SheetPickerModal", () => {
     const items = Array.from(container.querySelectorAll(".sheet-picker-item")) as HTMLElement[];
     await user.click(items[2]);
     fireEvent.keyDown(window, { key: "Enter" });
-    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(2);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onConfirm).toHaveBeenCalledWith(2);
   });
 
   it("does not render 全シートを出力 unless onExportAll is provided", () => {

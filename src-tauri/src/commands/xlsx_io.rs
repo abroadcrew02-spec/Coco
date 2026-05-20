@@ -4,9 +4,11 @@ use std::path::PathBuf;
 
 use calamine::{open_workbook, Data, Reader, Xlsx};
 use rust_xlsxwriter::{
-    Color, ConditionalFormatCell, ConditionalFormatCellRule, ConditionalFormatDuplicate,
-    ConditionalFormatFormula, ConditionalFormatText, ConditionalFormatTextRule,
-    ConditionalFormatTop, ConditionalFormatTopRule, DataValidation, DataValidationErrorStyle,
+    Color, ConditionalFormatAverage, ConditionalFormatAverageRule, ConditionalFormatCell,
+    ConditionalFormatCellRule, ConditionalFormatDate, ConditionalFormatDateRule,
+    ConditionalFormatDuplicate, ConditionalFormatFormula, ConditionalFormatText,
+    ConditionalFormatTextRule, ConditionalFormatTop, ConditionalFormatTopRule, DataValidation,
+    DataValidationErrorStyle,
     DataValidationRule, Format, FormatAlign, FormatBorder, FormatPattern, Formula, Url, Workbook,
 };
 use serde_json::{json, Map, Value};
@@ -24,9 +26,13 @@ const MAX_EXPORT_CELLS: usize = 500_000;
 
 /// Normalized cell style extracted from xl/styles.xml + per-sheet `<c s="..."/>` refs.
 /// Scope: font (bold/italic/color) + fill (color) + alignment (horizontal/vertical)
-/// + borders (per-side style/color).
+/// + borders (per-side style/color) + number format (resolved code string).
 ///
-/// TODO(xlsx-roundtrip): promote number formats + rich text into this normalized struct (see docs/TODOS.md#medium-number-format-richtext-styles)
+/// #40: num_format moved in so the struct is self-contained and the dedup
+/// hash naturally accounts for it. Rich-text formatting still lives on the
+/// per-cell `_richRuns` array because each cell carries its own text — sharing
+/// a "rich-text style" across cells would require splitting style from text,
+/// which is a separate refactor.
 #[derive(Default, Clone, PartialEq, Eq, Hash)]
 struct CellStyle {
     bold: bool,
@@ -36,6 +42,10 @@ struct CellStyle {
     h_align: Option<String>,    // "left" | "center" | "right" | "fill" | "justify"
     v_align: Option<String>,    // "top" | "middle" | "bottom"
     borders: Option<CellBorders>,
+    /// Number format code as resolved by `resolve_num_format` (built-in
+    /// table + custom `numFmts`). None means "no explicit num format" which
+    /// rust_xlsxwriter treats as General.
+    num_format: Option<String>,
 }
 
 #[derive(Default, Clone, PartialEq, Eq, Hash)]
@@ -122,6 +132,7 @@ impl CellStyle {
             && self.h_align.is_none()
             && self.v_align.is_none()
             && self.borders.is_none()
+            && self.num_format.is_none()
     }
 
     fn to_json(&self) -> Value {
@@ -272,14 +283,16 @@ fn parse_xlsx_styles<R: Read + Seek>(
     }
     let (fonts, fills, borders, cell_xfs_raw, custom_num_fmts) = parse_styles_xml(&styles_xml);
 
-    // 2. resolve each cellXf to a normalized CellStyle + number format
+    // 2. resolve each cellXf to a normalized CellStyle (which now carries its
+    //    own num_format per #40 — kept parallel cell_num_formats for callers
+    //    that still index by xf id without going through CellStyle).
     let cell_xfs: Vec<CellStyle> = cell_xfs_raw
         .iter()
-        .map(|x| resolve_xf(x, &fonts, &fills, &borders))
+        .map(|x| resolve_xf(x, &fonts, &fills, &borders, &custom_num_fmts))
         .collect();
-    let cell_num_formats: Vec<Option<String>> = cell_xfs_raw
+    let cell_num_formats: Vec<Option<String>> = cell_xfs
         .iter()
-        .map(|x| resolve_num_format(x, &custom_num_fmts))
+        .map(|s| s.num_format.clone())
         .collect();
 
     Ok(ParsedStyles {
@@ -613,14 +626,53 @@ fn parse_styles_xml(
     (fonts, fills, borders, xfs, custom_num_fmts)
 }
 
-/// Decode the small set of XML entities that may appear inside `formatCode`
-/// attributes (rust_xlsxwriter / Excel escape `&`, `<`, `>`, `"`).
+/// Decode the XML entities Excel may emit inside attribute / text content:
+/// the five named entities plus numeric character references in decimal
+/// (`&#10;`) and hexadecimal (`&#xA;`) forms. #66: without numeric refs,
+/// Excel-emitted newlines inside header/footer / comments / number formats
+/// survive as literal `&#10;` text and get double-escaped on re-export.
 fn decode_xml_entities(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(idx) = rest.find('&') {
+        out.push_str(&rest[..idx]);
+        let after = &rest[idx..];
+        let semi = match after.find(';') {
+            Some(p) if p <= 8 => p,
+            _ => {
+                // No `;` close within a plausible entity window — emit `&`
+                // verbatim and continue past it.
+                out.push('&');
+                rest = &after[1..];
+                continue;
+            }
+        };
+        let body = &after[1..semi];
+        let decoded: Option<char> = match body {
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            _ if body.starts_with("#x") || body.starts_with("#X") => {
+                u32::from_str_radix(&body[2..], 16).ok().and_then(char::from_u32)
+            }
+            _ if body.starts_with('#') => {
+                body[1..].parse::<u32>().ok().and_then(char::from_u32)
+            }
+            _ => None,
+        };
+        match decoded {
+            Some(c) => out.push(c),
+            None => out.push_str(&after[..=semi]),
+        }
+        rest = &after[semi + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Parse a `<top style="thin"><color rgb="FF000000"/></top>` (or similar side
@@ -702,6 +754,7 @@ fn resolve_xf(
     fonts: &[RawFont],
     fills: &[RawFill],
     borders: &[RawBorder],
+    custom_num_fmts: &HashMap<u32, String>,
 ) -> CellStyle {
     let mut s = CellStyle::default();
     // Font: honor regardless of applyFont — many writers omit the apply* flag.
@@ -741,6 +794,11 @@ fn resolve_xf(
             other => other.to_string(),
         });
     }
+    // #40: resolve the number-format code so it travels with the rest of the
+    // CellStyle. Same precedence as the old parallel cell_num_formats vec
+    // (built-in lookup, then custom numFmts table) but now bound to the
+    // style identity hash.
+    s.num_format = resolve_num_format(xf, custom_num_fmts);
     s
 }
 
@@ -950,11 +1008,21 @@ fn parse_sheet_cell_styles(xml: &str) -> HashMap<(u32, u32), usize> {
 
 /// Parse an A1-style ref like "B12" or "AA100" into (row0, col0).
 fn parse_a1(s: &str) -> Option<(u32, u32)> {
+    // OOXML spec caps columns at XFD (16384) and rows at 1048576. #65: use
+    // checked arithmetic so malicious refs like "ZZZZZZZ1" can't overflow u32
+    // (panic in debug, silent wrap in release with downstream HashMap
+    // mis-keying). Reject anything past the spec maximum.
+    const MAX_COL: u32 = 16_384;
+    const MAX_ROW: u32 = 1_048_576;
     let mut col = 0u32;
     let mut row_start = 0;
     for (i, ch) in s.char_indices() {
         if ch.is_ascii_alphabetic() {
-            col = col * 26 + (ch.to_ascii_uppercase() as u32 - 'A' as u32 + 1);
+            let inc = (ch.to_ascii_uppercase() as u32) - ('A' as u32) + 1;
+            col = col.checked_mul(26)?.checked_add(inc)?;
+            if col > MAX_COL {
+                return None;
+            }
             row_start = i + 1;
         } else {
             break;
@@ -964,7 +1032,7 @@ fn parse_a1(s: &str) -> Option<(u32, u32)> {
         return None;
     }
     let row: u32 = s[row_start..].parse().ok()?;
-    if row == 0 {
+    if row == 0 || row > MAX_ROW {
         return None;
     }
     Some((row - 1, col - 1))
@@ -1211,7 +1279,13 @@ fn build_format(style: &CellStyle, num_format: Option<&str>) -> Format {
             }
         }
     }
-    if let Some(nf) = num_format {
+    // #40: prefer the explicit override (per-cell `_fmt`) if present; fall
+    // back to whatever the resolved CellStyle carries. Previously num_format
+    // only flowed through the override channel, so cells that inherited
+    // formatting purely from their xf number-format ref were silently
+    // emitted as General on export.
+    let effective_num_fmt = num_format.or(style.num_format.as_deref());
+    if let Some(nf) = effective_num_fmt {
         fmt = fmt.set_num_format(nf);
     }
     fmt
@@ -2491,14 +2565,20 @@ fn parse_comments_xml(xml: &str) -> Vec<CommentEntry> {
 /// author/comment ids in lockstep so author values round-trip correctly.
 fn build_comments_xml(notes: &[(String, String, String)]) -> String {
     use std::fmt::Write as _;
+    // #90: dedup authors in O(N) via a HashMap that also remembers each
+    // author's stable index — `commentList` below needs to look up the id by
+    // name. Previously both the `any` walk above and the `position` walk
+    // below were O(N), giving an overall O(N²) export.
     let mut authors: Vec<String> = Vec::new();
+    let mut author_index: HashMap<String, usize> = HashMap::new();
     for (_, author, _) in notes {
         let name = if author.is_empty() {
             "Author".to_string()
         } else {
             author.clone()
         };
-        if !authors.iter().any(|a| a == &name) {
+        if !author_index.contains_key(&name) {
+            author_index.insert(name.clone(), authors.len());
             authors.push(name);
         }
     }
@@ -2520,10 +2600,8 @@ fn build_comments_xml(notes: &[(String, String, String)]) -> String {
         } else {
             author.as_str()
         };
-        let author_id = authors
-            .iter()
-            .position(|a| a == display_author)
-            .unwrap_or(0);
+        // #90: HashMap lookup instead of linear scan.
+        let author_id = author_index.get(display_author).copied().unwrap_or(0);
         let _ = write!(
             out,
             "<comment ref=\"{}\" authorId=\"{}\"><text>",
@@ -2557,6 +2635,14 @@ fn encode_xml_text(s: &str) -> String {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&apos;"),
+            // #80: strip XML 1.0 illegal control characters. NUL and other
+            // C0 controls (except TAB / LF / CR) are not legal in any XML
+            // document — leaving them in `<t>` cells produces a comments.xml
+            // that Excel rejects with "file is corrupt" on open. Replace with
+            // U+FFFD so the cell stays present but no longer invalidates the
+            // whole package.
+            '\t' | '\n' | '\r' => out.push(c),
+            c if (c as u32) < 0x20 || (c as u32) == 0x7F => out.push('\u{FFFD}'),
             _ => out.push(c),
         }
     }
@@ -3187,13 +3273,91 @@ pub(crate) struct ConditionalFormattingEntry {
     /// this back into the sheet XML verbatim inside a
     /// `<conditionalFormatting sqref="...">` block.
     pub raw: String,
+    /// #37: visual format hints carried via the rule's `dxfId` → styles.xml
+    /// `<dxfs>` table. Populated by `parse_xlsx_conditional_formatting` so
+    /// authored & round-tripped rules keep their bold / font-color / bg-color
+    /// on re-export through `build_cf_rule_format`. Empty for rules without
+    /// a dxf reference.
+    pub dxf_style: Option<DxfStyle>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct DxfStyle {
+    pub bold: bool,
+    pub italic: bool,
+    pub font_color: Option<String>, // "#RRGGBB"
+    pub bg_color: Option<String>,   // "#RRGGBB"
 }
 
 /// Parse one sheet's `<conditionalFormatting>` blocks. Unlike data validations
 /// (single block per sheet, multiple children), CF has one block per sqref
 /// with one or more `<cfRule>` children — so we scan all matching blocks and
 /// flatten the rules into a single Vec.
-fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEntry> {
+/// Parse the `<dxfs>` block from `xl/styles.xml`. Each `<dxf>` entry can
+/// declare font (bold/italic/color) and fill (bgColor) — we lift the subset
+/// the dialog round-trips. Returns dxf entries in declaration order so
+/// `dxfId` indexes directly. (#37)
+fn parse_dxfs_from_styles(styles_xml: &str) -> Vec<DxfStyle> {
+    let mut out = Vec::new();
+    let block = match extract_block(styles_xml, "<dxfs", "</dxfs>") {
+        Some(b) => b,
+        None => return out,
+    };
+    for dxf_el in extract_self_closing_or_paired(&block, "dxf") {
+        let mut dx = DxfStyle::default();
+        // <font><b/></font> / <font><i/></font> / <font><color rgb="FFRRGGBB"/></font>
+        if let Some(font) = extract_block(&dxf_el, "<font", "</font>") {
+            if font.contains("<b/>") || font.contains("<b ") {
+                dx.bold = true;
+            }
+            if font.contains("<i/>") || font.contains("<i ") {
+                dx.italic = true;
+            }
+            if let Some(color_tag) = find_tag(&font, "<color") {
+                if let Some(rgb) = parse_attr(&color_tag, "rgb") {
+                    if let Some(hex) = normalize_argb_hex(&rgb) {
+                        dx.font_color = Some(hex);
+                    }
+                }
+            }
+        }
+        // <fill><patternFill patternType="solid"><bgColor rgb="..."/></patternFill></fill>
+        // — Excel commonly writes bg under <bgColor> for solid dxf fills.
+        if let Some(fill) = extract_block(&dxf_el, "<fill", "</fill>") {
+            for needle in ["<bgColor", "<fgColor"].iter() {
+                if let Some(tag) = find_tag(&fill, needle) {
+                    if let Some(rgb) = parse_attr(&tag, "rgb") {
+                        if let Some(hex) = normalize_argb_hex(&rgb) {
+                            dx.bg_color = Some(hex);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        out.push(dx);
+    }
+    out
+}
+
+/// Normalize an OOXML ARGB hex (`FFRRGGBB`) to the `#RRGGBB` shape the
+/// dialog speaks. Returns None if the input isn't 6 or 8 hex digits.
+fn normalize_argb_hex(s: &str) -> Option<String> {
+    let cleaned: String = s.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+    let rgb = if cleaned.len() == 8 {
+        &cleaned[2..]
+    } else if cleaned.len() == 6 {
+        &cleaned[..]
+    } else {
+        return None;
+    };
+    Some(format!("#{}", rgb.to_ascii_uppercase()))
+}
+
+fn parse_sheet_conditional_formatting(
+    xml: &str,
+    dxfs: &[DxfStyle],
+) -> Vec<ConditionalFormattingEntry> {
     let mut out = Vec::new();
     for cf_block in extract_self_closing_or_paired(xml, "conditionalFormatting") {
         // Element header carries `sqref`. Body holds one or more <cfRule>.
@@ -3223,6 +3387,11 @@ fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEnt
             let rule_type = parse_attr(rule_head, "type")
                 .map(|s| decode_xml_entities(&s))
                 .unwrap_or_default();
+            // #37: capture dxfId and resolve against the dxfs table so the
+            // rule's visual format (bold / colors) round-trips on re-export.
+            let dxf_style = parse_attr(rule_head, "dxfId")
+                .and_then(|s| s.parse::<usize>().ok())
+                .and_then(|idx| dxfs.get(idx).cloned());
             let operator = parse_attr(rule_head, "operator")
                 .map(|s| decode_xml_entities(&s))
                 .unwrap_or_default();
@@ -3269,6 +3438,10 @@ fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEnt
                     percent: false,
                     bottom: false,
                     raw: rule_el.clone(),
+                    // colorScale / dataBar / iconSet carry their own gradient
+                    // colors inside the raw block, so we don't lift a dxf
+                    // entry here.
+                    dxf_style: dxf_style.clone(),
                 });
                 continue;
             }
@@ -3323,6 +3496,7 @@ fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEnt
                 percent,
                 bottom,
                 raw: String::new(),
+                dxf_style,
             });
         }
     }
@@ -3335,9 +3509,11 @@ fn parse_sheet_conditional_formatting(xml: &str) -> Vec<ConditionalFormattingEnt
 pub(crate) fn parse_xlsx_conditional_formatting(
     sheet_xmls: &HashMap<String, String>,
 ) -> HashMap<String, Vec<ConditionalFormattingEntry>> {
+    // External callers (tests / pre-#37 sites) don't have styles.xml
+    // available; pass an empty dxf table so dxf_style is just None.
     let mut out: HashMap<String, Vec<ConditionalFormattingEntry>> = HashMap::new();
     for (sheet_name, xml) in sheet_xmls {
-        let rules = parse_sheet_conditional_formatting(xml);
+        let rules = parse_sheet_conditional_formatting(xml, &[]);
         if !rules.is_empty() {
             out.insert(sheet_name.clone(), rules);
         }
@@ -3571,8 +3747,78 @@ fn apply_conditional_format_from_snapshot(
                 .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
                 .is_ok()
         }
-        // TODO(cf): reconstruct colorScale / dataBar / iconSet / aboveAverage / timePeriod rules (see docs/TODOS.md#medium-cf-more-rule-types)
-        // These rule types need typed values we don't reconstruct yet — drop silently.
+        "aboveAverage" => {
+            // #38: dialog stores the two bool toggles under `aboveAverage`.
+            // Excel encodes 4 variants on the same rule type via {below,
+            // equalAverage} combinations.
+            let aa = entry
+                .get("aboveAverage")
+                .and_then(|v| v.as_object());
+            let below = aa
+                .and_then(|o| o.get("below"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let equal_average = aa
+                .and_then(|o| o.get("equalAverage"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let rule = match (below, equal_average) {
+                (false, false) => ConditionalFormatAverageRule::AboveAverage,
+                (false, true) => ConditionalFormatAverageRule::EqualOrAboveAverage,
+                (true, false) => ConditionalFormatAverageRule::BelowAverage,
+                (true, true) => ConditionalFormatAverageRule::EqualOrBelowAverage,
+            };
+            let mut cf = ConditionalFormatAverage::new()
+                .set_rule(rule)
+                .set_multi_range(sqref)
+                .set_stop_if_true(stop_if_true);
+            if let Some(f) = style_format {
+                cf = cf.set_format(f);
+            }
+            worksheet
+                .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
+                .is_ok()
+        }
+        "timePeriod" => {
+            // #38: Excel's timePeriod CF rule has a fixed set of named
+            // relative ranges (today / yesterday / lastWeek / etc).
+            let period = entry
+                .get("timePeriod")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let rule = match period {
+                "today" => Some(ConditionalFormatDateRule::Today),
+                "yesterday" => Some(ConditionalFormatDateRule::Yesterday),
+                "tomorrow" => Some(ConditionalFormatDateRule::Tomorrow),
+                "last7Days" => Some(ConditionalFormatDateRule::Last7Days),
+                "thisWeek" => Some(ConditionalFormatDateRule::ThisWeek),
+                "lastWeek" => Some(ConditionalFormatDateRule::LastWeek),
+                "nextWeek" => Some(ConditionalFormatDateRule::NextWeek),
+                "thisMonth" => Some(ConditionalFormatDateRule::ThisMonth),
+                "lastMonth" => Some(ConditionalFormatDateRule::LastMonth),
+                "nextMonth" => Some(ConditionalFormatDateRule::NextMonth),
+                _ => None,
+            };
+            let Some(rule) = rule else {
+                return false;
+            };
+            let mut cf = ConditionalFormatDate::new()
+                .set_rule(rule)
+                .set_multi_range(sqref)
+                .set_stop_if_true(stop_if_true);
+            if let Some(f) = style_format {
+                cf = cf.set_format(f);
+            }
+            worksheet
+                .add_conditional_format(first_row, first_col16, last_row, last_col16, &cf)
+                .is_ok()
+        }
+        // colorScale / dataBar / iconSet still require gradient/icon
+        // authoring UI that isn't on the dialog yet. When imported from
+        // existing xlsx they round-trip via the verbatim raw_xml path
+        // (parse_sheet_conditional_formatting line 3319) so files keep
+        // their visuals — we just don't generate new rules of these
+        // shapes from the Coco dialog.
         _ => false,
     }
 }
@@ -3991,6 +4237,20 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     let mut data_validations_by_sheet: HashMap<String, Vec<DataValidationEntry>> = HashMap::new();
     let mut conditional_formats_by_sheet: HashMap<String, Vec<ConditionalFormattingEntry>> =
         HashMap::new();
+    // #37: read xl/styles.xml's <dxfs> block once so per-sheet CF parsing
+    // can resolve dxfId → bold/color hints. Best-effort — empty when the
+    // workbook has no styles or no dxfs.
+    let dxfs_table: Vec<DxfStyle> = {
+        let mut sx = String::new();
+        if let Ok(mut entry) = archive.by_name("xl/styles.xml") {
+            let _ = entry.read_to_string(&mut sx);
+        }
+        if sx.is_empty() {
+            Vec::new()
+        } else {
+            parse_dxfs_from_styles(&sx)
+        }
+    };
     let mut dimensions_by_sheet: HashMap<String, SheetDimensions> = HashMap::new();
     let mut merges_by_sheet: HashMap<String, Vec<(u32, u32, u32, u32)>> = HashMap::new();
     let mut freeze_panes_by_sheet: HashMap<String, FreezePaneEntry> = HashMap::new();
@@ -4016,7 +4276,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             data_validations_by_sheet.insert(sheet_name.clone(), dvs);
         }
 
-        let cfs = parse_sheet_conditional_formatting(&xml);
+        let cfs = parse_sheet_conditional_formatting(&xml, &dxfs_table);
         if !cfs.is_empty() {
             conditional_formats_by_sheet.insert(sheet_name.clone(), cfs);
         }
@@ -4467,6 +4727,31 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                         if !e.raw.is_empty() {
                             obj.insert("raw".into(), Value::String(e.raw.clone()));
                         }
+                        // #37: dxf-referenced visual format (bold / font
+                        // color / fill color) reads through to the same
+                        // `style` shape the dialog authors. apply_*_from_snapshot
+                        // then re-emits the dxf via rust_xlsxwriter on
+                        // re-export, closing the round-trip.
+                        if let Some(dxf) = &e.dxf_style {
+                            let mut sty = Map::new();
+                            if dxf.bold {
+                                sty.insert("bold".into(), Value::Bool(true));
+                            }
+                            if dxf.italic {
+                                sty.insert("italic".into(), Value::Bool(true));
+                            }
+                            if let Some(c) = &dxf.font_color {
+                                sty.insert("fontColor".into(), Value::String(c.clone()));
+                            }
+                            if let Some(c) = &dxf.bg_color {
+                                sty.insert("bgColor".into(), Value::String(c.clone()));
+                            }
+                            if !sty.is_empty() {
+                                obj.insert("style".into(), Value::Object(sty));
+                            }
+                        }
+                        // dxfId for raw-preserved rules: carry alongside the
+                        // raw XML so the splice path doesn't have to re-parse.
                         Value::Object(obj)
                     })
                     .collect();
@@ -4615,6 +4900,22 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     let preserved_parts =
         parse_xlsx_preserved_parts(&mut archive, &sheet_paths, &sheet_drawing_rids);
 
+    // #105: re-hydrate any `xl/cocoExtensions/*.json` parts a previous Coco
+    // export wrote (tables / sparklines / outline / pivot meta / slicers /
+    // scenarios / sheet notes / Coco-authored charts / threaded-comment
+    // extras). For files Excel saved (no extension parts), this is a no-op.
+    let coco_extensions = read_coco_extensions(&mut archive);
+
+    // Bug 4 fix: detect when this looks like a Coco-authored workbook but no
+    // cocoExtensions parts are present. That indicates Excel (or another
+    // tool) re-saved the file and silently dropped the extension parts, so
+    // tables / pivots / slicers / sparklines / outline / scenarios / sheet
+    // notes / threaded-comment extras have been lost. We don't auto-recover
+    // anything — just surface a warning so the user knows the original
+    // structure may not be intact.
+    let coco_extensions_missing_after_external_edit =
+        coco_extensions.is_empty() && xlsx_looks_coco_authored(&mut archive);
+
     let mut snapshot = json!({
         "id": workbook_id,
         "name": "Imported Workbook",
@@ -4628,6 +4929,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     if let Some(pp) = preserved_parts {
         snapshot["_preservedParts"] = pp;
     }
+    merge_coco_extensions_into_snapshot(&mut snapshot, &coco_extensions);
 
     let snapshot_json = serde_json::to_string(&snapshot).map_err(|e| e.to_string())?;
 
@@ -4662,6 +4964,19 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                 "One or more sheets exceed {LARGE_SHEET_THRESHOLD} non-empty cells; import may be slow."
             ),
             affected_sheets: Some(large_sheets),
+        });
+    }
+
+    // Bug 4 fix: surface silent data loss when a Coco-authored xlsx loses its
+    // cocoExtensions parts (typical when the file was re-saved in Excel).
+    if coco_extensions_missing_after_external_edit {
+        warnings.push(CompatibilityWarning {
+            severity: "warning".to_string(),
+            code: "XLSX_COCO_EXTENSIONS_MISSING".to_string(),
+            message:
+                "このファイルは Coco で作成された可能性がありますが、Coco 拡張データ (テーブル / ピボット / スパークライン等) が含まれていません。Excel 等の他ツールで上書き保存された場合、これらの機能は失われている可能性があります。"
+                    .to_string(),
+            affected_sheets: None,
         });
     }
 
@@ -4737,7 +5052,23 @@ fn dedup_sheet_name(candidate: &str, used: &HashSet<String>) -> String {
         if !used.contains(&candidate_n) {
             return candidate_n;
         }
-        n += 1;
+        // #93: defensive guard — Excel's hard cap of 200 sheets makes
+        // reaching `u32::MAX` unreachable in practice, but security harness
+        // and direct snapshot injection can push past the cap. checked_add
+        // turns an overflow into a fallback name instead of wrapping (and
+        // potentially colliding with `Sheet_0`).
+        match n.checked_add(1) {
+            Some(next) => n = next,
+            None => {
+                // Fall back to a uuid-suffixed name so we still return a
+                // unique value rather than looping forever.
+                return format!(
+                    "{}_{}",
+                    base_chars.iter().take(20).collect::<String>(),
+                    uuid::Uuid::new_v4().simple()
+                );
+            }
+        }
     }
 }
 
@@ -4967,13 +5298,23 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                             .map(|s| s.to_string()),
                     });
                 } else {
-                    let row = row_raw as u32;
-                    let col = col_raw as u16;
-                    if row > 0 || col > 0 {
-                        let _ = worksheet.set_freeze_panes(row, col);
-                        if let Some(tl) = fp.get("topLeft").and_then(|v| v.as_str()) {
-                            if let Some((tr, tc)) = parse_a1(tl) {
-                                let _ = worksheet.set_freeze_panes_top_cell(tr, tc as u16);
+                    // #85: checked conversion so out-of-range snapshot values
+                    // (corruption / hostile injection) don't wrap and freeze
+                    // an unintended row/col. OOXML caps row at 1048576 and
+                    // col at XFD (16384, fits u16); reject anything past
+                    // those bounds.
+                    let row = u32::try_from(row_raw).ok().filter(|r| *r <= 1_048_576);
+                    let col = u16::try_from(col_raw).ok().filter(|c| *c <= 16_384);
+                    if let (Some(row), Some(col)) = (row, col) {
+                        if row > 0 || col > 0 {
+                            let _ = worksheet.set_freeze_panes(row, col);
+                            if let Some(tl) = fp.get("topLeft").and_then(|v| v.as_str()) {
+                                if let Some((tr, tc)) = parse_a1(tl) {
+                                    if let Ok(tc_u16) = u16::try_from(tc) {
+                                        let _ = worksheet
+                                            .set_freeze_panes_top_cell(tr, tc_u16);
+                                    }
+                                }
                             }
                         }
                     }
@@ -5310,6 +5651,10 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                         // Rich-text cells: write each run with its own Format.
                         // rust_xlsxwriter's write_rich_string takes &[(&Format, &str)]
                         // and rejects empty segments, so build the Vec carefully.
+                        // #81: if there's only a single run, write_rich_string
+                        // would reject it (it requires ≥2 segments). Instead of
+                        // dropping the run's formatting, write the text with the
+                        // run's format applied as a cell-level Format.
                         if let Some(runs_arr) = cell_val.get("_richRuns").and_then(|v| v.as_array())
                         {
                             let parsed_runs: Vec<RichRun> = runs_arr
@@ -5317,7 +5662,29 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                                 .filter_map(RichRun::from_json)
                                 .filter(|r| !r.text.is_empty())
                                 .collect();
-                            if !parsed_runs.is_empty() {
+                            if parsed_runs.len() == 1 {
+                                // Single-run shortcut: build a Format from the
+                                // run's properties and merge with the cell-level
+                                // fmt_obj (cell style + num format). The run's
+                                // typography wins over the cell style for the
+                                // exact attributes the run specifies.
+                                let run_fmt = build_run_format(&parsed_runs[0]);
+                                let write_res = worksheet.write_string_with_format(
+                                    row_idx,
+                                    col_idx,
+                                    &parsed_runs[0].text,
+                                    &run_fmt,
+                                );
+                                if write_res.is_ok() {
+                                    cell_count += 1;
+                                    if cell_count > MAX_EXPORT_CELLS {
+                                        return Err(format!(
+                                            "XLSX_EXPORT_TOO_MANY_CELLS: {cell_count} cells exceeds limit {MAX_EXPORT_CELLS}"
+                                        ));
+                                    }
+                                    continue;
+                                }
+                            } else if !parsed_runs.is_empty() {
                                 let formats: Vec<Format> =
                                     parsed_runs.iter().map(build_run_format).collect();
                                 let segments: Vec<(&Format, &str)> = parsed_runs
@@ -5554,25 +5921,12 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
         });
     }
 
-    // Step 4: atomic save — rotate backups, write tmp, rename onto target
+    // Step 4: atomic save — write tmp first, rotate backups only after the
+    // tmp is fully built (#68 — rotating earlier means a transient failure
+    // during write / preserved-parts injection / comment rewrite shifts the
+    // backup chain even though no successful save happened).
     let target_path = PathBuf::from(&path);
     let tmp_path = temp_save_path(&target_path);
-
-    if target_path.exists() {
-        if let Err(e) = rotate_backups(&target_path) {
-            return Ok(ExportResult {
-                success: false,
-                path: path.clone(),
-                warnings: vec![CompatibilityWarning {
-                    severity: "blocking".to_string(),
-                    code: "XLSX_WRITE_FAILED".to_string(),
-                    message: format!("backup rotation failed: {e}"),
-                    affected_sheets: None,
-                }],
-                error: Some(format!("backup rotation failed: {e}")),
-            });
-        }
-    }
 
     if let Err(e) = workbook.save(&tmp_path) {
         let msg = e.to_string();
@@ -5663,6 +6017,49 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
         }
     }
 
+    // #105 / #120: Coco-extension preservation. Snapshot fields that have no
+    // first-class OOXML representation (tables, sparklines, outline groups,
+    // pivot metadata, slicers, scenarios, sheet notes, Coco-authored charts,
+    // threaded-comments extras) are bundled into `xl/cocoExtensions/*.json`
+    // parts. Excel ignores them, but a Coco re-import restores them losslessly.
+    let (coco_ext_bundles, coco_ext_families) =
+        build_coco_extension_bundles(&snapshot, &sheet_order);
+    if let Err(e) = inject_coco_extensions(&tmp_path, &coco_ext_bundles) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Ok(ExportResult {
+            success: false,
+            path: path.clone(),
+            warnings: vec![CompatibilityWarning {
+                severity: "blocking".to_string(),
+                code: "XLSX_COCO_EXTENSIONS_INJECTION_FAILED".to_string(),
+                message: format!("coco extensions injection failed: {e}"),
+                affected_sheets: None,
+            }],
+            error: Some(format!("XLSX_COCO_EXTENSIONS_INJECTION_FAILED: {e}")),
+        });
+    }
+
+    // #68: rotate now that the tmp file passed every build / injection
+    // step. A rotation failure here is fatal and we still abort cleanly,
+    // but at this point the bak chain only shifts when we're truly about
+    // to commit a new generation.
+    if target_path.exists() {
+        if let Err(e) = rotate_backups(&target_path) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Ok(ExportResult {
+                success: false,
+                path: path.clone(),
+                warnings: vec![CompatibilityWarning {
+                    severity: "blocking".to_string(),
+                    code: "XLSX_WRITE_FAILED".to_string(),
+                    message: format!("backup rotation failed: {e}"),
+                    affected_sheets: None,
+                }],
+                error: Some(format!("backup rotation failed: {e}")),
+            });
+        }
+    }
+
     if let Err(e) = crate::commands::file_replace::replace_temp_file(&tmp_path, &target_path) {
         let msg = e.to_string();
         let _ = std::fs::remove_file(&tmp_path);
@@ -5719,6 +6116,22 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                 "{} named range(s) could not be exported and were dropped: {}",
                 named_range_failures.len(),
                 named_range_failures.join("; ")
+            ),
+            affected_sheets: None,
+        });
+    }
+
+    // #120: surface per-family notices when a snapshot carried Coco-only data
+    // that we preserved via cocoExtensions parts. The data IS in the file and
+    // will round-trip back into Coco, but Excel won't render it. The wording
+    // makes both halves explicit so users can plan accordingly.
+    for fam in &coco_ext_families {
+        let label = coco_extension_label_ja(fam);
+        warnings.push(CompatibilityWarning {
+            severity: "info".to_string(),
+            code: format!("XLSX_COCO_EXTENSION_{}", fam.to_uppercase()),
+            message: format!(
+                "{label} は Coco 拡張パート (xl/cocoExtensions/{fam}.json) として保存されました (Excel では非表示・Coco で再オープン時に復元されます)"
             ),
             affected_sheets: None,
         });
@@ -6347,14 +6760,34 @@ pub(crate) fn inject_preserved_parts(
 
         // Workbook.xml / workbook.xml.rels rewrites for external-link
         // preservation. rust_xlsxwriter doesn't know about `<externalReferences>`
-        // or the externalLink rels, so we splice them back in.
+        // or the externalLink rels, so we splice them back in. #55: if a
+        // preserved rId collides with rust_xlsxwriter's freshly-emitted ones,
+        // we must remap to a fresh id and rewrite both the rels file and the
+        // `<externalReference r:id="…">` references in workbook.xml so they
+        // continue to point at the same entry.
+        let mut wb_rels_xml_for_resolve = String::new();
+        if rewrite_workbook_xml || rewrite_workbook_rels {
+            if let Ok(mut e) = src.by_name("xl/_rels/workbook.xml.rels") {
+                let _ = std::io::Read::read_to_string(&mut e, &mut wb_rels_xml_for_resolve);
+            }
+        }
+        let rid_remap: HashMap<String, String> = if rewrite_workbook_rels {
+            resolve_ext_link_rid_remap(&wb_rels_xml_for_resolve, &ext_link_rels)
+        } else {
+            HashMap::new()
+        };
         if rewrite_workbook_xml {
             let mut wb_xml = String::new();
             if let Ok(mut e) = src.by_name("xl/workbook.xml") {
                 let _ = std::io::Read::read_to_string(&mut e, &mut wb_xml);
             }
             let new_wb_xml = if let Some(block) = &ext_refs_block {
-                splice_external_references(&wb_xml, block)
+                let remapped_block = if rid_remap.is_empty() {
+                    block.clone()
+                } else {
+                    remap_ext_reference_rids(block, &rid_remap)
+                };
+                splice_external_references(&wb_xml, &remapped_block)
             } else {
                 wb_xml
             };
@@ -6364,11 +6797,8 @@ pub(crate) fn inject_preserved_parts(
                 .map_err(|e| e.to_string())?;
         }
         if rewrite_workbook_rels {
-            let mut wb_rels_xml = String::new();
-            if let Ok(mut e) = src.by_name("xl/_rels/workbook.xml.rels") {
-                let _ = std::io::Read::read_to_string(&mut e, &mut wb_rels_xml);
-            }
-            let new_wb_rels = append_workbook_rels(&wb_rels_xml, &ext_link_rels);
+            let new_wb_rels =
+                append_workbook_rels(&wb_rels_xml_for_resolve, &ext_link_rels, &rid_remap);
             out.start_file("xl/_rels/workbook.xml.rels", opts)
                 .map_err(|e| e.to_string())?;
             std::io::Write::write_all(&mut out, new_wb_rels.as_bytes())
@@ -6494,20 +6924,27 @@ fn splice_external_references(new_wb: &str, block: &str) -> String {
 /// Append preserved externalLink `<Relationship>` entries to the workbook
 /// rels file emitted by rust_xlsxwriter. Existing rels (sheets, styles,
 /// shared strings, etc.) are kept; we just splice the new ones before
-/// `</Relationships>`. If an rId already collides with an existing one we
-/// drop the new one — collision is unlikely since rust_xlsxwriter uses a
-/// monotonic counter and externalLink rIds typically come at the end.
-fn append_workbook_rels(new_rels: &str, ext_links: &[(String, String, String)]) -> String {
+/// `</Relationships>`. Colliding rIds use the remap produced by
+/// `resolve_ext_link_rid_remap` so the rels entry and the matching
+/// `<externalReference>` block in workbook.xml agree on the new id.
+fn append_workbook_rels(
+    new_rels: &str,
+    ext_links: &[(String, String, String)],
+    rid_remap: &HashMap<String, String>,
+) -> String {
     if ext_links.is_empty() {
         return new_rels.to_string();
     }
     let mut adds = String::new();
     for (rid, target, ty) in ext_links {
-        if new_rels.contains(&format!("Id=\"{rid}\"")) {
+        let effective_rid = rid_remap.get(rid).cloned().unwrap_or_else(|| rid.clone());
+        if new_rels.contains(&format!("Id=\"{effective_rid}\"")) {
+            // Should not happen after remap, but be defensive against weird
+            // input where a remap target was already used.
             continue;
         }
         adds.push_str(&format!(
-            "<Relationship Id=\"{rid}\" Type=\"{ty}\" Target=\"{target}\"/>"
+            "<Relationship Id=\"{effective_rid}\" Type=\"{ty}\" Target=\"{target}\"/>"
         ));
     }
     if adds.is_empty() {
@@ -6521,5 +6958,543 @@ fn append_workbook_rels(new_rels: &str, ext_links: &[(String, String, String)]) 
         s
     } else {
         new_rels.to_string()
+    }
+}
+
+/// Build a (old_rid → new_rid) remap for any preserved externalLink rId that
+/// would collide with the rels file rust_xlsxwriter just emitted. Picks fresh
+/// `rId<N>` values starting past the largest existing N so collisions in the
+/// remap target are avoided. Non-colliding rIds map to themselves implicitly
+/// (callers fall back to the input rId when the map has no entry).
+fn resolve_ext_link_rid_remap(
+    new_rels: &str,
+    ext_links: &[(String, String, String)],
+) -> HashMap<String, String> {
+    let mut remap = HashMap::new();
+    if ext_links.is_empty() {
+        return remap;
+    }
+
+    // Highest existing `rId<N>` in the rels file.
+    let mut max_n: u64 = 0;
+    let mut i = 0;
+    let bytes = new_rels.as_bytes();
+    let needle = b"Id=\"rId";
+    while i + needle.len() < bytes.len() {
+        if &bytes[i..i + needle.len()] == needle {
+            let start = i + needle.len();
+            let mut j = start;
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j > start {
+                if let Ok(s) = std::str::from_utf8(&bytes[start..j]) {
+                    if let Ok(n) = s.parse::<u64>() {
+                        if n > max_n {
+                            max_n = n;
+                        }
+                    }
+                }
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut next_n = max_n + 1;
+    for (rid, _target, _ty) in ext_links {
+        let collides = new_rels.contains(&format!("Id=\"{rid}\""));
+        if !collides {
+            continue;
+        }
+        // Find a fresh rId<N> not used by the rels file or by an earlier remap.
+        let new_rid = loop {
+            let candidate = format!("rId{next_n}");
+            next_n += 1;
+            if !new_rels.contains(&format!("Id=\"{candidate}\"")) && !used.contains(&candidate) {
+                break candidate;
+            }
+        };
+        used.insert(new_rid.clone());
+        remap.insert(rid.clone(), new_rid);
+    }
+    remap
+}
+
+/// Rewrite each `<externalReference r:id="OLD"/>` in `block` so that OLD is
+/// replaced with its remap target when one exists. Walks the block once and
+/// emits a fresh string; preserves attribute order and whitespace.
+fn remap_ext_reference_rids(block: &str, rid_remap: &HashMap<String, String>) -> String {
+    if rid_remap.is_empty() {
+        return block.to_string();
+    }
+    let mut out = String::with_capacity(block.len());
+    let mut rest = block;
+    let attr_marker = "r:id=\"";
+    while let Some(idx) = rest.find(attr_marker) {
+        out.push_str(&rest[..idx + attr_marker.len()]);
+        let after = &rest[idx + attr_marker.len()..];
+        if let Some(end) = after.find('"') {
+            let old_rid = &after[..end];
+            let new_rid = rid_remap.get(old_rid).cloned().unwrap_or_else(|| old_rid.to_string());
+            out.push_str(&new_rid);
+            out.push('"');
+            rest = &after[end + 1..];
+        } else {
+            // Malformed input — bail out and emit the rest verbatim.
+            out.push_str(after);
+            return out;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+// ============================================================================
+// Coco extension parts (#105 / #120)
+//
+// Several feature snapshots — tables, sparklines, outline groups, pivot
+// metadata, slicers, scenarios, sheet notes, Coco-authored charts, and the
+// threaded-comments extras (replies / resolved / resolvedAt / resolvedBy /
+// createdAt) — have no canonical OOXML representation that Coco's writer can
+// emit. Rather than silently dropping them, we serialize each family into a
+// dedicated JSON part under `xl/cocoExtensions/<feature>.json` inside the
+// output xlsx. Excel itself ignores unknown parts under `xl/` so the file
+// stays valid for Excel/Sheets; Coco re-reads the parts on import and merges
+// the values back into the snapshot at the original locations.
+//
+// Bundle structure for per-sheet families:
+//
+//     { "bySheetIndex": { "0": <field-value>, "1": <field-value>, ... } }
+//
+// The sheet index is the 0-based position in `sheetOrder` (stable across
+// round-trip — import always assigns `sheet-{N}` ids in sheet order, so we
+// never need to track the original snapshot id).
+//
+// For `_scenarios` (workbook-root) the file body is the raw field value.
+//
+// For threaded-comments extras the bundle is per-sheet AND per-cell:
+//
+//     { "bySheetIndex": { "<idx>": { "<cellRef>": { replies?: [...],
+//       resolved?: bool, resolvedAt?: string, resolvedBy?: string,
+//       createdAt?: string } } } }
+// ============================================================================
+
+/// Per-sheet snapshot fields we preserve via cocoExtensions parts.
+/// Tuple: (snapshot key, target file stem). The file stem is appended to
+/// `xl/cocoExtensions/` and gets a `.json` extension.
+const COCO_EXTENSION_SHEET_FIELDS: &[(&str, &str)] = &[
+    ("_outlineRows", "outlineRows"),
+    ("_outlineCols", "outlineCols"),
+    ("_tables", "tables"),
+    ("_sparklines", "sparklines"),
+    ("_pivots", "pivots"),
+    ("_slicers", "slicers"),
+    ("_note", "notes"),
+    ("_charts", "charts"),
+];
+
+/// Workbook-root fields preserved as standalone JSON parts.
+const COCO_EXTENSION_ROOT_FIELDS: &[(&str, &str)] = &[("_scenarios", "scenarios")];
+
+/// Threaded-comments extra-field keys captured per cell inside `_comments[]`.
+const COCO_THREADED_COMMENT_KEYS: &[&str] = &[
+    "replies",
+    "resolved",
+    "resolvedAt",
+    "resolvedBy",
+    "createdAt",
+];
+
+/// User-facing label per family — used by the warning emitter so users see
+/// concrete field names rather than internal snapshot keys.
+fn coco_extension_label_ja(file_stem: &str) -> &'static str {
+    match file_stem {
+        "outlineRows" => "アウトライン(行)",
+        "outlineCols" => "アウトライン(列)",
+        "tables" => "テーブル",
+        "sparklines" => "スパークライン",
+        "pivots" => "ピボットテーブル設定",
+        "slicers" => "スライサー",
+        "notes" => "シートメモ",
+        "charts" => "Coco作成のチャート",
+        "scenarios" => "シナリオ",
+        "threadedComments" => "コメント返信/解決状態",
+        _ => "Coco拡張データ",
+    }
+}
+
+/// Build the per-feature JSON bundles that must be written into the output
+/// xlsx as `xl/cocoExtensions/*.json` parts. Returns:
+///   - `bundles`: map from full zip part path → JSON bytes
+///   - `families`: ordered list of file stems that actually produced a bundle,
+///     used by the export path to emit one CompatibilityWarning per family.
+fn build_coco_extension_bundles(
+    snapshot: &Value,
+    sheet_order: &[Value],
+) -> (HashMap<String, Vec<u8>>, Vec<String>) {
+    let mut bundles: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut families: Vec<String> = Vec::new();
+
+    let sheets_obj = snapshot.get("sheets").and_then(|v| v.as_object());
+
+    // Per-sheet families.
+    for (snap_key, file_stem) in COCO_EXTENSION_SHEET_FIELDS {
+        let mut by_idx: Map<String, Value> = Map::new();
+        if let Some(sheets) = sheets_obj {
+            for (idx, sid_val) in sheet_order.iter().enumerate() {
+                let Some(sid) = sid_val.as_str() else { continue };
+                let Some(sheet) = sheets.get(sid) else { continue };
+                if let Some(val) = sheet.get(*snap_key) {
+                    if !val.is_null() {
+                        by_idx.insert(idx.to_string(), val.clone());
+                    }
+                }
+            }
+        }
+        if !by_idx.is_empty() {
+            let body = json!({ "bySheetIndex": Value::Object(by_idx) });
+            if let Ok(bytes) = serde_json::to_vec(&body) {
+                bundles.insert(
+                    format!("xl/cocoExtensions/{file_stem}.json"),
+                    bytes,
+                );
+                families.push((*file_stem).to_string());
+            }
+        }
+    }
+
+    // Workbook-root families.
+    for (snap_key, file_stem) in COCO_EXTENSION_ROOT_FIELDS {
+        if let Some(val) = snapshot.get(*snap_key) {
+            if !val.is_null() {
+                if let Ok(bytes) = serde_json::to_vec(val) {
+                    bundles.insert(
+                        format!("xl/cocoExtensions/{file_stem}.json"),
+                        bytes,
+                    );
+                    families.push((*file_stem).to_string());
+                }
+            }
+        }
+    }
+
+    // Threaded-comments extras. Walk every sheet's `_comments[]`; capture any
+    // entry that carries one of `COCO_THREADED_COMMENT_KEYS` keyed by cell
+    // ref. The legacy `xl/commentsN.xml` body still carries cell/author/text,
+    // so this part only covers the additive fields Excel can't store natively.
+    let mut threaded_by_idx: Map<String, Value> = Map::new();
+    if let Some(sheets) = sheets_obj {
+        for (idx, sid_val) in sheet_order.iter().enumerate() {
+            let Some(sid) = sid_val.as_str() else { continue };
+            let Some(sheet) = sheets.get(sid) else { continue };
+            let Some(arr) = sheet.get("_comments").and_then(|v| v.as_array()) else {
+                continue;
+            };
+            let mut per_cell: Map<String, Value> = Map::new();
+            for entry in arr {
+                let Some(obj) = entry.as_object() else { continue };
+                let cell_ref = obj
+                    .get("cell")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| obj.get("cellRef").and_then(|v| v.as_str()))
+                    .map(|s| s.to_string());
+                let Some(cell_ref) = cell_ref else { continue };
+                let mut extras: Map<String, Value> = Map::new();
+                for k in COCO_THREADED_COMMENT_KEYS {
+                    if let Some(v) = obj.get(*k) {
+                        if !v.is_null() {
+                            extras.insert((*k).to_string(), v.clone());
+                        }
+                    }
+                }
+                if !extras.is_empty() {
+                    per_cell.insert(cell_ref, Value::Object(extras));
+                }
+            }
+            if !per_cell.is_empty() {
+                threaded_by_idx.insert(idx.to_string(), Value::Object(per_cell));
+            }
+        }
+    }
+    if !threaded_by_idx.is_empty() {
+        let body = json!({ "bySheetIndex": Value::Object(threaded_by_idx) });
+        if let Ok(bytes) = serde_json::to_vec(&body) {
+            bundles.insert(
+                "xl/cocoExtensions/threadedComments.json".to_string(),
+                bytes,
+            );
+            families.push("threadedComments".to_string());
+        }
+    }
+
+    (bundles, families)
+}
+
+/// Reopen the freshly-written xlsx at `tmp_path` and append the cocoExtensions
+/// JSON parts. Excel ignores unknown `xl/` parts so we don't have to touch
+/// `[Content_Types].xml` — Excel only complains when an Override declares a
+/// part that doesn't exist, not the other way around. (We deliberately skip
+/// declaring our own content type so that the file stays maximally compatible
+/// with strict OOXML validators that reject unknown content types.)
+fn inject_coco_extensions(
+    tmp_path: &std::path::Path,
+    bundles: &HashMap<String, Vec<u8>>,
+) -> Result<(), String> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::{write::FileOptions, ZipArchive, ZipWriter};
+
+    if bundles.is_empty() {
+        return Ok(());
+    }
+
+    let original_bytes = fs::read(tmp_path).map_err(|e| e.to_string())?;
+    let mut src = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+
+    let mut out_buf: Vec<u8> = Vec::with_capacity(original_bytes.len() + 4096);
+    {
+        let mut out = ZipWriter::new(Cursor::new(&mut out_buf));
+        let opts: FileOptions =
+            FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+        // Skip any pre-existing entries with the same target paths so a
+        // round-trip (import → export with the same snapshot) overwrites
+        // rather than duplicates.
+        let skip: HashSet<String> = bundles.keys().cloned().collect();
+
+        for i in 0..src.len() {
+            let mut entry = src.by_index(i).map_err(|e| e.to_string())?;
+            let name = entry.name().to_string();
+            if skip.contains(&name) {
+                continue;
+            }
+            let mut buf = Vec::with_capacity(entry.size() as usize);
+            std::io::Read::read_to_end(&mut entry, &mut buf).map_err(|e| e.to_string())?;
+            out.start_file(&name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, &buf).map_err(|e| e.to_string())?;
+        }
+
+        for (name, bytes) in bundles {
+            out.start_file(name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, bytes).map_err(|e| e.to_string())?;
+        }
+
+        out.finish().map_err(|e| e.to_string())?;
+    }
+
+    fs::write(tmp_path, &out_buf).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Per-family upper bound on the JSON body we'll merge back from a
+/// cocoExtensions part. Defense-in-depth: a hostile or corrupt xlsx must not
+/// inflate the snapshot beyond what the export path will accept.
+const COCO_EXTENSION_PART_CAP_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Read all `xl/cocoExtensions/*.json` parts from the input archive. Returns
+/// a map from file stem (e.g. `"tables"`) → parsed JSON value (the bundle
+/// object as produced by `build_coco_extension_bundles`).
+fn read_coco_extensions<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> HashMap<String, Value> {
+    let mut out: HashMap<String, Value> = HashMap::new();
+
+    // Collect names first to avoid re-borrowing the archive while iterating.
+    let mut names: Vec<String> = Vec::new();
+    for i in 0..archive.len() {
+        if let Ok(entry) = archive.by_index(i) {
+            let name = entry.name().to_string();
+            if name.starts_with("xl/cocoExtensions/")
+                && name.ends_with(".json")
+                && entry.size() <= COCO_EXTENSION_PART_CAP_BYTES
+            {
+                names.push(name);
+            }
+        }
+    }
+
+    for name in names {
+        let Ok(mut entry) = archive.by_name(&name) else {
+            continue;
+        };
+        let mut buf = String::new();
+        if std::io::Read::read_to_string(&mut entry, &mut buf).is_err() {
+            continue;
+        }
+        let Ok(val) = serde_json::from_str::<Value>(&buf) else {
+            continue;
+        };
+        // Strip path prefix and `.json` suffix to recover the family stem.
+        let stem = name
+            .strip_prefix("xl/cocoExtensions/")
+            .and_then(|s| s.strip_suffix(".json"))
+            .unwrap_or("");
+        if !stem.is_empty() {
+            out.insert(stem.to_string(), val);
+        }
+    }
+
+    out
+}
+
+/// Detect whether the archive looks like a Coco-authored workbook by
+/// scanning `docProps/core.xml` for the literal string "Coco" inside either
+/// `<dc:creator>` or `<cp:lastModifiedBy>`. Returns true on a match. This is
+/// a coarse heuristic — false positives only matter when paired with the
+/// "no cocoExtensions parts present" condition (see Bug 4): together they
+/// mean the file used to carry Coco extension data that has since been
+/// stripped (most likely by Excel re-saving the file). False negatives are
+/// preferable to crashing on a malformed core.xml so any read/parse error
+/// short-circuits to `false`.
+fn xlsx_looks_coco_authored<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> bool {
+    let Ok(mut entry) = archive.by_name("docProps/core.xml") else {
+        return false;
+    };
+    let mut buf = String::new();
+    if std::io::Read::read_to_string(&mut entry, &mut buf).is_err() {
+        return false;
+    }
+    // Scan only the dc:creator and cp:lastModifiedBy elements so a stray
+    // "Coco" in a title/subject field doesn't trigger a false positive.
+    contains_coco_in_element(&buf, "dc:creator")
+        || contains_coco_in_element(&buf, "cp:lastModifiedBy")
+}
+
+// True when the named XML element (taking the first occurrence) has a body
+// that contains the substring "Coco" (case-sensitive — matches the exported
+// app name). Skips closing tags and empty / self-closed elements.
+fn contains_coco_in_element(xml: &str, tag: &str) -> bool {
+    // Find `<tag` (open) and then the matching close `</tag>`. We don't try
+    // to handle full XML namespaces — `dc:creator` and `cp:lastModifiedBy`
+    // are stable in OOXML core.xml.
+    let open_marker = format!("<{tag}");
+    let close_marker = format!("</{tag}>");
+    let Some(open_idx) = xml.find(&open_marker) else {
+        return false;
+    };
+    // Move past the opening tag itself (find the `>` that terminates it).
+    let after_open = &xml[open_idx..];
+    let Some(gt_off) = after_open.find('>') else {
+        return false;
+    };
+    let body_start = open_idx + gt_off + 1;
+    let Some(close_off) = xml[body_start..].find(&close_marker) else {
+        return false;
+    };
+    let body = &xml[body_start..body_start + close_off];
+    body.contains("Coco")
+}
+
+/// Merge the cocoExtensions bundles back into the snapshot at the locations
+/// the export path captured them from. Skips families we don't recognize so
+/// future cocoExtension parts written by a newer Coco can round-trip without
+/// requiring this reader to know about them (they just won't surface in the
+/// in-memory snapshot — an acceptable loss for forward compatibility).
+fn merge_coco_extensions_into_snapshot(
+    snapshot: &mut Value,
+    bundles: &HashMap<String, Value>,
+) {
+    if bundles.is_empty() {
+        return;
+    }
+    let snap_obj = match snapshot.as_object_mut() {
+        Some(o) => o,
+        None => return,
+    };
+
+    let sheet_order: Vec<String> = snap_obj
+        .get("sheetOrder")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Helper: extract `bySheetIndex` object from a bundle.
+    let by_sheet = |bundle: &Value| -> Option<Map<String, Value>> {
+        bundle
+            .get("bySheetIndex")
+            .and_then(|v| v.as_object())
+            .cloned()
+    };
+
+    // Per-sheet families.
+    for (snap_key, file_stem) in COCO_EXTENSION_SHEET_FIELDS {
+        let Some(bundle) = bundles.get(*file_stem) else {
+            continue;
+        };
+        let Some(map) = by_sheet(bundle) else { continue };
+        let sheets_obj = match snap_obj
+            .get_mut("sheets")
+            .and_then(|v| v.as_object_mut())
+        {
+            Some(o) => o,
+            None => continue,
+        };
+        for (idx_str, val) in map {
+            let Ok(idx) = idx_str.parse::<usize>() else { continue };
+            let Some(sid) = sheet_order.get(idx) else { continue };
+            let Some(sheet) = sheets_obj.get_mut(sid).and_then(|v| v.as_object_mut()) else {
+                continue;
+            };
+            sheet.insert((*snap_key).to_string(), val);
+        }
+    }
+
+    // Workbook-root families.
+    for (snap_key, file_stem) in COCO_EXTENSION_ROOT_FIELDS {
+        if let Some(bundle) = bundles.get(*file_stem) {
+            snap_obj.insert((*snap_key).to_string(), bundle.clone());
+        }
+    }
+
+    // Threaded-comments extras: merge per-cell extras back into each sheet's
+    // `_comments[]` row that matches by cell ref. Skips silently when no
+    // `_comments` row matches a recorded cell — the legacy comment must
+    // survive even if the extras can't be re-anchored.
+    if let Some(bundle) = bundles.get("threadedComments") {
+        if let Some(map) = by_sheet(bundle) {
+            let sheets_obj = snap_obj
+                .get_mut("sheets")
+                .and_then(|v| v.as_object_mut());
+            if let Some(sheets_obj) = sheets_obj {
+                for (idx_str, per_cell_val) in map {
+                    let Ok(idx) = idx_str.parse::<usize>() else { continue };
+                    let Some(sid) = sheet_order.get(idx) else { continue };
+                    let Some(per_cell) = per_cell_val.as_object() else { continue };
+                    let Some(sheet) = sheets_obj
+                        .get_mut(sid)
+                        .and_then(|v| v.as_object_mut())
+                    else {
+                        continue;
+                    };
+                    let Some(arr) = sheet
+                        .get_mut("_comments")
+                        .and_then(|v| v.as_array_mut())
+                    else {
+                        continue;
+                    };
+                    for entry in arr.iter_mut() {
+                        let Some(obj) = entry.as_object_mut() else { continue };
+                        let cell_ref = obj
+                            .get("cell")
+                            .and_then(|v| v.as_str())
+                            .or_else(|| obj.get("cellRef").and_then(|v| v.as_str()))
+                            .map(|s| s.to_string());
+                        let Some(cell_ref) = cell_ref else { continue };
+                        if let Some(extras) = per_cell.get(&cell_ref).and_then(|v| v.as_object()) {
+                            for (k, v) in extras {
+                                obj.insert(k.clone(), v.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

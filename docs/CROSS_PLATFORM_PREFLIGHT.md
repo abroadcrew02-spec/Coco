@@ -37,9 +37,9 @@ All OS-specific code paths in `src-tauri/src/commands/shell.rs` (the only file w
 
 ### WARNINGs
 
-1. **`src-tauri/tauri.conf.json` — no explicit `bundle.macOS.minimumSystemVersion`.**
-   - What breaks: Tauri's default minimum macOS deployment target (10.13 as of Tauri 2.0) is below §12.3's "macOS 12+" target. Bundles will still build, but if a dependency in the future requires macOS 11+ symbols the build could fail on stale runners. No current runtime hazard.
-   - Suggested fix: add `"macOS": { "minimumSystemVersion": "12.0" }` under `bundle` once Tauri 2.x is verified to accept it on this codebase. Not applied automatically because it requires a real macOS build to verify.
+1. **`src-tauri/tauri.conf.json` — `bundle.macOS.minimumSystemVersion` set to `12.0` (RESOLVED 2026-05-15, issue #60).**
+   - Resolution: `tauri.conf.json` now declares `bundle.macOS.minimumSystemVersion = "12.0"`, matching §12.3's "macOS 12+" target. No further action required.
+   - Historical context: this entry was previously listed as a WARNING because the field was missing; left here so the audit trail stays intact.
 
 2. **`src-tauri/tauri.conf.json` — no `bundle.macOS.signingIdentity`, `entitlements`, or hardened-runtime config.**
    - What breaks: unsigned `.dmg` will produce a Gatekeeper warning on macOS. Requirements.md §3.1 explicitly calls out "署名済みmacOS `.dmg` による社内配布" so signing must be added before first internal distribution. Build itself will still succeed.
@@ -75,6 +75,5 @@ A fresh macOS build (cargo + `npm run tauri build`) should **succeed** today and
 Caveats before declaring "ready":
 
 - The bundle will be unsigned and trigger Gatekeeper. Code signing is a §3.1 requirement before social distribution.
-- No `minimumSystemVersion` is declared, so the produced bundle's metadata may not assert macOS 12+ correctly.
 
 None of those block the first successful build; they block first *shippable* build.

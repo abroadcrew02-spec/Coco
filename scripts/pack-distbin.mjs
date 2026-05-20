@@ -26,6 +26,17 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriTargetRoot = join(root, "src-tauri", "target", "release");
 const distBin = join(root, "distbin");
 
+// Read the current package version so we can filter stale bundle artifacts
+// left from prior builds (#59). Bundles whose filename doesn't contain the
+// current version OR whose mtime predates the latest binary are excluded.
+const pkgVersion = (() => {
+  try {
+    return JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+  } catch {
+    return null;
+  }
+})();
+
 const candidates = [
   // Raw executable next to target/release/.
   { src: join(tauriTargetRoot, "coco.exe"), label: "exe" },
@@ -36,10 +47,28 @@ const candidates = [
 
 const bundleDir = join(tauriTargetRoot, "bundle");
 
+// Pick the freshest mtime among the raw release binaries — used as a floor for
+// bundle freshness. If the user's `tauri build` just produced Coco.exe, any
+// bundle older than that exe is definitely a stale artifact from a prior run.
+function latestBinaryMtime() {
+  let latest = 0;
+  for (const c of candidates) {
+    if (!existsSync(c.src)) continue;
+    const m = statSync(c.src).mtimeMs;
+    if (m > latest) latest = m;
+  }
+  return latest;
+}
+
 // Discover Tauri bundle outputs (msi, nsis, deb, dmg, app, AppImage, rpm).
 // Each bundler writes to its own subdir; just walk one level deep.
+//
+// #59: filter on (version-in-name OR mtime >= latest binary mtime - 5min). The
+// 5-minute slack absorbs clock skew and ordering between binary + bundle writes
+// inside a single `tauri build` invocation.
 function discoverBundles() {
   if (!existsSync(bundleDir)) return [];
+  const freshFloor = latestBinaryMtime() - 5 * 60 * 1000;
   const out = [];
   for (const sub of readdirSync(bundleDir)) {
     const subPath = join(bundleDir, sub);
@@ -48,6 +77,14 @@ function discoverBundles() {
       const entryPath = join(subPath, entry);
       // Skip .app on macOS (it's a directory bundle), keep the .dmg sibling.
       if (entry.endsWith(".app") || !statSync(entryPath).isFile()) continue;
+      const mtime = statSync(entryPath).mtimeMs;
+      const matchesVersion = pkgVersion ? entry.includes(pkgVersion) : false;
+      if (!matchesVersion && mtime < freshFloor) {
+        console.warn(
+          `[pack-distbin] skip stale bundle ${sub}/${entry} (version != ${pkgVersion}, mtime older than current build)`,
+        );
+        continue;
+      }
       out.push({ src: entryPath, label: sub });
     }
   }

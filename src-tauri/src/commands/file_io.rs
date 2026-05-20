@@ -90,6 +90,88 @@ pub fn read_file_bytes_base64(path: String) -> Result<String, String> {
     Ok(b64_encode(&bytes))
 }
 
+/// RFC 4648 base64 decoder. Returns Err on malformed input. Tolerates the
+/// usual whitespace runs (\n, \r, spaces) that some encoders sprinkle in.
+fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
+    let mut buf: [u8; 4] = [0; 4];
+    let mut buf_len: usize = 0;
+    let mut out: Vec<u8> = Vec::with_capacity(input.len() * 3 / 4);
+    let mut padding: usize = 0;
+    for ch in input.chars() {
+        if ch == '=' {
+            padding += 1;
+            buf[buf_len] = 0;
+            buf_len += 1;
+        } else if ch.is_whitespace() {
+            continue;
+        } else {
+            let val = match ch {
+                'A'..='Z' => ch as u8 - b'A',
+                'a'..='z' => ch as u8 - b'a' + 26,
+                '0'..='9' => ch as u8 - b'0' + 52,
+                '+' => 62,
+                '/' => 63,
+                _ => return Err(format!("INVALID_BASE64_CHAR: {ch}")),
+            };
+            buf[buf_len] = val;
+            buf_len += 1;
+        }
+        if buf_len == 4 {
+            let n = ((buf[0] as u32) << 18)
+                | ((buf[1] as u32) << 12)
+                | ((buf[2] as u32) << 6)
+                | (buf[3] as u32);
+            out.push(((n >> 16) & 0xff) as u8);
+            if padding < 2 {
+                out.push(((n >> 8) & 0xff) as u8);
+            }
+            if padding < 1 {
+                out.push((n & 0xff) as u8);
+            }
+            buf_len = 0;
+        }
+    }
+    if buf_len != 0 {
+        return Err("INVALID_BASE64_LENGTH".to_string());
+    }
+    Ok(out)
+}
+
+/// Write a base64-encoded payload as raw bytes to disk. Restricted to image
+/// extensions (png/jpg/jpeg/gif) and verified by magic bytes so this command
+/// can't be used as a generic file-writer escape hatch from the renderer.
+/// 32 MiB size cap matches `read_file_bytes_base64`.
+#[tauri::command]
+pub fn write_file_bytes_base64(path: String, base64: String) -> Result<(), String> {
+    let path_ref = Path::new(&path);
+    if !is_allowed_image_path(path_ref) {
+        return Err("UNSUPPORTED_FILE_TYPE".to_string());
+    }
+    if (base64.len() as u64) > MAX_READ_BYTES * 2 {
+        return Err(format!(
+            "PAYLOAD_TOO_LARGE: {} base64 chars (cap {} chars)",
+            base64.len(),
+            MAX_READ_BYTES * 2
+        ));
+    }
+    let bytes = b64_decode(&base64)?;
+    if bytes.len() as u64 > MAX_READ_BYTES {
+        return Err(format!(
+            "FILE_TOO_LARGE: {} bytes (cap {} bytes)",
+            bytes.len(),
+            MAX_READ_BYTES
+        ));
+    }
+    if !has_allowed_image_magic(&bytes) {
+        return Err("UNSUPPORTED_IMAGE_BYTES".to_string());
+    }
+    // Image exports are explicit user-picked paths and small (≤32 MiB); a
+    // direct fs::write is sufficient and avoids dragging the `tempfile` dev
+    // dependency into the runtime build.
+    fs::write(path_ref, &bytes).map_err(|e| format!("WRITE_FAILED: {e}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn existing_csv_export_paths(paths: Vec<String>) -> Result<Vec<String>, String> {
     if paths.len() > MAX_EXISTENCE_CHECK_PATHS {

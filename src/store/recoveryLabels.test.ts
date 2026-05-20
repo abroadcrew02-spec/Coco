@@ -10,12 +10,12 @@ describe("recoveryReasonLabel", () => {
     expect(recoveryReasonLabel("manual_save")).toBe("手動保存");
   });
 
-  it("translates backup", () => {
-    expect(recoveryReasonLabel("backup")).toBe("バックアップ");
+  it("passes through 'backup' as a raw code (#104: not emitted by Rust today)", () => {
+    expect(recoveryReasonLabel("backup")).toBe("backup");
   });
 
-  it("translates crash", () => {
-    expect(recoveryReasonLabel("crash")).toBe("クラッシュ復元");
+  it("passes through 'crash' as a raw code (#104: not emitted by Rust today)", () => {
+    expect(recoveryReasonLabel("crash")).toBe("crash");
   });
 
   it("passes through unknown codes so debugging info isn't lost", () => {

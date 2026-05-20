@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { isDirtySaveStatus } from "../store/dirtyGuard";
+import { isDirtySaveStatus, isWorkbookDirty } from "../store/dirtyGuard";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 
 /** req 5.4.2: when the user attempts to close the window with an unsaved
@@ -27,8 +27,9 @@ export function useCloseGuard() {
       .onCloseRequested(async (event) => {
         // We can't read the store via hooks inside the closure (it captures
         // the saveStatus from when the listener was registered). Use getState.
-        const dirty = isDirtySaveStatus(useWorkbookStore.getState().saveStatus);
-        if (!dirty) return; // allow normal close
+        // `isWorkbookDirty` also considers wasDirtyBeforeExport so an
+        // export_done transition doesn't smuggle dirty state past the guard.
+        if (!isWorkbookDirty()) return; // allow normal close
 
         event.preventDefault();
         const choice = await new Promise<"save" | "discard" | "cancel">((resolve) => {

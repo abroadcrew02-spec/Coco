@@ -1,0 +1,134 @@
+/* Live chart canvas panel — positioned bottom-left of univer-wrap so it
+   doesn't collide with ChartPreviewPanel (top-left) or the comment
+   indicators panel (right). Wider than the small preview list because
+   the chart itself targets a 480x300 viewport. */
+
+.ccp-panel {
+  position: absolute;
+  bottom: 8px;
+  left: 16px;
+  z-index: 24;
+  width: 520px;
+  max-width: calc(100vw - 48px);
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ccp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.ccp-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.ccp-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.ccp-collapse {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  color: #6b7280;
+}
+
+.ccp-collapse:hover {
+  color: #111827;
+}
+
+.ccp-body {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ccp-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ccp-picker-label {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.ccp-select {
+  padding: 4px 6px;
+  font-size: 12px;
+  border: 1px solid #c8d0cc;
+  border-radius: 3px;
+  background: #fff;
+  font-family: inherit;
+  color: #1f2937;
+}
+
+.ccp-select:focus {
+  outline: none;
+  border-color: #217346;
+  box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
+}
+
+.ccp-canvas {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.ccp-canvas svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+}
+
+.ccp-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 16px;
+  z-index: 24;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.ccp-badge:hover,
+.ccp-badge:focus-visible {
+  background: #f3f4f6;
+  outline: none;
+}
+
+.ccp-badge-count {
+  font-weight: 600;
+  color: #374151;
+}

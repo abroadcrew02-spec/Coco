@@ -1,3 +1,10 @@
+import {
+  hasKnownDecoration,
+  ICONSET_GLYPHS,
+  ICONSET_MULTI_PREFIXES,
+  stripKnownDecorations,
+} from "./renderGlyphs";
+
 // In-grid conditional formatting rendering (Phase 2).
 //
 // The xlsx round-trip stores per-sheet rules at `sheets.<sid>._conditionalFormatting`
@@ -34,6 +41,13 @@ export interface CfRuleEntry {
   priority?: number;
   stopIfTrue?: boolean;
   style?: { bold?: boolean; fontColor?: string; bgColor?: string };
+  // new in this round: advanced CF rule fields
+  color?: string;
+  colorScaleType?: "2color" | "3color";
+  minColor?: string;
+  midColor?: string;
+  maxColor?: string;
+  iconStyle?: "3arrows" | "3traffic" | "5rating";
 }
 
 export interface CellCoord {
@@ -85,16 +99,45 @@ function parseA1(cell: string): CellCoord | null {
   return { row: rowNum - 1, col };
 }
 
+/** Parse a column-only ref like "A", "$AA" — returns the 0-based column,
+ *  or null if it's not pure letters. #101 helper. */
+function parseColRef(s: string): number | null {
+  const trimmed = s.replace(/^\$/, "");
+  if (!/^[A-Za-z]+$/.test(trimmed)) return null;
+  const col = colLettersToIndex(trimmed);
+  return col >= 0 ? col : null;
+}
+
+/** Parse a row-only ref like "1", "$5" — returns the 0-based row, or null. */
+function parseRowRef(s: string): number | null {
+  const trimmed = s.replace(/^\$/, "");
+  if (!/^\d+$/.test(trimmed)) return null;
+  const n = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return n - 1;
+}
+
 /**
  * Parse an Excel sqref into a flat list of cell coordinates. Accepts:
  *   - single cells: "A1"
  *   - ranges: "A1:C3"
+ *   - whole-column refs: "A:A", "B:D" (#101)
+ *   - whole-row refs: "1:1", "5:10" (#101)
  *   - space-separated mixes: "A1 B2 D4:D10"
- * Returns an empty array on any malformed piece.
+ *
+ * #101: whole-column / whole-row refs are bounded by `usedRange` (passed in
+ * by the caller) so we never generate 1M-coordinate arrays for the full
+ * worksheet. If usedRange is omitted, whole-column / whole-row pieces
+ * conservatively fall back to row 0 / col 0 only.
  */
-export function parseSqrefToCells(sqref: string): CellCoord[] {
+export function parseSqrefToCells(
+  sqref: string,
+  usedRange?: { maxRow: number; maxCol: number },
+): CellCoord[] {
   const out: CellCoord[] = [];
   if (typeof sqref !== "string") return out;
+  const maxRow = usedRange?.maxRow ?? 0;
+  const maxCol = usedRange?.maxCol ?? 0;
   const pieces = sqref.trim().split(/\s+/);
   for (const piece of pieces) {
     if (!piece) continue;
@@ -104,8 +147,33 @@ export function parseSqrefToCells(sqref: string): CellCoord[] {
       if (c) out.push(c);
       continue;
     }
-    const a = parseA1(piece.slice(0, colon));
-    const b = parseA1(piece.slice(colon + 1));
+    const leftStr = piece.slice(0, colon);
+    const rightStr = piece.slice(colon + 1);
+    // Whole-column ("A:A", "B:D")
+    const lc = parseColRef(leftStr);
+    const rc = parseColRef(rightStr);
+    if (lc !== null && rc !== null) {
+      const c0 = Math.min(lc, rc);
+      const c1 = Math.max(lc, rc);
+      for (let r = 0; r <= maxRow; r++) {
+        for (let c = c0; c <= c1; c++) out.push({ row: r, col: c });
+      }
+      continue;
+    }
+    // Whole-row ("1:1", "5:10")
+    const lr = parseRowRef(leftStr);
+    const rr = parseRowRef(rightStr);
+    if (lr !== null && rr !== null) {
+      const r0 = Math.min(lr, rr);
+      const r1 = Math.max(lr, rr);
+      for (let r = r0; r <= r1; r++) {
+        for (let c = 0; c <= maxCol; c++) out.push({ row: r, col: c });
+      }
+      continue;
+    }
+    // Explicit cell range.
+    const a = parseA1(leftStr);
+    const b = parseA1(rightStr);
     if (!a || !b) continue;
     const r0 = Math.min(a.row, b.row);
     const r1 = Math.max(a.row, b.row);
@@ -130,6 +198,27 @@ function readCellValue(cellData: Record<string, Record<string, unknown>> | undef
   const cell = r[String(col)] as Record<string, unknown> | undefined;
   if (!cell) return undefined;
   return cell.v;
+}
+
+/**
+ * #113: detect a cell hidden by the slicer pipeline (`hd:1`). Excel computes
+ * range-aware CF statistics (top10, duplicates, uniques, dataBar, colorScale,
+ * iconSet) over visible cells only, and never paints hidden cells. We need
+ * this check in BOTH the rangeValues collection (so min/max/median/rank
+ * exclude hidden values) and the per-cell apply loop (so we don't write a
+ * style onto a hidden cell that would surface again if the row is unhidden).
+ */
+function isCellHidden(
+  cellData: Record<string, Record<string, unknown>> | undefined,
+  row: number,
+  col: number,
+): boolean {
+  if (!cellData) return false;
+  const r = cellData[String(row)];
+  if (!r) return false;
+  const cell = r[String(col)] as Record<string, unknown> | undefined;
+  if (!cell) return false;
+  return cell.hd === 1;
 }
 
 /**
@@ -278,6 +367,454 @@ export function evaluateUnique(values: unknown[], target: unknown): boolean {
   return count === 1;
 }
 
+// new in this round: -----------------------------------------------------
+// Advanced CF rule types: dataBar, colorScale, iconSet, expression.
+
+/** Convert a hex color ("#RRGGBB") to [r,g,b] (0..255). Returns null on bad input. */
+function hexToRgb(hex: string): [number, number, number] | null {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!m) return null;
+  const n = Number.parseInt(m[1], 16);
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const c = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
+  return `#${c(r)}${c(g)}${c(b)}`;
+}
+
+/** Convert RGB (0..255) to HSL where h:0..360, s:0..100, l:0..100. */
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const rn = r / 255, gn = g / 255, bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  let h = 0;
+  let s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case rn:
+        h = (gn - bn) / d + (gn < bn ? 6 : 0);
+        break;
+      case gn:
+        h = (bn - rn) / d + 2;
+        break;
+      case bn:
+        h = (rn - gn) / d + 4;
+        break;
+    }
+    h *= 60;
+  }
+  return [h, s * 100, l * 100];
+}
+
+/** Convert HSL (h:0..360, s:0..100, l:0..100) to RGB (0..255). */
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const sn = s / 100, ln = l / 100;
+  if (sn === 0) {
+    const v = Math.round(ln * 255);
+    return [v, v, v];
+  }
+  const hue2rgb = (p: number, q: number, t: number): number => {
+    let tt = t;
+    if (tt < 0) tt += 1;
+    if (tt > 1) tt -= 1;
+    if (tt < 1 / 6) return p + (q - p) * 6 * tt;
+    if (tt < 1 / 2) return q;
+    if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
+    return p;
+  };
+  const q = ln < 0.5 ? ln * (1 + sn) : ln + sn - ln * sn;
+  const p = 2 * ln - q;
+  const hk = h / 360;
+  return [
+    Math.round(hue2rgb(p, q, hk + 1 / 3) * 255),
+    Math.round(hue2rgb(p, q, hk) * 255),
+    Math.round(hue2rgb(p, q, hk - 1 / 3) * 255),
+  ];
+}
+
+/** Given a base color and a fillRatio (0..1), return a lightness-adjusted hex.
+ *  lightness = 100 - fillRatio * 60: 100% fill → darker bar, 0% → nearly white. */
+export function evaluateDataBar(base: string, fillRatio: number): string {
+  const rgb = hexToRgb(base) ?? [99, 142, 198];
+  const [h, s] = rgbToHsl(rgb[0], rgb[1], rgb[2]);
+  const ratio = Math.max(0, Math.min(1, fillRatio));
+  const l = 100 - ratio * 60;
+  const [nr, ng, nb] = hslToRgb(h, s, l);
+  return rgbToHex(nr, ng, nb);
+}
+
+/** Compute the fill ratio of `value` in [min,max]. Returns 0 if min==max or non-numeric. */
+function fillRatioFor(value: unknown, min: number, max: number): number {
+  const n = toNumber(value);
+  if (Number.isNaN(n)) return 0;
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return 0;
+  const r = (n - min) / (max - min);
+  return Math.max(0, Math.min(1, r));
+}
+
+/** Linear interpolation between two RGB colors in RGB space. t in [0,1]. */
+function lerpHex(aHex: string, bHex: string, t: number): string {
+  const a = hexToRgb(aHex) ?? [0, 0, 0];
+  const b = hexToRgb(bHex) ?? [255, 255, 255];
+  const tt = Math.max(0, Math.min(1, t));
+  return rgbToHex(
+    a[0] + (b[0] - a[0]) * tt,
+    a[1] + (b[1] - a[1]) * tt,
+    a[2] + (b[2] - a[2]) * tt,
+  );
+}
+
+/**
+ * Evaluate a colorScale rule against a single value. For 3-color scales we
+ * interpolate min→mid in [min,median] and mid→max in [median,max]. Returns
+ * the hex color, or null when the value is non-numeric (no fill).
+ */
+export function evaluateColorScale(
+  value: unknown,
+  scaleType: "2color" | "3color",
+  min: number,
+  max: number,
+  median: number,
+  minColor: string,
+  midColor: string,
+  maxColor: string,
+): string | null {
+  const n = toNumber(value);
+  if (Number.isNaN(n)) return null;
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  if (max === min) return minColor;
+  if (scaleType === "2color") {
+    return lerpHex(minColor, maxColor, (n - min) / (max - min));
+  }
+  if (n <= median) {
+    const span = median - min;
+    return lerpHex(minColor, midColor, span === 0 ? 0 : (n - min) / span);
+  } else {
+    const span = max - median;
+    return lerpHex(midColor, maxColor, span === 0 ? 1 : (n - median) / span);
+  }
+}
+
+const ICON_GLYPHS: Record<string, string[]> = {
+  "3arrows": ["↓", "→", "↑"],
+  "3traffic": ["🔴", "🟡", "🟢"],
+  "5rating": ["★☆☆☆☆", "★★☆☆☆", "★★★☆☆", "★★★★☆", "★★★★★"],
+};
+
+// Note (#118A → audit): the previous "strip known iconSet glyphs" guard
+// lived here, but it only knew about iconSet glyphs and so missed sparkline /
+// comment / error / formula prefixes written by sibling render patches. The
+// guard has been replaced by `stripKnownDecorations` from `./renderGlyphs`,
+// which knows about ALL sibling-patch decorations and prevents stacking like
+// "↑ 💬  ▁▃▆▇█". See the iconSet branch of `patchCfRenders` below.
+
+/** Pick an icon glyph for `value` based on its band in [min,max] using the
+ *  given iconStyle's bucket count. Returns "" when value is non-numeric. */
+export function evaluateIconSet(
+  value: unknown,
+  iconStyle: string,
+  min: number,
+  max: number,
+): string {
+  const set = ICON_GLYPHS[iconStyle] ?? ICON_GLYPHS["3arrows"];
+  const n = toNumber(value);
+  if (Number.isNaN(n) || !Number.isFinite(min) || !Number.isFinite(max)) return "";
+  const buckets = set.length;
+  if (max === min) return set[buckets - 1];
+  const ratio = (n - min) / (max - min);
+  let idx = Math.floor(ratio * buckets);
+  if (idx >= buckets) idx = buckets - 1;
+  if (idx < 0) idx = 0;
+  return set[idx];
+}
+
+/**
+ * Tiny tokenizer for the expression evaluator. Yields numbers, strings,
+ * idents (function names + cell refs), and operator tokens. Whitespace skipped.
+ */
+type Token =
+  | { k: "num"; v: number }
+  | { k: "str"; v: string }
+  | { k: "ident"; v: string }
+  | { k: "op"; v: string }
+  | { k: "lp" }
+  | { k: "rp" }
+  | { k: "comma" };
+
+function tokenize(src: string): Token[] | null {
+  const out: Token[] = [];
+  let i = 0;
+  const s = src;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === " " || ch === "\t") {
+      i++;
+      continue;
+    }
+    if (ch === "(") {
+      out.push({ k: "lp" });
+      i++;
+      continue;
+    }
+    if (ch === ")") {
+      out.push({ k: "rp" });
+      i++;
+      continue;
+    }
+    if (ch === ",") {
+      out.push({ k: "comma" });
+      i++;
+      continue;
+    }
+    if (ch === ">" || ch === "<" || ch === "=") {
+      // multi-char: >=, <=, <>
+      if (ch === "<" && s[i + 1] === ">") {
+        out.push({ k: "op", v: "<>" });
+        i += 2;
+        continue;
+      }
+      if ((ch === ">" || ch === "<") && s[i + 1] === "=") {
+        out.push({ k: "op", v: ch + "=" });
+        i += 2;
+        continue;
+      }
+      out.push({ k: "op", v: ch });
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      let j = i + 1;
+      let buf = "";
+      while (j < s.length && s[j] !== '"') {
+        buf += s[j];
+        j++;
+      }
+      if (j >= s.length) return null;
+      out.push({ k: "str", v: buf });
+      i = j + 1;
+      continue;
+    }
+    if (ch >= "0" && ch <= "9") {
+      let j = i;
+      while (j < s.length && (/[0-9.]/.test(s[j]))) j++;
+      const n = Number(s.slice(i, j));
+      if (!Number.isFinite(n)) return null;
+      out.push({ k: "num", v: n });
+      i = j;
+      continue;
+    }
+    if (/[A-Za-z_$]/.test(ch)) {
+      let j = i;
+      while (j < s.length && /[A-Za-z_$0-9]/.test(s[j])) j++;
+      out.push({ k: "ident", v: s.slice(i, j) });
+      i = j;
+      continue;
+    }
+    // Unknown char — bail.
+    return null;
+  }
+  return out;
+}
+
+/** Parsed atom value used during expression evaluation. */
+type EvalValue = number | string | boolean | null;
+
+interface EvalCtx {
+  cellData: Record<string, Record<string, unknown>> | undefined;
+  anchorRow: number;
+  anchorCol: number;
+  curRow: number;
+  curCol: number;
+}
+
+/** Resolve an A1 ident relative to the rule's anchor cell. E.g. rule sqref=A1
+ *  with formula1="=B2" and current cell at (3,3) reads from (3+ (2-1), 3+ (B-A))
+ *  =(4,4). Returns the raw cell value (number/string/null). */
+function readRelative(name: string, ctx: EvalCtx): EvalValue {
+  const c = parseA1(name);
+  if (!c) return null;
+  const dr = c.row - ctx.anchorRow;
+  const dc = c.col - ctx.anchorCol;
+  const r = ctx.curRow + dr;
+  const cc = ctx.curCol + dc;
+  if (r < 0 || cc < 0) return null;
+  const v = readCellValue(ctx.cellData, r, cc);
+  if (v === undefined || v === null) return null;
+  if (typeof v === "number" || typeof v === "string" || typeof v === "boolean") return v;
+  return String(v);
+}
+
+/** Tiny recursive-descent parser for the expression grammar:
+ *    expr   := cmp
+ *    cmp    := add ( OP add )?       OP in > < >= <= = <>
+ *    add    := mul ( ('+'|'-') mul )*    -- not in spec but harmless
+ *    mul    := atom
+ *    atom   := number | string | ident '(' args? ')' | ident | '(' expr ')'
+ *  Returns evaluated value or throws. */
+class ExprParser {
+  i = 0;
+  toks: Token[];
+  ctx: EvalCtx;
+  constructor(toks: Token[], ctx: EvalCtx) {
+    this.toks = toks;
+    this.ctx = ctx;
+  }
+  peek(): Token | undefined {
+    return this.toks[this.i];
+  }
+  eat(): Token | undefined {
+    return this.toks[this.i++];
+  }
+  parse(): EvalValue {
+    const v = this.parseCmp();
+    if (this.i !== this.toks.length) throw new Error("trailing tokens");
+    return v;
+  }
+  parseCmp(): EvalValue {
+    const l = this.parseAtom();
+    const t = this.peek();
+    if (t && t.k === "op") {
+      this.eat();
+      const r = this.parseAtom();
+      return cmp(l, r, t.v);
+    }
+    return l;
+  }
+  parseAtom(): EvalValue {
+    const t = this.eat();
+    if (!t) throw new Error("unexpected end");
+    if (t.k === "num") return t.v;
+    if (t.k === "str") return t.v;
+    if (t.k === "lp") {
+      const v = this.parseCmp();
+      const r = this.eat();
+      if (!r || r.k !== "rp") throw new Error("missing )");
+      return v;
+    }
+    if (t.k === "ident") {
+      // function call?
+      if (this.peek()?.k === "lp") {
+        this.eat(); // consume lp
+        const args: EvalValue[] = [];
+        if (this.peek()?.k !== "rp") {
+          args.push(this.parseCmp());
+          while (this.peek()?.k === "comma") {
+            this.eat();
+            args.push(this.parseCmp());
+          }
+        }
+        const close = this.eat();
+        if (!close || close.k !== "rp") throw new Error("missing )");
+        return callFn(t.v.toUpperCase(), args, this.ctx);
+      }
+      // bare ident: cell ref or unknown name
+      return readRelative(t.v, this.ctx);
+    }
+    throw new Error("bad atom");
+  }
+}
+
+function isBlankVal(v: EvalValue): boolean {
+  return v === null || v === undefined || v === "";
+}
+
+function cmp(l: EvalValue, r: EvalValue, op: string): boolean {
+  // Coerce both sides to number when possible; fall back to string compare for = / <>.
+  const ln = typeof l === "number" ? l : Number(l);
+  const rn = typeof r === "number" ? r : Number(r);
+  const bothNum = !Number.isNaN(ln) && !Number.isNaN(rn) && l !== null && r !== null;
+  switch (op) {
+    case ">":
+      return bothNum && ln > rn;
+    case "<":
+      return bothNum && ln < rn;
+    case ">=":
+      return bothNum && ln >= rn;
+    case "<=":
+      return bothNum && ln <= rn;
+    case "=":
+      if (bothNum) return ln === rn;
+      return String(l ?? "") === String(r ?? "");
+    case "<>":
+      if (bothNum) return ln !== rn;
+      return String(l ?? "") !== String(r ?? "");
+  }
+  return false;
+}
+
+function callFn(name: string, args: EvalValue[], ctx: EvalCtx): EvalValue {
+  switch (name) {
+    case "ISBLANK":
+      return args.length === 1 && isBlankVal(args[0]);
+    case "ISNUMBER":
+      return args.length === 1 && typeof args[0] === "number" && Number.isFinite(args[0]);
+    case "ISTEXT":
+      return args.length === 1 && typeof args[0] === "string" && args[0] !== "";
+    case "MOD": {
+      if (args.length !== 2) return null;
+      const a = typeof args[0] === "number" ? args[0] : Number(args[0]);
+      const b = typeof args[1] === "number" ? args[1] : Number(args[1]);
+      if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
+      return a - Math.floor(a / b) * b;
+    }
+    case "ROW":
+      // ROW() with no args returns the current row (1-based).
+      return args.length === 0 ? ctx.curRow + 1 : null;
+    case "COLUMN":
+      return args.length === 0 ? ctx.curCol + 1 : null;
+  }
+  return null;
+}
+
+/** Evaluate a formula-based CF expression against the current cell. Returns
+ *  true / false (fail-closed: any parse or evaluation error → false). The
+ *  formula's leading `=` is stripped before tokenization. */
+export function evaluateExpression(
+  formula: string | undefined,
+  ctx: EvalCtx,
+): boolean {
+  if (!formula) return false;
+  let src = String(formula).trim();
+  if (src.startsWith("=")) src = src.slice(1).trim();
+  if (!src) return false;
+  try {
+    const toks = tokenize(src);
+    if (!toks) return false;
+    const p = new ExprParser(toks, ctx);
+    const v = p.parse();
+    if (typeof v === "boolean") return v;
+    if (typeof v === "number") return v !== 0;
+    if (typeof v === "string") return v !== "";
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** Extract the anchor (top-left) of the first piece of an sqref string.
+ *  Used by the expression evaluator to derive the relative-reference offset. */
+function anchorOfSqref(sqref: string): CellCoord {
+  const pieces = sqref.trim().split(/\s+/);
+  for (const piece of pieces) {
+    if (!piece) continue;
+    const colon = piece.indexOf(":");
+    const leftStr = colon < 0 ? piece : piece.slice(0, colon);
+    const a = parseA1(leftStr);
+    if (a) return a;
+    // Whole-column "A:A" or whole-row "1:1" — best-effort anchor at (0, col) / (row, 0).
+    const lc = parseColRef(leftStr);
+    if (lc !== null) return { row: 0, col: lc };
+    const lr = parseRowRef(leftStr);
+    if (lr !== null) return { row: lr, col: 0 };
+  }
+  return { row: 0, col: 0 };
+}
+// end new in this round ---------------------------------------------------
+
 /**
  * Translate a CfRuleEntry's `style` field (authoring-time) plus a default
  * fallback into the Univer IStyleData partial we merge into a cell's `s`.
@@ -315,9 +852,44 @@ function ruleMatches(rule: CfRuleEntry, value: unknown, rangeValues: unknown[]):
       return evaluateDuplicate(rangeValues, value);
     case "uniqueValues":
       return evaluateUnique(rangeValues, value);
+    // new in this round: dataBar / colorScale / iconSet always "match" when
+    // the cell has a numeric value (they always paint a style for in-range
+    // numeric cells). The actual color/glyph is decided inside patchCfRenders.
+    case "dataBar":
+    case "colorScale":
+    case "iconSet":
+      return !Number.isNaN(toNumber(value));
+    // new in this round: expression rules — evaluated by the caller because
+    // they need (row,col) context. ruleMatches returns false here so the
+    // default switch doesn't accidentally style them.
+    case "expression":
+      return false;
     default:
       return false;
   }
+}
+
+// new in this round: compute the per-numeric-cell range stats used by
+// dataBar / colorScale / iconSet. Non-numeric cells are excluded. Returns
+// null when the range has no numeric data.
+function rangeStats(values: unknown[]): { min: number; max: number; median: number } | null {
+  const nums: number[] = [];
+  for (const v of values) {
+    const n = toNumber(v);
+    if (!Number.isNaN(n)) nums.push(n);
+  }
+  if (nums.length === 0) return null;
+  let min = nums[0];
+  let max = nums[0];
+  for (const n of nums) {
+    if (n < min) min = n;
+    if (n > max) max = n;
+  }
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = sorted.length % 2 === 0
+    ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+    : sorted[(sorted.length - 1) / 2];
+  return { min, max, median: mid };
 }
 
 /**
@@ -354,25 +926,226 @@ export function patchCfRenders<T>(snapshot: T): T {
       Record<string, unknown>
     >;
 
+    // #101: compute the used range so whole-column / whole-row sqrefs
+    // ("A:A", "1:1") can be bounded. Walk the existing cellData once —
+    // the keys are stringified ints so a max-reduce is cheap.
+    let usedMaxRow = 0;
+    let usedMaxCol = 0;
+    for (const rowKey of Object.keys(cellData)) {
+      const r = Number.parseInt(rowKey, 10);
+      if (Number.isFinite(r) && r > usedMaxRow) usedMaxRow = r;
+      const row = cellData[rowKey];
+      if (row && typeof row === "object") {
+        for (const colKey of Object.keys(row)) {
+          const c = Number.parseInt(colKey, 10);
+          if (Number.isFinite(c) && c > usedMaxCol) usedMaxCol = c;
+        }
+      }
+    }
+    const usedRange = { maxRow: usedMaxRow, maxCol: usedMaxCol };
+
     // Ascending priority = highest-priority first (Excel convention).
     // We iterate low-to-high and let later (lower-priority) writes only
     // fill keys not already set, so the first rule wins per style key.
+    // #118B: rules without an explicit priority used to all collapse to the
+    // same effective priority (1), making tiebreak resolution dependent on
+    // array order — which the xlsx round-trip doesn't preserve. Assign a
+    // synthetic priority of (originalIndex + 1) when undefined/null so the
+    // ordering is at least deterministic given the same input, and use the
+    // original index as the secondary tiebreaker for explicit-priority ties.
     const sorted = [...rules]
       .filter((r) => r && typeof r === "object" && typeof r.sqref === "string")
-      .sort((a, b) => (a.priority ?? 1) - (b.priority ?? 1));
+      .map((r, originalIndex) => ({
+        rule: r,
+        originalIndex,
+        effectivePriority:
+          r.priority === undefined || r.priority === null
+            ? originalIndex + 1
+            : r.priority,
+      }))
+      .sort((a, b) => {
+        const d = a.effectivePriority - b.effectivePriority;
+        return d !== 0 ? d : a.originalIndex - b.originalIndex;
+      })
+      .map((x) => x.rule);
 
     for (const rule of sorted) {
-      const coords = parseSqrefToCells(rule.sqref);
+      const coords = parseSqrefToCells(rule.sqref, usedRange);
       if (coords.length === 0) continue;
       // Pre-collect values when the rule is range-aware.
       let rangeValues: unknown[] = [];
       const t = rule.type ?? "";
-      if (t === "top10" || t === "duplicateValues" || t === "uniqueValues") {
-        rangeValues = coords.map((c) => readCellValue(cellData, c.row, c.col));
+      if (
+        t === "top10" ||
+        t === "duplicateValues" ||
+        t === "uniqueValues" ||
+        // new in this round: dataBar / colorScale / iconSet also need the
+        // full range to compute min/max/median.
+        t === "dataBar" ||
+        t === "colorScale" ||
+        t === "iconSet"
+      ) {
+        // #113: Excel computes range stats over visible cells only. Skip
+        // cells marked hidden by the slicer pipeline (`hd:1`) so they don't
+        // pollute min/max/median/rank for visible cells in the same range.
+        rangeValues = coords
+          .filter((c) => !isCellHidden(cellData, c.row, c.col))
+          .map((c) => readCellValue(cellData, c.row, c.col));
       }
-      const styleDelta = styleForRule(rule);
+      // new in this round: dataBar/colorScale/iconSet are styled per-cell
+      // based on the cell's value relative to range stats — branch out so we
+      // can compute the delta inside the loop and skip styleForRule.
+      const isAdvancedScale =
+        t === "dataBar" || t === "colorScale" || t === "iconSet";
+      const isExpression = t === "expression";
+      const stats = isAdvancedScale ? rangeStats(rangeValues) : null;
+      const anchor = isExpression ? anchorOfSqref(rule.sqref) : { row: 0, col: 0 };
+      const exprStyleDelta = isExpression ? styleForRule(rule) : null;
+      const styleDelta = isAdvancedScale || isExpression ? {} : styleForRule(rule);
+
       for (const { row, col } of coords) {
+        // #113: never paint a CF style on a cell marked hidden by the slicer
+        // pipeline. Mirrors the rangeValues filter above and prevents stale
+        // styles surfacing when the row is later unhidden.
+        if (isCellHidden(cellData, row, col)) continue;
         const value = readCellValue(cellData, row, col);
+
+        // new in this round: expression branch — evaluate per cell.
+        if (isExpression) {
+          const ok = evaluateExpression(rule.formula1, {
+            cellData,
+            anchorRow: anchor.row,
+            anchorCol: anchor.col,
+            curRow: row,
+            curCol: col,
+          });
+          if (!ok) continue;
+          const rowKey = String(row);
+          const colKey = String(col);
+          const rowMap = (cellData[rowKey] ?? (cellData[rowKey] = {})) as Record<string, unknown>;
+          const existing = (rowMap[colKey] as Record<string, unknown> | undefined) ?? {};
+          const baseStyle =
+            typeof existing.s === "object" && existing.s !== null
+              ? (existing.s as Record<string, unknown>)
+              : {};
+          const mergedStyle: Record<string, unknown> = { ...baseStyle };
+          for (const k of Object.keys(exprStyleDelta ?? {})) {
+            if (!(k in mergedStyle)) mergedStyle[k] = (exprStyleDelta as Record<string, unknown>)[k];
+          }
+          rowMap[colKey] = { ...existing, s: mergedStyle };
+          continue;
+        }
+
+        // new in this round: dataBar / colorScale / iconSet — per-cell paint
+        // based on range stats.
+        if (isAdvancedScale) {
+          if (!stats) continue;
+          const n = toNumber(value);
+          if (Number.isNaN(n)) continue;
+          const rowKey = String(row);
+          const colKey = String(col);
+          const rowMap = (cellData[rowKey] ?? (cellData[rowKey] = {})) as Record<string, unknown>;
+          const existing = (rowMap[colKey] as Record<string, unknown> | undefined) ?? {};
+          const baseStyle =
+            typeof existing.s === "object" && existing.s !== null
+              ? (existing.s as Record<string, unknown>)
+              : {};
+          if (t === "dataBar") {
+            const base = rule.color ?? "#638EC6";
+            const ratio = fillRatioFor(value, stats.min, stats.max);
+            const bg = evaluateDataBar(base, ratio);
+            if (!("bg" in baseStyle)) {
+              rowMap[colKey] = {
+                ...existing,
+                s: { ...baseStyle, bg: { rgb: bg } },
+              };
+            }
+            continue;
+          }
+          if (t === "colorScale") {
+            const scaleType = rule.colorScaleType ?? "2color";
+            const minCol = rule.minColor ?? "#F8696B";
+            const midCol = rule.midColor ?? "#FFEB84";
+            const maxCol = rule.maxColor ?? "#63BE7B";
+            const hex = evaluateColorScale(
+              value,
+              scaleType,
+              stats.min,
+              stats.max,
+              stats.median,
+              minCol,
+              midCol,
+              maxCol,
+            );
+            if (hex && !("bg" in baseStyle)) {
+              rowMap[colKey] = {
+                ...existing,
+                s: { ...baseStyle, bg: { rgb: hex } },
+              };
+            }
+            continue;
+          }
+          if (t === "iconSet") {
+            const glyph = evaluateIconSet(value, rule.iconStyle ?? "3arrows", stats.min, stats.max);
+            if (!glyph) continue;
+            // Prefix the glyph onto the cell's display value `v`. We work on
+            // the deep-cloned snapshot so the source isn't mutated.
+            const cur = existing.v;
+            let text = cur === undefined || cur === null ? "" : String(cur);
+            // Bug #1 from the audit: previously this only stripped a leading
+            // iconSet glyph (the original #118A guard). Any OTHER sibling-patch
+            // decoration written earlier in the pipeline (sparkline bars,
+            // "💬 ", "⚠ ", "=formula") would stack underneath the iconSet
+            // prefix, producing visible junk like "↑ ▁▃▆▇█" or "↑ 💬 note".
+            //
+            // Policy:
+            //   - Cell already shows a formula ("=...") via show-formulas →
+            //     skip the iconSet glyph entirely. Prepending "↑ =SUM(...)"
+            //     would be misleading and visually wrong.
+            //   - Cell already shows a sparkline / error / comment glyph →
+            //     skip the iconSet glyph entirely (audit-recommended: "don't
+            //     add another iconSet glyph; skip rather than stack"). The
+            //     style fill / fontColor still applies via the iconSet rule's
+            //     stats-driven path, but the in-cell glyph stays the sibling
+            //     patch's marker.
+            //   - Cell starts with another iconSet glyph (overlapping rules
+            //     with different iconStyles) → strip and replace, preserving
+            //     the original #118A behavior so the higher-priority rule
+            //     wins cleanly.
+            if (text.startsWith("=")) continue;
+            // Detect an overlapping iconSet glyph at the start so we can
+            // strip-and-replace (the original #118A behavior — higher-priority
+            // overlapping iconSet rule with a different iconStyle wins).
+            const cp = text.length > 0 ? text.codePointAt(0) : undefined;
+            const firstGlyph = cp !== undefined ? String.fromCodePoint(cp) : "";
+            const startsWithSingleIconGlyph =
+              firstGlyph !== "" &&
+              ICONSET_GLYPHS.has(firstGlyph) &&
+              text.slice(firstGlyph.length).startsWith(" ");
+            const startsWithMultiIconPrefix = ICONSET_MULTI_PREFIXES.some((p) =>
+              text.startsWith(p),
+            );
+            if (startsWithSingleIconGlyph || startsWithMultiIconPrefix) {
+              text = stripKnownDecorations(text);
+            } else if (hasKnownDecoration(text)) {
+              // Sparkline / comment / error / formula prefix is already on the
+              // cell — skip rather than stack. The CF rule's style still
+              // applies if it has a `style` field (handled by the
+              // styleForRule path) — only the in-cell glyph is suppressed.
+              continue;
+            }
+            const prefix = `${glyph} `;
+            const next = prefix + text;
+            rowMap[colKey] = {
+              ...existing,
+              v: next,
+            };
+            continue;
+          }
+          continue;
+        }
+
+        // Existing path for cellIs / containsText / top10 / duplicate / unique.
         if (!ruleMatches(rule, value, rangeValues)) continue;
         const rowKey = String(row);
         const colKey = String(col);

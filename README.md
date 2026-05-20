@@ -7,7 +7,7 @@ The full requirements specification lives in [`requirements.md`](./requirements.
 ## Project status
 
 - **Phase 0**: technical foundation — complete.
-- **Phase 1 (MVP-1, MVP-2, MVP-3)**: Workbook authoring on xlsx, xlsx import / export with round-trip preservation, CSV export, recents, recovery candidates — complete. See [`docs/MVP1_AUDIT.md`](./docs/MVP1_AUDIT.md) for the FR-001..FR-014 coverage matrix.
+- **Phase 1 (MVP-1, MVP-2, MVP-3)**: Workbook authoring on xlsx, xlsx import / export with round-trip preservation, CSV export, recents, recovery candidates — complete. See [`docs/COVERAGE.md`](./docs/COVERAGE.md) for the FR-001..FR-014 coverage matrix.
 - **Phase 2**: Authoring entry points for named ranges, data validation, conditional formatting, charts, images, hyperlinks, comments, sort, number format, sheet protection, snapshot history — **preview**. The xlsx side preserves these elements through round-trip; the UI dialogs capture user intent into the snapshot but full WYSIWYG rendering of every element is not yet complete.
 
 ## Features

@@ -1,16 +1,59 @@
+use std::sync::OnceLock;
 use tauri::Manager;
 
 use crate::commands::workbook::{SaveResult, MAX_SNAPSHOTS_PER_WORKBOOK};
+
+/// Session-unique suffix appended to recovery file names. #72: without this,
+/// two app instances editing the same workbook share `recovery/{wb}.coco`
+/// and clobber each other's autosaves. The first call seeds a per-process
+/// UUID; every subsequent autosave from this process uses the same suffix.
+fn session_suffix() -> &'static str {
+    static SUFFIX: OnceLock<String> = OnceLock::new();
+    SUFFIX.get_or_init(|| {
+        let uuid = uuid::Uuid::new_v4().simple().to_string();
+        uuid[..12].to_string()
+    })
+}
+
+fn validate_workbook_id(workbook_id: &str) -> Result<(), String> {
+    if workbook_id.is_empty() || workbook_id.len() > 128 {
+        return Err("invalid workbook_id length".to_string());
+    }
+    if !workbook_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("invalid workbook_id characters".to_string());
+    }
+    Ok(())
+}
 
 pub fn autosave_temp_core(
     data_dir: &std::path::Path,
     workbook_id: &str,
     snapshot_json: &str,
 ) -> Result<SaveResult, String> {
+    validate_workbook_id(workbook_id)?;
+
     let recovery_dir = data_dir.join("recovery");
     std::fs::create_dir_all(&recovery_dir).map_err(|e| e.to_string())?;
 
-    let temp_path = recovery_dir.join(format!("{}.coco", workbook_id));
+    // #72: per-session suffix isolates concurrent windows editing the same
+    // workbook. Recovery cleanup still walks the directory and removes the
+    // candidate row + file pair, so the suffix is only about avoiding the
+    // write collision.
+    let temp_path = recovery_dir.join(format!("{}-{}.coco", workbook_id, session_suffix()));
+
+    // Defense-in-depth: ensure the resulting path is still inside recovery_dir.
+    let canonical_recovery = std::fs::canonicalize(&recovery_dir).map_err(|e| e.to_string())?;
+    let canonical_parent = temp_path
+        .parent()
+        .ok_or_else(|| "invalid recovery path".to_string())
+        .and_then(|p| std::fs::canonicalize(p).map_err(|e| e.to_string()))?;
+    if canonical_parent != canonical_recovery {
+        return Err("workbook_id escapes recovery directory".to_string());
+    }
+
     let temp_path_str = temp_path.to_string_lossy().to_string();
 
     let conn = rusqlite::Connection::open(&temp_path).map_err(|e| e.to_string())?;
@@ -73,6 +116,65 @@ pub fn autosave_temp_core(
         path: temp_path_str,
         error: None,
     })
+}
+
+/// #82: startup sweep of the recovery directory. Removes recovery `.coco`
+/// files that no longer have a matching `recovery_candidates` row — typical
+/// causes are a hard kill between autosave temp creation and DB row insert,
+/// or an app data wipe that cleared the DB but left the files. Scoped to
+/// the recovery directory so it can't touch user files. Returns the count
+/// of files removed (best-effort; errors are logged via the return type).
+pub fn sweep_orphan_recovery_files(data_dir: &std::path::Path) -> Result<u32, String> {
+    let recovery_dir = data_dir.join("recovery");
+    if !recovery_dir.exists() {
+        return Ok(0);
+    }
+    let app_conn = crate::db::app_db::open_app_db_at(data_dir)?;
+    // Snapshot the known temp_paths up front so we don't hold the DB during
+    // the readdir loop.
+    let known: std::collections::HashSet<String> = {
+        let mut stmt = app_conn
+            .prepare("SELECT temp_path FROM recovery_candidates")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        let mut set = std::collections::HashSet::new();
+        for r in rows {
+            if let Ok(p) = r {
+                set.insert(p);
+            }
+        }
+        set
+    };
+
+    let mut removed: u32 = 0;
+    let entries = match std::fs::read_dir(&recovery_dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(0),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // Only touch `.coco` files we know how to interpret. Skip dirs,
+        // unrelated extensions, and SQLite sidecars (-wal / -shm).
+        let name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+        if !name.ends_with(".coco") {
+            continue;
+        }
+        if known.contains(&path.to_string_lossy().to_string()) {
+            continue;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            removed += 1;
+            // Sidecars share the prefix; remove them too if present.
+            let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+            let _ = std::fs::remove_file(format!("{}-shm", path.display()));
+        }
+    }
+    Ok(removed)
 }
 
 pub fn clear_recovery_core(data_dir: &std::path::Path, candidate_id: &str) -> Result<(), String> {

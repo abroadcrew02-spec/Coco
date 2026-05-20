@@ -13,17 +13,87 @@ const EDITOR_COMMAND_IDS = new Set([
   "insert-comment",
   "insert-chart",
   "insert-image",
+  "insert-table",
+  "insert-sparkline",
   "format-number",
   "format-currency",
   "format-percent",
   "format-conditional",
+  "format-cell-styles",
   "format-painter",
   "format-tab-color",
   "data-sort",
   "data-validation",
   "data-named-ranges",
   "data-autosum",
+  "data-outline-groups",
   "tools-sheet-protection",
+  "tools-goal-seek",
+  "tools-error-checking",
+  "file-page-setup",
+  "view-tables-panel",
+  "view-sparklines-panel",
+  "view-errors-panel",
+  "view-show-formulas",
+  "data-subtotal",
+  "data-remove-duplicates",
+  "data-text-to-columns",
+  "data-advanced-filter",
+  "edit-flash-fill",
+  "insert-pivot",
+  "view-pivots-panel",
+  "view-charts-canvas-panel",
+  "insert-slicer",
+  "view-slicers-panel",
+  "edit-quick-analysis",
+  "view-trace-panel",
+  "sheet-hide-active",
+  "sheet-unhide",
+  "sheet-move-copy",
+  "insert-function",
+  "settings-custom-lists",
+  "calc-options",
+  "calc-recalc-all",
+  "calc-recalc-sheet",
+  "view-watch-window",
+  "watch-add-active",
+  "tools-scenarios",
+  "data-forecast-sheet",
+  "insert-recommended-charts",
+  "format-cf-manage-rules",
+  "view-snapshot-diff",
+  "tools-spell-check",
+  "data-form",
+  "edit-find-replace-all",
+  "view-comments-manager",
+  "data-smart-date",
+  "data-convert-to-range",
+  "tools-document-inspector",
+  "data-bulk-clean",
+  "file-csv-import-wizard",
+  "edit-go-to",
+  "file-import-sheet",
+  "view-bookmarks-panel",
+  "bookmark-add-current",
+  "format-manage-codes",
+  "data-range-compare",
+  "insert-symbol",
+  "view-sheet-note",
+  "view-image-manager",
+  "file-templates",
+  "view-snapshot-controls",
+  "snapshot-now",
+  "data-sort-by-color",
+  "data-filter-by-color",
+  "view-workbook-stats",
+  "view-show-all-comments",
+  "file-quick-print",
+  "view-hyperlink-manager",
+  "format-borders",
+  "format-quick-cf",
+  "insert-cell-link",
+  "help-check-update",
+  "data-filter-search",
 ]);
 
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route
@@ -37,6 +107,9 @@ export function useMenuActions() {
   const save = useWorkbookStore((s) => s.save);
   const promptSaveAs = useWorkbookStore((s) => s.promptSaveAs);
   const exportXlsx = useWorkbookStore((s) => s.exportXlsx);
+  const exportHtml = useWorkbookStore((s) => s.exportHtml);
+  const exportPdf = useWorkbookStore((s) => s.exportPdf);
+  const exportWorkspaceBundle = useWorkbookStore((s) => s.exportWorkspaceBundle);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -92,6 +165,18 @@ export function useMenuActions() {
         case "export-csv":
           await handleCsvExport();
           break;
+        case "export-html":
+          await exportHtml();
+          break;
+        case "export-pdf":
+          await exportPdf();
+          break;
+        case "export-workspace-bundle":
+          await exportWorkspaceBundle();
+          break;
+        case "import-workspace-bundle":
+          window.dispatchEvent(new CustomEvent("coco:menu-import-workspace-bundle"));
+          break;
         case "settings":
           requestSettings();
           break;
@@ -120,5 +205,5 @@ export function useMenuActions() {
       cancelled = true;
       if (unlisten) unlisten();
     };
-  }, [newWorkbook, openCoco, importXlsx, importCsv, save, promptSaveAs, exportXlsx]);
+  }, [newWorkbook, openCoco, importXlsx, importCsv, save, promptSaveAs, exportXlsx, exportHtml, exportPdf, exportWorkspaceBundle]);
 }

@@ -1,0 +1,223 @@
+/* Formula-trace panel — sidebar mirror of ErrorIndicatorsPanel positioned
+   below the error panel (top: 8px + ~50vh) so both can be visible at
+   once. Width matches the other audit panels for a uniform stack. */
+
+.ftp-panel {
+  position: absolute;
+  top: 8px;
+  right: 556px;
+  z-index: 25;
+  width: 260px;
+  max-height: 50vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.ftp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #eff6ff;
+  border-bottom: 1px solid #bfdbfe;
+}
+
+.ftp-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+.ftp-glyph {
+  color: #2563eb;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.ftp-collapse {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  color: #6b7280;
+}
+
+.ftp-collapse:hover {
+  color: #111827;
+}
+
+.ftp-active {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 11px;
+}
+
+.ftp-active-label {
+  color: #6b7280;
+  font-family: inherit;
+}
+
+.ftp-active-ref {
+  color: #111827;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ftp-active-empty {
+  color: #9ca3af;
+  font-family: inherit;
+  font-style: italic;
+}
+
+.ftp-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.ftp-section {
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.ftp-section:last-child {
+  border-bottom: 0;
+}
+
+.ftp-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #4b5563;
+  background: #f9fafb;
+  text-transform: none;
+}
+
+.ftp-section-count {
+  font-size: 10px;
+  color: #fff;
+  background: #6b7280;
+  border-radius: 10px;
+  padding: 0 6px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.ftp-empty {
+  margin: 0;
+  padding: 6px 10px 10px;
+  font-size: 11px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.ftp-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ftp-item {
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.ftp-item:last-child {
+  border-bottom: 0;
+}
+
+.ftp-item-btn {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 6px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #1f2937;
+}
+
+.ftp-item-btn:hover,
+.ftp-item-btn:focus-visible {
+  background: #eff6ff;
+  outline: none;
+}
+
+.ftp-cell-ref {
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 11px;
+  color: #4338ca;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 36px;
+}
+
+.ftp-sheet {
+  font-size: 11px;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 70px;
+  flex-shrink: 0;
+}
+
+.ftp-formula {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #1f2937;
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 11px;
+}
+
+/* Collapsed badge — sized to match eip-badge so collapsed pills line up
+   vertically when multiple audit panels are minimised. */
+.ftp-badge {
+  position: absolute;
+  top: 8px;
+  right: 158px;
+  z-index: 25;
+  background: #fff;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.ftp-badge:hover,
+.ftp-badge:focus-visible {
+  background: #eff6ff;
+  outline: none;
+}
+
+.ftp-badge-count {
+  font-weight: 600;
+  color: #1d4ed8;
+}

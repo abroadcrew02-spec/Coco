@@ -17,14 +17,33 @@ fn count_candidates(data_dir: &std::path::Path, candidate_id: &str) -> i64 {
         .unwrap()
 }
 
+/// #72: recovery filename now includes a per-process session suffix
+/// (`{workbook_id}-{12-hex}.coco`). Tests can't hard-code the suffix, so
+/// they glob the recovery directory for files starting with the workbook id.
+fn find_recovery_file(data_dir: &std::path::Path, workbook_id: &str) -> std::path::PathBuf {
+    let recovery_dir = data_dir.join("recovery");
+    let prefix = format!("{}-", workbook_id);
+    std::fs::read_dir(&recovery_dir)
+        .unwrap_or_else(|e| panic!("recovery dir missing: {e}"))
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with(&prefix) && n.ends_with(".coco"))
+                .unwrap_or(false)
+        })
+        .unwrap_or_else(|| panic!("no recovery file matching {prefix}*.coco in {recovery_dir:?}"))
+}
+
 #[test]
 fn autosave_creates_temp_coco_and_candidate_row() {
     let tmp = TempDir::new().unwrap();
     let result = autosave_temp_core(tmp.path(), "wb-1", "{\"x\":1}").unwrap();
     assert!(result.success);
 
-    // Temp .coco exists at the expected path.
-    let expected_path = tmp.path().join("recovery").join("wb-1.coco");
+    // Temp .coco exists; locate via the per-session suffix.
+    let expected_path = find_recovery_file(tmp.path(), "wb-1");
     assert!(
         expected_path.exists(),
         "expected {:?} to exist",
@@ -52,7 +71,7 @@ fn autosave_uses_auto_save_reason() {
     let tmp = TempDir::new().unwrap();
     autosave_temp_core(tmp.path(), "wb-2", "{}").unwrap();
 
-    let coco_path = tmp.path().join("recovery").join("wb-2.coco");
+    let coco_path = find_recovery_file(tmp.path(), "wb-2");
     let conn = Connection::open(&coco_path).unwrap();
     let reason: String = conn
         .query_row(
@@ -83,7 +102,7 @@ fn repeated_autosave_prunes_snapshots_to_cap_and_keeps_latest() {
         autosave_temp_core(tmp.path(), "wb-retention", &format!("{{\"v\":{i}}}")).unwrap();
     }
 
-    let coco_path = tmp.path().join("recovery").join("wb-retention.coco");
+    let coco_path = find_recovery_file(tmp.path(), "wb-retention");
     let conn = Connection::open(&coco_path).unwrap();
     let count: i64 = conn
         .query_row(
@@ -109,7 +128,7 @@ fn clear_recovery_removes_file_and_row() {
     let tmp = TempDir::new().unwrap();
     autosave_temp_core(tmp.path(), "wb-4", "{}").unwrap();
 
-    let coco_path = tmp.path().join("recovery").join("wb-4.coco");
+    let coco_path = find_recovery_file(tmp.path(), "wb-4");
     assert!(coco_path.exists());
     assert_eq!(count_candidates(tmp.path(), "wb-4"), 1);
 
@@ -137,7 +156,7 @@ fn clear_recovery_tolerates_missing_temp_file() {
     autosave_temp_core(tmp.path(), "wb-5", "{}").unwrap();
 
     // Manually delete the temp file BEFORE calling clear_recovery.
-    let coco_path = tmp.path().join("recovery").join("wb-5.coco");
+    let coco_path = find_recovery_file(tmp.path(), "wb-5");
     std::fs::remove_file(&coco_path).unwrap();
 
     // clear_recovery should still succeed and remove the DB row.
@@ -156,5 +175,6 @@ fn autosave_preserves_existing_recovery_dir_files() {
     autosave_temp_core(tmp.path(), "wb-6", "{}").unwrap();
 
     assert!(recovery_dir.join("stranger.txt").exists());
-    assert!(recovery_dir.join("wb-6.coco").exists());
+    // #72: find the suffixed file rather than the bare workbook_id name.
+    assert!(find_recovery_file(tmp.path(), "wb-6").exists());
 }

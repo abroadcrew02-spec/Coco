@@ -1,0 +1,269 @@
+/* Watch Window panel — Excel-style floating list of pinned cells.
+   Mirrors ErrorIndicatorsPanel positioning conventions but offset further
+   left so it doesn't collide with the errors/tables/sparklines panels. */
+
+.wwp-panel {
+  position: absolute;
+  top: 8px;
+  right: 556px;
+  z-index: 25;
+  width: 360px;
+  max-height: 50vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.wwp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #eef2ff;
+  border-bottom: 1px solid #c7d2fe;
+}
+
+.wwp-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #3730a3;
+}
+
+.wwp-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wwp-add,
+.wwp-collapse {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 6px;
+  color: #4338ca;
+}
+
+.wwp-add:hover,
+.wwp-collapse:hover {
+  color: #111827;
+}
+
+.wwp-glyph {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.wwp-add-form {
+  padding: 8px 10px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wwp-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wwp-add-label {
+  width: 48px;
+  font-size: 11px;
+  color: #4b5563;
+}
+
+.wwp-add-select,
+.wwp-add-input {
+  flex: 1;
+  padding: 3px 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 12px;
+  background: #fff;
+}
+
+.wwp-add-input {
+  font-family: "Consolas", "Menlo", monospace;
+}
+
+.wwp-add-error {
+  color: #b91c1c;
+  font-size: 11px;
+}
+
+.wwp-add-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.wwp-add-submit,
+.wwp-add-cancel {
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid #d1d5db;
+  background: #fff;
+}
+
+.wwp-add-submit {
+  background: #4338ca;
+  color: #fff;
+  border-color: #4338ca;
+}
+
+.wwp-add-submit:hover {
+  background: #3730a3;
+}
+
+.wwp-add-cancel:hover {
+  background: #f3f4f6;
+}
+
+.wwp-empty {
+  padding: 16px 12px;
+  color: #6b7280;
+  text-align: center;
+  font-size: 11px;
+}
+
+.wwp-table-wrap {
+  overflow: auto;
+  flex: 1;
+}
+
+.wwp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.wwp-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f9fafb;
+  color: #4b5563;
+  font-weight: 600;
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.wwp-row td {
+  padding: 4px 6px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wwp-cell-sheet {
+  max-width: 80px;
+}
+
+.wwp-cell-ref {
+  font-family: "Consolas", "Menlo", monospace;
+  color: #4338ca;
+  width: 40px;
+}
+
+.wwp-cell-value {
+  font-family: "Consolas", "Menlo", monospace;
+  color: #111827;
+}
+
+.wwp-cell-formula {
+  font-family: "Consolas", "Menlo", monospace;
+  color: #6b7280;
+}
+
+.wwp-cell-remove {
+  width: 24px;
+  text-align: center;
+}
+
+.wwp-empty-cell {
+  color: #9ca3af;
+}
+
+.wwp-jump {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: #4338ca;
+  text-decoration: underline;
+  font: inherit;
+  text-align: left;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wwp-jump:hover,
+.wwp-jump:focus-visible {
+  color: #1e1b4b;
+  outline: none;
+}
+
+.wwp-remove {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: #9ca3af;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.wwp-remove:hover {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+/* Collapsed badge — sized to match eip-badge so the two collapsed pills
+   line up visually when both panels are minimised. */
+.wwp-badge {
+  position: absolute;
+  top: 8px;
+  right: 158px;
+  z-index: 25;
+  background: #fff;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.wwp-badge:hover,
+.wwp-badge:focus-visible {
+  background: #eef2ff;
+  outline: none;
+}
+
+.wwp-badge-count {
+  font-weight: 600;
+  color: #3730a3;
+}

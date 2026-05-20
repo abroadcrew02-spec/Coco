@@ -1,0 +1,205 @@
+.sid-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1250;
+}
+
+.sid-modal {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  max-width: 560px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sid-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #eee;
+  background-color: #fafafa;
+}
+
+.sid-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #217346;
+  margin: 0;
+}
+
+.sid-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  color: #999;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.sid-close:hover {
+  color: #333;
+  background-color: #eee;
+}
+
+.sid-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sid-file-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.sid-file-input {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 13px;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  background-color: #fafafa;
+  color: #333;
+  font-family: inherit;
+  min-width: 0;
+}
+
+.sid-status {
+  margin: 6px 0;
+  font-size: 13px;
+  color: #777;
+  text-align: center;
+}
+
+.sid-error {
+  margin: 6px 0;
+  font-size: 13px;
+  color: #b00020;
+  background-color: #fdecea;
+  border: 1px solid #f6c4c0;
+  border-radius: 4px;
+  padding: 6px 10px;
+}
+
+.sid-list-header {
+  border-bottom: 1px solid #eee;
+}
+
+.sid-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sid-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 24px 1fr 110px 80px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #333;
+  background-color: #fff;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sid-row:hover {
+  background-color: #f3faf6;
+  border-color: #cfe6da;
+}
+
+.sid-row--active {
+  background-color: #e7f4ec;
+  border-color: #217346;
+}
+
+.sid-row--header {
+  cursor: default;
+  font-weight: 600;
+  color: #555;
+  background-color: transparent;
+}
+
+.sid-row--header:hover {
+  background-color: transparent;
+  border-color: transparent;
+}
+
+.sid-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sid-meta {
+  font-size: 12px;
+  color: #666;
+  font-variant-numeric: tabular-nums;
+}
+
+.sid-meta--count {
+  text-align: right;
+}
+
+.sid-footer {
+  padding: 12px 20px;
+  background-color: #fafafa;
+  border-top: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.sid-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #424242;
+  background-color: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sid-btn:hover:not(:disabled) {
+  background-color: #f0f0f0;
+  border-color: #b0b0b0;
+}
+
+.sid-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sid-btn--primary {
+  background-color: #217346;
+  color: #fff;
+  border-color: #217346;
+}
+
+.sid-btn--primary:hover:not(:disabled) {
+  background-color: #1a5c38;
+  border-color: #1a5c38;
+}

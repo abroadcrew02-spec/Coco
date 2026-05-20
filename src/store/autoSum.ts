@@ -51,6 +51,12 @@ function isNumericCell(
     const n = Number(v);
     if (Number.isFinite(n)) return true;
   }
+  // #92: a formula cell whose cached `v` hasn't been written yet should still
+  // count as numeric for scan purposes — otherwise pressing Alt+= just after
+  // entering a formula above the anchor cell silently no-ops. We can't
+  // evaluate the formula here, but the presence of `f` is a strong enough
+  // signal that the column intent is numeric.
+  if (typeof cell.f === "string" && cell.f.length > 0) return true;
   return false;
 }
 

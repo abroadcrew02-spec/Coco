@@ -1,0 +1,256 @@
+.fra-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1250;
+}
+
+.fra-modal {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  max-width: 760px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fra-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #eee;
+  background-color: #fafafa;
+}
+
+.fra-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #217346;
+  margin: 0;
+}
+
+.fra-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  color: #999;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.fra-close:hover {
+  color: #333;
+  background-color: #eee;
+}
+
+.fra-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fra-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fra-field-label {
+  font-size: 12px;
+  color: #555;
+}
+
+.fra-input {
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid #c8d0cc;
+  border-radius: 3px;
+  font-family: inherit;
+}
+
+.fra-input:focus,
+.fra-select:focus {
+  outline: none;
+  border-color: #217346;
+  box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
+}
+
+.fra-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 22px;
+  align-items: center;
+}
+
+.fra-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #424242;
+}
+
+.fra-select-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #555;
+}
+
+.fra-select {
+  padding: 5px 8px;
+  font-size: 13px;
+  border: 1px solid #c8d0cc;
+  border-radius: 3px;
+  background-color: #fff;
+  font-family: inherit;
+}
+
+.fra-results {
+  border: 1px solid #d0d8d4;
+  border-radius: 6px;
+  background-color: #fff;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 220px;
+  max-height: 320px;
+}
+
+.fra-results-header,
+.fra-result-row {
+  display: grid;
+  grid-template-columns: 1.2fr 0.7fr 1.4fr 2fr;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  align-items: center;
+}
+
+.fra-results-header {
+  background-color: #f6fbf8;
+  color: #555;
+  font-weight: 600;
+  border-bottom: 1px solid #d0d8d4;
+}
+
+.fra-results-body {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.fra-result-row {
+  cursor: pointer;
+  border-bottom: 1px solid #f0f3f1;
+  color: #333;
+}
+
+.fra-result-row:hover {
+  background-color: #f1faf4;
+}
+
+.fra-result-row.is-selected {
+  background-color: #e1f0e7;
+  color: #1a5c38;
+}
+
+.fra-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fra-cell--preview {
+  color: #555;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.fra-empty {
+  padding: 24px 10px;
+  text-align: center;
+  font-size: 12px;
+  color: #888;
+}
+
+.fra-overflow {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #757575;
+  background-color: #fafafa;
+  border-top: 1px dashed #d8e3dc;
+}
+
+.fra-status {
+  margin: 0;
+  font-size: 12px;
+}
+
+.fra-status--info {
+  color: #217346;
+}
+
+.fra-status--error {
+  color: #b00020;
+}
+
+.fra-footer {
+  padding: 12px 20px;
+  background-color: #fafafa;
+  border-top: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.fra-footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.fra-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #424242;
+  background-color: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.fra-btn:hover:not(:disabled) {
+  background-color: #f0f0f0;
+  border-color: #b0b0b0;
+}
+
+.fra-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fra-btn--primary {
+  background-color: #217346;
+  color: #fff;
+  border-color: #217346;
+}
+
+.fra-btn--primary:hover:not(:disabled) {
+  background-color: #1a5c38;
+  border-color: #1a5c38;
+}

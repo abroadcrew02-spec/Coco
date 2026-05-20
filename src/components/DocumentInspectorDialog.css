@@ -1,0 +1,271 @@
+/* Document Inspector modal. Standard backdrop + centered panel, narrower
+   than the Comments Manager because the category list is a tall stack of
+   single rows rather than a wide table. */
+
+.doc-inspector-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.doc-inspector-modal {
+  background: #fff;
+  border-radius: 8px;
+  width: min(720px, 95vw);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  font-size: 13px;
+  color: #1f2937;
+}
+
+.doc-inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.doc-inspector-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.doc-inspector-status {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.doc-inspector-status--clean {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.doc-inspector-status--hits {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.doc-inspector-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.doc-inspector-close {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  padding: 4px 8px;
+  color: #6b7280;
+}
+
+.doc-inspector-close:hover {
+  color: #111827;
+}
+
+.doc-inspector-intro {
+  margin: 0;
+  padding: 10px 16px;
+  background: #fcfcfd;
+  border-bottom: 1px solid #e5e7eb;
+  color: #4b5563;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.doc-inspector-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 16px;
+  background: #fff;
+}
+
+.doc-inspector-empty {
+  text-align: center;
+  color: #9ca3af;
+  padding: 32px 0;
+  margin: 0;
+}
+
+.doc-inspector-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.doc-inspector-row {
+  border-bottom: 1px solid #f3f4f6;
+  padding: 10px 0;
+}
+
+.doc-inspector-row:last-child {
+  border-bottom: 0;
+}
+
+.doc-inspector-row--hit .doc-inspector-row-title {
+  color: #111827;
+}
+
+.doc-inspector-row-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.doc-inspector-row-text {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.doc-inspector-row-title {
+  font-weight: 600;
+  color: #374151;
+}
+
+.doc-inspector-row-count {
+  font-size: 11px;
+  font-weight: 600;
+  background: #f3f4f6;
+  color: #6b7280;
+  padding: 1px 8px;
+  border-radius: 999px;
+  min-width: 28px;
+  text-align: center;
+}
+
+.doc-inspector-row-count--hit {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.doc-inspector-row-desc {
+  color: #6b7280;
+  font-size: 12px;
+  flex-basis: 100%;
+}
+
+.doc-inspector-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.doc-inspector-mini-btn {
+  padding: 3px 10px;
+  font-size: 12px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #374151;
+}
+
+.doc-inspector-mini-btn:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.doc-inspector-mini-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.doc-inspector-mini-btn--danger {
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+.doc-inspector-mini-btn--danger:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
+.doc-inspector-items {
+  list-style: none;
+  margin: 8px 0 0 0;
+  padding: 6px 12px;
+  background: #f9fafb;
+  border-radius: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.doc-inspector-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.doc-inspector-item:last-child {
+  border-bottom: 0;
+}
+
+.doc-inspector-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #374151;
+  font-family: "Consolas", "Menlo", monospace;
+}
+
+.doc-inspector-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 12px 16px;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+  gap: 8px;
+}
+
+.doc-inspector-btn {
+  padding: 6px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  color: #374151;
+}
+
+.doc-inspector-btn:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.doc-inspector-btn--primary {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
+.doc-inspector-btn--primary:hover:not(:disabled) {
+  background: #1d4ed8;
+}

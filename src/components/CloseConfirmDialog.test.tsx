@@ -39,21 +39,24 @@ describe("CloseConfirmDialog", () => {
       const user = userEvent.setup();
       renderDialog();
       await user.click(screen.getByRole("button", { name: "保存して終了" }));
-      expect(onChoice).toHaveBeenCalledExactlyOnceWith("save");
+      expect(onChoice).toHaveBeenCalledTimes(1);
+      expect(onChoice).toHaveBeenCalledWith("save");
     });
 
     it("破棄して終了 → 'discard'", async () => {
       const user = userEvent.setup();
       renderDialog();
       await user.click(screen.getByRole("button", { name: "破棄して終了" }));
-      expect(onChoice).toHaveBeenCalledExactlyOnceWith("discard");
+      expect(onChoice).toHaveBeenCalledTimes(1);
+      expect(onChoice).toHaveBeenCalledWith("discard");
     });
 
     it("キャンセル → 'cancel'", async () => {
       const user = userEvent.setup();
       renderDialog();
       await user.click(screen.getByRole("button", { name: "キャンセル" }));
-      expect(onChoice).toHaveBeenCalledExactlyOnceWith("cancel");
+      expect(onChoice).toHaveBeenCalledTimes(1);
+      expect(onChoice).toHaveBeenCalledWith("cancel");
     });
   });
 
@@ -61,7 +64,8 @@ describe("CloseConfirmDialog", () => {
     it("clicking the backdrop sends 'cancel' (no implicit discard)", () => {
       const { container } = renderDialog();
       fireEvent.click(container.querySelector(".close-confirm-backdrop")!);
-      expect(onChoice).toHaveBeenCalledExactlyOnceWith("cancel");
+      expect(onChoice).toHaveBeenCalledTimes(1);
+      expect(onChoice).toHaveBeenCalledWith("cancel");
     });
 
     it("clicking inside the modal body does not trigger onChoice", () => {
@@ -75,13 +79,15 @@ describe("CloseConfirmDialog", () => {
     it("Enter → 'save' (primary action)", () => {
       renderDialog();
       fireEvent.keyDown(window, { key: "Enter" });
-      expect(onChoice).toHaveBeenCalledExactlyOnceWith("save");
+      expect(onChoice).toHaveBeenCalledTimes(1);
+      expect(onChoice).toHaveBeenCalledWith("save");
     });
 
     it("Escape → 'cancel'", () => {
       renderDialog();
       fireEvent.keyDown(window, { key: "Escape" });
-      expect(onChoice).toHaveBeenCalledExactlyOnceWith("cancel");
+      expect(onChoice).toHaveBeenCalledTimes(1);
+      expect(onChoice).toHaveBeenCalledWith("cancel");
     });
 
     it("other keys do not trigger any choice", () => {

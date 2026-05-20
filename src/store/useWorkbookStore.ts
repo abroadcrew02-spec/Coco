@@ -20,6 +20,11 @@ interface WorkbookState {
   screen: AppScreen;
   currentHandle: WorkbookHandle | null;
   saveStatus: SaveStatus;
+  /** True when the workbook was dirty (unsaved changes) at the moment export
+   *  started. Export does not persist the working book, so the dirty state
+   *  must survive an export_done / export_failed transition. Cleared whenever
+   *  saveStatus moves to a non-export state (save/load/new/etc.). */
+  wasDirtyBeforeExport: boolean;
   importWarnings: CompatibilityWarning[];
   recentFiles: RecentFile[];
   recoveryCandidates: RecoveryCandidate[];
@@ -37,6 +42,12 @@ interface WorkbookState {
   pinnedPaths: string[]; // recent files the user has pinned; sorts to top of home list
   pinnedOrder: string[]; // user-defined ordering for pinned items (drag-to-reorder)
   suppressCsvPocWarning: boolean; // hide the always-fires "CSV PoC" info banner
+  /** #97: Coco-managed snapshot history for apply-style operations
+   *  (AutoSum, format painter, hyperlink, CF, DV, etc.) that bypass
+   *  Univer's commandService. Each entry is a `currentSnapshotJson` that
+   *  predated the next mutation. Bounded to keep memory in check. */
+  cocoUndoStack: string[];
+  cocoRedoStack: string[];
 
   // Actions
   newWorkbook: () => Promise<void>;
@@ -49,12 +60,26 @@ interface WorkbookState {
   dismissSaveError: () => void;
   autoSave: () => Promise<void>;
   exportXlsx: () => Promise<void>;
+  exportHtml: () => Promise<void>;
+  exportPdf: () => Promise<void>;
+  exportWorkspaceBundle: () => Promise<void>;
   listSheetNames: () => Promise<{ id: string; name: string }[]>;
   exportCsvToPath: (path: string, sheetId: string) => Promise<void>;
   dismissExportWarnings: () => void;
   restoreCandidate: (candidateId: string) => Promise<void>;
   dismissCandidate: (candidateId: string) => Promise<void>;
   updateSnapshot: (snapshotJson: string) => void;
+  /** #97: snapshot a pre-mutation state so it can be reverted via cocoUndo.
+   *  Apply-style operations (AutoSum, format painter, hyperlink, etc.) call
+   *  this with the *previous* `currentSnapshotJson` immediately before
+   *  calling `updateSnapshot` with the post-mutation state. Pushes onto
+   *  `cocoUndoStack` and clears `cocoRedoStack`. No-op for null inputs. */
+  pushCocoCheckpoint: (prevSnapshotJson: string | null) => void;
+  /** #97: pop the last checkpoint, swap it in as currentSnapshotJson, push
+   *  the current state onto the redo stack. No-op when the stack is empty. */
+  cocoUndo: () => void;
+  /** #97: pop from redo stack, swap in, push current onto undo. */
+  cocoRedo: () => void;
   markDirty: () => void;
   loadRecentFiles: () => Promise<void>;
   removeRecent: (path: string) => Promise<void>;
@@ -111,6 +136,9 @@ export interface IntegrityCheckResult {
 
 const AUTOSAVE_KEY = "autosave.interval_ms";
 const DEFAULT_AUTOSAVE_MS = 30_000;
+/** Minimum positive autosave interval. 0 (disabled) is still allowed; any
+ *  non-zero value below this would peg the disk + main thread (#89). */
+const MIN_AUTOSAVE_MS = 5_000;
 const CSV_ENCODING_KEY = "csv.export_encoding";
 type CsvEncoding = "utf8-bom" | "utf8" | "shift_jis";
 const DEFAULT_CSV_ENCODING: CsvEncoding = "utf8-bom";
@@ -129,6 +157,13 @@ const SNAPSHOT_REQUIRED_ERROR = "保存できるスナップショットがあ�
 const hasSnapshotJson = (snapshotJson: string | null): snapshotJson is string =>
   typeof snapshotJson === "string" && snapshotJson.length > 0;
 
+/** Local copy of dirtyGuard's saveStatus → dirty mapping. Re-implemented here
+ *  (rather than imported) because dirtyGuard.ts imports this store, and going
+ *  the other direction would cause a circular dependency. Keep in sync with
+ *  `isDirtySaveStatus` in dirtyGuard.ts. */
+const isDirtySaveStatusValue = (s: SaveStatus): boolean =>
+  s === "unsaved" || s === "save_failed";
+
 const defaultSaveAsName = (path: string | null): string =>
   path ? path.replace(/\.[^./\\]*$/, "") + ".xlsx" : "Untitled.xlsx";
 
@@ -140,6 +175,16 @@ const defaultSaveAsName = (path: string | null): string =>
 // switching `currentHandle` / `currentSnapshotJson` for a new workbook.
 let openSeq = 0;
 let autoSaveInFlight: Promise<void> | null = null;
+// #69: manual save/saveAs in-flight guard. Without this, Ctrl+S double-presses
+// (or shortcut + menu race) launch two `workbook_save` / `workbook_export_xlsx`
+// invocations against the same path. Both call `rotate_backups`, shifting the
+// backup chain twice for one logical save.
+let saveInFlight: Promise<void> | null = null;
+// #70: counts edits arriving while a save is in-flight. markDirty bumps it
+// instead of stomping `saveStatus`; on save resolution we honor a non-zero
+// counter by transitioning to "unsaved" rather than "saved", closing the
+// race where a close-during-save bypassed the dirty guard.
+let pendingEditsDuringSave = 0;
 
 const waitForAutoSave = async () => {
   const pending = autoSaveInFlight;
@@ -154,6 +199,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   screen: "home",
   currentHandle: null,
   saveStatus: "saved",
+  wasDirtyBeforeExport: false,
   importWarnings: [],
   recentFiles: [],
   recoveryCandidates: [],
@@ -171,6 +217,8 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   pinnedPaths: [],
   pinnedOrder: [],
   suppressCsvPocWarning: false,
+  cocoUndoStack: [],
+  cocoRedoStack: [],
 
   newWorkbook: async () => {
     const mySeq = ++openSeq;
@@ -182,6 +230,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: handle,
         editorRevision: get().editorRevision + 1,
         saveStatus: "unsaved",
+        wasDirtyBeforeExport: false,
         importWarnings: [],
         exportWarnings: [],
         blockingImport: null,
@@ -196,6 +245,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
 
   openCoco: async (path: string) => {
     const mySeq = ++openSeq;
+    // Capture the pre-open status so a failed open can restore the dirty
+    // state of the previous workbook (#48). `loading` is purely transient.
+    const priorStatus = get().saveStatus;
+    const priorDirty = get().wasDirtyBeforeExport;
     try {
       set({ saveStatus: "loading" });
       const result = await invoke<OpenWorkbookResult>("workbook_open_coco", { path });
@@ -205,6 +258,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: result.handle,
         editorRevision: get().editorRevision + 1,
         saveStatus: "saved",
+        wasDirtyBeforeExport: false,
         importWarnings: result.warnings,
         exportWarnings: [],
         blockingImport: null,
@@ -213,12 +267,18 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       });
     } catch (e) {
       if (mySeq !== openSeq) return;
-      set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
+      set({
+        saveStatus: priorStatus === "loading" ? "saved" : priorStatus,
+        wasDirtyBeforeExport: priorDirty,
+        lastError: friendlyError(String(e)),
+      });
     }
   },
 
   importXlsx: async (path: string) => {
     const mySeq = ++openSeq;
+    const priorStatus = get().saveStatus;
+    const priorDirty = get().wasDirtyBeforeExport;
     try {
       set({ saveStatus: "loading" });
       const result = await invoke<ImportWorkbookResult>("workbook_import_xlsx", { path });
@@ -230,9 +290,11 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       if (hasBlocking) {
         // req 7.3: dedicated modal for malicious-file rejection rather than an
         // inline banner. The dialog displays both blocking issues and the
-        // companion non-blocking warnings.
+        // companion non-blocking warnings. The prior workbook (if any) stays
+        // intact — restore its saveStatus so dirty state isn't silently lost.
         set({
-          saveStatus: "saved",
+          saveStatus: priorStatus === "loading" ? "saved" : priorStatus,
+          wasDirtyBeforeExport: priorDirty,
           blockingImport: result.warnings,
           importWarnings: [],
           lastError: null,
@@ -244,6 +306,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: result.handle,
         editorRevision: get().editorRevision + 1,
         saveStatus: "unsaved",
+        wasDirtyBeforeExport: false,
         importWarnings: result.warnings,
         exportWarnings: [],
         blockingImport: null,
@@ -252,12 +315,18 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       });
     } catch (e) {
       if (mySeq !== openSeq) return;
-      set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
+      set({
+        saveStatus: priorStatus === "loading" ? "saved" : priorStatus,
+        wasDirtyBeforeExport: priorDirty,
+        lastError: friendlyError(String(e)),
+      });
     }
   },
 
   importCsv: async (path: string) => {
     const mySeq = ++openSeq;
+    const priorStatus = get().saveStatus;
+    const priorDirty = get().wasDirtyBeforeExport;
     try {
       set({ saveStatus: "loading" });
       // "auto" → omit so Rust runs full auto-detect (UTF-8 BOM → UTF-8 → SJIS fallback).
@@ -276,6 +345,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: result.handle,
         editorRevision: get().editorRevision + 1,
         saveStatus: "unsaved",
+        wasDirtyBeforeExport: false,
         importWarnings: filteredWarnings,
         exportWarnings: [],
         blockingImport: null,
@@ -284,86 +354,122 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       });
     } catch (e) {
       if (mySeq !== openSeq) return;
-      set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
+      set({
+        saveStatus: priorStatus === "loading" ? "saved" : priorStatus,
+        wasDirtyBeforeExport: priorDirty,
+        lastError: friendlyError(String(e)),
+      });
     }
   },
 
   save: async () => {
-    await waitForAutoSave();
-    await flushPendingSnapshot();
-    const { currentHandle, currentSnapshotJson, saveAs } = get();
-    if (!currentHandle) return;
-
-    if (!hasSnapshotJson(currentSnapshotJson)) {
-      set({ saveStatus: "save_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+    // #69: serialize manual saves so double-press / menu+shortcut races
+    // can't kick off two concurrent rotate_backups against the same path.
+    // Subsequent callers piggyback on the in-flight save and return when it
+    // resolves, matching the user expectation of "Ctrl+S = one save".
+    if (saveInFlight) {
+      await saveInFlight;
       return;
     }
+    const run = (async () => {
+      // #70: reset the mid-save edit counter at entry; markDirty increments
+      // it during the save, and at resolution we honour any non-zero value
+      // by transitioning to "unsaved" instead of "saved".
+      pendingEditsDuringSave = 0;
+      await waitForAutoSave();
+      await flushPendingSnapshot();
+      const { currentHandle, currentSnapshotJson, saveAs } = get();
+      if (!currentHandle) return;
 
-    const currentPath = currentHandle.path;
-    const currentLower = currentPath?.toLowerCase() ?? "";
-
-    // New/imported-protected workbook → prompt for save target (xlsx only — see AD-02).
-    if (!currentPath || currentHandle.requiresSaveAsOnFirstSave || currentLower.endsWith(".xlsm")) {
-      const defaultPath = defaultSaveAsName(currentPath);
-      const chosen = await saveDialog({
-        title: "名前を付けて保存",
-        defaultPath: defaultPath.split(/[\\/]/).pop() ?? "Untitled.xlsx",
-        filters: [
-          { name: "Excel Workbook", extensions: ["xlsx"] },
-        ],
-      });
-      if (!chosen) {
-        set({ saveStatus: "unsaved" });
+      if (!hasSnapshotJson(currentSnapshotJson)) {
+        set({ saveStatus: "save_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
         return;
       }
-      await saveAs(chosen);
-      return;
-    }
 
-    // Overwrite in place — route to xlsx writer or SQLite writer based on extension.
-    set({ saveStatus: "saving" });
-    try {
-      if (currentLower.endsWith(".xlsx")) {
-        const result = await invoke<ExportResult>("workbook_export_xlsx", {
+      const currentPath = currentHandle.path;
+      const currentLower = currentPath?.toLowerCase() ?? "";
+
+      if (!currentPath || currentHandle.requiresSaveAsOnFirstSave || currentLower.endsWith(".xlsm")) {
+        const defaultPath = defaultSaveAsName(currentPath);
+        const chosen = await saveDialog({
+          title: "名前を付けて保存",
+          defaultPath: defaultPath.split(/[\\/]/).pop() ?? "Untitled.xlsx",
+          filters: [
+            { name: "Excel Workbook", extensions: ["xlsx"] },
+          ],
+        });
+        if (!chosen) {
+          set({ saveStatus: "unsaved" });
+          return;
+        }
+        await saveAs(chosen);
+        return;
+      }
+
+      set({ saveStatus: "saving" });
+      try {
+        if (currentLower.endsWith(".xlsx")) {
+          const result = await invoke<ExportResult>("workbook_export_xlsx", {
+            path: currentPath,
+            snapshotJson: currentSnapshotJson,
+          });
+          // #70: if edits arrived while we were saving, downgrade success to
+          // "unsaved" so closeGuard can still warn.
+          const dirtyAfter = pendingEditsDuringSave > 0;
+          set({
+            saveStatus: result.success
+              ? dirtyAfter
+                ? "unsaved"
+                : "saved"
+              : "save_failed",
+            wasDirtyBeforeExport: result.success ? false : get().wasDirtyBeforeExport,
+            currentHandle: result.success
+              ? { ...currentHandle, requiresSaveAsOnFirstSave: false }
+              : currentHandle,
+            lastError: result.success ? null : friendlyError(result.error) ?? "保存に失敗しました",
+            lastSavedAt: result.success ? Date.now() : get().lastSavedAt,
+          });
+          if (result.success) {
+            clearRecoveryBestEffort(currentHandle.workbookId);
+          }
+          return;
+        }
+        const result = await invoke<SaveResult>("workbook_save", {
+          workbookId: currentHandle.workbookId,
           path: currentPath,
           snapshotJson: currentSnapshotJson,
         });
-        set({
-          saveStatus: result.success ? "saved" : "save_failed",
-          currentHandle: result.success
-            ? { ...currentHandle, requiresSaveAsOnFirstSave: false }
-            : currentHandle,
-          lastError: result.success ? null : friendlyError(result.error) ?? "保存に失敗しました",
-          lastSavedAt: result.success ? Date.now() : get().lastSavedAt,
-        });
+        const dirtyAfter = pendingEditsDuringSave > 0;
         if (result.success) {
-          clearRecoveryBestEffort(currentHandle.workbookId);
+          set({
+            saveStatus: dirtyAfter ? "unsaved" : "saved",
+            wasDirtyBeforeExport: false,
+            currentHandle: { ...currentHandle, path: result.path, requiresSaveAsOnFirstSave: false },
+            lastError: null,
+            lastSavedAt: Date.now(),
+          });
+        } else {
+          set({ saveStatus: "save_failed", lastError: friendlyError(result.error) });
         }
-        return;
+      } catch (e) {
+        set({ saveStatus: "save_failed", lastError: friendlyError(String(e)) });
       }
-      // Legacy .coco path (already-saved file). Treat unknown extensions as
-      // .coco for back-compat; user can no longer select .coco from Save As.
-      const result = await invoke<SaveResult>("workbook_save", {
-        workbookId: currentHandle.workbookId,
-        path: currentPath,
-        snapshotJson: currentSnapshotJson,
-      });
-      if (result.success) {
-        set({
-          saveStatus: "saved",
-          currentHandle: { ...currentHandle, path: result.path, requiresSaveAsOnFirstSave: false },
-          lastError: null,
-          lastSavedAt: Date.now(),
-        });
-      } else {
-        set({ saveStatus: "save_failed", lastError: friendlyError(result.error) });
-      }
-    } catch (e) {
-      set({ saveStatus: "save_failed", lastError: friendlyError(String(e)) });
+    })();
+    saveInFlight = run;
+    try {
+      await run;
+    } finally {
+      if (saveInFlight === run) saveInFlight = null;
     }
   },
 
   saveAs: async (path: string) => {
+    // #69: saveAs is not separately locked because the public save() may
+    // delegate here from inside its own saveInFlight section — re-locking
+    // would deadlock that handoff. Direct concurrent Save As is rare (no
+    // double-press shortcut, only the menu) so the residual race is
+    // acceptable.
+    pendingEditsDuringSave = 0;
     await waitForAutoSave();
     await flushPendingSnapshot();
     const { currentHandle, currentSnapshotJson } = get();
@@ -375,10 +481,8 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     const lower = path.toLowerCase();
     set({ saveStatus: "saving" });
     try {
-      // Route by chosen extension.
       const isCoco = lower.endsWith(".coco");
       const isXlsx = lower.endsWith(".xlsx");
-      // Default unknown extensions to xlsx (since xlsx is now the canonical format).
       const command = isCoco ? "workbook_save_as" : "workbook_export_xlsx";
       const args = isCoco
         ? {
@@ -392,9 +496,11 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
           };
 
       const result = (await invoke(command, args)) as SaveResult | ExportResult;
+      const dirtyAfter = pendingEditsDuringSave > 0;
       if (result.success) {
         set({
-          saveStatus: "saved",
+          saveStatus: dirtyAfter ? "unsaved" : "saved",
+          wasDirtyBeforeExport: false,
           currentHandle: { ...currentHandle, path: result.path, requiresSaveAsOnFirstSave: false },
           lastError: null,
           lastSavedAt: Date.now(),
@@ -449,6 +555,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
 
       const path = currentHandle.path;
       const isCoco = path ? path.toLowerCase().endsWith(".coco") : false;
+      // #71: snapshot we're committing now. If the user edits during the
+      // invoke window, currentSnapshotJson moves past it and we must NOT
+      // declare the workbook clean (auto_saved) for a stale snapshot.
+      const inflightSnapshot = currentSnapshotJson;
 
       try {
         if (isCoco && path) {
@@ -458,7 +568,26 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
             path,
             snapshotJson: currentSnapshotJson,
           });
-          if (result.success) set({ saveStatus: "auto_saved", lastError: null, lastSavedAt: Date.now() });
+          if (result.success) {
+            // #71: only transition to auto_saved when the snapshot we just
+            // wrote is still the latest. If newer edits arrived, keep the
+            // workbook dirty so the next tick re-runs autosave and the
+            // close guard can still warn.
+            const stillCurrent = get().currentSnapshotJson === inflightSnapshot;
+            set({
+              saveStatus: stillCurrent ? "auto_saved" : "unsaved",
+              wasDirtyBeforeExport: false,
+              lastError: null,
+              lastSavedAt: stillCurrent ? Date.now() : get().lastSavedAt,
+            });
+          } else {
+            // #42: surface auto_save_failed so the UI can warn the user that
+            // autosave is broken (e.g. disk full, permissions).
+            set({
+              saveStatus: "save_failed",
+              lastError: friendlyError(result.error) ?? "自動保存に失敗しました",
+            });
+          }
         } else {
           // xlsx path or unsaved → write a hidden temp .coco for crash recovery only.
           // The user's xlsx file is NEVER touched by autosave (xlsx re-zip is slow + risks
@@ -467,10 +596,27 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
             workbookId: currentHandle.workbookId,
             snapshotJson: currentSnapshotJson,
           });
-          if (result.success) set({ saveStatus: "unsaved", lastError: null, lastSavedAt: Date.now() });
+          if (result.success) {
+            // #75: temp autosave writes a hidden recovery .coco — the user's
+            // xlsx is NOT saved. Don't bump lastSavedAt or the status bar
+            // shows "未保存 · 最終保存 X秒前" (misleading: user thinks xlsx
+            // is safe). Only explicit Ctrl+S of the xlsx updates lastSavedAt.
+            set({ saveStatus: "unsaved", lastError: null });
+          } else {
+            // #42: temp autosave failure also flips saveStatus + surfaces error.
+            set({
+              saveStatus: "save_failed",
+              lastError: friendlyError(result.error) ?? "自動保存に失敗しました",
+            });
+          }
         }
-      } catch {
-        // Auto-save failures shouldn't disrupt the user; explicit Ctrl+S will surface real errors.
+      } catch (e) {
+        // #42: previously this swallowed the rejection silently. Surface a
+        // failure status so the user can see autosave isn't running.
+        set({
+          saveStatus: "save_failed",
+          lastError: friendlyError(String(e)) ?? "自動保存に失敗しました",
+        });
       }
     })();
 
@@ -503,13 +649,21 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     });
     if (!chosen) return;
 
-    set({ isExporting: true, saveStatus: "exporting", exportWarnings: [] });
+    const priorDirty = isDirtySaveStatusValue(get().saveStatus);
+    set({
+      isExporting: true,
+      saveStatus: "exporting",
+      exportWarnings: [],
+      wasDirtyBeforeExport: priorDirty,
+    });
     try {
       const result = await invoke<ExportResult>("workbook_export_xlsx", {
         path: chosen,
         snapshotJson: currentSnapshotJson,
       });
-      // req 5.4.2: export does not change the working .coco path.
+      // req 5.4.2: export does not change the working .coco path. dirty state
+      // also survives export — `wasDirtyBeforeExport` keeps the close guard
+      // honest until the next real save / discard.
       set({
         isExporting: false,
         saveStatus: result.success ? "export_done" : "export_failed",
@@ -522,6 +676,136 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         saveStatus: "export_failed",
         lastError: friendlyError(String(e)),
       });
+    }
+  },
+
+  exportHtml: async () => {
+    await waitForAutoSave();
+    await flushPendingSnapshot();
+    const { currentHandle, currentSnapshotJson } = get();
+    if (!currentHandle) return;
+    if (!hasSnapshotJson(currentSnapshotJson)) {
+      set({ saveStatus: "export_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+      return;
+    }
+    const defaultName = currentHandle.path
+      ? defaultSaveAsName(currentHandle.path).replace(/\.xlsx$/i, ".html").split(/[\\/]/).pop()
+      : "Untitled.html";
+    const chosen = await saveDialog({
+      title: "HTML としてエクスポート",
+      defaultPath: defaultName,
+      filters: [{ name: "HTML", extensions: ["html", "htm"] }],
+    });
+    if (!chosen) return;
+    const priorDirty = isDirtySaveStatusValue(get().saveStatus);
+    set({
+      isExporting: true,
+      saveStatus: "exporting",
+      exportWarnings: [],
+      wasDirtyBeforeExport: priorDirty,
+    });
+    try {
+      const result = await invoke<ExportResult>("workbook_export_html", {
+        snapshotJson: currentSnapshotJson,
+        outputPath: chosen,
+      });
+      set({
+        isExporting: false,
+        saveStatus: result.success ? "export_done" : "export_failed",
+        exportWarnings: result.warnings ?? [],
+        lastError: result.success ? null : friendlyError(result.error) ?? "HTML エクスポートに失敗しました",
+      });
+    } catch (e) {
+      set({ isExporting: false, saveStatus: "export_failed", lastError: friendlyError(String(e)) });
+    }
+  },
+
+  exportPdf: async () => {
+    await waitForAutoSave();
+    await flushPendingSnapshot();
+    const { currentHandle, currentSnapshotJson } = get();
+    if (!currentHandle) return;
+    if (!hasSnapshotJson(currentSnapshotJson)) {
+      set({ saveStatus: "export_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+      return;
+    }
+    const defaultName = currentHandle.path
+      ? defaultSaveAsName(currentHandle.path).replace(/\.xlsx$/i, ".pdf").split(/[\\/]/).pop()
+      : "Untitled.pdf";
+    const chosen = await saveDialog({
+      title: "PDF としてエクスポート",
+      defaultPath: defaultName,
+      filters: [{ name: "PDF", extensions: ["pdf"] }],
+    });
+    if (!chosen) return;
+    const priorDirty = isDirtySaveStatusValue(get().saveStatus);
+    set({
+      isExporting: true,
+      saveStatus: "exporting",
+      exportWarnings: [],
+      wasDirtyBeforeExport: priorDirty,
+    });
+    try {
+      const result = await invoke<ExportResult>("workbook_export_pdf", {
+        snapshotJson: currentSnapshotJson,
+        outputPath: chosen,
+      });
+      set({
+        isExporting: false,
+        saveStatus: result.success ? "export_done" : "export_failed",
+        exportWarnings: result.warnings ?? [],
+        lastError: result.success ? null : friendlyError(result.error) ?? "PDF エクスポートに失敗しました",
+      });
+    } catch (e) {
+      set({ isExporting: false, saveStatus: "export_failed", lastError: friendlyError(String(e)) });
+    }
+  },
+
+  exportWorkspaceBundle: async () => {
+    await waitForAutoSave();
+    await flushPendingSnapshot();
+    const { currentHandle, currentSnapshotJson } = get();
+    if (!currentHandle) return;
+    if (!hasSnapshotJson(currentSnapshotJson)) {
+      set({ saveStatus: "export_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
+      return;
+    }
+    const defaultName = currentHandle.path
+      ? defaultSaveAsName(currentHandle.path).replace(/\.xlsx$/i, ".zip").split(/[\\/]/).pop()
+      : "Workspace.zip";
+    const chosen = await saveDialog({
+      title: "ワークスペースバンドル出力",
+      defaultPath: defaultName,
+      filters: [{ name: "Workspace Bundle", extensions: ["zip"] }],
+    });
+    if (!chosen) return;
+    const priorDirty = isDirtySaveStatusValue(get().saveStatus);
+    set({
+      isExporting: true,
+      saveStatus: "exporting",
+      exportWarnings: [],
+      wasDirtyBeforeExport: priorDirty,
+    });
+    try {
+      const result = await invoke<{
+        success: boolean;
+        bundleSizeBytes: number;
+        sheetCount: number;
+        warnings: CompatibilityWarning[];
+        error?: string;
+      }>("workbook_export_workspace_bundle", {
+        workbookPath: currentHandle.path ?? null,
+        snapshotJson: currentSnapshotJson,
+        outputPath: chosen,
+      });
+      set({
+        isExporting: false,
+        saveStatus: result.success ? "export_done" : "export_failed",
+        exportWarnings: result.warnings ?? [],
+        lastError: result.success ? null : friendlyError(result.error) ?? "バンドル出力に失敗しました",
+      });
+    } catch (e) {
+      set({ isExporting: false, saveStatus: "export_failed", lastError: friendlyError(String(e)) });
     }
   },
 
@@ -552,7 +836,12 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       set({ isExporting: false, saveStatus: "export_failed", lastError: SNAPSHOT_REQUIRED_ERROR });
       return;
     }
-    set({ isExporting: true, saveStatus: "exporting" });
+    const priorDirty = isDirtySaveStatusValue(get().saveStatus);
+    set({
+      isExporting: true,
+      saveStatus: "exporting",
+      wasDirtyBeforeExport: priorDirty,
+    });
     try {
       const result = await invoke<{
         success: boolean;
@@ -588,9 +877,65 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     }));
   },
 
+  pushCocoCheckpoint: (prevSnapshotJson: string | null) => {
+    if (!prevSnapshotJson) return;
+    set((s) => {
+      const stack = [...s.cocoUndoStack, prevSnapshotJson];
+      // Bound the history so a long editing session doesn't accumulate
+      // hundreds of MB of snapshots in memory.
+      const MAX = 20;
+      if (stack.length > MAX) stack.shift();
+      return { cocoUndoStack: stack, cocoRedoStack: [] };
+    });
+  },
+
+  cocoUndo: () => {
+    const { cocoUndoStack, currentSnapshotJson } = get();
+    if (cocoUndoStack.length === 0) return;
+    const prev = cocoUndoStack[cocoUndoStack.length - 1];
+    const nextStack = cocoUndoStack.slice(0, -1);
+    set((s) => ({
+      cocoUndoStack: nextStack,
+      cocoRedoStack: currentSnapshotJson
+        ? [...s.cocoRedoStack, currentSnapshotJson]
+        : s.cocoRedoStack,
+      currentSnapshotJson: prev,
+      // editorRevision bump re-mounts Univer with the restored snapshot.
+      // View state (scroll, selection) resets, but the data integrity of
+      // the undo is preserved — better UX than a stale grid.
+      editorRevision: s.editorRevision + 1,
+      saveStatus: "unsaved",
+      dirtyRevision: s.dirtyRevision + 1,
+    }));
+  },
+
+  cocoRedo: () => {
+    const { cocoRedoStack, currentSnapshotJson } = get();
+    if (cocoRedoStack.length === 0) return;
+    const next = cocoRedoStack[cocoRedoStack.length - 1];
+    const nextRedo = cocoRedoStack.slice(0, -1);
+    set((s) => ({
+      cocoRedoStack: nextRedo,
+      cocoUndoStack: currentSnapshotJson
+        ? [...s.cocoUndoStack, currentSnapshotJson]
+        : s.cocoUndoStack,
+      currentSnapshotJson: next,
+      editorRevision: s.editorRevision + 1,
+      saveStatus: "unsaved",
+      dirtyRevision: s.dirtyRevision + 1,
+    }));
+  },
+
   markDirty: () => {
     const { saveStatus } = get();
     if (saveStatus === "saving" || saveStatus === "exporting" || saveStatus === "loading") {
+      // #70: still record that an edit arrived so the save resolution can
+      // downgrade "saved" → "unsaved" instead of leaving a 300ms window
+      // where closeGuard thinks the workbook is clean. Don't touch
+      // saveStatus directly — the in-progress save still needs its
+      // "saving" indicator until the invoke resolves.
+      pendingEditsDuringSave += 1;
+      set((s) => ({ dirtyRevision: s.dirtyRevision + 1 }));
       return;
     }
     set((s) => ({ saveStatus: "unsaved", dirtyRevision: s.dirtyRevision + 1 }));
@@ -634,6 +979,8 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
 
   restoreCandidate: async (candidateId: string) => {
     const mySeq = ++openSeq;
+    const priorStatus = get().saveStatus;
+    const priorDirty = get().wasDirtyBeforeExport;
     try {
       set({ saveStatus: "loading" });
       const result = await invoke<OpenWorkbookResult>("workbook_restore_backup", { candidateId });
@@ -644,13 +991,18 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: { ...result.handle, path: null },
         editorRevision: get().editorRevision + 1,
         saveStatus: "unsaved",
+        wasDirtyBeforeExport: false,
         importWarnings: result.warnings,
         currentSnapshotJson: result.handle.snapshotJson,
         lastError: null,
       });
     } catch (e) {
       if (mySeq !== openSeq) return;
-      set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
+      set({
+        saveStatus: priorStatus === "loading" ? "saved" : priorStatus,
+        wasDirtyBeforeExport: priorDirty,
+        lastError: friendlyError(String(e)),
+      });
     }
   },
 
@@ -677,11 +1029,15 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       currentHandle: null,
       currentSnapshotJson: null,
       saveStatus: "saved",
+      wasDirtyBeforeExport: false,
       importWarnings: [],
       exportWarnings: [],
       blockingImport: null,
       lastError: null,
       lastSavedAt: null,
+      // #97: drop undo history when leaving the workbook.
+      cocoUndoStack: [],
+      cocoRedoStack: [],
     }),
 
   setSaveStatus: (status) => set({ saveStatus: status }),
@@ -691,8 +1047,16 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       const raw = await invoke<string | null>("get_setting", { key: AUTOSAVE_KEY });
       if (raw === null) return;
       const ms = Number.parseInt(raw, 10);
-      if (Number.isFinite(ms) && ms >= 0) {
-        set({ autoSaveIntervalMs: ms });
+      // #43 / #89: isFinite rejects NaN/Infinity/-Infinity. 0 is the special
+      // "disabled" value (no autosave). Any positive interval is clamped to
+      // [MIN_AUTOSAVE_MS, 24h] so a malformed prior value can't either spam
+      // the disk (1ms) or effectively disable autosave (1 month).
+      if (Number.isFinite(ms) && ms >= 0 && ms <= 24 * 60 * 60 * 1000) {
+        if (ms === 0 || ms >= MIN_AUTOSAVE_MS) {
+          set({ autoSaveIntervalMs: ms });
+        } else {
+          set({ autoSaveIntervalMs: MIN_AUTOSAVE_MS });
+        }
       }
     } catch {
       // non-critical: default stays in effect
@@ -700,7 +1064,11 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   },
 
   setAutoSaveInterval: async (ms: number) => {
-    if (!Number.isFinite(ms) || ms < 0) return;
+    // #43 / #89: reject NaN, Infinity, -Infinity, negatives, absurd upper
+    // values, AND positive values below MIN_AUTOSAVE_MS (a 1ms interval would
+    // peg the main thread + disk I/O on every tick).
+    if (!Number.isFinite(ms) || ms < 0 || ms > 24 * 60 * 60 * 1000) return;
+    if (ms > 0 && ms < MIN_AUTOSAVE_MS) return;
     set({ autoSaveIntervalMs: ms });
     try {
       await invoke("set_setting", { key: AUTOSAVE_KEY, value: String(ms) });
@@ -757,12 +1125,26 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     try {
       const raw = await invoke<string | null>("get_setting", { key: PINNED_PATHS_KEY });
       if (raw === null) return;
-      const parsed = JSON.parse(raw);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        // #44: malformed JSON → keep the in-memory default (empty list) and
+        // also persist a clean value so the next read doesn't re-trigger this.
+        set({ pinnedPaths: [] });
+        void invoke("set_setting", { key: PINNED_PATHS_KEY, value: "[]" }).catch(() => undefined);
+        return;
+      }
       if (Array.isArray(parsed) && parsed.every((p) => typeof p === "string")) {
         set({ pinnedPaths: parsed });
+      } else {
+        // Non-array / non-string-array JSON (null, object, mixed types) →
+        // reject and reset to a clean empty list so subsequent writes don't
+        // round-trip corrupted state.
+        set({ pinnedPaths: [] });
       }
     } catch {
-      // non-critical: empty pin list stays
+      // get_setting failure → non-critical: empty pin list stays
     }
   },
 
@@ -772,8 +1154,11 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     set({ pinnedPaths: next });
     try {
       await invoke("set_setting", { key: PINNED_PATHS_KEY, value: JSON.stringify(next) });
-    } catch {
-      // best-effort persistence
+    } catch (e) {
+      // #84: roll back the in-memory change so the UI state stays in sync
+      // with persisted state. Otherwise the pin "stays" until the next
+      // app restart, surprising the user.
+      set({ pinnedPaths: cur, lastError: friendlyError(String(e)) ?? "ピンの保存に失敗しました" });
     }
   },
 
@@ -791,11 +1176,13 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   },
 
   setPinnedOrder: async (order: string[]) => {
+    const prev = get().pinnedOrder;
     set({ pinnedOrder: order });
     try {
       await invoke("set_setting", { key: PINNED_ORDER_KEY, value: JSON.stringify(order) });
-    } catch {
-      // best-effort persistence
+    } catch (e) {
+      // #84: rollback to keep in-memory state aligned with disk.
+      set({ pinnedOrder: prev, lastError: friendlyError(String(e)) ?? "並び順の保存に失敗しました" });
     }
   },
 
@@ -838,11 +1225,13 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   },
 
   setSuppressCsvPocWarning: async (v: boolean) => {
+    const prev = get().suppressCsvPocWarning;
     set({ suppressCsvPocWarning: v });
     try {
       await invoke("set_setting", { key: SUPPRESS_CSV_POC_KEY, value: v ? "true" : "false" });
-    } catch {
-      // best-effort persistence
+    } catch (e) {
+      // #84: rollback so the toggle reflects the persisted state.
+      set({ suppressCsvPocWarning: prev, lastError: friendlyError(String(e)) ?? "設定保存に失敗しました" });
     }
   },
 
@@ -863,6 +1252,8 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     const { currentHandle } = get();
     if (!currentHandle?.path) return;
     const mySeq = ++openSeq;
+    const priorStatus = get().saveStatus;
+    const priorDirty = get().wasDirtyBeforeExport;
     try {
       set({ saveStatus: "loading" });
       const result = await invoke<OpenWorkbookResult>("workbook_open_snapshot", {
@@ -878,13 +1269,18 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: { ...result.handle, path: null },
         editorRevision: get().editorRevision + 1,
         saveStatus: "unsaved",
+        wasDirtyBeforeExport: false,
         importWarnings: result.warnings,
         currentSnapshotJson: result.handle.snapshotJson,
         lastError: null,
       });
     } catch (e) {
       if (mySeq !== openSeq) return;
-      set({ saveStatus: "saved", lastError: friendlyError(String(e)) });
+      set({
+        saveStatus: priorStatus === "loading" ? "saved" : priorStatus,
+        wasDirtyBeforeExport: priorDirty,
+        lastError: friendlyError(String(e)),
+      });
     }
   },
 

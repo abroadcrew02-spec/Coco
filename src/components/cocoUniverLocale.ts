@@ -603,7 +603,12 @@ const jaJPOverride = {
   sheets: {
     tabs: {
       sheetCopy: "（コピー{0}）",
-      sheet: "シート",
+      // The initial sheet from workbook_new() is named "Sheet1" (English).
+      // Keeping this prefix as "Sheet" makes added tabs continue as
+      // "Sheet2", "Sheet3", ... so the names AND the numbering line up.
+      // Previously this was "シート", which produced "シート1" / "シート2"
+      // out of sync with the existing "Sheet1".
+      sheet: "Sheet",
     },
     info: {
       overlappingSelections: "重なり合う選択範囲ではこのコマンドを使用できません",

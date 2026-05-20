@@ -128,9 +128,11 @@ describe("EditorScreen Univer plugin wiring", () => {
     );
     expect(mutationSnapshotSyncSource.match(/cancelPendingSnapshotSync\(\);/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
     expect(mutationSnapshotSyncSource).toMatch(/updateSnapshot\(JSON\.stringify\(workbook\.save\(\)\)\)/);
-    expect(mutationSnapshotSyncSource).toMatch(
-      /if \(shouldSkipBackgroundSnapshotSync\(snapshotRef\.current\)\) \{\s*return;\s*\}/,
-    );
+    // #87: when the workbook is too large for the fast path, we still
+    // schedule a longer-leash sync (instead of returning indefinitely) so
+    // protection / data-validation guards eventually see fresh state.
+    expect(mutationSnapshotSyncSource).toMatch(/shouldSkipBackgroundSnapshotSync\(snapshotRef\.current\)/);
+    expect(mutationSnapshotSyncSource).toMatch(/LARGE_WORKBOOK_SYNC_LEASH_MS/);
   });
 
   it("registers a synchronous snapshot flush for immediate save/close flows", () => {
@@ -150,7 +152,9 @@ describe("EditorScreen Univer plugin wiring", () => {
     expect(editorSource).toMatch(/case "data-autosum":\s*applyAutoSum\(\);/);
     expect(editorSource).toMatch(/case "tools-sheet-protection":\s*toggleSheetProtection\(\);/);
     expect(toolbarSource).not.toMatch(/data-testid="sheet-protection-toggle"/);
-    expect(editorSource).toMatch(/updateSnapshot\(JSON\.stringify\(fresh\)\)/);
+    // #97: apply-style mutations now go through applyMutatedSnapshot so the
+    // pre-mutation state is checkpointed for Coco undo (Ctrl+Alt+Z).
+    expect(editorSource).toMatch(/applyMutatedSnapshot\(JSON\.stringify\(fresh\)\)/);
     expect(editorSource).toMatch(/_protected/);
   });
 });

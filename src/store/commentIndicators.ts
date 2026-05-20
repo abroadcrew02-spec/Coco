@@ -36,7 +36,13 @@ interface CommentSnapshot {
     string,
     | {
         name?: string;
-        _comments?: Array<{ cell?: unknown; author?: unknown; text?: unknown }>;
+        _comments?: Array<{
+          cell?: unknown;
+          cellRef?: unknown;
+          author?: unknown;
+          text?: unknown;
+          body?: unknown;
+        }>;
       }
     | undefined
   >;
@@ -87,8 +93,18 @@ export function computeCommentIndicators(
     const sheetName = typeof sheet.name === "string" && sheet.name ? sheet.name : sheetId;
     for (const entry of arr) {
       if (!entry || typeof entry !== "object") continue;
-      const cell = typeof entry.cell === "string" ? entry.cell : null;
-      const text = typeof entry.text === "string" ? entry.text : null;
+      const cell =
+        typeof entry.cell === "string"
+          ? entry.cell
+          : typeof entry.cellRef === "string"
+            ? entry.cellRef
+            : null;
+      const text =
+        typeof entry.text === "string"
+          ? entry.text
+          : typeof entry.body === "string"
+            ? entry.body
+            : null;
       if (!cell || text === null) continue;
       const indicator: CommentIndicator = { sheetId, sheetName, cell, text };
       if (typeof entry.author === "string" && entry.author) {

@@ -1228,10 +1228,14 @@ describe("pinnedPaths", () => {
     expect(useWorkbookStore.getState().pinnedPaths).toEqual(["/tmp/b.csv"]);
   });
 
-  it("togglePinned keeps in-memory state even when persistence fails", async () => {
+  it("togglePinned rolls back in-memory state when persistence fails (#84)", async () => {
+    // #84: persist failure shouldn't leave a phantom pin that vanishes on
+    // next restart. Roll back and surface a lastError so the user knows.
+    useWorkbookStore.setState({ pinnedPaths: [] });
     invokeMock.mockRejectedValue("db locked");
     await useWorkbookStore.getState().togglePinned("/tmp/a.xlsx");
-    expect(useWorkbookStore.getState().pinnedPaths).toEqual(["/tmp/a.xlsx"]);
+    expect(useWorkbookStore.getState().pinnedPaths).toEqual([]);
+    expect(useWorkbookStore.getState().lastError).not.toBeNull();
   });
 });
 
@@ -1383,12 +1387,12 @@ describe("audit item 14: concurrent open race", () => {
   );
 });
 
-describe("audit item 15: autoSave swallows invoke rejection", () => {
-  it("keeps saveStatus stable (does NOT flip to save_failed) on autosave invoke rejection", async () => {
-    // Intentional design: autosave failures must not disrupt the user;
-    // explicit Ctrl+S surfaces real errors. The empty `catch {}` block
-    // in autoSave is the pin. This test locks that contract so a future
-    // refactor doesn't accidentally start propagating autosave errors.
+describe("audit item 15: autoSave surfaces invoke rejection (issue #42)", () => {
+  it("flips saveStatus to save_failed on autosave invoke rejection so the user sees the failure", async () => {
+    // Issue #42: previously the empty catch{} swallowed the rejection silently,
+    // leaving the user with a stale "unsaved" indicator that hid the fact that
+    // autosave was broken (e.g. disk full). The new contract is to flip to
+    // save_failed + surface a friendly error so the UI can warn.
     invokeMock.mockRejectedValue("disk full");
     useWorkbookStore.setState({
       currentHandle: makeHandle({ path: "/tmp/data.coco" }),
@@ -1398,12 +1402,11 @@ describe("audit item 15: autoSave swallows invoke rejection", () => {
     });
     await useWorkbookStore.getState().autoSave();
     const s = useWorkbookStore.getState();
-    expect(s.saveStatus).toBe("unsaved");
-    expect(s.saveStatus).not.toBe("save_failed");
-    expect(s.lastError).toBeNull();
+    expect(s.saveStatus).toBe("save_failed");
+    expect(s.lastError).not.toBeNull();
   });
 
-  it("keeps saveStatus stable when temp autosave (xlsx path) rejects", async () => {
+  it("flips saveStatus to save_failed when temp autosave (xlsx path) rejects", async () => {
     invokeMock.mockRejectedValue("EACCES /app_data/recovery");
     useWorkbookStore.setState({
       currentHandle: makeHandle({ path: "/tmp/data.xlsx" }),
@@ -1413,8 +1416,8 @@ describe("audit item 15: autoSave swallows invoke rejection", () => {
     });
     await useWorkbookStore.getState().autoSave();
     const s = useWorkbookStore.getState();
-    expect(s.saveStatus).toBe("unsaved");
-    expect(s.lastError).toBeNull();
+    expect(s.saveStatus).toBe("save_failed");
+    expect(s.lastError).not.toBeNull();
   });
 });
 
@@ -1593,10 +1596,15 @@ describe("pinnedOrder", () => {
     );
   });
 
-  it("setPinnedOrder keeps in-memory state even when persistence fails", async () => {
+  it("setPinnedOrder rolls back in-memory state when persistence fails (#84)", async () => {
+    // #84: previously the in-memory state stayed and persisted state diverged
+    // silently. Now we roll back so the visible order matches what will
+    // survive the next app restart.
+    useWorkbookStore.setState({ pinnedOrder: [] });
     invokeMock.mockRejectedValue("db locked");
     await useWorkbookStore.getState().setPinnedOrder(["/tmp/a.xlsx"]);
-    expect(useWorkbookStore.getState().pinnedOrder).toEqual(["/tmp/a.xlsx"]);
+    expect(useWorkbookStore.getState().pinnedOrder).toEqual([]);
+    expect(useWorkbookStore.getState().lastError).not.toBeNull();
   });
 
   it("reorderPinned moves dragged to where target is (insert before target)", async () => {
@@ -2116,10 +2124,14 @@ describe("settings-persist reject is best-effort", () => {
     expect(useWorkbookStore.getState().csvImportEncoding).toBe("shift_jis");
   });
 
-  it("setSuppressCsvPocWarning keeps in-memory value when invoke rejects", async () => {
+  it("setSuppressCsvPocWarning rolls back in-memory value when invoke rejects (#84)", async () => {
+    // #84: rollback so in-memory state matches persisted state. Previously
+    // the toggle would appear flipped until restart.
+    useWorkbookStore.setState({ suppressCsvPocWarning: false });
     invokeMock.mockRejectedValue("DB_LOCKED");
     await useWorkbookStore.getState().setSuppressCsvPocWarning(true);
-    expect(useWorkbookStore.getState().suppressCsvPocWarning).toBe(true);
+    expect(useWorkbookStore.getState().suppressCsvPocWarning).toBe(false);
+    expect(useWorkbookStore.getState().lastError).not.toBeNull();
   });
 
   it("setAutoSaveInterval keeps in-memory value when invoke rejects", async () => {

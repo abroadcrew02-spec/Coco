@@ -6,7 +6,21 @@ import "./ConditionalFormattingDialog.css";
 // fields are omitted (not nulled) when empty so the JSON stays compact.
 export interface CfRule {
   sqref: string;
-  type: "cellIs" | "containsText" | "top10" | "duplicateValues" | "uniqueValues";
+  type:
+    | "cellIs"
+    | "containsText"
+    | "top10"
+    | "duplicateValues"
+    | "uniqueValues"
+    // #38: above/below the average of the rule's range.
+    | "aboveAverage"
+    // #38: date in the named relative range (today / yesterday / lastWeek / etc).
+    | "timePeriod"
+    // new in this round: advanced CF rule types.
+    | "dataBar"
+    | "colorScale"
+    | "iconSet"
+    | "expression";
   operator?: string;
   formula1?: string;
   formula2?: string;
@@ -14,13 +28,37 @@ export interface CfRule {
   rank?: number;
   percent?: boolean;
   bottom?: boolean;
+  /** #38: aboveAverage variants — Excel uses bool flags rather than an operator.
+   *  When type === "aboveAverage", true means "below average". */
+  aboveAverage?: { below?: boolean; equalAverage?: boolean };
+  /** #38: timePeriod selector. One of the OOXML period codes Excel writes. */
+  timePeriod?:
+    | "today"
+    | "yesterday"
+    | "tomorrow"
+    | "last7Days"
+    | "thisWeek"
+    | "lastWeek"
+    | "nextWeek"
+    | "thisMonth"
+    | "lastMonth"
+    | "nextMonth";
   priority?: number;
   stopIfTrue?: boolean;
-  // TODO(cf): emit dxf-referenced visual format on export (see docs/TODOS.md#medium-cf-dxf-emit)
-  // Style hints — these don't round-trip through the Rust xlsx_io path yet,
-  // but we carry them through the snapshot so the user's choices are
-  // preserved on save/reopen.
+  // #37: style hints round-trip through xlsx via dxf entries written into
+  // xl/styles.xml on export. The cfRule references the dxf via dxfId so
+  // Excel renders the user's chosen bold/colors on cells that match.
   style?: { bold?: boolean; fontColor?: string; bgColor?: string };
+  // new in this round: dataBar / colorScale / iconSet configuration.
+  /** Base color for dataBar. Defaults to #638EC6 (Excel blue). */
+  color?: string;
+  /** 2-color or 3-color scale variant. */
+  colorScaleType?: "2color" | "3color";
+  minColor?: string;
+  midColor?: string;
+  maxColor?: string;
+  /** Preset icon style for iconSet rules. */
+  iconStyle?: "3arrows" | "3traffic" | "5rating";
 }
 
 interface Props {
@@ -47,7 +85,34 @@ const RULE_TYPE_LABELS: Record<CfRule["type"], string> = {
   top10: "上位/下位 (top10)",
   duplicateValues: "重複値",
   uniqueValues: "一意値",
+  aboveAverage: "平均値より上/下 (aboveAverage)",
+  timePeriod: "期間 (timePeriod)",
+  // new in this round:
+  dataBar: "データバー (dataBar)",
+  colorScale: "カラースケール (colorScale)",
+  iconSet: "アイコンセット (iconSet)",
+  expression: "数式 (expression)",
 };
+
+// new in this round: icon-set presets shown in the rule editor dropdown.
+const ICON_STYLE_OPTIONS: { value: NonNullable<CfRule["iconStyle"]>; label: string }[] = [
+  { value: "3arrows", label: "3 矢印 (↑ → ↓)" },
+  { value: "3traffic", label: "3 信号 (🔴 🟡 🟢)" },
+  { value: "5rating", label: "5 段階評価 (★)" },
+];
+
+const TIME_PERIOD_OPTIONS: { value: NonNullable<CfRule["timePeriod"]>; label: string }[] = [
+  { value: "today", label: "今日" },
+  { value: "yesterday", label: "昨日" },
+  { value: "tomorrow", label: "明日" },
+  { value: "last7Days", label: "過去7日間" },
+  { value: "thisWeek", label: "今週" },
+  { value: "lastWeek", label: "先週" },
+  { value: "nextWeek", label: "翌週" },
+  { value: "thisMonth", label: "今月" },
+  { value: "lastMonth", label: "先月" },
+  { value: "nextMonth", label: "翌月" },
+];
 
 const CELLIS_OPERATORS = [
   { value: "greaterThan", label: "より大きい" },
@@ -81,6 +146,27 @@ function validate(form: CfRule): string | null {
       break;
     case "duplicateValues":
     case "uniqueValues":
+      break;
+    case "aboveAverage":
+      // No inputs required — the cfRule defaults to "above the average of
+      // the selected range". `aboveAverage.below` flips to below-average.
+      break;
+    case "timePeriod":
+      if (!form.timePeriod) return "期間を選択してください";
+      break;
+    // new in this round:
+    case "dataBar":
+      // color defaults to #638EC6 when blank — no required field.
+      break;
+    case "colorScale":
+      if (form.colorScaleType !== "2color" && form.colorScaleType !== "3color")
+        return "カラースケール種別を選択してください";
+      break;
+    case "iconSet":
+      if (!form.iconStyle) return "アイコンスタイルを選択してください";
+      break;
+    case "expression":
+      if (!(form.formula1 ?? "").trim()) return "数式を入力してください (例: =A1>10)";
       break;
   }
   return null;
@@ -117,6 +203,26 @@ function summarize(r: CfRule): string {
       return `${RULE_TYPE_LABELS[r.type]} · ${r.bottom ? "下位" : "上位"} ${r.rank ?? 10}${
         r.percent ? "%" : ""
       }`;
+    case "aboveAverage": {
+      const dir = r.aboveAverage?.below ? "未満" : "より上";
+      const eq = r.aboveAverage?.equalAverage ? " (平均含む)" : "";
+      return `${RULE_TYPE_LABELS[r.type]} · 平均値${dir}${eq}`;
+    }
+    case "timePeriod": {
+      const opt = TIME_PERIOD_OPTIONS.find((o) => o.value === r.timePeriod);
+      return `${RULE_TYPE_LABELS[r.type]} · ${opt?.label ?? r.timePeriod ?? ""}`;
+    }
+    // new in this round:
+    case "dataBar":
+      return `Data bar (${r.color ?? "#638EC6"})`;
+    case "colorScale":
+      return `Color scale ${r.colorScaleType === "3color" ? "3" : "2"}`;
+    case "iconSet": {
+      const opt = ICON_STYLE_OPTIONS.find((o) => o.value === r.iconStyle);
+      return `Icon set ${opt?.label ?? r.iconStyle ?? ""}`;
+    }
+    case "expression":
+      return `Formula: ${r.formula1 ?? ""}`;
     default:
       return RULE_TYPE_LABELS[r.type];
   }
@@ -210,9 +316,41 @@ export default function ConditionalFormattingDialog({
       clean.rank = form.rank ?? 10;
       if (form.percent) clean.percent = true;
       if (form.bottom) clean.bottom = true;
+    } else if (form.type === "aboveAverage") {
+      // #38: aboveAverage carries only its two bool toggles.
+      if (form.aboveAverage?.below || form.aboveAverage?.equalAverage) {
+        clean.aboveAverage = {};
+        if (form.aboveAverage.below) clean.aboveAverage.below = true;
+        if (form.aboveAverage.equalAverage) clean.aboveAverage.equalAverage = true;
+      }
+    } else if (form.type === "timePeriod") {
+      // #38: timePeriod carries the chosen period code.
+      clean.timePeriod = form.timePeriod;
+    } else if (form.type === "dataBar") {
+      // new in this round: dataBar carries an optional base color.
+      if (form.color) clean.color = form.color;
+    } else if (form.type === "colorScale") {
+      // new in this round: colorScale carries variant + 2 or 3 colors.
+      clean.colorScaleType = form.colorScaleType ?? "2color";
+      if (form.minColor) clean.minColor = form.minColor;
+      if (clean.colorScaleType === "3color" && form.midColor) clean.midColor = form.midColor;
+      if (form.maxColor) clean.maxColor = form.maxColor;
+    } else if (form.type === "iconSet") {
+      // new in this round: iconSet carries the preset style name.
+      clean.iconStyle = form.iconStyle ?? "3arrows";
+    } else if (form.type === "expression") {
+      // new in this round: expression carries the formula text in formula1.
+      clean.formula1 = (form.formula1 ?? "").trim();
     }
+    // Skip authoring-time style for dataBar / colorScale / iconSet — those
+    // rule types generate their own per-cell styles and a user-picked bg
+    // would shadow them.
+    const acceptsAuthorStyle =
+      form.type !== "dataBar" && form.type !== "colorScale" && form.type !== "iconSet";
     const styleHasValue =
-      form.style && (form.style.bold || form.style.fontColor || form.style.bgColor);
+      acceptsAuthorStyle &&
+      form.style &&
+      (form.style.bold || form.style.fontColor || form.style.bgColor);
     if (styleHasValue) {
       const s: NonNullable<CfRule["style"]> = {};
       if (form.style?.bold) s.bold = true;
@@ -421,6 +559,173 @@ export default function ConditionalFormattingDialog({
                 </>
               )}
 
+              {form.type === "aboveAverage" && (
+                <>
+                  <label className="cf-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={!!form.aboveAverage?.below}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          aboveAverage: {
+                            ...(form.aboveAverage ?? {}),
+                            below: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    <span>平均値より下（チェックなしは平均値より上）</span>
+                  </label>
+                  <label className="cf-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={!!form.aboveAverage?.equalAverage}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          aboveAverage: {
+                            ...(form.aboveAverage ?? {}),
+                            equalAverage: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    <span>平均値ちょうども含める</span>
+                  </label>
+                </>
+              )}
+
+              {form.type === "timePeriod" && (
+                <label className="cf-field">
+                  <span className="cf-field-label">期間</span>
+                  <select
+                    className="cf-select"
+                    value={form.timePeriod ?? ""}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        timePeriod:
+                          (e.target.value as NonNullable<CfRule["timePeriod"]>) || undefined,
+                      })
+                    }
+                  >
+                    <option value="">（選択してください）</option>
+                    {TIME_PERIOD_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              {/* new in this round: dataBar — just a base-color picker. */}
+              {form.type === "dataBar" && (
+                <label className="cf-field cf-field--inline">
+                  <span className="cf-field-label">バーの色</span>
+                  <input
+                    type="color"
+                    className="cf-color"
+                    value={form.color || "#638EC6"}
+                    onChange={(e) => setForm({ ...form, color: e.target.value })}
+                  />
+                </label>
+              )}
+
+              {/* new in this round: colorScale — variant + 2/3 colors. */}
+              {form.type === "colorScale" && (
+                <>
+                  <label className="cf-field">
+                    <span className="cf-field-label">スケール種別</span>
+                    <select
+                      className="cf-input"
+                      value={form.colorScaleType ?? "2color"}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          colorScaleType: e.target.value as "2color" | "3color",
+                        })
+                      }
+                    >
+                      <option value="2color">2 色</option>
+                      <option value="3color">3 色</option>
+                    </select>
+                  </label>
+                  <label className="cf-field cf-field--inline">
+                    <span className="cf-field-label">最小値の色</span>
+                    <input
+                      type="color"
+                      className="cf-color"
+                      value={form.minColor || "#F8696B"}
+                      onChange={(e) => setForm({ ...form, minColor: e.target.value })}
+                    />
+                  </label>
+                  {form.colorScaleType === "3color" && (
+                    <label className="cf-field cf-field--inline">
+                      <span className="cf-field-label">中央値の色</span>
+                      <input
+                        type="color"
+                        className="cf-color"
+                        value={form.midColor || "#FFEB84"}
+                        onChange={(e) => setForm({ ...form, midColor: e.target.value })}
+                      />
+                    </label>
+                  )}
+                  <label className="cf-field cf-field--inline">
+                    <span className="cf-field-label">最大値の色</span>
+                    <input
+                      type="color"
+                      className="cf-color"
+                      value={form.maxColor || "#63BE7B"}
+                      onChange={(e) => setForm({ ...form, maxColor: e.target.value })}
+                    />
+                  </label>
+                </>
+              )}
+
+              {/* new in this round: iconSet — preset dropdown. */}
+              {form.type === "iconSet" && (
+                <label className="cf-field">
+                  <span className="cf-field-label">アイコンスタイル</span>
+                  <select
+                    className="cf-input"
+                    value={form.iconStyle ?? "3arrows"}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        iconStyle: e.target.value as NonNullable<CfRule["iconStyle"]>,
+                      })
+                    }
+                  >
+                    {ICON_STYLE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              {/* new in this round: expression — formula text input. */}
+              {form.type === "expression" && (
+                <label className="cf-field">
+                  <span className="cf-field-label">数式</span>
+                  <input
+                    type="text"
+                    className="cf-input"
+                    value={form.formula1 ?? ""}
+                    onChange={(e) => setForm({ ...form, formula1: e.target.value })}
+                    placeholder="=A1>10 / =ISBLANK(A1) / =MOD(ROW(),2)=0"
+                  />
+                </label>
+              )}
+
+              {/* dataBar / colorScale / iconSet manage their own visuals — no
+                  authoring style fieldset for them. */}
+              {form.type !== "dataBar" &&
+                form.type !== "colorScale" &&
+                form.type !== "iconSet" && (
               <fieldset className="cf-style">
                 <legend className="cf-field-label">書式</legend>
                 <label className="cf-checkbox">
@@ -465,6 +770,7 @@ export default function ConditionalFormattingDialog({
                   />
                 </label>
               </fieldset>
+              )}
 
               {formError && <p className="cf-error">{formError}</p>}
               <div className="cf-form-actions">

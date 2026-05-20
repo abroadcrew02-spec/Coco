@@ -1,0 +1,163 @@
+/* Floating error-indicators panel — mirrors CommentIndicatorsPanel
+   positioning so the two panels don't fight for the same corner. We
+   offset the top further down so both can be visible at once when the
+   user opens them in tandem. */
+
+.eip-panel {
+  position: absolute;
+  top: 8px;
+  right: 286px;
+  z-index: 25;
+  width: 260px;
+  max-height: 50vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.eip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #fdf2f2;
+  border-bottom: 1px solid #f5c2c2;
+}
+
+.eip-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #b91c1c;
+}
+
+.eip-collapse {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  color: #6b7280;
+}
+
+.eip-collapse:hover {
+  color: #111827;
+}
+
+.eip-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.eip-group {
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.eip-group:last-child {
+  border-bottom: 0;
+}
+
+.eip-group-title {
+  margin: 0;
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #4b5563;
+  background: #f9fafb;
+  text-transform: none;
+}
+
+.eip-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.eip-item {
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.eip-item:last-child {
+  border-bottom: 0;
+}
+
+.eip-item-btn {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 6px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #1f2937;
+}
+
+.eip-item-btn:hover,
+.eip-item-btn:focus-visible {
+  background: #fef2f2;
+  outline: none;
+}
+
+.eip-cell-ref {
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 11px;
+  color: #4338ca;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 36px;
+}
+
+.eip-detail {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #b91c1c;
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 11px;
+}
+
+.eip-glyph {
+  color: #b91c1c;
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Collapsed badge — sized to match cip-badge so the two collapsed pills
+   line up visually when both panels are minimised. */
+.eip-badge {
+  position: absolute;
+  top: 8px;
+  right: 88px;
+  z-index: 25;
+  background: #fff;
+  border: 1px solid #f5c2c2;
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.eip-badge:hover,
+.eip-badge:focus-visible {
+  background: #fef2f2;
+  outline: none;
+}
+
+.eip-badge-count {
+  font-weight: 600;
+  color: #b91c1c;
+}

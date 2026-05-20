@@ -18,6 +18,7 @@ import {
   notifyThemeChanged,
   THEME_MODE_LABELS,
 } from "../store/theme";
+import SmartChipRulesEditor from "./SmartChipRulesEditor";
 import "./SettingsDialog.css";
 
 interface Props {
@@ -224,6 +225,12 @@ export default function SettingsDialog({ onClose }: Props) {
               />
               <span>「CSV PoC インポート」バナーを表示しない</span>
             </label>
+          </details>
+          <details className="settings-section">
+            <summary className="settings-section-summary">
+              <h3>スマートチップのカスタムルール</h3>
+            </summary>
+            <SmartChipRulesEditor />
           </details>
           <details className="settings-section">
             <summary className="settings-section-summary">

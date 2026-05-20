@@ -382,6 +382,14 @@ import {
 } from "../store/macroRecord";
 import { loadAllSecure as loadMacrosSecure } from "../store/secureMacroStore";
 import CommentIndicatorsPanel from "./CommentIndicatorsPanel";
+import SmartChipPopover, {
+  type SmartChipPopoverAnchor,
+} from "./SmartChipPopover";
+import {
+  type SmartChip,
+  chipsForCell as smartChipsForCell,
+  chipActionUrl as smartChipActionUrl,
+} from "../store/smartChips";
 import ChartPreviewPanel from "./ChartPreviewPanel";
 import { computeChartPreviews, type ChartPreview } from "./chartPreviewData";
 import ImagePreviewPanel from "./ImagePreviewPanel";
@@ -6361,6 +6369,148 @@ export default function EditorScreen() {
     // lifetime of the component and later workbooks' clicks never fire.
   }, [currentHandle]);
 
+  // Smart chips (#158 MVP + #185 user-extensible rules). Lazy hover-driven
+  // detection: we wire the sheets-ui `onCellHover` facade event, look up
+  // chips for the hovered (sheetId, row, col), and surface them in
+  // SmartChipPopover. The detector reads the snapshot ref so we always see
+  // the freshest cell values without re-binding on every snapshot mutation.
+  //
+  // Detection runs only on hover — no eager walk of the grid — so a 1M-row
+  // workbook pays nothing until the user points at a cell. The detector is
+  // O(cell-text-length) with a hard 8 KB bail-out, and the custom-rule pass
+  // (#185) is bounded by MAX_MATCHES_PER_CELL + a ReDoS-shape rejection in
+  // customSmartChipRules.ts, so even pathological rules stay cheap.
+  const [smartChipState, setSmartChipState] = useState<{
+    chips: SmartChip[];
+    anchor: SmartChipPopoverAnchor | null;
+    sheetId: string;
+    row: number;
+    col: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!fUniverRef.current) return;
+    const fUniver = fUniverRef.current;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+
+    const onCellHover = (workbook as unknown as {
+      onCellHover?: (
+        cb: (cell: {
+          subUnitId?: string;
+          row?: number;
+          col?: number;
+          event?: { clientX?: number; clientY?: number };
+        }) => void,
+      ) => { dispose: () => void };
+    }).onCellHover;
+    if (typeof onCellHover !== "function") return;
+
+    const disposable = onCellHover.call(workbook, (cell) => {
+      const subUnitId = typeof cell.subUnitId === "string" ? cell.subUnitId : null;
+      const row = typeof cell.row === "number" ? cell.row : null;
+      const col = typeof cell.col === "number" ? cell.col : null;
+      if (subUnitId === null || row === null || col === null) {
+        setSmartChipState(null);
+        return;
+      }
+      // Skip re-detect when hovering the same cell: avoids re-running the
+      // detector + re-rendering the popover on every mousemove pixel.
+      setSmartChipState((prev) => {
+        if (
+          prev &&
+          prev.sheetId === subUnitId &&
+          prev.row === row &&
+          prev.col === col
+        ) {
+          return prev;
+        }
+        const chips = smartChipsForCell(
+          snapshotRef.current,
+          subUnitId,
+          row,
+          col,
+        );
+        if (chips.length === 0) return null;
+        // Anchor coordinates: use the pointer position if Univer surfaced
+        // an event, with a small downward offset so the popover doesn't
+        // sit under the cursor. Fall back to top-left of the viewport.
+        const ev = cell.event;
+        const x = typeof ev?.clientX === "number" ? ev.clientX + 12 : 24;
+        const y = typeof ev?.clientY === "number" ? ev.clientY + 16 : 24;
+        return {
+          chips,
+          anchor: { x, y },
+          sheetId: subUnitId,
+          row,
+          col,
+        };
+      });
+    });
+
+    return () => disposable.dispose();
+  }, [currentHandle]);
+
+  // Action handler for a chip pick. URLs / emails / custom-rule URLs go
+  // through the existing `open_url` Tauri command (which enforces a scheme
+  // allowlist of http(s)/mailto in shell.rs — custom rule templates are
+  // validated to http(s) up-front, so they pass). Dates pop a tiny
+  // prompt-based picker for the MVP — the user sees the chip's ISO value
+  // and can confirm/edit it; we then write it back via the Univer facade.
+  const handleSmartChipActivate = useCallback(
+    (chip: SmartChip) => {
+      const url = smartChipActionUrl(chip);
+      if (url) {
+        invoke("open_url", { url }).catch((err) => {
+          // eslint-disable-next-line no-console
+          console.warn("smart-chip open_url failed:", err);
+        });
+        setSmartChipState(null);
+        return;
+      }
+      if (chip.kind === "date" && smartChipState) {
+        const current = chip.iso ?? "";
+        // window.prompt is the MVP-minimal "calendar picker". It accepts
+        // YYYY-MM-DD; we re-detect via Date.parse so the user can also
+        // type "May 20, 2026" and get a normalized date written back.
+        const input = window.prompt(
+          "日付を編集 (YYYY-MM-DD)",
+          current,
+        );
+        if (input === null) {
+          setSmartChipState(null);
+          return;
+        }
+        const trimmed = input.trim();
+        if (!trimmed) {
+          setSmartChipState(null);
+          return;
+        }
+        const parsed = Date.parse(trimmed);
+        if (!Number.isFinite(parsed)) {
+          // eslint-disable-next-line no-console
+          console.warn("smart-chip date parse failed:", trimmed);
+          setSmartChipState(null);
+          return;
+        }
+        const d = new Date(parsed);
+        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        try {
+          const fUniver = fUniverRef.current;
+          const workbook = fUniver?.getActiveWorkbook();
+          const sheet = workbook?.getActiveSheet();
+          const range = sheet?.getRange(smartChipState.row, smartChipState.col);
+          if (range) range.setValue(iso);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn("smart-chip date write failed:", err);
+        }
+        setSmartChipState(null);
+      }
+    },
+    [smartChipState],
+  );
+
   const statusLabel = SAVE_STATUS_LABELS[saveStatus] ?? saveStatus;
   const statusClass = `status-bar__status status-bar__status--${saveStatus}`;
   // #94: memoize the stats parse so unrelated re-renders don't pay the cost
@@ -6507,6 +6657,12 @@ export default function EditorScreen() {
         <CommentIndicatorsPanel
           indicators={commentIndicators}
           onSelect={jumpToCommentCell}
+        />
+        <SmartChipPopover
+          chips={smartChipState?.chips ?? []}
+          anchor={smartChipState?.anchor ?? null}
+          onActivate={handleSmartChipActivate}
+          onDismiss={() => setSmartChipState(null)}
         />
         <ChartPreviewPanel
           previews={chartPreviews}

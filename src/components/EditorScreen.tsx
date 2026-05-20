@@ -374,6 +374,8 @@ import InsertImageDialog, {
 import SortDialog, { type SortFormValue } from "./SortDialog";
 import SheetTabColorDialog from "./SheetTabColorDialog";
 import CommandPalette, { type PaletteCommand } from "./CommandPalette";
+import MacroDialog from "./MacroDialog";
+import { observeCommand as observeMacroCommand } from "../store/macroRecord";
 import CommentIndicatorsPanel from "./CommentIndicatorsPanel";
 import ChartPreviewPanel from "./ChartPreviewPanel";
 import { computeChartPreviews, type ChartPreview } from "./chartPreviewData";
@@ -504,6 +506,10 @@ export default function EditorScreen() {
   // list is rebuilt on every render so the palette always sees the latest
   // handler closures and store actions.
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // #131 — macro record/playback dialog. Boolean; the dialog reads the
+  // recorder state from the module-scope singleton in `store/macroRecord`,
+  // so we don't mirror it here.
+  const [macroDialogOpen, setMacroDialogOpen] = useState(false);
   const [warningsDialog, setWarningsDialog] = useState<null | "import" | "export">(null);
   // Named-ranges dialog state: null while closed; once opened we snapshot the
   // current set so the user can cancel out without mutating the workbook.
@@ -5179,6 +5185,13 @@ export default function EditorScreen() {
       run: () => setSnapshotsOpen(true),
     },
     {
+      id: "tools.macro",
+      label: "マクロの記録 / 再生",
+      category: "ツール",
+      keywords: "macro record playback automation",
+      run: () => setMacroDialogOpen(true),
+    },
+    {
       id: "view.settings",
       label: "設定",
       category: "表示",
@@ -5453,6 +5466,9 @@ export default function EditorScreen() {
         break;
       case "tools-scenarios":
         openScenarioManagerDialog();
+        break;
+      case "tools-macro":
+        setMacroDialogOpen(true);
         break;
       case "data-forecast-sheet":
         openForecastSheetDialog();
@@ -6153,6 +6169,22 @@ export default function EditorScreen() {
     };
   }, [markDirty, updateSnapshot]);
 
+  // #131 — macro recorder hook. Subscribes to Univer's high-level COMMAND
+  // stream (not MUTATION; replaying a COMMAND re-generates the right MUTATIONs
+  // so undo + snapshot sync keep working). The observer is a no-op when the
+  // recorder is idle, so the cost is one Set.has() per command.
+  useEffect(() => {
+    if (!fUniverRef.current) return;
+    const fUniver = fUniverRef.current;
+    const disposable = fUniver.onCommandExecuted((info, options) => {
+      if (info.type !== CommandType.COMMAND) return;
+      observeMacroCommand(info.id, info.params, {
+        fromCollab: options?.fromCollab === true,
+      });
+    });
+    return () => disposable.dispose();
+  }, []);
+
   // Live sheet-protection enforcement. G3 marks `_protected` in the snapshot
   // and round-trips it through xlsx, but Univer itself doesn't know about
   // that key — so without this guard the user could still type into a
@@ -6594,6 +6626,26 @@ export default function EditorScreen() {
         />
       )}
       {snapshotsOpen && <SnapshotHistoryDialog onClose={() => setSnapshotsOpen(false)} />}
+      {macroDialogOpen && (
+        <MacroDialog
+          executor={
+            fUniverRef.current
+              ? {
+                  // Adapter — FUniver.executeCommand is generic over `P extends
+                  // object` but our recorded params are `unknown` JSON blobs.
+                  // We cast through `object` because Univer's commands accept
+                  // plain JSON-shaped objects for the whitelisted ids.
+                  executeCommand: (id, params) =>
+                    fUniverRef.current!.executeCommand(
+                      id,
+                      (params ?? undefined) as object | undefined,
+                    ),
+                }
+              : null
+          }
+          onClose={() => setMacroDialogOpen(false)}
+        />
+      )}
       {paletteOpen && (
         <CommandPalette
           commands={paletteCommands}

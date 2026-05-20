@@ -184,6 +184,8 @@ pub fn run() {
                 .text("tools-scenarios", "シナリオの管理...")
                 .text("tools-analysis-toolpak", "分析ツールパック...")
                 .separator()
+                .text("tools-macro", "マクロの記録 / 再生...")
+                .separator()
                 .text("calc-options", "計算オプション...")
                 .text("calc-recalc-all", "再計算\tF9")
                 .text("calc-recalc-sheet", "シート再計算\tShift+F9")

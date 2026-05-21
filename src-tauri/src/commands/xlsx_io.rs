@@ -7094,6 +7094,13 @@ const COCO_EXTENSION_SHEET_FIELDS: &[(&str, &str)] = &[
     ("_slicers", "slicers"),
     ("_note", "notes"),
     ("_charts", "charts"),
+    // #150 / #183: cell checkboxes + form controls (radio / spin / scroll).
+    // The control's *value* lives in a plain cell so it round-trips through
+    // xlsx natively; this part preserves the control metadata (which cells
+    // are decorated, group ids, min/max/step) that has no OOXML equivalent
+    // Coco's writer can emit. Re-read on import and merged back per sheet.
+    ("_checkboxes", "checkboxes"),
+    ("_formControls", "formControls"),
 ];
 
 /// Workbook-root fields preserved as standalone JSON parts.
@@ -7121,6 +7128,8 @@ fn coco_extension_label_ja(file_stem: &str) -> &'static str {
         "notes" => "シートメモ",
         "charts" => "Coco作成のチャート",
         "scenarios" => "シナリオ",
+        "checkboxes" => "チェックボックス",
+        "formControls" => "フォームコントロール",
         "threadedComments" => "コメント返信/解決状態",
         _ => "Coco拡張データ",
     }

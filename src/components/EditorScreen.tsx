@@ -54,6 +54,26 @@ import {
   chooseHyperlinkRestyle,
 } from "./hyperlinkRender";
 import { patchCfRenders } from "./conditionalFormatRender";
+import { patchCheckboxRenders } from "./checkboxRender";
+import {
+  addCheckbox,
+  hasCheckbox,
+  removeCheckbox,
+  toggleCheckbox as toggleCheckboxInSnapshot,
+  toA1 as checkboxToA1,
+} from "../store/checkbox";
+import { patchFormControlRenders } from "./formControlRender";
+import {
+  addFormControl,
+  getFormControlAt,
+  hasFormControl,
+  isCellOccupied,
+  removeFormControl,
+  selectRadio,
+  stepControl,
+  toA1 as formControlToA1,
+  type FormControlKind,
+} from "../store/formControls";
 import { patchOutlineRenders } from "./outlineRender";
 import { patchTableRenders } from "./tableRender";
 import { patchSparklineRenders } from "./sparklineRender";
@@ -1154,6 +1174,211 @@ export default function EditorScreen() {
       }
     },
     [getReadyWorkbook, hyperlinkCtx, applyMutatedSnapshot],
+  );
+
+  // #150: "Insert → Checkbox" command. Walks the active selection and toggles
+  // checkbox decoration on every cell. Single-cell on a pre-decorated cell
+  // removes the checkbox (Google Sheets parity: the menu acts as toggle).
+  // Snapshot is pushed through applyMutatedSnapshot so the Coco undo stack
+  // captures the change.
+  const insertCheckboxAtSelection = useCallback(() => {
+    const ready = getReadyWorkbook("チェックボックス");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    const liveSnapshot = useWorkbookStore.getState().currentSnapshotJson;
+    if (isSheetProtectedInSnapshot(liveSnapshot, sheetId)) {
+      setEditorOperationError(
+        "チェックボックス: このシートは保護されているため挿入できません。",
+      );
+      return;
+    }
+    // Resolve selection rect (fall back to A1 on no live selection).
+    let r1 = 0;
+    let c1 = 0;
+    let r2 = 0;
+    let c2 = 0;
+    try {
+      const sel = sheet.getSelection();
+      const range = sel?.getActiveRange();
+      if (range) {
+        r1 = range.getRow();
+        c1 = range.getColumn();
+        const rowCount =
+          (range as unknown as { getRowCount?: () => number }).getRowCount?.() ??
+          1;
+        const colCount =
+          (range as unknown as { getColumnCount?: () => number }).getColumnCount?.() ??
+          1;
+        r2 = r1 + Math.max(rowCount, 1) - 1;
+        c2 = c1 + Math.max(colCount, 1) - 1;
+      }
+    } catch {
+      // Fall through to defaults.
+    }
+
+    // Single-cell on a pre-decorated cell → remove (toggle off).
+    if (r1 === r2 && c1 === c2 && hasCheckbox(liveSnapshot, sheetId, r1, c1)) {
+      const next = removeCheckbox(liveSnapshot, sheetId, checkboxToA1(r1, c1));
+      applyMutatedSnapshot(JSON.stringify(next));
+      return;
+    }
+
+    // Cell-occupancy guard: refuse when any target cell already carries a
+    // sparkline or form-control glyph (they overwrite the cell's `p` paragraph
+    // and would visually collide). A pre-existing checkbox is fine — addCheckbox
+    // is idempotent on the host cell.
+    for (let r = r1; r <= r2; r++) {
+      for (let c = c1; c <= c2; c++) {
+        if (
+          isCellOccupied(liveSnapshot, sheetId, r, c) &&
+          !hasCheckbox(liveSnapshot, sheetId, r, c)
+        ) {
+          setEditorOperationError(
+            "チェックボックス: 対象範囲にスパークライン・フォームコントロールがあるセルが含まれるため挿入できません。",
+          );
+          return;
+        }
+      }
+    }
+
+    // Apply addCheckbox across the rectangle.
+    let snap: unknown = liveSnapshot
+      ? JSON.parse(liveSnapshot)
+      : { sheets: {} };
+    for (let r = r1; r <= r2; r++) {
+      for (let c = c1; c <= c2; c++) {
+        snap = addCheckbox(
+          snap as Parameters<typeof addCheckbox>[0],
+          sheetId,
+          checkboxToA1(r, c),
+        );
+      }
+    }
+    applyMutatedSnapshot(JSON.stringify(snap));
+  }, [getReadyWorkbook, applyMutatedSnapshot]);
+
+  // #183: "Insert → Form control" commands (radio / spin / scroll). Each
+  // anchors the control to the active cell with its linked cell defaulting to
+  // the next column over so the control glyph and its numeric value don't
+  // collide. A single-cell selection on a pre-decorated cell removes the
+  // control (toggle parity with the checkbox command). Radios placed in the
+  // same column are auto-bundled into one group so they behave mutually
+  // exclusively out of the box.
+  const insertFormControlAtSelection = useCallback(
+    (kind: FormControlKind) => {
+      const labelJa =
+        kind === "radio"
+          ? "ラジオボタン"
+          : kind === "spin"
+            ? "スピンボタン"
+            : "スクロールバー";
+      const ready = getReadyWorkbook(labelJa);
+      if (!ready) return;
+      const { workbook } = ready;
+      const sheet = workbook.getActiveSheet();
+      if (!sheet) return;
+      const sheetId = sheet.getSheetId();
+      const liveSnapshot = useWorkbookStore.getState().currentSnapshotJson;
+      if (isSheetProtectedInSnapshot(liveSnapshot, sheetId)) {
+        setEditorOperationError(
+          `${labelJa}: このシートは保護されているため挿入できません。`,
+        );
+        return;
+      }
+      // Anchor cell = top-left of the active selection (fallback A1).
+      let row = 0;
+      let col = 0;
+      try {
+        const sel = sheet.getSelection();
+        const range = sel?.getActiveRange();
+        if (range) {
+          row = range.getRow();
+          col = range.getColumn();
+        }
+      } catch {
+        // Fall through to defaults.
+      }
+
+      // Toggle-off when the anchor already hosts a control.
+      if (hasFormControl(liveSnapshot, sheetId, row, col)) {
+        const next = removeFormControl(
+          liveSnapshot,
+          sheetId,
+          formControlToA1(row, col),
+        );
+        applyMutatedSnapshot(JSON.stringify(next));
+        return;
+      }
+
+      // Cell-occupancy guard: refuse to stack a control glyph onto a cell that
+      // already carries a sparkline / checkbox glyph (they all overwrite the
+      // cell's `p` paragraph and would visually collide).
+      if (isCellOccupied(liveSnapshot, sheetId, row, col)) {
+        setEditorOperationError(
+          `${labelJa}: このセルには既にスパークライン・チェックボックス・フォームコントロールのいずれかがあるため挿入できません。`,
+        );
+        return;
+      }
+
+      const hostRef = formControlToA1(row, col);
+      // Linked cell defaults to the cell one column to the right so the
+      // control glyph and its value are visually distinct.
+      const linkedRef = formControlToA1(row, col + 1);
+      let spec: Parameters<typeof addFormControl>[3];
+      if (kind === "radio") {
+        // Auto-group radios that share a column on this sheet.
+        const groupId = `radio-col${col}`;
+        // Count existing radios in this group to label the new option.
+        const existing = liveSnapshot
+          ? (() => {
+              try {
+                const parsed = JSON.parse(liveSnapshot);
+                const arr = parsed?.sheets?.[sheetId]?._formControls;
+                return Array.isArray(arr)
+                  ? arr.filter(
+                      (e: { kind?: string; group?: string }) =>
+                        e?.kind === "radio" && e?.group === groupId,
+                    ).length
+                  : 0;
+              } catch {
+                return 0;
+              }
+            })()
+          : 0;
+        const optionIndex = existing + 1;
+        spec = {
+          kind: "radio",
+          group: groupId,
+          // All radios in a group share one linked cell (Excel parity).
+          linkedCell: formControlToA1(row, col + 1),
+          optionValue: optionIndex,
+          label: `オプション ${optionIndex}`,
+        };
+      } else if (kind === "spin") {
+        spec = {
+          kind: "spin",
+          linkedCell: linkedRef,
+          min: 0,
+          max: 100,
+          step: 1,
+        };
+      } else {
+        spec = {
+          kind: "scroll",
+          linkedCell: linkedRef,
+          min: 0,
+          max: 100,
+          step: 1,
+          page: 10,
+        };
+      }
+      const next = addFormControl(liveSnapshot, sheetId, hostRef, spec);
+      applyMutatedSnapshot(JSON.stringify(next));
+    },
+    [getReadyWorkbook, applyMutatedSnapshot],
   );
 
   // Resolve a default author for new comments. localStorage > navigator hints
@@ -5592,6 +5817,18 @@ export default function EditorScreen() {
       case "insert-cell-link":
         openCellLinkerDialog();
         break;
+      case "insert-checkbox":
+        insertCheckboxAtSelection();
+        break;
+      case "insert-radio-button":
+        insertFormControlAtSelection("radio");
+        break;
+      case "insert-spin-button":
+        insertFormControlAtSelection("spin");
+        break;
+      case "insert-scroll-bar":
+        insertFormControlAtSelection("scroll");
+        break;
       case "data-filter-search":
         openFilterSearchDialog();
         break;
@@ -5825,6 +6062,96 @@ export default function EditorScreen() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // #183: keyboard activation for checkboxes and form controls. When the
+  // active cell hosts a control:
+  //   - checkbox:  Space toggles the boolean.
+  //   - radio:     Space / Enter selects this option.
+  //   - spin:      ArrowUp/Down step by ±step.
+  //   - scroll:    ArrowUp/Down step by ±step, PageUp/Down by ±page.
+  // We ignore the keystroke while a cell editor / dialog input is focused so
+  // typing into a cell still works. Mutations route through
+  // applyMutatedSnapshot for undo capture and respect sheet protection.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== " " && e.key !== "Enter" &&
+          e.key !== "ArrowUp" && e.key !== "ArrowDown" &&
+          e.key !== "PageUp" && e.key !== "PageDown") {
+        return;
+      }
+      // Skip when focus is in an editable field (cell editor, dialog input).
+      const active = document.activeElement;
+      if (
+        active &&
+        (active.tagName === "INPUT" ||
+          active.tagName === "TEXTAREA" ||
+          (active as HTMLElement).isContentEditable)
+      ) {
+        return;
+      }
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const sheet = workbook.getActiveSheet();
+      if (!sheet) return;
+      const subUnitId = sheet.getSheetId();
+      let row = -1;
+      let col = -1;
+      try {
+        const range = sheet.getSelection()?.getActiveRange();
+        if (range) {
+          row = range.getRow();
+          col = range.getColumn();
+        }
+      } catch {
+        return;
+      }
+      if (row < 0 || col < 0) return;
+      const snapshot = snapshotRef.current;
+
+      // Checkbox: Space toggles.
+      if (hasCheckbox(snapshot, subUnitId, row, col)) {
+        if (e.key !== " ") return;
+        if (isSheetProtectedInSnapshot(snapshot, subUnitId)) return;
+        e.preventDefault();
+        const result = toggleCheckboxInSnapshot(snapshot, subUnitId, row, col);
+        if (result.changed) {
+          applyMutatedSnapshot(JSON.stringify(result.snapshot));
+        }
+        return;
+      }
+
+      // Form controls.
+      const fc = getFormControlAt(snapshot, subUnitId, row, col);
+      if (!fc) return;
+      if (isSheetProtectedInSnapshot(snapshot, subUnitId)) return;
+      let result: ReturnType<typeof selectRadio> | null = null;
+      if (fc.kind === "radio") {
+        if (e.key !== " " && e.key !== "Enter") return;
+        result = selectRadio(snapshot, subUnitId, row, col);
+      } else {
+        // spin / scroll
+        if (e.key === "ArrowUp") {
+          result = stepControl(snapshot, subUnitId, row, col, 1, false);
+        } else if (e.key === "ArrowDown") {
+          result = stepControl(snapshot, subUnitId, row, col, -1, false);
+        } else if (e.key === "PageUp" && fc.kind === "scroll") {
+          result = stepControl(snapshot, subUnitId, row, col, 1, true);
+        } else if (e.key === "PageDown" && fc.kind === "scroll") {
+          result = stepControl(snapshot, subUnitId, row, col, -1, true);
+        } else {
+          return;
+        }
+      }
+      e.preventDefault();
+      if (result && result.changed) {
+        applyMutatedSnapshot(JSON.stringify(result.snapshot));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [applyMutatedSnapshot]);
+
   // #107: consume the coco:calc-recalc events. Calls Univer's facade calc()
   // when available (the public surface in 0.5.x exposes a workbook-level
   // calculate via formula plugin); best-effort otherwise.
@@ -6028,7 +6355,13 @@ export default function EditorScreen() {
                   patchSparklineRenders(
                     patchTableRenders(
                       patchSlicerFilters(
-                        patchOutlineRenders(patchHyperlinkRenders(JSON.parse(currentSnapshotJson))),
+                        patchFormControlRenders(
+                          patchCheckboxRenders(
+                            patchOutlineRenders(
+                              patchHyperlinkRenders(JSON.parse(currentSnapshotJson)),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -6330,6 +6663,48 @@ export default function EditorScreen() {
     const disposable = onCellClick.call(workbook, (cell) => {
       const { subUnitId, row, col } = cell.location ?? {};
       if (typeof subUnitId !== "string" || typeof row !== "number" || typeof col !== "number") {
+        return;
+      }
+      // #150: checkbox toggle takes priority over hyperlink follow. A cell
+      // can't sensibly be both. Honour sheet protection — the
+      // beforeCommandExecute guard would block the mutation anyway, but
+      // bailing here avoids a stale snapshot push.
+      if (hasCheckbox(snapshotRef.current, subUnitId, row, col)) {
+        if (isSheetProtectedInSnapshot(snapshotRef.current, subUnitId)) return;
+        const result = toggleCheckboxInSnapshot(
+          snapshotRef.current,
+          subUnitId,
+          row,
+          col,
+        );
+        if (!result.changed) return;
+        applyMutatedSnapshot(JSON.stringify(result.snapshot));
+        return;
+      }
+      // #183: form-control activation. Radio → select; spin → step +1;
+      // scroll → step +1 page. Click is the coarse interaction; the keyboard
+      // handler offers finer control (arrows / Space). Sheet protection blocks
+      // the mutation just like the checkbox path.
+      const fc = getFormControlAt(snapshotRef.current, subUnitId, row, col);
+      if (fc) {
+        if (isSheetProtectedInSnapshot(snapshotRef.current, subUnitId)) return;
+        let result;
+        if (fc.kind === "radio") {
+          result = selectRadio(snapshotRef.current, subUnitId, row, col);
+        } else {
+          // Spin steps by one; scroll bar steps by one page on a plain click.
+          result = stepControl(
+            snapshotRef.current,
+            subUnitId,
+            row,
+            col,
+            1,
+            fc.kind === "scroll",
+          );
+        }
+        if (result.changed) {
+          applyMutatedSnapshot(JSON.stringify(result.snapshot));
+        }
         return;
       }
       const entry = lookupHyperlink(snapshotRef.current, subUnitId, row, col);

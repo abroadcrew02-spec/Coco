@@ -129,6 +129,11 @@ pub fn run() {
                 .text("insert-function", "関数の挿入...\tShift+F3")
                 .text("insert-symbol", "記号 / シンボル...")
                 .text("insert-cell-link", "セルリンクの挿入...")
+                .separator()
+                .text("insert-checkbox", "チェックボックス")
+                .text("insert-radio-button", "ラジオボタン")
+                .text("insert-spin-button", "スピンボタン")
+                .text("insert-scroll-bar", "スクロールバー")
                 .build()?;
             let format_menu = SubmenuBuilder::new(app, "書式")
                 .text("format-number", "表示形式...")

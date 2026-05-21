@@ -36,11 +36,14 @@ import {
 export const COCO_INSERT_COMMENT_COMMAND_ID = "coco.command.insert-comment";
 export const COCO_INSERT_HYPERLINK_COMMAND_ID = "coco.command.insert-hyperlink";
 export const COCO_OPEN_NUMBER_FORMAT_COMMAND_ID = "coco.command.open-number-format";
+export const COCO_CAMERA_CAPTURE_COMMAND_ID = "coco.command.camera-capture";
 
 export interface CocoContextMenuCallbacks {
   openCommentDialog: () => void;
   openHyperlinkDialog: () => void;
   openNumberFormatDialog: () => void;
+  /** #184: snapshot the active selection into a live camera image. */
+  captureCamera: () => void;
 }
 
 // Build an ICommand that, when invoked, calls a React-side opener. We close
@@ -106,6 +109,15 @@ function numberFormatMenuItemFactory(): IMenuButtonItem {
   };
 }
 
+function cameraCaptureMenuItemFactory(): IMenuButtonItem {
+  return {
+    id: COCO_CAMERA_CAPTURE_COMMAND_ID,
+    type: MenuItemType.BUTTON,
+    title: "カメラ撮影",
+    tooltip: "選択範囲のスナップショット画像を作成 (ソース更新に追従)",
+  };
+}
+
 // Build the menu schema to merge. We pin all three under
 // ContextMenuPosition.MAIN_AREA → ContextMenuGroup.OTHERS so they appear
 // at the bottom of the right-click menu, after Univer's stock groups
@@ -126,6 +138,10 @@ export function buildCocoContextMenuSchema() {
         [COCO_OPEN_NUMBER_FORMAT_COMMAND_ID]: {
           order: 102,
           menuItemFactory: numberFormatMenuItemFactory,
+        },
+        [COCO_CAMERA_CAPTURE_COMMAND_ID]: {
+          order: 103,
+          menuItemFactory: cameraCaptureMenuItemFactory,
         },
       },
     },
@@ -158,6 +174,7 @@ export function registerCocoContextMenu(
   const commentRef = { current: callbacks.openCommentDialog };
   const hyperlinkRef = { current: callbacks.openHyperlinkDialog };
   const numFmtRef = { current: callbacks.openNumberFormatDialog };
+  const cameraRef = { current: callbacks.captureCamera };
 
   const disposables: IDisposable[] = [
     commandService.registerCommand(
@@ -168,6 +185,9 @@ export function registerCocoContextMenu(
     ),
     commandService.registerCommand(
       makeCommand(COCO_OPEN_NUMBER_FORMAT_COMMAND_ID, numFmtRef),
+    ),
+    commandService.registerCommand(
+      makeCommand(COCO_CAMERA_CAPTURE_COMMAND_ID, cameraRef),
     ),
   ];
 

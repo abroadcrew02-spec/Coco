@@ -420,7 +420,7 @@ import {
 } from "../hooks/useGlobalShortcuts";
 import { confirmDiscardIfUnsaved } from "../store/dirtyGuard";
 import { routeOpenPath } from "../store/pathRouter";
-import { registerSnapshotFlush } from "../store/snapshotSync";
+import { registerSnapshotFlush, carryForwardRootExtensions } from "../store/snapshotSync";
 import { timeAgoJa } from "./timeAgo";
 import {
   computeSnapshotStats,
@@ -444,6 +444,19 @@ import {
   colRowToA1,
   type ImagePreview,
 } from "../store/imagePreviews";
+import CameraLinksPanel from "./CameraLinksPanel";
+import {
+  listCameraLinks,
+  addCameraLink,
+  removeCameraLink,
+  updateCameraLinkRender,
+  isSourceResolvable,
+  generateCameraLinkId,
+  CAMERA_LINKS_MAX,
+  type CameraLink,
+} from "../store/cameraLinks";
+import { renderRangeToDataUrl } from "../store/cameraCanvas";
+import { rectToA1 } from "../store/cameraRender";
 import { validateMutation, extractCellWrites } from "../store/dataValidation";
 import { getLocale, subscribeLocale, t } from "../i18n/locale";
 import { swapUniverLocale } from "./univerLocaleSwap";
@@ -701,6 +714,8 @@ export default function EditorScreen() {
   const [chartsCanvasPanelOpen, setChartsCanvasPanelOpen] = useState(false);
   const [slicerDialogOpen, setSlicerDialogOpen] = useState(false);
   const [slicersPanelOpen, setSlicersPanelOpen] = useState(false);
+  // #184: camera-image (live range snapshot) panel visibility.
+  const [cameraPanelOpen, setCameraPanelOpen] = useState(false);
   const [quickAnalysisDialog, setQuickAnalysisDialog] = useState<{
     sheetId: string;
     range: string;
@@ -2372,6 +2387,150 @@ export default function EditorScreen() {
     },
     [applyMutatedSnapshot],
   );
+
+  // --- Camera (#184) ---------------------------------------------------------
+  // Snapshot the active selection into a "live" camera image: the source
+  // range is baked into a PNG data URL that re-renders when the source cells
+  // change. Univer 0.5.x has no in-grid overlay API so the images surface in
+  // CameraLinksPanel (sidebar) — see store/cameraLinks.ts.
+  const captureCamera = useCallback(() => {
+    const ready = getReadyWorkbook("カメラ撮影");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    const r = sheet.getSelection()?.getActiveRange();
+    if (!r) {
+      setEditorOperationError("カメラ撮影: セル範囲を選択してください");
+      return;
+    }
+    const startRow = r.getRow();
+    const startCol = r.getColumn();
+    const height = (r as unknown as { getHeight?: () => number }).getHeight?.() ?? 1;
+    const width = (r as unknown as { getWidth?: () => number }).getWidth?.() ?? 1;
+    const sourceRange = {
+      r1: startRow,
+      c1: startCol,
+      r2: startRow + Math.max(0, height - 1),
+      c2: startCol + Math.max(0, width - 1),
+    };
+    const snapJson = workbook.save() as unknown as Record<string, unknown>;
+    const snapStr = JSON.stringify(snapJson);
+
+    const links = listCameraLinks(snapJson);
+    if (links.length >= CAMERA_LINKS_MAX) {
+      setEditorOperationError(
+        `カメラ撮影: 1ブックあたり ${CAMERA_LINKS_MAX} 件までです`,
+      );
+      return;
+    }
+
+    const dataUrl = renderRangeToDataUrl(snapStr, sheetId, sourceRange);
+    if (dataUrl === null) {
+      setEditorOperationError("カメラ撮影: スナップショット画像の生成に失敗しました");
+      return;
+    }
+    // Default destination anchor: two columns to the right of the source so
+    // the snapshot doesn't overlap the range it mirrors.
+    const link: CameraLink = {
+      id: generateCameraLinkId(links),
+      sourceSheetId: sheetId,
+      sourceRange,
+      dstSheetId: sheetId,
+      dstAnchor: { row: sourceRange.r1, col: sourceRange.c2 + 2 },
+      dataUrl,
+      broken: false,
+      generatedAt: new Date().toISOString(),
+    };
+    const { snapshot: nextSnap, added } = addCameraLink(snapJson, link);
+    if (!added) {
+      setEditorOperationError(
+        `カメラ撮影: 1ブックあたり ${CAMERA_LINKS_MAX} 件までです`,
+      );
+      return;
+    }
+    setEditorOperationError(null);
+    applyMutatedSnapshot(JSON.stringify(nextSnap));
+    setCameraPanelOpen(true);
+  }, [getReadyWorkbook, applyMutatedSnapshot]);
+
+  const captureCameraRef = useRef<() => void>(() => {});
+  captureCameraRef.current = captureCamera;
+
+  // Delete a camera link by id.
+  const deleteCameraLink = useCallback(
+    (id: string) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as Record<string, unknown>;
+      applyMutatedSnapshot(JSON.stringify(removeCameraLink(fresh, id)));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // Live re-render: when the snapshot changes, re-bake every camera image
+  // whose source range may have moved/changed. Debounced 300ms so a burst of
+  // edits collapses into one re-render pass (issue perf budget). Broken links
+  // (source sheet deleted) get flagged for the #REF! placeholder. The render
+  // pass writes back via updateSnapshot directly (not applyMutatedSnapshot)
+  // so it doesn't pollute the Coco undo stack — it's a derived refresh, not a
+  // user action.
+  useEffect(() => {
+    if (!currentSnapshotJson) return;
+    let snapshot: Record<string, unknown>;
+    try {
+      snapshot = JSON.parse(currentSnapshotJson) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    const links = listCameraLinks(snapshot);
+    if (links.length === 0) return;
+
+    const timer = window.setTimeout(() => {
+      // Re-read the latest snapshot at fire time so we don't clobber edits
+      // made during the debounce window.
+      const latest = useWorkbookStore.getState().currentSnapshotJson;
+      if (!latest) return;
+      let live: Record<string, unknown>;
+      try {
+        live = JSON.parse(latest) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+      let mutated = false;
+      let working = live;
+      for (const link of listCameraLinks(live)) {
+        const resolvable = isSourceResolvable(
+          live as { sheets?: Record<string, unknown> },
+          link,
+        );
+        if (!resolvable) {
+          if (!link.broken || link.dataUrl !== "") {
+            working = updateCameraLinkRender(working, link.id, {
+              dataUrl: "",
+              broken: true,
+            });
+            mutated = true;
+          }
+          continue;
+        }
+        const fresh = renderRangeToDataUrl(latest, link.sourceSheetId, link.sourceRange);
+        if (fresh !== null && (fresh !== link.dataUrl || link.broken)) {
+          working = updateCameraLinkRender(working, link.id, {
+            dataUrl: fresh,
+            broken: false,
+          });
+          mutated = true;
+        }
+      }
+      if (mutated) {
+        updateSnapshot(JSON.stringify(working));
+      }
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [currentSnapshotJson, updateSnapshot]);
 
   // --- Quick Analysis --------------------------------------------------------
   const openQuickAnalysisDialog = useCallback(() => {
@@ -4448,6 +4607,29 @@ export default function EditorScreen() {
     }
   }, []);
 
+  // #184: jump the Univer selection to a camera link's source range / dst
+  // anchor when the user clicks an entry in CameraLinksPanel.
+  const jumpToCameraSource = useCallback(
+    (link: CameraLink) => {
+      jumpToA1OnSheet(link.sourceSheetId, rectToA1(link.sourceRange));
+    },
+    [jumpToA1OnSheet],
+  );
+  const jumpToCameraDest = useCallback(
+    (link: CameraLink) => {
+      jumpToA1OnSheet(
+        link.dstSheetId,
+        rectToA1({
+          r1: link.dstAnchor.row,
+          c1: link.dstAnchor.col,
+          r2: link.dstAnchor.row,
+          c2: link.dstAnchor.col,
+        }),
+      );
+    },
+    [jumpToA1OnSheet],
+  );
+
   // Jump the Univer selection to a commented cell when the user clicks an
   // entry in CommentIndicatorsPanel. Switches sheets first if needed, then
   // sets the active range to the target A1 cell. Best-effort — silent
@@ -5427,6 +5609,20 @@ export default function EditorScreen() {
       run: () => setSnapshotsOpen(true),
     },
     {
+      id: "insert.camera",
+      label: "カメラ撮影 (範囲のスナップショット画像)",
+      category: "挿入",
+      keywords: "camera snapshot picture range live image",
+      run: captureCamera,
+    },
+    {
+      id: "view.camera",
+      label: "カメラ画像パネル",
+      category: "表示",
+      keywords: "camera snapshot panel",
+      run: () => setCameraPanelOpen((v) => !v),
+    },
+    {
       id: "tools.macro",
       label: "マクロの記録 / 再生",
       category: "ツール",
@@ -5669,6 +5865,12 @@ export default function EditorScreen() {
         break;
       case "view-slicers-panel":
         setSlicersPanelOpen((v) => !v);
+        break;
+      case "insert-camera":
+        captureCamera();
+        break;
+      case "view-camera-panel":
+        setCameraPanelOpen((v) => !v);
         break;
       case "edit-quick-analysis":
         openQuickAnalysisDialog();
@@ -6403,6 +6605,7 @@ export default function EditorScreen() {
         openCommentDialog: () => openCommentDialogRef.current(),
         openHyperlinkDialog: () => openHyperlinkDialogRef.current(),
         openNumberFormatDialog: () => openNumberFormatDialogRef.current(),
+        captureCamera: () => captureCameraRef.current(),
       });
 
       // #179 (area C): rewrite Japanese function-name aliases (=合計(...) →
@@ -6450,7 +6653,15 @@ export default function EditorScreen() {
     const syncSnapshot = () => {
       const workbook = fUniver.getActiveWorkbook();
       if (!workbook) return;
-      updateSnapshot(JSON.stringify(workbook.save()));
+      // #184 C-1: `FWorkbook.save()` reconstructs the snapshot from Univer's
+      // internal models, so it drops Coco's workbook-root extension keys
+      // (`_cameraLinks`, `_scenarios`) that were written straight into the
+      // store via `applyMutatedSnapshot` without a Univer re-mount. Re-graft
+      // them from the prior store snapshot so a cell edit doesn't silently
+      // wipe the user's camera links / scenarios.
+      const fresh = JSON.stringify(workbook.save());
+      const prev = useWorkbookStore.getState().currentSnapshotJson;
+      updateSnapshot(carryForwardRootExtensions(fresh, prev));
     };
 
     const cancelPendingSnapshotSync = () => {
@@ -7047,6 +7258,15 @@ export default function EditorScreen() {
           images={imagePreviews}
           onSelect={jumpToImageCell}
         />
+        {cameraPanelOpen && currentSnapshotJson && (
+          <CameraLinksPanel
+            workbookSnapshotJson={currentSnapshotJson}
+            sheetNamesById={sheetNamesById}
+            onJumpToSource={jumpToCameraSource}
+            onJumpToDest={jumpToCameraDest}
+            onDelete={deleteCameraLink}
+          />
+        )}
         {tablesPanelOpen && (
           <TableInfoPanel
             workbookSnapshotJson={currentSnapshotJson ?? ""}

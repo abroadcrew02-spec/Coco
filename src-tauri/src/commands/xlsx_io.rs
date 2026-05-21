@@ -7104,7 +7104,8 @@ const COCO_EXTENSION_SHEET_FIELDS: &[(&str, &str)] = &[
 ];
 
 /// Workbook-root fields preserved as standalone JSON parts.
-const COCO_EXTENSION_ROOT_FIELDS: &[(&str, &str)] = &[("_scenarios", "scenarios")];
+const COCO_EXTENSION_ROOT_FIELDS: &[(&str, &str)] =
+    &[("_scenarios", "scenarios"), ("_cameraLinks", "cameraLinks")];
 
 /// Threaded-comments extra-field keys captured per cell inside `_comments[]`.
 const COCO_THREADED_COMMENT_KEYS: &[&str] = &[
@@ -7128,11 +7129,36 @@ fn coco_extension_label_ja(file_stem: &str) -> &'static str {
         "notes" => "シートメモ",
         "charts" => "Coco作成のチャート",
         "scenarios" => "シナリオ",
+        "cameraLinks" => "カメラ画像",
         "checkboxes" => "チェックボックス",
         "formControls" => "フォームコントロール",
         "threadedComments" => "コメント返信/解決状態",
         _ => "Coco拡張データ",
     }
+}
+
+/// #184 M-1: blank the `dataUrl` of every entry in a `_cameraLinks` array so
+/// the xlsx-bound bundle stays small. Each `dataUrl` is a baked PNG that the
+/// frontend regenerates from its source range on load; only the link metadata
+/// (id, ranges, anchors, broken flag) needs to survive the round trip.
+/// Non-array / non-object input is returned untouched.
+fn strip_camera_data_urls(val: &Value) -> Value {
+    let Some(arr) = val.as_array() else {
+        return val.clone();
+    };
+    let stripped: Vec<Value> = arr
+        .iter()
+        .map(|entry| {
+            let mut e = entry.clone();
+            if let Some(obj) = e.as_object_mut() {
+                if obj.contains_key("dataUrl") {
+                    obj.insert("dataUrl".to_string(), Value::String(String::new()));
+                }
+            }
+            e
+        })
+        .collect();
+    Value::Array(stripped)
 }
 
 /// Build the per-feature JSON bundles that must be written into the output
@@ -7179,7 +7205,18 @@ fn build_coco_extension_bundles(
     for (snap_key, file_stem) in COCO_EXTENSION_ROOT_FIELDS {
         if let Some(val) = snapshot.get(*snap_key) {
             if !val.is_null() {
-                if let Ok(bytes) = serde_json::to_vec(val) {
+                // #184 M-1: a camera link's `dataUrl` is a baked PNG (base64,
+                // up to a few hundred KB) — persisting all 50 into the xlsx
+                // would bloat the file by tens of MB. Strip every `dataUrl`
+                // before serializing; the frontend's live re-render effect
+                // re-bakes them from the source range after load. .coco saves
+                // (SQLite) keep the dataUrl since size pressure there is lower.
+                let payload = if *file_stem == "cameraLinks" {
+                    strip_camera_data_urls(val)
+                } else {
+                    val.clone()
+                };
+                if let Ok(bytes) = serde_json::to_vec(&payload) {
                     bundles.insert(
                         format!("xl/cocoExtensions/{file_stem}.json"),
                         bytes,
@@ -7505,5 +7542,41 @@ fn merge_coco_extensions_into_snapshot(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod camera_link_tests {
+    use super::strip_camera_data_urls;
+    use serde_json::json;
+
+    #[test]
+    fn blanks_data_url_on_every_link() {
+        let input = json!([
+            { "id": "camera-1", "dataUrl": "data:image/png;base64,AAAA", "broken": false },
+            { "id": "camera-2", "dataUrl": "data:image/png;base64,BBBB", "broken": true },
+        ]);
+        let out = strip_camera_data_urls(&input);
+        let arr = out.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        for entry in arr {
+            assert_eq!(entry.get("dataUrl").unwrap().as_str().unwrap(), "");
+        }
+        // Non-dataUrl metadata survives untouched.
+        assert_eq!(arr[0].get("id").unwrap(), "camera-1");
+        assert_eq!(arr[1].get("broken").unwrap(), &json!(true));
+    }
+
+    #[test]
+    fn leaves_links_without_data_url_alone() {
+        let input = json!([{ "id": "camera-1", "broken": false }]);
+        let out = strip_camera_data_urls(&input);
+        assert!(out.as_array().unwrap()[0].get("dataUrl").is_none());
+    }
+
+    #[test]
+    fn passes_non_array_through_unchanged() {
+        let input = json!({ "not": "an array" });
+        assert_eq!(strip_camera_data_urls(&input), input);
     }
 }

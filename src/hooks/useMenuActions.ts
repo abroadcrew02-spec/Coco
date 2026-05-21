@@ -45,6 +45,8 @@ const EDITOR_COMMAND_IDS = new Set([
   "view-charts-canvas-panel",
   "insert-slicer",
   "view-slicers-panel",
+  "insert-camera",
+  "view-camera-panel",
   "edit-quick-analysis",
   "view-trace-panel",
   "sheet-hide-active",

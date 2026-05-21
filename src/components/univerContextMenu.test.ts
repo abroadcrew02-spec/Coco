@@ -28,6 +28,7 @@ import {
   COCO_INSERT_COMMENT_COMMAND_ID,
   COCO_INSERT_HYPERLINK_COMMAND_ID,
   COCO_OPEN_NUMBER_FORMAT_COMMAND_ID,
+  COCO_CAMERA_CAPTURE_COMMAND_ID,
 } from "./univerContextMenu";
 
 interface MergedSchemaCall {
@@ -82,12 +83,13 @@ describe("buildCocoContextMenuSchema", () => {
   const others =
     schema[ContextMenuPosition.MAIN_AREA][ContextMenuGroup.OTHERS];
 
-  it("places three entries under MAIN_AREA → OTHERS", () => {
+  it("places four entries under MAIN_AREA → OTHERS", () => {
     const ids = Object.keys(others);
     expect(ids).toEqual([
       COCO_INSERT_COMMENT_COMMAND_ID,
       COCO_INSERT_HYPERLINK_COMMAND_ID,
       COCO_OPEN_NUMBER_FORMAT_COMMAND_ID,
+      COCO_CAMERA_CAPTURE_COMMAND_ID,
     ]);
   });
 
@@ -95,6 +97,7 @@ describe("buildCocoContextMenuSchema", () => {
     expect(others[COCO_INSERT_COMMENT_COMMAND_ID].order).toBe(100);
     expect(others[COCO_INSERT_HYPERLINK_COMMAND_ID].order).toBe(101);
     expect(others[COCO_OPEN_NUMBER_FORMAT_COMMAND_ID].order).toBe(102);
+    expect(others[COCO_CAMERA_CAPTURE_COMMAND_ID].order).toBe(103);
   });
 
   it("produces BUTTON menu items with JA titles", () => {
@@ -110,6 +113,10 @@ describe("buildCocoContextMenuSchema", () => {
       others[COCO_OPEN_NUMBER_FORMAT_COMMAND_ID].menuItemFactory();
     expect(numFmt.type).toBe(MenuItemType.BUTTON);
     expect(numFmt.title).toBe("表示形式...");
+
+    const camera = others[COCO_CAMERA_CAPTURE_COMMAND_ID].menuItemFactory();
+    expect(camera.type).toBe(MenuItemType.BUTTON);
+    expect(camera.title).toBe("カメラ撮影");
   });
 
   it("aligns menu item ids with command ids so dispatch resolves", () => {
@@ -124,16 +131,20 @@ describe("buildCocoContextMenuSchema", () => {
     expect(
       others[COCO_OPEN_NUMBER_FORMAT_COMMAND_ID].menuItemFactory().id,
     ).toBe(COCO_OPEN_NUMBER_FORMAT_COMMAND_ID);
+    expect(
+      others[COCO_CAMERA_CAPTURE_COMMAND_ID].menuItemFactory().id,
+    ).toBe(COCO_CAMERA_CAPTURE_COMMAND_ID);
   });
 });
 
 describe("registerCocoContextMenu", () => {
-  it("registers three OPERATION commands and merges the schema once", () => {
+  it("registers four OPERATION commands and merges the schema once", () => {
     const { univer, commands, merged } = makeFakeUniver();
     const cb = {
       openCommentDialog: vi.fn(),
       openHyperlinkDialog: vi.fn(),
       openNumberFormatDialog: vi.fn(),
+      captureCamera: vi.fn(),
     };
 
     registerCocoContextMenu(univer, cb);
@@ -142,6 +153,7 @@ describe("registerCocoContextMenu", () => {
       COCO_INSERT_COMMENT_COMMAND_ID,
       COCO_INSERT_HYPERLINK_COMMAND_ID,
       COCO_OPEN_NUMBER_FORMAT_COMMAND_ID,
+      COCO_CAMERA_CAPTURE_COMMAND_ID,
     ]);
     expect(merged).toHaveLength(1);
   });
@@ -152,6 +164,7 @@ describe("registerCocoContextMenu", () => {
       openCommentDialog: vi.fn(),
       openHyperlinkDialog: vi.fn(),
       openNumberFormatDialog: vi.fn(),
+      captureCamera: vi.fn(),
     };
     registerCocoContextMenu(univer, cb);
 
@@ -164,10 +177,12 @@ describe("registerCocoContextMenu", () => {
     byId.get(COCO_INSERT_COMMENT_COMMAND_ID)!.handler(stubAccessor);
     byId.get(COCO_INSERT_HYPERLINK_COMMAND_ID)!.handler(stubAccessor);
     byId.get(COCO_OPEN_NUMBER_FORMAT_COMMAND_ID)!.handler(stubAccessor);
+    byId.get(COCO_CAMERA_CAPTURE_COMMAND_ID)!.handler(stubAccessor);
 
     expect(cb.openCommentDialog).toHaveBeenCalledTimes(1);
     expect(cb.openHyperlinkDialog).toHaveBeenCalledTimes(1);
     expect(cb.openNumberFormatDialog).toHaveBeenCalledTimes(1);
+    expect(cb.captureCamera).toHaveBeenCalledTimes(1);
   });
 
   it("swallows handler errors so a thrown opener doesn't poison Univer's command service", () => {
@@ -179,6 +194,7 @@ describe("registerCocoContextMenu", () => {
       },
       openHyperlinkDialog: vi.fn(),
       openNumberFormatDialog: vi.fn(),
+      captureCamera: vi.fn(),
     };
     registerCocoContextMenu(univer, cb);
 
@@ -191,12 +207,13 @@ describe("registerCocoContextMenu", () => {
     consoleErr.mockRestore();
   });
 
-  it("disposes the three command registrations on teardown", () => {
+  it("disposes the four command registrations on teardown", () => {
     const { univer, disposed } = makeFakeUniver();
     const cb = {
       openCommentDialog: vi.fn(),
       openHyperlinkDialog: vi.fn(),
       openNumberFormatDialog: vi.fn(),
+      captureCamera: vi.fn(),
     };
     const reg = registerCocoContextMenu(univer, cb);
     expect(disposed).toEqual([]);
@@ -207,6 +224,7 @@ describe("registerCocoContextMenu", () => {
       COCO_INSERT_COMMENT_COMMAND_ID,
       COCO_INSERT_HYPERLINK_COMMAND_ID,
       COCO_OPEN_NUMBER_FORMAT_COMMAND_ID,
+      COCO_CAMERA_CAPTURE_COMMAND_ID,
     ]);
   });
 });

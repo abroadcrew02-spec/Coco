@@ -127,7 +127,10 @@ describe("EditorScreen Univer plugin wiring", () => {
       /markDirty\(\);\s*cancelPendingSnapshotSync\(\);\s*debounceTimer = setTimeout\(\(\) => \{\s*debounceTimer = null;\s*scheduleSnapshotSync\(\);\s*\}, 300\);/,
     );
     expect(mutationSnapshotSyncSource.match(/cancelPendingSnapshotSync\(\);/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
-    expect(mutationSnapshotSyncSource).toMatch(/updateSnapshot\(JSON\.stringify\(workbook\.save\(\)\)\)/);
+    // #184 C-1: syncSnapshot re-grafts Coco's workbook-root extension keys
+    // (`_cameraLinks`, `_scenarios`) that `workbook.save()` drops, so a cell
+    // edit can't silently wipe the user's camera links / scenarios.
+    expect(mutationSnapshotSyncSource).toMatch(/updateSnapshot\(carryForwardRootExtensions\(fresh, prev\)\)/);
     // #87: when the workbook is too large for the fast path, we still
     // schedule a longer-leash sync (instead of returning indefinitely) so
     // protection / data-validation guards eventually see fresh state.
@@ -136,7 +139,7 @@ describe("EditorScreen Univer plugin wiring", () => {
   });
 
   it("registers a synchronous snapshot flush for immediate save/close flows", () => {
-    expect(editorSource).toMatch(/import \{ registerSnapshotFlush \} from "\.\.\/store\/snapshotSync"/);
+    expect(editorSource).toMatch(/import \{ registerSnapshotFlush, carryForwardRootExtensions \} from "\.\.\/store\/snapshotSync"/);
     expect(mutationSnapshotSyncSource).toMatch(/const unregisterSnapshotFlush = registerSnapshotFlush\(\(\) => \{/);
     expect(mutationSnapshotSyncSource).toMatch(
       /registerSnapshotFlush\(\(\) => \{\s*cancelPendingSnapshotSync\(\);\s*syncSnapshot\(\);\s*\}\)/,

@@ -1,0 +1,51 @@
+/* Formula bar — issue #198. Theme-token driven (#191). */
+
+.formula-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  flex-shrink: 0;
+  background-color: var(--coco-bg-elevated);
+  border-bottom: 1px solid var(--coco-border);
+  padding: 2px 6px;
+  min-height: 28px;
+}
+
+.formula-bar__namebox {
+  display: flex;
+  align-items: center;
+  min-width: 120px;
+  flex-shrink: 0;
+}
+
+.formula-bar__fx {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-style: italic;
+  font-size: 13px;
+  color: var(--coco-text-muted);
+  border-left: 1px solid var(--coco-border);
+  border-right: 1px solid var(--coco-border);
+  margin: 0 6px;
+}
+
+.formula-bar__input {
+  flex: 1 1 auto;
+  appearance: none;
+  border: 1px solid var(--coco-border-strong);
+  border-radius: 3px;
+  background-color: var(--coco-bg-elevated);
+  color: var(--coco-text);
+  font-size: 13px;
+  font-family: "Consolas", "Courier New", monospace;
+  padding: 2px 8px;
+}
+
+.formula-bar__input:focus {
+  border-color: var(--coco-accent);
+}
+
+.formula-bar__input::placeholder {
+  color: var(--coco-text-faint);
+}

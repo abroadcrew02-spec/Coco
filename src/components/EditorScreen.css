@@ -348,3 +348,22 @@
   margin-left: auto;
   padding-left: 12px;
 }
+
+/* #198: hide Univer's built-in toolbar — Coco's own ribbon replaces it.
+ * We hide only `.univer-toolbar-container` (not the whole header) so the
+ * grid and other header chrome Univer renders are unaffected; passing
+ * `header: false` to UniverUIPlugin would also remove the grid header. */
+.univer-toolbar-container {
+  display: none !important;
+}
+
+/* #198: hide Univer's built-in formula bar — Coco's `ribbon/FormulaBar.tsx`
+ * replaces it, so leaving Univer's would double-render the bar.
+ * `.univer-formula-box` is the outermost wrapper rendered by @univerjs/sheets-ui
+ * (contains `.univer-name-ranges` + `.univer-formula-bar`). Hiding it does NOT
+ * affect inline cell editing: that editor is mounted separately by
+ * `cellEditorManagerService` into `.univer-editor-container` /
+ * `.univer-sheet-embedding-formula-editor-wrap`, not inside `.univer-formula-box`. */
+.univer-formula-box {
+  display: none !important;
+}

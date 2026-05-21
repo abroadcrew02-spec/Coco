@@ -6,7 +6,9 @@ import { confirmDiscardIfUnsaved } from "../store/dirtyGuard";
 import { routeOpenPath } from "../store/pathRouter";
 import { requestHelp, requestSettings } from "./useGlobalShortcuts";
 
-const EDITOR_COMMAND_IDS = new Set([
+// Exported so the ribbon's command-id integrity test (#198) can assert that
+// every `editorCommand` button in ribbonDefs targets a dispatchable id.
+export const EDITOR_COMMAND_IDS = new Set([
   "edit-command-palette",
   "view-snapshots",
   "insert-hyperlink",

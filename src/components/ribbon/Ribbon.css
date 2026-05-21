@@ -1,0 +1,132 @@
+/* Excel-like ribbon — issue #198.
+ *
+ * All colors use the `--coco-*` theme tokens (issue #191) so the ribbon
+ * follows light / dark automatically. Layout is two stacked rows: a tab
+ * strip and the active tab's panel of grouped buttons.
+ */
+
+.ribbon {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  background-color: var(--coco-bg-elevated);
+  border-bottom: 1px solid var(--coco-border);
+}
+
+/* --- Tab strip ------------------------------------------------------------ */
+.ribbon__tablist {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 2px 6px 0;
+  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--coco-border);
+}
+
+.ribbon__tab {
+  appearance: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: transparent;
+  color: var(--coco-text-muted);
+  font-size: 13px;
+  padding: 6px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ribbon__tab:hover {
+  background-color: var(--coco-surface-hover);
+  color: var(--coco-text);
+}
+
+.ribbon__tab--active {
+  background-color: var(--coco-bg-elevated);
+  color: var(--coco-accent);
+  font-weight: 600;
+  border-color: var(--coco-border);
+}
+
+/* --- Panel ---------------------------------------------------------------- */
+.ribbon__panel {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 4px 6px;
+  overflow-x: auto;
+  min-height: 78px;
+}
+
+.ribbon__group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2px 8px;
+  border-right: 1px solid var(--coco-border);
+}
+
+.ribbon__group:last-child {
+  border-right: none;
+}
+
+.ribbon__group-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 2px;
+  flex: 1 1 auto;
+  max-width: 260px;
+}
+
+.ribbon__group-label {
+  font-size: 10px;
+  color: var(--coco-text-faint);
+  text-align: center;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+/* --- Buttons -------------------------------------------------------------- */
+.ribbon-btn {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  width: 58px;
+  min-height: 52px;
+  padding: 4px 2px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--coco-text);
+  cursor: pointer;
+}
+
+.ribbon-btn:hover {
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-border);
+}
+
+.ribbon-btn:active {
+  background-color: var(--coco-accent-subtle);
+}
+
+.ribbon-btn__icon {
+  font-size: 16px;
+  line-height: 1.2;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ribbon-btn__label {
+  font-size: 10px;
+  line-height: 1.15;
+  text-align: center;
+  word-break: break-word;
+  hyphens: auto;
+}

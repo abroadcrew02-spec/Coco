@@ -308,6 +308,8 @@ import BulkCleanDialog from "./BulkCleanDialog";
 import { applyBulkClean, type BulkCleanParams } from "../store/bulkClean";
 import CsvImportWizardDialog from "./CsvImportWizardDialog";
 import NavigationBox, { type NavigationTarget } from "./NavigationBox";
+import Ribbon from "./ribbon/Ribbon";
+import FormulaBar from "./ribbon/FormulaBar";
 import { resolveNamedRange as resolveNavNamed } from "../store/navigationBox";
 import SheetImportDialog from "./SheetImportDialog";
 import { addImportedSheetToSnapshot } from "../store/sheetImport";
@@ -541,6 +543,32 @@ const EDITOR_NOT_READY_MESSAGE =
   "エディタを初期化中です。少し待ってからもう一度実行してください。";
 const SNAPSHOT_UNAVAILABLE_MESSAGE =
   "ワークブックの内容を取得できませんでした。ホームへ戻って、もう一度開き直してください。";
+
+// #198: derive the next number-format code for the ribbon's comma / decimal
+// buttons. `prev` is the cell's current `_fmt`; the result is written back to
+// `_fmt`. Kept module-level + pure so it's trivially unit-testable.
+//   commaStyle      — toggle a thousands-separator integer format.
+//   increaseDecimal — append one fractional digit.
+//   decreaseDecimal — remove one fractional digit (floors at zero).
+function nextNumberFormatCode(
+  op: "commaStyle" | "increaseDecimal" | "decreaseDecimal",
+  prev: string,
+): string {
+  // Count trailing decimal digits in the existing pattern (the `0`s after a
+  // literal dot). Defaults to 0 when there's no recognizable pattern.
+  const decimalMatch = /\.(0+)/.exec(prev);
+  const decimals = decimalMatch ? decimalMatch[1].length : 0;
+  const hasComma = prev.includes(",");
+  if (op === "commaStyle") {
+    // Toggle: if it's already a comma format, fall back to General.
+    if (hasComma) return "";
+    return decimals > 0 ? `#,##0.${"0".repeat(decimals)}` : "#,##0";
+  }
+  const nextDecimals =
+    op === "increaseDecimal" ? decimals + 1 : Math.max(0, decimals - 1);
+  const intPart = hasComma ? "#,##0" : "0";
+  return nextDecimals > 0 ? `${intPart}.${"0".repeat(nextDecimals)}` : intPart;
+}
 
 export default function EditorScreen() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -856,6 +884,9 @@ export default function EditorScreen() {
   // Univer 0.5.x's selection observable API isn't stable.
   const [navActiveSheetName, setNavActiveSheetName] = useState("Sheet1");
   const [navActiveCellRef, setNavActiveCellRef] = useState("A1");
+  // #198: text shown in the ribbon's formula bar — the active cell's formula
+  // (preferred) or its literal value. Refreshed by the same 300ms poll.
+  const [formulaBarText, setFormulaBarText] = useState("");
   // #146 / #188: track the active sheet id so the TextBoxesPanel can filter to
   // the current sheet. Same 300ms-poll cadence as navActiveSheetName above.
   const [activeSheetId, setActiveSheetId] = useState<string | null>(null);
@@ -4625,6 +4656,211 @@ export default function EditorScreen() {
     [currentSnapshotJson, readNamedRanges, goToJump],
   );
 
+  // #198: commit a value/formula typed into the ribbon's formula bar to the
+  // active cell. Routes through FRange.setValue so Univer's formula engine
+  // and undo stack handle it (matches insert-symbol / insert-function paths).
+  const handleFormulaBarCommit = useCallback(
+    (value: string) => {
+      const ready = getReadyWorkbook("数式バー");
+      if (!ready) return;
+      const sheet = ready.workbook.getActiveSheet();
+      if (!sheet) return;
+      try {
+        const range = sheet.getSelection()?.getActiveRange();
+        if (!range) return;
+        const a1 = range.getA1Notation();
+        const topLeft = a1.includes(":") ? a1.split(":")[0] : a1;
+        sheet.getRange(topLeft)?.setValue(value);
+      } catch {
+        // best-effort
+      }
+    },
+    [getReadyWorkbook],
+  );
+
+  // #198: dispatch a Univer-native ribbon operation. Font / alignment / merge
+  // ops call the FRange facade directly on the live workbook (Univer routes
+  // these through its command stack, so undo/redo and re-render Just Work).
+  // Toggle buttons read the current cell style first so a second click clears.
+  // Number-format ops (comma / decimal) take the snapshot `_fmt` path because
+  // Coco doesn't register the optional @univerjs/sheets-numfmt facade.
+  const handleUniverAction = useCallback(
+    (op: import("./ribbon/ribbonDefs").UniverActionId) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+
+      // Workbook-level ops first — no range needed.
+      if (op === "undo") {
+        try {
+          workbook.undo();
+        } catch {
+          /* best-effort */
+        }
+        return;
+      }
+      if (op === "redo") {
+        try {
+          workbook.redo();
+        } catch {
+          /* best-effort */
+        }
+        return;
+      }
+      if (op === "copy") {
+        // Univer owns the clipboard; re-dispatch the browser copy command so
+        // the active selection is copied through Univer's clipboard service.
+        try {
+          document.execCommand("copy");
+        } catch {
+          /* best-effort */
+        }
+        return;
+      }
+      if (op === "paste") {
+        try {
+          document.execCommand("paste");
+        } catch {
+          /* best-effort */
+        }
+        return;
+      }
+
+      const sheet = workbook.getActiveSheet();
+      if (!sheet) return;
+      let range;
+      try {
+        range = sheet.getSelection()?.getActiveRange();
+      } catch {
+        range = null;
+      }
+      if (!range) return;
+
+      try {
+        switch (op) {
+          case "bold": {
+            const cur = range.getCellStyle();
+            const isBold = !!cur && (cur as { bl?: number }).bl === 1;
+            range.setFontWeight(isBold ? "normal" : "bold");
+            break;
+          }
+          case "italic": {
+            const cur = range.getCellStyle();
+            const isItalic = !!cur && (cur as { it?: number }).it === 1;
+            range.setFontStyle(isItalic ? "normal" : "italic");
+            break;
+          }
+          case "underline": {
+            const cur = range.getCellStyle() as { ul?: { s?: number } } | null;
+            const isUnderlined = !!cur && cur.ul?.s === 1;
+            range.setFontLine(isUnderlined ? "none" : "underline");
+            break;
+          }
+          case "fontColor": {
+            const color = window.prompt(
+              t("ribbon.btn.fontColor"),
+              "#000000",
+            );
+            if (color && color.trim()) range.setFontColor(color.trim());
+            break;
+          }
+          case "fillColor": {
+            const color = window.prompt(
+              t("ribbon.btn.fillColor"),
+              "#ffff00",
+            );
+            if (color && color.trim()) range.setBackground(color.trim());
+            break;
+          }
+          case "alignLeft":
+            range.setHorizontalAlignment("left");
+            break;
+          case "alignCenter":
+            range.setHorizontalAlignment("center");
+            break;
+          case "alignRight":
+            // Univer 0.5.x's facade types FHorizontalAlignment as
+            // 'left' | 'center' | 'normal' and omits 'right', but the
+            // underlying SetHorizontalTextAlignCommand accepts it (the core
+            // HorizontalAlign enum has RIGHT=3). Cast through the parameter
+            // type so the legitimate value compiles.
+            (
+              range.setHorizontalAlignment as (a: string) => unknown
+            )("right");
+            break;
+          case "alignTop":
+            range.setVerticalAlignment("top");
+            break;
+          case "alignMiddle":
+            range.setVerticalAlignment("middle");
+            break;
+          case "alignBottom":
+            range.setVerticalAlignment("bottom");
+            break;
+          case "wrapText": {
+            const wrapped = range.getWrap();
+            range.setWrap(!wrapped);
+            break;
+          }
+          case "mergeCells":
+            range.merge();
+            break;
+          case "unmergeCells":
+            range.breakApart();
+            break;
+          case "commaStyle":
+          case "increaseDecimal":
+          case "decreaseDecimal": {
+            // Number-format ops walk the snapshot `_fmt` field directly —
+            // Coco doesn't register @univerjs/sheets-numfmt, and xlsx_io.rs
+            // keys the round-trip off per-cell `_fmt` (see applyNumberFormat).
+            const sheetId = sheet.getSheetId();
+            const sr = range.getRow();
+            const sc = range.getColumn();
+            const h =
+              (range as unknown as { getHeight?: () => number }).getHeight?.() ?? 1;
+            const w =
+              (range as unknown as { getWidth?: () => number }).getWidth?.() ?? 1;
+            const snapshot = workbook.save() as unknown as {
+              sheets?: Record<
+                string,
+                {
+                  cellData?: Record<
+                    string,
+                    Record<string, Record<string, unknown> | undefined>
+                  >;
+                }
+              >;
+            };
+            const sheetObj = snapshot.sheets?.[sheetId];
+            if (!sheetObj) break;
+            if (!sheetObj.cellData) sheetObj.cellData = {};
+            const cellData = sheetObj.cellData;
+            for (let r = sr; r < sr + h; r++) {
+              const rowKey = String(r);
+              if (!cellData[rowKey]) cellData[rowKey] = {};
+              const row = cellData[rowKey];
+              for (let c = sc; c < sc + w; c++) {
+                const colKey = String(c);
+                const cell = row[colKey] ?? {};
+                const prev = typeof cell._fmt === "string" ? cell._fmt : "";
+                cell._fmt = nextNumberFormatCode(op, prev);
+                row[colKey] = cell;
+              }
+            }
+            applyMutatedSnapshot(JSON.stringify(snapshot));
+            break;
+          }
+        }
+      } catch {
+        // best-effort — Univer throws on a few edge selections (e.g. merged
+        // overlap); swallow so a bad click never crashes the editor.
+      }
+    },
+    [applyMutatedSnapshot],
+  );
+
   // --- Wave 10: Insert Symbol / Sheet Notes / Image Manager / Templates / Snapshot Controls ---
   const openInsertSymbolDialog = useCallback(() => {
     const ready = getReadyWorkbook("記号の挿入");
@@ -6935,6 +7171,21 @@ export default function EditorScreen() {
           }
           setNavActiveCellRef(`${cellA1}:${endCellLetters}${endRow + 1}`);
         }
+        // #198: feed the formula bar — show the formula if the active cell
+        // has one, otherwise its literal value. Read from the top-left cell.
+        try {
+          const cell = sheet.getRange(startRow, startCol);
+          const formulas = cell.getFormulas();
+          const f = formulas?.[0]?.[0];
+          if (typeof f === "string" && f.length > 0) {
+            setFormulaBarText(f);
+          } else {
+            const v = cell.getValue();
+            setFormulaBarText(v === null || v === undefined ? "" : String(v));
+          }
+        } catch {
+          // best-effort
+        }
       } catch {
         // best-effort
       }
@@ -8020,16 +8271,23 @@ export default function EditorScreen() {
           >
             {fileLabel}
           </span>
-          {/* Excel-like Name Box: persistent toolbar widget for cell/range/
-              named-range navigation (Ctrl+G modal still available as fallback). */}
-          <NavigationBox
-            activeSheetName={navActiveSheetName}
-            activeCellRef={navActiveCellRef}
-            availableNamedRanges={readNamedRanges().map((r) => ({ name: r.name, target: r.formula }))}
-            onNavigate={handleGoToNavigate}
-          />
         </div>
       </div>
+      {/* #198: Excel-like ribbon — replaces the flat toolbar's per-feature
+          buttons. The native menu bar (src-tauri) stays as a parallel surface.
+          The Name Box lives in the formula bar below. */}
+      <Ribbon onUniverAction={handleUniverAction} />
+      <FormulaBar
+        activeSheetName={navActiveSheetName}
+        activeCellRef={navActiveCellRef}
+        availableNamedRanges={readNamedRanges().map((r) => ({
+          name: r.name,
+          target: r.formula,
+        }))}
+        onNavigate={handleGoToNavigate}
+        cellText={formulaBarText}
+        onCommit={handleFormulaBarCommit}
+      />
       {sheetPicker && (
         <SheetPickerModal
           sheets={sheetPicker.map((s) => s.name)}

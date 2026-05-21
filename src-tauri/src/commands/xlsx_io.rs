@@ -5638,6 +5638,21 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                                     .write_formula(row_idx, col_idx, f)
                                     .map_err(|e| e.to_string())?;
                             }
+                            // #176: rust_xlsxwriter stores 0 as every formula's
+                            // result and flags the file for full recalc on open.
+                            // For an external-book reference (`=[Book]Sheet!A1`)
+                            // that's lossy: Univer cannot recompute it (single-
+                            // workbook editor — the referenced unit is never
+                            // loaded), so the imported cached value is the only
+                            // thing the user can see. Re-emit that cached value
+                            // as the formula result so the closed-book fallback
+                            // survives the round-trip. Normal formulas are left
+                            // alone — Univer recalculates them at render time.
+                            if formula_is_external_ref(f) {
+                                if let Some(result) = cached_formula_result(cell_val) {
+                                    worksheet.set_formula_result(row_idx, col_idx, result);
+                                }
+                            }
                             formula_count += 1;
                             cell_count += 1;
                             if cell_count > MAX_EXPORT_CELLS {
@@ -6179,6 +6194,54 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
 //     `<externalReferences>` block spliced back in. Per req 5.3.2, cached
 //     values survive but Coco never auto-fetches the external workbook.
 // ============================================================================
+
+/// True when a formula string is an external-book reference, i.e. it carries
+/// an OOXML `[index]` / `[Book.xlsx]` workbook bracket before a sheet name —
+/// `=[1]Sheet1!A1`, `='[1]Sheet 1'!A1`, `=SUM([2]Data!B2:B9)`. Univer's
+/// formula engine cannot evaluate these in Coco (single-workbook editor — the
+/// referenced unit is never loaded), so on export their imported cached value
+/// must be re-emitted as the formula result (#176).
+///
+/// The check is intentionally conservative: a `[` that is not a workbook
+/// bracket (e.g. a structured table reference `Table1[Col]`) is not followed
+/// by a sheet-name `!`, so the `]` ... `!` ordering test rejects it.
+pub(crate) fn formula_is_external_ref(formula: &str) -> bool {
+    let mut search_from = 0;
+    while let Some(open_rel) = formula[search_from..].find('[') {
+        let open = search_from + open_rel;
+        let Some(close_rel) = formula[open + 1..].find(']') else {
+            return false;
+        };
+        let close = open + 1 + close_rel;
+        // A workbook bracket is immediately followed by the sheet portion of
+        // the reference, which always contains a `!`. A structured table
+        // reference like `Table1[Column]` has no `!` after the `]` before the
+        // next bracket / end, so it is correctly rejected.
+        if let Some(bang_rel) = formula[close + 1..].find('!') {
+            // Reject if another `[` sits between `]` and `!` — that would mean
+            // the `!` belongs to a later, unrelated reference.
+            let between = &formula[close + 1..close + 1 + bang_rel];
+            if !between.contains('[') {
+                return true;
+            }
+        }
+        search_from = close + 1;
+    }
+    false
+}
+
+/// Stringify a formula cell's cached value (`v`) for `set_formula_result`.
+/// Returns `None` when the cell has no usable cached value (so the export
+/// path leaves rust_xlsxwriter's default `0` result untouched). Errors (`t:"e"`
+/// with a null `v`) round-trip the stored error literal when present.
+pub(crate) fn cached_formula_result(cell: &Value) -> Option<String> {
+    match cell.get("v") {
+        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+        Some(Value::Number(n)) => Some(n.to_string()),
+        Some(Value::Bool(b)) => Some(if *b { "TRUE".into() } else { "FALSE".into() }),
+        _ => None,
+    }
+}
 
 const PRESERVED_PART_SIZE_CAP: usize = 16 * 1024 * 1024;
 const PRESERVED_TOTAL_SIZE_CAP: usize = 32 * 1024 * 1024;
@@ -7578,5 +7641,58 @@ mod camera_link_tests {
     fn passes_non_array_through_unchanged() {
         let input = json!({ "not": "an array" });
         assert_eq!(strip_camera_data_urls(&input), input);
+    }
+}
+
+#[cfg(test)]
+mod external_ref_tests {
+    use super::{cached_formula_result, formula_is_external_ref};
+    use serde_json::json;
+
+    #[test]
+    fn detects_external_book_references() {
+        assert!(formula_is_external_ref("=[1]Sheet1!A1"));
+        assert!(formula_is_external_ref("=[Other.xlsx]Sheet1!A1"));
+        assert!(formula_is_external_ref("='[1]Sheet 1'!A1"));
+        assert!(formula_is_external_ref("=SUM([2]Data!B2:B9)"));
+        assert!(formula_is_external_ref("=[1]Sheet1!A1+[1]Sheet1!A2"));
+    }
+
+    #[test]
+    fn rejects_non_external_formulas() {
+        assert!(!formula_is_external_ref("=SUM(A1:A10)"));
+        assert!(!formula_is_external_ref("=Sheet2!A1"));
+        // Structured table references use brackets but no sheet `!`.
+        assert!(!formula_is_external_ref("=SUM(Table1[Amount])"));
+        assert!(!formula_is_external_ref("=Table1[Col]+Table1[Other]"));
+        assert!(!formula_is_external_ref("=A1"));
+        // Unbalanced bracket — treated as non-external rather than panicking.
+        assert!(!formula_is_external_ref("=[1Sheet1!A1"));
+    }
+
+    #[test]
+    fn cached_result_stringifies_value_types() {
+        assert_eq!(
+            cached_formula_result(&json!({ "f": "=[1]S!A1", "v": 42 })),
+            Some("42".to_string())
+        );
+        assert_eq!(
+            cached_formula_result(&json!({ "f": "=[1]S!A1", "v": "hello" })),
+            Some("hello".to_string())
+        );
+        assert_eq!(
+            cached_formula_result(&json!({ "f": "=[1]S!A1", "v": true })),
+            Some("TRUE".to_string())
+        );
+        // No cached value, or empty string, or null → None (leave default 0).
+        assert_eq!(cached_formula_result(&json!({ "f": "=[1]S!A1" })), None);
+        assert_eq!(
+            cached_formula_result(&json!({ "f": "=[1]S!A1", "v": "" })),
+            None
+        );
+        assert_eq!(
+            cached_formula_result(&json!({ "f": "=[1]S!A1", "v": null })),
+            None
+        );
     }
 }

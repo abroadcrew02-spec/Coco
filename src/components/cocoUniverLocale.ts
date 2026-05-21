@@ -6,6 +6,7 @@ import SheetsFormulaUIEnUS from "@univerjs/sheets-formula-ui/locale/en-US";
 import FindReplaceEnUS from "@univerjs/find-replace/locale/en-US";
 import SheetsFindReplaceEnUS from "@univerjs/sheets-find-replace/locale/en-US";
 import type { Locale } from "../i18n/locale";
+import { FUNCTION_LIST_JA_ABSTRACT } from "./univerFunctionListJa";
 
 type LanguageValue = string | string[] | LocaleRecord | LocaleRecord[] | boolean;
 interface LocaleRecord {
@@ -21,6 +22,18 @@ const enUSLocaleParts = [
   FindReplaceEnUS,
   SheetsFindReplaceEnUS,
 ] as LocaleRecord[];
+
+// #179 (area D): turn the flat NAME → abstract map into the nested shape
+// Univer's `formula.functionList` expects ({ NAME: { abstract } }), so
+// `deepMerge` only replaces the `abstract` key and leaves `description` /
+// `functionParameter` as Univer's English copy.
+function buildFunctionListJa(): LocaleRecord {
+  const out: LocaleRecord = {};
+  for (const [name, abstract] of Object.entries(FUNCTION_LIST_JA_ABSTRACT)) {
+    out[name] = { abstract };
+  }
+  return out;
+}
 
 // Univer 0.5.x は ja-JP locale を出荷していない (en-US / zh-CN / zh-TW / fr-FR /
 // ru-RU / fa-IR / vi-VN のみ)。en-US を base にして、Coco の UI で目に入る
@@ -732,6 +745,10 @@ const jaJPOverride = {
     operation: {
       pasteFormula: "数式を貼り付け",
     },
+    // #179 (area D): JA `abstract` for the ~200 most-used functions. Merged
+    // over Univer's en-US `formula.functionList`; `description` /
+    // `functionParameter` keep Univer's English copy.
+    functionList: buildFunctionListJa(),
   },
 
   table: {

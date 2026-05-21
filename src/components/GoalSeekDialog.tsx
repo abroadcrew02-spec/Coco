@@ -4,6 +4,8 @@ import {
   type GoalSeekResult,
   runGoalSeek,
 } from "../store/goalSeek";
+import { useFocusTrap } from "../hooks/useFocusTrap";
+import { t } from "../i18n/locale";
 import "./GoalSeekDialog.css";
 
 // A1 cell ref (NOT a range — Goal Seek operates on single cells only).
@@ -43,6 +45,8 @@ export default function GoalSeekDialog({
   const [changingCell, setChangingCell] = useState(initialChangingCell);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<RunStatus>({ kind: "idle" });
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, onClose);
 
   // Capture the original value of the changing cell when the dialog opens so
   // the user can revert via "元に戻す" if they don't like the result. We only
@@ -56,17 +60,6 @@ export default function GoalSeekDialog({
     const v = runAdapter.readNumeric(initialChangingCell);
     originalRef.current = { cell: initialChangingCell, value: v };
   }, [initialChangingCell, runAdapter]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   const running = status.kind === "running";
 
@@ -163,6 +156,7 @@ export default function GoalSeekDialog({
   return (
     <div className="gsd-backdrop" onClick={onClose}>
       <div
+        ref={modalRef}
         className="gsd-modal"
         role="dialog"
         aria-modal="true"
@@ -175,7 +169,7 @@ export default function GoalSeekDialog({
             type="button"
             className="gsd-close"
             onClick={onClose}
-            aria-label="閉じる"
+            aria-label={t("a11y.label.closeDialog")}
           >
             ×
           </button>

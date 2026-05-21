@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ImageListing } from "../store/imageManager";
+import { t } from "../i18n/locale";
 import "./ImageManagerDialog.css";
 
 interface Props {
@@ -84,7 +85,7 @@ export default function ImageManagerDialog({
     const sheetName =
       sheets.find((s) => s.id === sheetFilter)?.name ?? sheetFilter;
     const ok = window.confirm(
-      `シート「${sheetName}」の画像 ${countOnSheet} 枚を削除します。よろしいですか？`,
+      t("confirm.image.bulkDelete", sheetName, countOnSheet),
     );
     if (!ok) return;
     onBulkDeleteOnSheet(sheetFilter);
@@ -197,7 +198,7 @@ export default function ImageManagerDialog({
                           type="button"
                           className="img-mgr-mini-btn img-mgr-mini-btn--danger"
                           onClick={() => {
-                            if (window.confirm("この画像を削除しますか？")) {
+                            if (window.confirm(t("confirm.image.delete"))) {
                               onDelete(img.sheetId, img.anchor);
                             }
                           }}

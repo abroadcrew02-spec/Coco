@@ -33,6 +33,7 @@ import "@univerjs/find-replace/lib/index.css";
 
 import { undoRedoOverride } from "./univerUndoRedoOverride";
 import { registerCocoContextMenu } from "./univerContextMenu";
+import { registerFormulaNormalizer } from "./univerFormulaNormalizer";
 import { buildCocoUniverLocale } from "./cocoUniverLocale";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { useAutoSave } from "../hooks/useAutoSave";
@@ -53,6 +54,26 @@ import {
   chooseHyperlinkRestyle,
 } from "./hyperlinkRender";
 import { patchCfRenders } from "./conditionalFormatRender";
+import { patchCheckboxRenders } from "./checkboxRender";
+import {
+  addCheckbox,
+  hasCheckbox,
+  removeCheckbox,
+  toggleCheckbox as toggleCheckboxInSnapshot,
+  toA1 as checkboxToA1,
+} from "../store/checkbox";
+import { patchFormControlRenders } from "./formControlRender";
+import {
+  addFormControl,
+  getFormControlAt,
+  hasFormControl,
+  isCellOccupied,
+  removeFormControl,
+  selectRadio,
+  stepControl,
+  toA1 as formControlToA1,
+  type FormControlKind,
+} from "../store/formControls";
 import { patchOutlineRenders } from "./outlineRender";
 import { patchTableRenders } from "./tableRender";
 import { patchSparklineRenders } from "./sparklineRender";
@@ -175,6 +196,18 @@ import InsertFunctionDialog from "./InsertFunctionDialog";
 import CustomListsDialog from "./CustomListsDialog";
 import CalculationOptionsDialog from "./CalculationOptionsDialog";
 import CalculationModeIndicator from "./CalculationModeIndicator";
+import StatusBarStats from "./StatusBarStats";
+import LiveRegion from "./LiveRegion";
+import {
+  announce,
+  announceError,
+  buildCellAnnouncement,
+  buildRangeAnnouncement,
+} from "../store/announce";
+import {
+  type SelectionStats,
+  computeSelectionStats,
+} from "../store/selectionStats";
 import {
   type CalcMode,
   getCalcMode,
@@ -200,6 +233,23 @@ import {
 } from "../store/scenarios";
 import ForecastSheetDialog, { type ForecastApplyParams } from "./ForecastSheetDialog";
 import { runForecast, parseXValues } from "../store/forecastSheet";
+import AnalysisToolpakDialog, {
+  type AnalysisApplyParams,
+} from "./AnalysisToolpakDialog";
+import {
+  runLinearRegression,
+  runOneWayANOVA,
+  buildHistogram,
+  runTwoWayANOVA,
+  runTTest,
+  runChiSquareGoodnessOfFit,
+  runChiSquareIndependence,
+  runCorrelationMatrix,
+  generateRandomNumbers,
+  runSimpleMovingAverage,
+  runExponentialMovingAverage,
+  runFourierTransform,
+} from "../store/analysisToolpak";
 import RecommendedChartsDialog from "./RecommendedChartsDialog";
 import { type ChartRecommendation, analyzeRange } from "../store/recommendedCharts";
 import CfRuleManagerDialog from "./CfRuleManagerDialog";
@@ -261,6 +311,21 @@ import NavigationBox, { type NavigationTarget } from "./NavigationBox";
 import { resolveNamedRange as resolveNavNamed } from "../store/navigationBox";
 import SheetImportDialog from "./SheetImportDialog";
 import { addImportedSheetToSnapshot } from "../store/sheetImport";
+import DataConnectionsDialog, {
+  type AddConnectionInput,
+} from "./DataConnectionsDialog";
+import {
+  type DataConnection,
+  type EtlStep,
+  type SheetFragment as DataConnSheetFragment,
+  addConnection as addConnectionToSnapshot,
+  applyFragmentToSheet as applyDataConnFragment,
+  listConnections as listDataConnections,
+  makeConnectionId,
+  removeConnection as removeConnectionFromSnapshot,
+  transformFragment as transformDataConnFragment,
+  updateConnection as updateConnectionInSnapshot,
+} from "../store/dataConnections";
 import BookmarksPanel from "./BookmarksPanel";
 import {
   addBookmark,
@@ -348,17 +413,49 @@ import InsertImageDialog, {
   type ImageFormValue,
   type ImagePickResult,
 } from "./InsertImageDialog";
+import InsertShapeDialog, {
+  type ShapeFormValue,
+} from "./InsertShapeDialog";
+import TextBoxesPanel from "./TextBoxesPanel";
+import {
+  a1ToColRow as tbA1ToColRow,
+  addTextBox,
+  deleteTextBox,
+  updateTextBox,
+  listTextBoxesForSheet,
+  makeTextBoxId,
+  type TextBox,
+} from "../store/textBoxes";
 import SortDialog, { type SortFormValue } from "./SortDialog";
 import SheetTabColorDialog from "./SheetTabColorDialog";
 import CommandPalette, { type PaletteCommand } from "./CommandPalette";
+import MacroDialog from "./MacroDialog";
+import {
+  observeCommand as observeMacroCommand,
+  playback as playbackMacro,
+  summariseDestructive as summariseMacroDestructive,
+} from "../store/macroRecord";
+import { loadAllSecure as loadMacrosSecure } from "../store/secureMacroStore";
 import CommentIndicatorsPanel from "./CommentIndicatorsPanel";
+import SmartChipPopover, {
+  type SmartChipPopoverAnchor,
+} from "./SmartChipPopover";
+import {
+  type SmartChip,
+  chipsForCell as smartChipsForCell,
+  chipActionUrl as smartChipActionUrl,
+} from "../store/smartChips";
 import ChartPreviewPanel from "./ChartPreviewPanel";
 import { computeChartPreviews, type ChartPreview } from "./chartPreviewData";
 import ImagePreviewPanel from "./ImagePreviewPanel";
-import { requestSettings, requestHelp } from "../hooks/useGlobalShortcuts";
+import {
+  requestSettings,
+  requestHelp,
+  onMacroPlayRequested,
+} from "../hooks/useGlobalShortcuts";
 import { confirmDiscardIfUnsaved } from "../store/dirtyGuard";
 import { routeOpenPath } from "../store/pathRouter";
-import { registerSnapshotFlush } from "../store/snapshotSync";
+import { registerSnapshotFlush, carryForwardRootExtensions } from "../store/snapshotSync";
 import { timeAgoJa } from "./timeAgo";
 import {
   computeSnapshotStats,
@@ -367,6 +464,13 @@ import {
 } from "../store/snapshotStats";
 import { isSheetProtectedInSnapshot } from "../store/sheetProtection";
 import { extractCellStyle, applyCellStyle } from "../store/formatPainter";
+import {
+  computeSplitEntry,
+  hasSplitPane,
+  writeSplitPaneInto,
+  type SplitMode,
+  type SplitSnapshotShape,
+} from "../store/splitPane";
 import { inferAutoSumRange, buildSumFormula } from "../store/autoSum";
 import {
   applyQuickNumberFormat,
@@ -382,8 +486,33 @@ import {
   colRowToA1,
   type ImagePreview,
 } from "../store/imagePreviews";
+import CameraLinksPanel from "./CameraLinksPanel";
+import {
+  listCameraLinks,
+  addCameraLink,
+  removeCameraLink,
+  updateCameraLinkRender,
+  isSourceResolvable,
+  generateCameraLinkId,
+  CAMERA_LINKS_MAX,
+  type CameraLink,
+} from "../store/cameraLinks";
+import { renderRangeToDataUrl } from "../store/cameraCanvas";
+import { rectToA1 } from "../store/cameraRender";
 import { validateMutation, extractCellWrites } from "../store/dataValidation";
-import { getLocale, t } from "../i18n/locale";
+import { getLocale, subscribeLocale, t } from "../i18n/locale";
+import { swapUniverLocale } from "./univerLocaleSwap";
+import ScriptEditorDialog from "./ScriptEditorDialog";
+import {
+  type ScriptEntry,
+  type EditEvent,
+  type CollectedTriggers,
+  readScripts,
+  writeScripts,
+  collectTriggers,
+  fireTrigger,
+  recordRun,
+} from "../store/scriptRuntime";
 import "./EditorScreen.css";
 
 // req 5.4.1: "loading" blocks editing (snapshot is being replaced); "saving"
@@ -473,10 +602,17 @@ export default function EditorScreen() {
   // indicator + UpdateAvailableDialog. See src/store/updater.ts for the
   // UpdaterState union and lazy-loaded plugin wrappers.
   const [updaterState, setUpdaterState] = useState<UpdaterState>({ kind: "idle" });
+  // #192: live aggregates for the current selection, shown on the status bar.
+  // null = single-cell / empty selection (nothing worth summarizing).
+  const [selectionStats, setSelectionStats] = useState<SelectionStats | null>(null);
   // Command palette (Ctrl+Shift+P / Cmd+Shift+P). Boolean state — the command
   // list is rebuilt on every render so the palette always sees the latest
   // handler closures and store actions.
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // #131 — macro record/playback dialog. Boolean; the dialog reads the
+  // recorder state from the module-scope singleton in `store/macroRecord`,
+  // so we don't mirror it here.
+  const [macroDialogOpen, setMacroDialogOpen] = useState(false);
   const [warningsDialog, setWarningsDialog] = useState<null | "import" | "export">(null);
   // Named-ranges dialog state: null while closed; once opened we snapshot the
   // current set so the user can cancel out without mutating the workbook.
@@ -529,6 +665,13 @@ export default function EditorScreen() {
   // Insert-image dialog: null while closed. Captures the active sheet + the
   // top-left of the active range so the image anchors where the user clicked.
   const [imageDialog, setImageDialog] = useState<{
+    sheetId: string;
+    cell: string;
+  } | null>(null);
+  // Insert-shape dialog (#146 / #188): null while closed. Captures the active
+  // sheet + the top-left of the active range so the shape anchors where the
+  // user clicked. Same shape as imageDialog.
+  const [shapeDialog, setShapeDialog] = useState<{
     sheetId: string;
     cell: string;
   } | null>(null);
@@ -631,6 +774,8 @@ export default function EditorScreen() {
   const [chartsCanvasPanelOpen, setChartsCanvasPanelOpen] = useState(false);
   const [slicerDialogOpen, setSlicerDialogOpen] = useState(false);
   const [slicersPanelOpen, setSlicersPanelOpen] = useState(false);
+  // #184: camera-image (live range snapshot) panel visibility.
+  const [cameraPanelOpen, setCameraPanelOpen] = useState(false);
   const [quickAnalysisDialog, setQuickAnalysisDialog] = useState<{
     sheetId: string;
     range: string;
@@ -651,6 +796,8 @@ export default function EditorScreen() {
   } | null>(null);
   const [insertFunctionCtx, setInsertFunctionCtx] = useState<{ sheetId: string; cellRef: string } | null>(null);
   const [customListsCtx, setCustomListsCtx] = useState<{ initialActiveRange: string } | null>(null);
+  // #136 / #189: スクリプトエディタ。
+  const [scriptEditorOpen, setScriptEditorOpen] = useState(false);
   const [calcOptionsOpen, setCalcOptionsOpen] = useState(false);
   const [calcMode, setCalcModeState] = useState<CalcMode>(() => getCalcMode());
   const [watchWindowOpen, setWatchWindowOpen] = useState(false);
@@ -658,6 +805,7 @@ export default function EditorScreen() {
   const [scenariosOpen, setScenariosOpen] = useState(false);
   const [scenarioAdapter, setScenarioAdapter] = useState<ScenarioAdapter | null>(null);
   const [forecastDialog, setForecastDialog] = useState<{ xRange: string; yRange: string } | null>(null);
+  const [analysisToolpakDialog, setAnalysisToolpakDialog] = useState<{ initialRange: string } | null>(null);
   const [recommendedChartsDialog, setRecommendedChartsDialog] = useState<{
     sheetId: string;
     range: string;
@@ -708,7 +856,12 @@ export default function EditorScreen() {
   // Univer 0.5.x's selection observable API isn't stable.
   const [navActiveSheetName, setNavActiveSheetName] = useState("Sheet1");
   const [navActiveCellRef, setNavActiveCellRef] = useState("A1");
+  // #146 / #188: track the active sheet id so the TextBoxesPanel can filter to
+  // the current sheet. Same 300ms-poll cadence as navActiveSheetName above.
+  const [activeSheetId, setActiveSheetId] = useState<string | null>(null);
   const [sheetImportOpen, setSheetImportOpen] = useState(false);
+  // #140 / #190: external data connections (Power Query) — modal dialog.
+  const [dataConnectionsOpen, setDataConnectionsOpen] = useState(false);
   const [bookmarksPanelOpen, setBookmarksPanelOpen] = useState(false);
   // #109: per-workbook session id so bookmarks for unsaved workbooks don't
   // bleed across "default". Regenerated whenever the workbook handle changes
@@ -897,6 +1050,128 @@ export default function EditorScreen() {
     if (!getReadyWorkbook("名前付き範囲")) return;
     setNamedRanges(readNamedRanges());
   }, [getReadyWorkbook, readNamedRanges]);
+
+  // --- Window split (issue #156) -------------------------------------------
+  //
+  // "Split" is the Excel "View → Split" feature: divide the active sheet into
+  // 2 or 4 viewports at the active cell, each scrolling independently. Unlike
+  // freeze panes (the top/left region is locked), split panes have NO locked
+  // region — all panes scroll.
+  //
+  // Univer 0.5.x does not expose a dedicated split-pane API; only freeze. The
+  // closest visual approximation is `FWorksheet.setFreeze` which renders 4
+  // viewports with independent scroll. We use that for the in-session view and
+  // persist `state="split"` in `_freezePane` so xlsx round-trip preserves
+  // Excel's distinction.
+  const applySplitToFacade = useCallback(
+    (
+      workbook: ReturnType<FUniver["getActiveWorkbook"]>,
+      sheetId: string,
+      row: number,
+      col: number,
+    ) => {
+      try {
+        if (!workbook) return;
+        const sheets = workbook.getSheets();
+        const target = sheets.find((s) => s.getSheetId() === sheetId);
+        if (!target) return;
+        if (row === 0 && col === 0) {
+          target.cancelFreeze();
+          return;
+        }
+        target.setFreeze({
+          xSplit: col,
+          ySplit: row,
+          startRow: row,
+          startColumn: col,
+        });
+      } catch {
+        // Best-effort.
+      }
+    },
+    [],
+  );
+
+  const toggleSplitPane = useCallback(
+    (mode: SplitMode = "both") => {
+      const ready = getReadyWorkbook("ウィンドウ分割");
+      if (!ready) return;
+      const { workbook } = ready;
+      const activeSheet = workbook.getActiveSheet();
+      if (!activeSheet) return;
+      const sheetId = activeSheet.getSheetId();
+
+      const fresh = workbook.save() as unknown as SplitSnapshotShape;
+      if (!fresh.sheets || !fresh.sheets[sheetId]) return;
+
+      const freshJson = JSON.stringify(fresh);
+      if (hasSplitPane(freshJson, sheetId)) {
+        writeSplitPaneInto(fresh, sheetId, null);
+        applyMutatedSnapshot(JSON.stringify(fresh));
+        applySplitToFacade(workbook, sheetId, 0, 0);
+        return;
+      }
+
+      let activeRow = 0;
+      let activeCol = 0;
+      try {
+        const sel = activeSheet.getSelection();
+        const range = sel?.getActiveRange();
+        if (range) {
+          activeRow = range.getRow();
+          activeCol = range.getColumn();
+        }
+      } catch {
+        // Best-effort.
+      }
+      const entry = computeSplitEntry(activeRow, activeCol, mode);
+      if (!entry) {
+        setEditorOperationError(
+          "ウィンドウ分割: アクティブセルが A1 のため分割位置を決められません。別のセルを選択してから再度お試しください。",
+        );
+        return;
+      }
+      writeSplitPaneInto(fresh, sheetId, entry);
+      applyMutatedSnapshot(JSON.stringify(fresh));
+      applySplitToFacade(workbook, sheetId, entry.row, entry.col);
+    },
+    [getReadyWorkbook, applyMutatedSnapshot, applySplitToFacade],
+  );
+
+  const clearSplitPane = useCallback(() => {
+    const ready = getReadyWorkbook("ウィンドウ分割を解除");
+    if (!ready) return;
+    const { workbook } = ready;
+    const activeSheet = workbook.getActiveSheet();
+    if (!activeSheet) return;
+    const sheetId = activeSheet.getSheetId();
+    const fresh = workbook.save() as unknown as SplitSnapshotShape;
+    if (!fresh.sheets || !fresh.sheets[sheetId]) return;
+    if (!hasSplitPane(JSON.stringify(fresh), sheetId)) return;
+    writeSplitPaneInto(fresh, sheetId, null);
+    applyMutatedSnapshot(JSON.stringify(fresh));
+    applySplitToFacade(workbook, sheetId, 0, 0);
+  }, [getReadyWorkbook, applyMutatedSnapshot, applySplitToFacade]);
+
+  const activeSheetHasSplit = (() => {
+    if (!currentSnapshotJson) return false;
+    const fUniver = fUniverRef.current;
+    let sid: string | undefined;
+    try {
+      sid = fUniver?.getActiveWorkbook()?.getActiveSheet()?.getSheetId();
+    } catch {
+      sid = undefined;
+    }
+    if (!sid) {
+      try {
+        const snap = JSON.parse(currentSnapshotJson) as { sheetOrder?: string[] };
+        sid = snap.sheetOrder?.[0];
+      } catch {
+        return false;
+      }
+    }
+    return hasSplitPane(currentSnapshotJson, sid ?? null);
+  })();
 
   // Data-validation dialog plumbing. We work directly on the snapshot JSON
   // rather than going through Univer because the @univerjs/sheets-data
@@ -1103,6 +1378,211 @@ export default function EditorScreen() {
       }
     },
     [getReadyWorkbook, hyperlinkCtx, applyMutatedSnapshot],
+  );
+
+  // #150: "Insert → Checkbox" command. Walks the active selection and toggles
+  // checkbox decoration on every cell. Single-cell on a pre-decorated cell
+  // removes the checkbox (Google Sheets parity: the menu acts as toggle).
+  // Snapshot is pushed through applyMutatedSnapshot so the Coco undo stack
+  // captures the change.
+  const insertCheckboxAtSelection = useCallback(() => {
+    const ready = getReadyWorkbook("チェックボックス");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    const liveSnapshot = useWorkbookStore.getState().currentSnapshotJson;
+    if (isSheetProtectedInSnapshot(liveSnapshot, sheetId)) {
+      setEditorOperationError(
+        "チェックボックス: このシートは保護されているため挿入できません。",
+      );
+      return;
+    }
+    // Resolve selection rect (fall back to A1 on no live selection).
+    let r1 = 0;
+    let c1 = 0;
+    let r2 = 0;
+    let c2 = 0;
+    try {
+      const sel = sheet.getSelection();
+      const range = sel?.getActiveRange();
+      if (range) {
+        r1 = range.getRow();
+        c1 = range.getColumn();
+        const rowCount =
+          (range as unknown as { getRowCount?: () => number }).getRowCount?.() ??
+          1;
+        const colCount =
+          (range as unknown as { getColumnCount?: () => number }).getColumnCount?.() ??
+          1;
+        r2 = r1 + Math.max(rowCount, 1) - 1;
+        c2 = c1 + Math.max(colCount, 1) - 1;
+      }
+    } catch {
+      // Fall through to defaults.
+    }
+
+    // Single-cell on a pre-decorated cell → remove (toggle off).
+    if (r1 === r2 && c1 === c2 && hasCheckbox(liveSnapshot, sheetId, r1, c1)) {
+      const next = removeCheckbox(liveSnapshot, sheetId, checkboxToA1(r1, c1));
+      applyMutatedSnapshot(JSON.stringify(next));
+      return;
+    }
+
+    // Cell-occupancy guard: refuse when any target cell already carries a
+    // sparkline or form-control glyph (they overwrite the cell's `p` paragraph
+    // and would visually collide). A pre-existing checkbox is fine — addCheckbox
+    // is idempotent on the host cell.
+    for (let r = r1; r <= r2; r++) {
+      for (let c = c1; c <= c2; c++) {
+        if (
+          isCellOccupied(liveSnapshot, sheetId, r, c) &&
+          !hasCheckbox(liveSnapshot, sheetId, r, c)
+        ) {
+          setEditorOperationError(
+            "チェックボックス: 対象範囲にスパークライン・フォームコントロールがあるセルが含まれるため挿入できません。",
+          );
+          return;
+        }
+      }
+    }
+
+    // Apply addCheckbox across the rectangle.
+    let snap: unknown = liveSnapshot
+      ? JSON.parse(liveSnapshot)
+      : { sheets: {} };
+    for (let r = r1; r <= r2; r++) {
+      for (let c = c1; c <= c2; c++) {
+        snap = addCheckbox(
+          snap as Parameters<typeof addCheckbox>[0],
+          sheetId,
+          checkboxToA1(r, c),
+        );
+      }
+    }
+    applyMutatedSnapshot(JSON.stringify(snap));
+  }, [getReadyWorkbook, applyMutatedSnapshot]);
+
+  // #183: "Insert → Form control" commands (radio / spin / scroll). Each
+  // anchors the control to the active cell with its linked cell defaulting to
+  // the next column over so the control glyph and its numeric value don't
+  // collide. A single-cell selection on a pre-decorated cell removes the
+  // control (toggle parity with the checkbox command). Radios placed in the
+  // same column are auto-bundled into one group so they behave mutually
+  // exclusively out of the box.
+  const insertFormControlAtSelection = useCallback(
+    (kind: FormControlKind) => {
+      const labelJa =
+        kind === "radio"
+          ? "ラジオボタン"
+          : kind === "spin"
+            ? "スピンボタン"
+            : "スクロールバー";
+      const ready = getReadyWorkbook(labelJa);
+      if (!ready) return;
+      const { workbook } = ready;
+      const sheet = workbook.getActiveSheet();
+      if (!sheet) return;
+      const sheetId = sheet.getSheetId();
+      const liveSnapshot = useWorkbookStore.getState().currentSnapshotJson;
+      if (isSheetProtectedInSnapshot(liveSnapshot, sheetId)) {
+        setEditorOperationError(
+          `${labelJa}: このシートは保護されているため挿入できません。`,
+        );
+        return;
+      }
+      // Anchor cell = top-left of the active selection (fallback A1).
+      let row = 0;
+      let col = 0;
+      try {
+        const sel = sheet.getSelection();
+        const range = sel?.getActiveRange();
+        if (range) {
+          row = range.getRow();
+          col = range.getColumn();
+        }
+      } catch {
+        // Fall through to defaults.
+      }
+
+      // Toggle-off when the anchor already hosts a control.
+      if (hasFormControl(liveSnapshot, sheetId, row, col)) {
+        const next = removeFormControl(
+          liveSnapshot,
+          sheetId,
+          formControlToA1(row, col),
+        );
+        applyMutatedSnapshot(JSON.stringify(next));
+        return;
+      }
+
+      // Cell-occupancy guard: refuse to stack a control glyph onto a cell that
+      // already carries a sparkline / checkbox glyph (they all overwrite the
+      // cell's `p` paragraph and would visually collide).
+      if (isCellOccupied(liveSnapshot, sheetId, row, col)) {
+        setEditorOperationError(
+          `${labelJa}: このセルには既にスパークライン・チェックボックス・フォームコントロールのいずれかがあるため挿入できません。`,
+        );
+        return;
+      }
+
+      const hostRef = formControlToA1(row, col);
+      // Linked cell defaults to the cell one column to the right so the
+      // control glyph and its value are visually distinct.
+      const linkedRef = formControlToA1(row, col + 1);
+      let spec: Parameters<typeof addFormControl>[3];
+      if (kind === "radio") {
+        // Auto-group radios that share a column on this sheet.
+        const groupId = `radio-col${col}`;
+        // Count existing radios in this group to label the new option.
+        const existing = liveSnapshot
+          ? (() => {
+              try {
+                const parsed = JSON.parse(liveSnapshot);
+                const arr = parsed?.sheets?.[sheetId]?._formControls;
+                return Array.isArray(arr)
+                  ? arr.filter(
+                      (e: { kind?: string; group?: string }) =>
+                        e?.kind === "radio" && e?.group === groupId,
+                    ).length
+                  : 0;
+              } catch {
+                return 0;
+              }
+            })()
+          : 0;
+        const optionIndex = existing + 1;
+        spec = {
+          kind: "radio",
+          group: groupId,
+          // All radios in a group share one linked cell (Excel parity).
+          linkedCell: formControlToA1(row, col + 1),
+          optionValue: optionIndex,
+          label: `オプション ${optionIndex}`,
+        };
+      } else if (kind === "spin") {
+        spec = {
+          kind: "spin",
+          linkedCell: linkedRef,
+          min: 0,
+          max: 100,
+          step: 1,
+        };
+      } else {
+        spec = {
+          kind: "scroll",
+          linkedCell: linkedRef,
+          min: 0,
+          max: 100,
+          step: 1,
+          page: 10,
+        };
+      }
+      const next = addFormControl(liveSnapshot, sheetId, hostRef, spec);
+      applyMutatedSnapshot(JSON.stringify(next));
+    },
+    [getReadyWorkbook, applyMutatedSnapshot],
   );
 
   // Resolve a default author for new comments. localStorage > navigator hints
@@ -2097,6 +2577,150 @@ export default function EditorScreen() {
     [applyMutatedSnapshot],
   );
 
+  // --- Camera (#184) ---------------------------------------------------------
+  // Snapshot the active selection into a "live" camera image: the source
+  // range is baked into a PNG data URL that re-renders when the source cells
+  // change. Univer 0.5.x has no in-grid overlay API so the images surface in
+  // CameraLinksPanel (sidebar) — see store/cameraLinks.ts.
+  const captureCamera = useCallback(() => {
+    const ready = getReadyWorkbook("カメラ撮影");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    const r = sheet.getSelection()?.getActiveRange();
+    if (!r) {
+      setEditorOperationError("カメラ撮影: セル範囲を選択してください");
+      return;
+    }
+    const startRow = r.getRow();
+    const startCol = r.getColumn();
+    const height = (r as unknown as { getHeight?: () => number }).getHeight?.() ?? 1;
+    const width = (r as unknown as { getWidth?: () => number }).getWidth?.() ?? 1;
+    const sourceRange = {
+      r1: startRow,
+      c1: startCol,
+      r2: startRow + Math.max(0, height - 1),
+      c2: startCol + Math.max(0, width - 1),
+    };
+    const snapJson = workbook.save() as unknown as Record<string, unknown>;
+    const snapStr = JSON.stringify(snapJson);
+
+    const links = listCameraLinks(snapJson);
+    if (links.length >= CAMERA_LINKS_MAX) {
+      setEditorOperationError(
+        `カメラ撮影: 1ブックあたり ${CAMERA_LINKS_MAX} 件までです`,
+      );
+      return;
+    }
+
+    const dataUrl = renderRangeToDataUrl(snapStr, sheetId, sourceRange);
+    if (dataUrl === null) {
+      setEditorOperationError("カメラ撮影: スナップショット画像の生成に失敗しました");
+      return;
+    }
+    // Default destination anchor: two columns to the right of the source so
+    // the snapshot doesn't overlap the range it mirrors.
+    const link: CameraLink = {
+      id: generateCameraLinkId(links),
+      sourceSheetId: sheetId,
+      sourceRange,
+      dstSheetId: sheetId,
+      dstAnchor: { row: sourceRange.r1, col: sourceRange.c2 + 2 },
+      dataUrl,
+      broken: false,
+      generatedAt: new Date().toISOString(),
+    };
+    const { snapshot: nextSnap, added } = addCameraLink(snapJson, link);
+    if (!added) {
+      setEditorOperationError(
+        `カメラ撮影: 1ブックあたり ${CAMERA_LINKS_MAX} 件までです`,
+      );
+      return;
+    }
+    setEditorOperationError(null);
+    applyMutatedSnapshot(JSON.stringify(nextSnap));
+    setCameraPanelOpen(true);
+  }, [getReadyWorkbook, applyMutatedSnapshot]);
+
+  const captureCameraRef = useRef<() => void>(() => {});
+  captureCameraRef.current = captureCamera;
+
+  // Delete a camera link by id.
+  const deleteCameraLink = useCallback(
+    (id: string) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as Record<string, unknown>;
+      applyMutatedSnapshot(JSON.stringify(removeCameraLink(fresh, id)));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // Live re-render: when the snapshot changes, re-bake every camera image
+  // whose source range may have moved/changed. Debounced 300ms so a burst of
+  // edits collapses into one re-render pass (issue perf budget). Broken links
+  // (source sheet deleted) get flagged for the #REF! placeholder. The render
+  // pass writes back via updateSnapshot directly (not applyMutatedSnapshot)
+  // so it doesn't pollute the Coco undo stack — it's a derived refresh, not a
+  // user action.
+  useEffect(() => {
+    if (!currentSnapshotJson) return;
+    let snapshot: Record<string, unknown>;
+    try {
+      snapshot = JSON.parse(currentSnapshotJson) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    const links = listCameraLinks(snapshot);
+    if (links.length === 0) return;
+
+    const timer = window.setTimeout(() => {
+      // Re-read the latest snapshot at fire time so we don't clobber edits
+      // made during the debounce window.
+      const latest = useWorkbookStore.getState().currentSnapshotJson;
+      if (!latest) return;
+      let live: Record<string, unknown>;
+      try {
+        live = JSON.parse(latest) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+      let mutated = false;
+      let working = live;
+      for (const link of listCameraLinks(live)) {
+        const resolvable = isSourceResolvable(
+          live as { sheets?: Record<string, unknown> },
+          link,
+        );
+        if (!resolvable) {
+          if (!link.broken || link.dataUrl !== "") {
+            working = updateCameraLinkRender(working, link.id, {
+              dataUrl: "",
+              broken: true,
+            });
+            mutated = true;
+          }
+          continue;
+        }
+        const fresh = renderRangeToDataUrl(latest, link.sourceSheetId, link.sourceRange);
+        if (fresh !== null && (fresh !== link.dataUrl || link.broken)) {
+          working = updateCameraLinkRender(working, link.id, {
+            dataUrl: fresh,
+            broken: false,
+          });
+          mutated = true;
+        }
+      }
+      if (mutated) {
+        updateSnapshot(JSON.stringify(working));
+      }
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [currentSnapshotJson, updateSnapshot]);
+
   // --- Quick Analysis --------------------------------------------------------
   const openQuickAnalysisDialog = useCallback(() => {
     const ready = getReadyWorkbook("クイック分析");
@@ -2167,6 +2791,155 @@ export default function EditorScreen() {
     const id = window.setInterval(tick, 300);
     return () => window.clearInterval(id);
   }, [tracePanelOpen]);
+
+  // #192: keep the status-bar selection summary (合計 / 平均 / 個数 ...) in
+  // sync with the live selection. We poll the active range every 250ms —
+  // mirroring the Trace panel above — because Univer 0.5.x's selection
+  // observable isn't stable across patches, and `onSelectionChange` doesn't
+  // carry cell values (we'd still have to re-read the range). A single-cell
+  // selection (or no selection) yields null so the summary stays hidden.
+  const lastSelectionRangeKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Cap the per-poll read: a whole-column selection is ~1M cells and
+    // re-serializing it every 250ms would stutter the UI.
+    const MAX_SELECTION_CELLS = 100_000;
+    const tick = () => {
+      const workbook = fUniverRef.current?.getActiveWorkbook();
+      if (!workbook) {
+        lastSelectionRangeKeyRef.current = null;
+        setSelectionStats(null);
+        return;
+      }
+      try {
+        const sheet = workbook.getActiveSheet();
+        const r = sheet?.getSelection()?.getActiveRange();
+        if (!r) {
+          lastSelectionRangeKeyRef.current = null;
+          setSelectionStats(null);
+          return;
+        }
+        const range = r as unknown as {
+          getHeight?: () => number;
+          getWidth?: () => number;
+          getRow?: () => number;
+          getColumn?: () => number;
+          getValues?: () => unknown[][];
+        };
+        const height = range.getHeight?.() ?? 1;
+        const width = range.getWidth?.() ?? 1;
+        if (height <= 1 && width <= 1) {
+          lastSelectionRangeKeyRef.current = null;
+          setSelectionStats(null);
+          return;
+        }
+        // Skip the (potentially large) getValues() read when the selection
+        // hasn't moved since the last poll — recompute only on change.
+        const sheetId =
+          (sheet as unknown as { getSheetId?: () => string }).getSheetId?.() ??
+          "";
+        const rangeKey = `${sheetId}:${range.getRow?.() ?? 0},${
+          range.getColumn?.() ?? 0
+        },${height},${width}`;
+        if (rangeKey === lastSelectionRangeKeyRef.current) return;
+        lastSelectionRangeKeyRef.current = rangeKey;
+        if (height * width > MAX_SELECTION_CELLS) {
+          setSelectionStats(null);
+          return;
+        }
+        const values = range.getValues?.();
+        const stats = computeSelectionStats(values);
+        // Excel hides the summary when the selection has no countable data.
+        setSelectionStats(stats.count > 0 ? stats : null);
+      } catch {
+        lastSelectionRangeKeyRef.current = null;
+        setSelectionStats(null);
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // #177: announce the active cell / range to screen readers (NVDA / JAWS /
+  // Narrator) whenever the selection moves. Polls the active range — same
+  // mechanism as the #192 status-bar summary above — because Univer 0.5.x's
+  // selection observable isn't stable across patches. Announcing only on a
+  // *change* of range key avoids spamming the live region every tick.
+  const lastAnnouncedRangeKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const tick = () => {
+      const workbook = fUniverRef.current?.getActiveWorkbook();
+      if (!workbook) return;
+      try {
+        const sheet = workbook.getActiveSheet();
+        const r = sheet?.getSelection()?.getActiveRange();
+        if (!r) return;
+        const range = r as unknown as {
+          getHeight?: () => number;
+          getWidth?: () => number;
+          getRow?: () => number;
+          getColumn?: () => number;
+          getValue?: () => unknown;
+        };
+        const row = range.getRow?.() ?? 0;
+        const col = range.getColumn?.() ?? 0;
+        const height = range.getHeight?.() ?? 1;
+        const width = range.getWidth?.() ?? 1;
+        const sheetId =
+          (sheet as unknown as { getSheetId?: () => string }).getSheetId?.() ??
+          "";
+        const rangeKey = `${sheetId}:${row},${col},${height},${width}`;
+        if (rangeKey === lastAnnouncedRangeKeyRef.current) return;
+        // Skip the very first poll: announcing the cell the editor simply
+        // opened on would be noise. Establish the baseline silently.
+        const isFirst = lastAnnouncedRangeKeyRef.current === null;
+        lastAnnouncedRangeKeyRef.current = rangeKey;
+        if (isFirst) return;
+        if (height <= 1 && width <= 1) {
+          announce(buildCellAnnouncement(row, col, range.getValue?.()));
+        } else {
+          announce(
+            buildRangeAnnouncement(
+              row,
+              col,
+              row + height - 1,
+              col + width - 1,
+            ),
+          );
+        }
+      } catch {
+        // Univer's selection API can throw mid-teardown — ignore.
+      }
+    };
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // #177: announce save-status changes (saving / saved / failed) to screen
+  // readers. The sighted status bar already shows these; this mirrors them
+  // into the live region so assistive-tech users get the same feedback.
+  const lastAnnouncedSaveStatusRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = lastAnnouncedSaveStatusRef.current;
+    lastAnnouncedSaveStatusRef.current = saveStatus;
+    // Skip the initial render — only announce genuine transitions.
+    if (prev === null || prev === saveStatus) return;
+    if (saveStatus === "saved") {
+      announce(t("a11y.status.saved"));
+    } else if (saveStatus === "saving") {
+      announce(t("a11y.status.saving"));
+    } else if (saveStatus === "save_failed") {
+      announceError(t("a11y.status.saveFailed"));
+    }
+  }, [saveStatus]);
+
+  // #177: route editor operation errors / status messages through the
+  // assertive live region so screen readers speak them immediately.
+  useEffect(() => {
+    if (editorOperationError) {
+      announceError(editorOperationError);
+    }
+  }, [editorOperationError]);
 
   // --- Sheet Visibility (Hide/Unhide) ---------------------------------------
   const hideActiveSheet = useCallback(() => {
@@ -2455,6 +3228,601 @@ export default function EditorScreen() {
           }
         }
       }
+      applyMutatedSnapshot(JSON.stringify(snap));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // --- Analysis ToolPak ------------------------------------------------------
+  const openAnalysisToolpakDialog = useCallback(() => {
+    const ready = getReadyWorkbook("分析ツールパック");
+    if (!ready) return;
+    const sheet = ready.workbook.getActiveSheet();
+    if (!sheet) return;
+    let initialRange = "A2:A10";
+    try {
+      const r = sheet.getSelection()?.getActiveRange();
+      if (r) initialRange = r.getA1Notation();
+    } catch {
+      // best-effort
+    }
+    setAnalysisToolpakDialog({ initialRange });
+  }, [getReadyWorkbook]);
+
+  const applyAnalysisToolpak = useCallback(
+    (p: AnalysisApplyParams) => {
+      const fUniver = fUniverRef.current;
+      const wb = fUniver?.getActiveWorkbook();
+      if (!wb) return;
+      const snap = JSON.parse(JSON.stringify(wb.save())) as {
+        sheets?: Record<string, {
+          id?: string;
+          name?: string;
+          cellData?: Record<string, Record<string, unknown>>;
+        }>;
+        sheetOrder?: string[];
+      };
+      const sheetId = wb.getActiveSheet()?.getSheetId();
+      const sourceSheet = sheetId ? snap.sheets?.[sheetId] : undefined;
+      if (!snap.sheets || !sourceSheet) {
+        setEditorOperationError("分析ツールパック: アクティブシートが取得できません。");
+        return;
+      }
+
+      // Local A1 parser — single cell or rectangle, optional sheet qualifier
+      // (the qualifier is ignored; we always read from the active sheet).
+      const parseRange = (a1: string): { r1: number; c1: number; r2: number; c2: number } | null => {
+        const trimmed = a1.replace(/^[^!]+!/, "").trim();
+        const m = /^\$?([A-Za-z]+)\$?(\d+)(?::\$?([A-Za-z]+)\$?(\d+))?$/.exec(trimmed);
+        if (!m) return null;
+        const colToIdx = (s: string) => {
+          let n = 0;
+          for (const c of s.toUpperCase()) n = n * 26 + (c.charCodeAt(0) - 64);
+          return n - 1;
+        };
+        const c1 = colToIdx(m[1]);
+        const r1 = parseInt(m[2], 10) - 1;
+        const c2 = m[3] ? colToIdx(m[3]) : c1;
+        const r2 = m[4] ? parseInt(m[4], 10) - 1 : r1;
+        return {
+          r1: Math.min(r1, r2),
+          r2: Math.max(r1, r2),
+          c1: Math.min(c1, c2),
+          c2: Math.max(c1, c2),
+        };
+      };
+
+      const readNums = (a1: string): number[] => {
+        const pr = parseRange(a1);
+        if (!pr) return [];
+        const out: number[] = [];
+        for (let r = pr.r1; r <= pr.r2; r++) {
+          for (let c = pr.c1; c <= pr.c2; c++) {
+            const cell = (sourceSheet.cellData?.[String(r)] as
+              | Record<string, { v?: unknown }>
+              | undefined)?.[String(c)];
+            const v = cell?.v;
+            if (typeof v === "number" && Number.isFinite(v)) {
+              out.push(v);
+            } else if (typeof v === "string" && v.trim() !== "") {
+              const n = Number(v);
+              if (Number.isFinite(n)) out.push(n);
+            }
+            // blanks / non-numeric are skipped (analysis helpers tolerate
+            // gaps; for regression they're filtered pair-wise downstream).
+          }
+        }
+        return out;
+      };
+
+      // Read a range as a single flat column, preserving position: blank /
+      // non-numeric cells become NaN instead of being skipped. Used by the
+      // correlation matrix so every variable column has the same length and
+      // listwise deletion can drop incomplete rows consistently.
+      const readColumn = (a1: string): number[] => {
+        const pr = parseRange(a1);
+        if (!pr) return [];
+        const out: number[] = [];
+        for (let r = pr.r1; r <= pr.r2; r++) {
+          for (let c = pr.c1; c <= pr.c2; c++) {
+            const cell = (sourceSheet.cellData?.[String(r)] as
+              | Record<string, { v?: unknown }>
+              | undefined)?.[String(c)];
+            const v = cell?.v;
+            if (typeof v === "number" && Number.isFinite(v)) {
+              out.push(v);
+            } else if (typeof v === "string" && v.trim() !== "") {
+              const num = Number(v);
+              out.push(Number.isFinite(num) ? num : Number.NaN);
+            } else {
+              out.push(Number.NaN);
+            }
+          }
+        }
+        return out;
+      };
+
+      // Read a rectangular block as a row-major 2D number grid. Blank /
+      // non-numeric cells become NaN so the analysis helpers can decide how
+      // to treat them (most reject NaN in grid inputs).
+      const readGrid = (a1: string): number[][] => {
+        const pr = parseRange(a1);
+        if (!pr) return [];
+        const grid: number[][] = [];
+        for (let r = pr.r1; r <= pr.r2; r++) {
+          const row: number[] = [];
+          for (let c = pr.c1; c <= pr.c2; c++) {
+            const cell = (sourceSheet.cellData?.[String(r)] as
+              | Record<string, { v?: unknown }>
+              | undefined)?.[String(c)];
+            const v = cell?.v;
+            if (typeof v === "number" && Number.isFinite(v)) {
+              row.push(v);
+            } else if (typeof v === "string" && v.trim() !== "") {
+              const num = Number(v);
+              row.push(Number.isFinite(num) ? num : Number.NaN);
+            } else {
+              row.push(Number.NaN);
+            }
+          }
+          grid.push(row);
+        }
+        return grid;
+      };
+
+      // Allocate a fresh sheet id + name without collisions.
+      const sheets = snap.sheets;
+      const order = Array.isArray(snap.sheetOrder) ? snap.sheetOrder : [];
+      snap.sheetOrder = order;
+      const existingIds = new Set(Object.keys(sheets));
+      for (const id of order) existingIds.add(id);
+      let n = 1;
+      let newSheetId = `sheet-analysis-${n}`;
+      while (existingIds.has(newSheetId)) {
+        n += 1;
+        newSheetId = `sheet-analysis-${n}`;
+      }
+      const existingNames = new Set<string>();
+      for (const s of Object.values(sheets)) {
+        if (s && typeof s.name === "string") existingNames.add(s.name);
+      }
+      const baseNameByKind: Record<AnalysisApplyParams["kind"], string> = {
+        regression: "分析-回帰",
+        anova: "分析-ANOVA",
+        histogram: "分析-ヒストグラム",
+        anova2: "分析-二元ANOVA",
+        ttest: "分析-t検定",
+        chisquare: "分析-カイ二乗",
+        correlation: "分析-相関",
+        random: "分析-乱数",
+        movingAverage: "分析-移動平均",
+        fourier: "分析-フーリエ",
+      };
+      const baseName = baseNameByKind[p.kind] ?? "分析";
+      let finalName = baseName;
+      let nameN = 2;
+      while (existingNames.has(finalName)) {
+        finalName = `${baseName} (${nameN})`;
+        nameN += 1;
+      }
+
+      // Build the result table as a row-major 2D array of cell values.
+      const rows: Array<Array<string | number>> = [];
+      const fmt = (n: number) => (Number.isFinite(n) ? n : "—");
+
+      if (p.kind === "regression") {
+        const xs = readNums(p.primaryRange);
+        const ys = p.secondaryRange ? readNums(p.secondaryRange) : [];
+        const res = runLinearRegression(xs, ys);
+        rows.push(["線形回帰分析"]);
+        rows.push(["X 範囲", p.primaryRange]);
+        rows.push(["Y 範囲", p.secondaryRange ?? ""]);
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push(["観測数 n", res.n]);
+          rows.push(["切片 (b)", fmt(res.intercept)]);
+          rows.push(["傾き (a)", fmt(res.slope)]);
+          rows.push(["R²", fmt(res.r2)]);
+          rows.push(["自由度調整 R²", fmt(res.adjustedR2)]);
+          rows.push(["残差標準誤差", fmt(res.residualSE)]);
+          rows.push(["傾きの標準誤差", fmt(res.seSlope)]);
+          rows.push(["切片の標準誤差", fmt(res.seIntercept)]);
+          rows.push(["F 統計", fmt(res.f)]);
+          rows.push(["p 値", fmt(res.pValue)]);
+          rows.push([]);
+          rows.push(["分散分析表"]);
+          rows.push(["要因", "df", "SS", "MS"]);
+          rows.push(["回帰", 1, fmt(res.ssr), fmt(res.ssr / 1)]);
+          rows.push([
+            "残差",
+            res.n - 2,
+            fmt(res.sse),
+            fmt(res.sse / Math.max(1, res.n - 2)),
+          ]);
+          rows.push(["合計", res.n - 1, fmt(res.sst), ""]);
+          rows.push([]);
+          rows.push(["残差テーブル"]);
+          rows.push(["i", "ŷ", "残差"]);
+          for (let i = 0; i < res.fitted.length; i++) {
+            rows.push([i + 1, fmt(res.fitted[i]), fmt(res.residuals[i])]);
+          }
+        }
+      } else if (p.kind === "anova") {
+        const groups = (p.groupRanges ?? []).map((r) => readNums(r));
+        const res = runOneWayANOVA(groups);
+        rows.push(["一元配置 分散分析 (ANOVA)"]);
+        (p.groupRanges ?? []).forEach((r, i) => {
+          rows.push([`群 ${i + 1} の範囲`, r]);
+        });
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push(["群ごとの要約"]);
+          rows.push(["群", "n", "平均", "分散"]);
+          res.groups.forEach((g, i) => {
+            rows.push([`群 ${i + 1}`, g.n, fmt(g.mean), fmt(g.variance)]);
+          });
+          rows.push([]);
+          rows.push(["分散分析表"]);
+          rows.push(["要因", "df", "SS", "MS", "F", "p 値"]);
+          rows.push([
+            "群間",
+            res.dfBetween,
+            fmt(res.ssBetween),
+            fmt(res.msBetween),
+            fmt(res.f),
+            fmt(res.pValue),
+          ]);
+          rows.push([
+            "群内",
+            res.dfWithin,
+            fmt(res.ssWithin),
+            fmt(res.msWithin),
+            "",
+            "",
+          ]);
+          rows.push(["合計", res.dfTotal, fmt(res.ssTotal), "", "", ""]);
+        }
+      } else if (p.kind === "histogram") {
+        const data = readNums(p.primaryRange);
+        const res = buildHistogram(data, p.binEdges ?? []);
+        rows.push(["ヒストグラム"]);
+        rows.push(["データ範囲", p.primaryRange]);
+        rows.push([
+          "ビン境界",
+          (p.binEdges ?? []).length > 0 ? (p.binEdges ?? []).join(", ") : "自動 (Sturges)",
+        ]);
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push(["範囲", "下限", "上限", "頻度"]);
+          res.bins.forEach((b) => {
+            rows.push([b.label, fmt(b.binStart), fmt(b.binEnd), b.frequency]);
+          });
+          if (res.underflow > 0) rows.push(["下方外れ", "", "", res.underflow]);
+          if (res.overflow > 0) rows.push(["上方外れ", "", "", res.overflow]);
+        }
+      } else if (p.kind === "anova2") {
+        // Two-way ANOVA. The block range is a (levelsA·replicates) × levelsB
+        // grid laid out row-major: factor-A levels stacked, replicates within.
+        const grid = readGrid(p.primaryRange);
+        const a = Math.max(0, Math.floor(p.levelsA ?? 0));
+        const b = Math.max(0, Math.floor(p.levelsB ?? 0));
+        const r = Math.max(0, Math.floor(p.replicates ?? 0));
+        rows.push(["二元配置 分散分析 (ANOVA)"]);
+        rows.push(["データ範囲", p.primaryRange]);
+        rows.push(["因子 A 水準数", a]);
+        rows.push(["因子 B 水準数", b]);
+        rows.push(["セルあたり繰り返し数", r]);
+        rows.push([]);
+        const expectedRows = a * r;
+        if (
+          a < 2 ||
+          b < 2 ||
+          r < 1 ||
+          grid.length !== expectedRows ||
+          grid.some((row) => row.length !== b)
+        ) {
+          rows.push([
+            "エラー",
+            `データブロックは ${expectedRows} 行 × ${b} 列である必要があります (現在 ${grid.length} 行)`,
+          ]);
+        } else {
+          // Re-shape the flat grid into cells[a][b][r].
+          const cells: number[][][] = [];
+          for (let i = 0; i < a; i++) {
+            const rowCells: number[][] = [];
+            for (let j = 0; j < b; j++) {
+              const reps: number[] = [];
+              for (let k = 0; k < r; k++) {
+                reps.push(grid[i * r + k][j]);
+              }
+              rowCells.push(reps);
+            }
+            cells.push(rowCells);
+          }
+          const res = runTwoWayANOVA(cells);
+          if (res.error) {
+            rows.push(["エラー", res.error]);
+          } else {
+            rows.push(["総平均", fmt(res.grandMean)]);
+            rows.push(["総観測数", res.totalN]);
+            rows.push([]);
+            rows.push(["分散分析表"]);
+            rows.push(["要因", "df", "SS", "MS", "F", "p 値"]);
+            const labelOf = (s: string) =>
+              s === "factorA"
+                ? "因子 A"
+                : s === "factorB"
+                  ? "因子 B"
+                  : s === "interaction"
+                    ? "交互作用 (A×B)"
+                    : s === "error"
+                      ? "誤差"
+                      : "合計";
+            res.terms.forEach((t) => {
+              rows.push([
+                labelOf(t.source),
+                t.df,
+                fmt(t.ss),
+                Number.isFinite(t.ms) ? fmt(t.ms) : "",
+                t.f !== undefined ? fmt(t.f) : "",
+                t.pValue !== undefined ? fmt(t.pValue) : "",
+              ]);
+            });
+          }
+        }
+      } else if (p.kind === "ttest") {
+        const variant = p.tTestVariant ?? "twoSamplePooled";
+        const s1 = readNums(p.primaryRange);
+        const s2 = p.secondaryRange ? readNums(p.secondaryRange) : [];
+        const res = runTTest(s1, s2, variant, p.hypothesizedMean ?? 0);
+        const variantLabel =
+          variant === "oneSample"
+            ? "1 標本"
+            : variant === "twoSamplePooled"
+              ? "2 標本 (等分散プール)"
+              : variant === "welch"
+                ? "2 標本 (Welch)"
+                : "対応あり";
+        rows.push(["t 検定"]);
+        rows.push(["検定タイプ", variantLabel]);
+        rows.push(["標本 1 の範囲", p.primaryRange]);
+        if (variant !== "oneSample") {
+          rows.push(["標本 2 の範囲", p.secondaryRange ?? ""]);
+        }
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push(["", "標本 1", variant === "oneSample" ? "" : "標本 2"]);
+          rows.push([
+            "平均",
+            fmt(res.mean1),
+            variant === "oneSample" ? "" : fmt(res.mean2),
+          ]);
+          rows.push([
+            "観測数 n",
+            res.n1,
+            variant === "oneSample" ? "" : res.n2,
+          ]);
+          rows.push([]);
+          rows.push([
+            variant === "oneSample" ? "仮説平均 (μ₀)" : "仮説平均差",
+            fmt(res.hypothesizedMean),
+          ]);
+          rows.push(["平均差", fmt(res.meanDiff)]);
+          rows.push(["標準誤差", fmt(res.standardError)]);
+          rows.push(["t 統計", fmt(res.t)]);
+          rows.push(["自由度", fmt(res.df)]);
+          rows.push(["p 値 (両側)", fmt(res.pValueTwoSided)]);
+          rows.push(["p 値 (片側)", fmt(res.pValueOneSided)]);
+        }
+      } else if (p.kind === "chisquare") {
+        const variant = p.chiSquareVariant ?? "goodnessOfFit";
+        if (variant === "goodnessOfFit") {
+          const observed = readNums(p.primaryRange);
+          const expected = p.expectedRange
+            ? readNums(p.expectedRange)
+            : undefined;
+          const res = runChiSquareGoodnessOfFit(observed, expected);
+          rows.push(["カイ二乗 適合度検定"]);
+          rows.push(["観測度数の範囲", p.primaryRange]);
+          rows.push([
+            "期待度数の範囲",
+            p.expectedRange ?? "一様分布 (自動)",
+          ]);
+          rows.push([]);
+          if (res.error) {
+            rows.push(["エラー", res.error]);
+          } else {
+            rows.push(["χ² 統計", fmt(res.chiSquare)]);
+            rows.push(["自由度", res.df]);
+            rows.push(["p 値", fmt(res.pValue)]);
+            rows.push([]);
+            rows.push(["カテゴリ", "観測度数", "期待度数"]);
+            res.colTotals.forEach((obs, i) => {
+              rows.push([
+                `カテゴリ ${i + 1}`,
+                fmt(obs),
+                fmt(res.expected[0]?.[i] ?? Number.NaN),
+              ]);
+            });
+          }
+        } else {
+          const table = readGrid(p.primaryRange);
+          const res = runChiSquareIndependence(table);
+          rows.push(["カイ二乗 独立性検定"]);
+          rows.push(["分割表の範囲", p.primaryRange]);
+          rows.push([]);
+          if (res.error) {
+            rows.push(["エラー", res.error]);
+          } else {
+            rows.push(["χ² 統計", fmt(res.chiSquare)]);
+            rows.push(["自由度", res.df]);
+            rows.push(["p 値", fmt(res.pValue)]);
+            rows.push(["総度数", res.total]);
+            rows.push([]);
+            rows.push(["期待度数表"]);
+            const header: Array<string | number> = [""];
+            for (let j = 0; j < res.colTotals.length; j++) {
+              header.push(`列 ${j + 1}`);
+            }
+            rows.push(header);
+            res.expected.forEach((expRow, i) => {
+              rows.push([`行 ${i + 1}`, ...expRow.map((e) => fmt(e))]);
+            });
+          }
+        }
+      } else if (p.kind === "correlation") {
+        const ranges = p.variableRanges ?? [];
+        // Keep blank/non-numeric cells as NaN (not skipped) so each variable
+        // column stays the same length; runCorrelationMatrix then drops
+        // incomplete rows via listwise deletion.
+        const columns = ranges.map((rng) => readColumn(rng));
+        const labels = ranges.map((rng, i) => `変数 ${i + 1} (${rng})`);
+        const res = runCorrelationMatrix(columns, labels);
+        rows.push(["相関行列"]);
+        ranges.forEach((rng, i) => {
+          rows.push([`変数 ${i + 1} の範囲`, rng]);
+        });
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push(["完全ケース数 n", res.n]);
+          rows.push([]);
+          rows.push(["相関係数行列 (Pearson)"]);
+          rows.push(["", ...res.labels]);
+          res.correlation.forEach((corrRow, i) => {
+            rows.push([res.labels[i], ...corrRow.map((v) => fmt(v))]);
+          });
+          rows.push([]);
+          rows.push(["共分散行列 (標本, n-1)"]);
+          rows.push(["", ...res.labels]);
+          res.covariance.forEach((covRow, i) => {
+            rows.push([res.labels[i], ...covRow.map((v) => fmt(v))]);
+          });
+        }
+      } else if (p.kind === "random") {
+        const res = generateRandomNumbers({
+          distribution: p.randomDistribution ?? "normal",
+          count: p.randomCount ?? 0,
+          seed: p.randomSeed,
+          min: p.randomMin,
+          max: p.randomMax,
+          mean: p.randomMean,
+          stdDev: p.randomStdDev,
+          probability: p.randomProbability,
+          lambda: p.randomLambda,
+        });
+        const distLabel =
+          res.distribution === "uniform"
+            ? "一様分布"
+            : res.distribution === "normal"
+              ? "正規分布"
+              : res.distribution === "bernoulli"
+                ? "ベルヌーイ分布"
+                : "ポアソン分布";
+        rows.push(["乱数生成"]);
+        rows.push(["分布", distLabel]);
+        rows.push([
+          "シード",
+          p.randomSeed !== undefined ? p.randomSeed : "ランダム",
+        ]);
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push(["i", "値"]);
+          res.values.forEach((v, i) => {
+            rows.push([i + 1, fmt(v)]);
+          });
+        }
+      } else if (p.kind === "movingAverage") {
+        const variant = p.movingAverageVariant ?? "simple";
+        const data = readNums(p.primaryRange);
+        const res =
+          variant === "simple"
+            ? runSimpleMovingAverage(data, p.movingWindow ?? 0)
+            : runExponentialMovingAverage(data, p.movingAlpha ?? 0);
+        rows.push([
+          variant === "simple" ? "単純移動平均" : "指数移動平均",
+        ]);
+        rows.push(["データ範囲", p.primaryRange]);
+        if (variant === "simple") {
+          rows.push(["窓幅", p.movingWindow ?? ""]);
+        } else {
+          rows.push(["平滑化係数 α", p.movingAlpha ?? ""]);
+        }
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push(["i", "元データ", "移動平均"]);
+          res.values.forEach((v, i) => {
+            rows.push([
+              i + 1,
+              fmt(data[i]),
+              Number.isFinite(v) ? fmt(v) : "—",
+            ]);
+          });
+        }
+      } else {
+        // fourier
+        const signal = readNums(p.primaryRange);
+        const res = runFourierTransform(signal);
+        rows.push(["フーリエ変換 (FFT)"]);
+        rows.push(["信号データ範囲", p.primaryRange]);
+        rows.push([]);
+        if (res.error) {
+          rows.push(["エラー", res.error]);
+        } else {
+          rows.push([
+            "アルゴリズム",
+            res.method === "radix2"
+              ? "Cooley-Tukey (基数2)"
+              : "Bluestein (任意長)",
+          ]);
+          rows.push(["サンプル数 n", res.n]);
+          rows.push([]);
+          rows.push(["k", "実部", "虚部", "振幅", "位相 (rad)"]);
+          for (let k = 0; k < res.n; k++) {
+            rows.push([
+              k,
+              fmt(res.real[k]),
+              fmt(res.imag[k]),
+              fmt(res.amplitude[k]),
+              fmt(res.phase[k]),
+            ]);
+          }
+        }
+      }
+
+      // Materialise the rows into a fresh sheet fragment. We mirror the
+      // shape Univer expects (cellData[row][col] = { v }) and include
+      // rowCount/columnCount for a snug viewport.
+      const cellData: Record<string, Record<string, { v: unknown }>> = {};
+      let maxCols = 0;
+      rows.forEach((row, r) => {
+        if (row.length === 0) return;
+        if (row.length > maxCols) maxCols = row.length;
+        const rowObj: Record<string, { v: unknown }> = {};
+        row.forEach((cell, c) => {
+          rowObj[String(c)] = { v: cell };
+        });
+        cellData[String(r)] = rowObj;
+      });
+      sheets[newSheetId] = {
+        id: newSheetId,
+        name: finalName,
+        cellData,
+      };
+      order.push(newSheetId);
       applyMutatedSnapshot(JSON.stringify(snap));
     },
     [applyMutatedSnapshot],
@@ -2896,6 +4264,221 @@ export default function EditorScreen() {
     },
     [applyMutatedSnapshot],
   );
+
+  // --- #140 / #190: External data connections (Power Query) ---
+  // Loads a source (CSV/JSON file, Web/REST endpoint or local SQLite DB) via
+  // the backend, runs the connection's ETL step pipeline, and merges the
+  // result into the snapshot under a sheet owned by the connection record.
+  const loadDataConnectionFragment = useCallback(
+    async (
+      conn: Pick<DataConnection, "type" | "sourcePath" | "web" | "sqlite" | "targetSheetName">,
+    ): Promise<DataConnSheetFragment> => {
+      type RawResult = {
+        sheetName: string;
+        rowCount: number;
+        columnCount: number;
+        headers: string[];
+        cellData: Record<string, Record<string, unknown>>;
+        encoding: string;
+      };
+      let result: RawResult;
+      if (conn.type === "web") {
+        if (!conn.web) throw new Error("Web 接続の設定がありません");
+        result = await invoke<RawResult>("data_connection_load_web", {
+          url: conn.web.url,
+          format: conn.web.format,
+          headers:
+            conn.web.headers && Object.keys(conn.web.headers).length > 0
+              ? conn.web.headers
+              : null,
+          sheetName: conn.targetSheetName,
+        });
+      } else if (conn.type === "sqlite") {
+        if (!conn.sqlite) throw new Error("SQLite 接続の設定がありません");
+        result = await invoke<RawResult>("data_connection_load_sqlite", {
+          dbPath: conn.sqlite.dbPath,
+          query: conn.sqlite.query,
+          sheetName: conn.targetSheetName,
+        });
+      } else {
+        result = await invoke<RawResult>("data_connection_load", {
+          sourcePath: conn.sourcePath,
+          sourceType: conn.type,
+        });
+      }
+      return {
+        cellData: result.cellData,
+        rowCount: result.rowCount,
+        columnCount: result.columnCount,
+        headers: result.headers,
+      };
+    },
+    [],
+  );
+
+  const handleDataConnectionAdd = useCallback(
+    async (input: AddConnectionInput) => {
+      const connection: DataConnection = {
+        id: makeConnectionId(),
+        name: input.name,
+        type: input.type,
+        sourcePath: input.sourcePath,
+        targetSheetId: null,
+        targetSheetName: input.targetSheetName,
+        lastRefreshedAt: null,
+        steps: [],
+      };
+      if (input.type === "web") {
+        connection.web = {
+          url: input.webUrl ?? "",
+          format: input.webFormat ?? "auto",
+          headers: input.webHeaders ?? {},
+        };
+      } else if (input.type === "sqlite") {
+        connection.sqlite = {
+          dbPath: input.sourcePath,
+          query: input.sqliteQuery ?? "",
+        };
+      }
+      const rawFragment = await loadDataConnectionFragment(connection);
+      const fragment = transformDataConnFragment(rawFragment, connection.steps);
+      // Re-read the live snapshot AFTER the async load so concurrent edits
+      // aren't lost.
+      const liveSnap = useWorkbookStore.getState().currentSnapshotJson;
+      if (!liveSnap) throw new Error("ワークブックがありません");
+      const snapshot = JSON.parse(liveSnap) as Record<string, unknown>;
+      const { sheetId } = applyDataConnFragment(snapshot, connection, fragment);
+      connection.targetSheetId = sheetId;
+      connection.lastRefreshedAt = Date.now();
+      addConnectionToSnapshot(snapshot, connection);
+      applyMutatedSnapshot(JSON.stringify(snapshot));
+    },
+    [applyMutatedSnapshot, loadDataConnectionFragment],
+  );
+
+  const handleDataConnectionRefresh = useCallback(
+    async (connectionId: string) => {
+      const liveBefore = useWorkbookStore.getState().currentSnapshotJson;
+      if (!liveBefore) throw new Error("ワークブックがありません");
+      const snapBefore = JSON.parse(liveBefore) as Record<string, unknown>;
+      const conn = listDataConnections(snapBefore).find((c) => c.id === connectionId);
+      if (!conn) throw new Error("接続が見つかりません");
+      const rawFragment = await loadDataConnectionFragment(conn);
+      // Re-parse the live snapshot AFTER the async load.
+      const liveAfter = useWorkbookStore.getState().currentSnapshotJson;
+      if (!liveAfter) throw new Error("ワークブックがありません");
+      const snapAfter = JSON.parse(liveAfter) as Record<string, unknown>;
+      const liveConn = listDataConnections(snapAfter).find((c) => c.id === connectionId);
+      if (!liveConn) throw new Error("接続が削除されています");
+      const fragment = transformDataConnFragment(rawFragment, liveConn.steps);
+      const { sheetId } = applyDataConnFragment(snapAfter, liveConn, fragment);
+      updateConnectionInSnapshot(snapAfter, connectionId, {
+        targetSheetId: sheetId,
+        lastRefreshedAt: Date.now(),
+      });
+      applyMutatedSnapshot(JSON.stringify(snapAfter));
+    },
+    [applyMutatedSnapshot, loadDataConnectionFragment],
+  );
+
+  const handleDataConnectionEdit = useCallback(
+    async (
+      connectionId: string,
+      patch: {
+        name: string;
+        targetSheetName: string;
+        steps: EtlStep[];
+        scheduleOnOpen: boolean;
+        scheduleIntervalMinutes: number;
+      },
+    ) => {
+      const live = useWorkbookStore.getState().currentSnapshotJson;
+      if (!live) throw new Error("ワークブックがありません");
+      const snap = JSON.parse(live) as Record<string, unknown>;
+      // Rename the underlying sheet too so the new name is visible.
+      const conn = listDataConnections(snap).find((c) => c.id === connectionId);
+      if (conn && conn.targetSheetId) {
+        const sheets = (snap.sheets ?? {}) as Record<string, { name?: string } | undefined>;
+        const sheet = sheets[conn.targetSheetId];
+        if (sheet && typeof sheet === "object") {
+          sheet.name = patch.targetSheetName;
+        }
+      }
+      updateConnectionInSnapshot(snap, connectionId, {
+        name: patch.name,
+        targetSheetName: patch.targetSheetName,
+        steps: patch.steps,
+        schedule: {
+          onOpen: patch.scheduleOnOpen,
+          intervalMinutes: patch.scheduleIntervalMinutes,
+        },
+      });
+      applyMutatedSnapshot(JSON.stringify(snap));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  const handleDataConnectionRemove = useCallback(
+    async (connectionId: string) => {
+      const live = useWorkbookStore.getState().currentSnapshotJson;
+      if (!live) throw new Error("ワークブックがありません");
+      const snap = JSON.parse(live) as Record<string, unknown>;
+      removeConnectionFromSnapshot(snap, connectionId);
+      applyMutatedSnapshot(JSON.stringify(snap));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // #190 Phase 5: scheduled refresh. Fires connections marked `onOpen` once
+  // when the workbook handle changes, and sets up per-connection interval
+  // timers for connections with `intervalMinutes > 0`. The timers re-read the
+  // live snapshot each tick, so edits to a connection's schedule take effect
+  // on the next dialog save (which replaces the handle? no — we re-scan).
+  const dataConnOnOpenFiredRef = useRef<string | null>(null);
+  useEffect(() => {
+    const handle = currentHandle;
+    if (!handle) return;
+    const handleKey = JSON.stringify(handle);
+    const snapJson = useWorkbookStore.getState().currentSnapshotJson;
+    if (!snapJson) return;
+    let conns: DataConnection[];
+    try {
+      conns = listDataConnections(JSON.parse(snapJson) as Record<string, unknown>);
+    } catch {
+      return;
+    }
+    // Fire on-open refreshes exactly once per workbook handle.
+    if (dataConnOnOpenFiredRef.current !== handleKey) {
+      dataConnOnOpenFiredRef.current = handleKey;
+      for (const c of conns) {
+        if (c.schedule?.onOpen) {
+          void handleDataConnectionRefresh(c.id).catch(() => {
+            // Background refresh failures are non-fatal — surfaced in the
+            // dialog when the user next opens it.
+          });
+        }
+      }
+    }
+    // Interval timers: one per connection with intervalMinutes > 0.
+    const timers: ReturnType<typeof setInterval>[] = [];
+    for (const c of conns) {
+      const minutes = c.schedule?.intervalMinutes ?? 0;
+      if (minutes > 0) {
+        const id = c.id;
+        timers.push(
+          setInterval(
+            () => {
+              void handleDataConnectionRefresh(id).catch(() => {});
+            },
+            minutes * 60_000,
+          ),
+        );
+      }
+    }
+    return () => {
+      for (const t of timers) clearInterval(t);
+    };
+  }, [currentHandle, handleDataConnectionRefresh]);
 
   const addCurrentCellAsBookmark = useCallback(() => {
     const fUniver = fUniverRef.current;
@@ -3509,6 +5092,59 @@ export default function EditorScreen() {
     }
   }, []);
 
+  // #146 / #188: derive the shape (text box / rect / ellipse / line) list for
+  // the active sheet from the live snapshot. Filtered client-side so the panel
+  // auto-refreshes on sheet switch / insert / delete without manual invalidation.
+  const activeSheetTextBoxes: TextBox[] = activeSheetId
+    ? listTextBoxesForSheet(currentSnapshotJson ?? null, activeSheetId)
+    : [];
+
+  // Jump the Univer selection to a shape's anchor cell when the user clicks a
+  // panel row. Switches sheets first if the shape lives on a different sheet —
+  // mirrors jumpToImageCell.
+  const jumpToTextBoxCell = useCallback((tb: TextBox) => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    try {
+      const target = workbook.getSheetBySheetId(tb.sheetId);
+      if (!target) return;
+      const active = workbook.getActiveSheet();
+      if (!active || active.getSheetId() !== tb.sheetId) {
+        workbook.setActiveSheet(target);
+      }
+      const a1 = colRowToA1(tb.x, tb.y);
+      const range = target.getRange(a1);
+      if (range) range.activate();
+    } catch {
+      // best-effort
+    }
+  }, []);
+
+  // #184: jump the Univer selection to a camera link's source range / dst
+  // anchor when the user clicks an entry in CameraLinksPanel.
+  const jumpToCameraSource = useCallback(
+    (link: CameraLink) => {
+      jumpToA1OnSheet(link.sourceSheetId, rectToA1(link.sourceRange));
+    },
+    [jumpToA1OnSheet],
+  );
+  const jumpToCameraDest = useCallback(
+    (link: CameraLink) => {
+      jumpToA1OnSheet(
+        link.dstSheetId,
+        rectToA1({
+          r1: link.dstAnchor.row,
+          c1: link.dstAnchor.col,
+          r2: link.dstAnchor.row,
+          c2: link.dstAnchor.col,
+        }),
+      );
+    },
+    [jumpToA1OnSheet],
+  );
+
   // Jump the Univer selection to a commented cell when the user clicks an
   // entry in CommentIndicatorsPanel. Switches sheets first if needed, then
   // sets the active range to the target A1 cell. Best-effort — silent
@@ -3767,7 +5403,7 @@ export default function EditorScreen() {
         existing.v !== undefined ? String(existing.v) : String(existing.f ?? "");
       const trimmed = preview.length > 40 ? preview.slice(0, 40) + "…" : preview;
       const ok = window.confirm(
-        `アクティブセルに値 "${trimmed}" があります。${formula} で上書きしますか？`,
+        t("confirm.cell.overwrite", trimmed, formula),
       );
       if (!ok) return;
     }
@@ -4003,6 +5639,124 @@ export default function EditorScreen() {
       return null;
     },
     [imageDialog, applyMutatedSnapshot],
+  );
+
+  // #146 / #188 — Insert-shape dialog plumbing. Snapshots the active sheet +
+  // the top-left of the active range so the shape anchors at the user's actual
+  // cursor cell (same pattern as openImageDialog).
+  const openShapeDialog = useCallback(() => {
+    const ready = getReadyWorkbook("図形の挿入");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let cell = "A1";
+    try {
+      const sel = sheet.getSelection();
+      const range = sel?.getActiveRange();
+      if (range) {
+        const a1 = range.getA1Notation();
+        cell = a1.includes(":") ? a1.split(":")[0] : a1;
+      }
+    } catch {
+      // fall back to A1
+    }
+    setShapeDialog({ sheetId, cell });
+  }, [getReadyWorkbook]);
+
+  // Apply a new shape (text box / rect / ellipse / line) by mutating the
+  // snapshot's `_textBoxes` array. The shape stays in-memory only until the
+  // user saves to xlsx; on save the round-trip serialises every shape into
+  // the matching drawing XML via `_textBoxes` → `<xdr:sp>` / `<xdr:grpSp>`
+  // injection. Returns null on success, or a localized error string on
+  // rejection (matching applyImage's contract).
+  const applyShape = useCallback(
+    (value: ShapeFormValue): string | null => {
+      if (!shapeDialog) return "ダイアログの状態が無効です";
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return "ワークブックがまだ準備できていません";
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return "アクティブなワークブックがありません";
+      const snapshot = workbook.save() as unknown as Record<string, unknown>;
+      const sheetOrder = (snapshot.sheetOrder as string[] | undefined) ?? [];
+      if (!sheetOrder.includes(shapeDialog.sheetId)) {
+        return "対象シートが見つかりません";
+      }
+      const pos = tbA1ToColRow(value.cell);
+      if (!pos) return "アンカーセルの解析に失敗しました";
+      const tb: TextBox = {
+        id: makeTextBoxId(),
+        type: value.type,
+        sheetId: shapeDialog.sheetId,
+        x: pos.col,
+        y: pos.row,
+        w: value.w,
+        h: value.h,
+        text: value.text,
+        fontFamily: value.fontFamily,
+        fontSize: value.fontSize,
+        color: value.color,
+        backgroundColor: value.backgroundColor,
+        borderColor: value.borderColor,
+      };
+      const next = addTextBox(snapshot, tb);
+      applyMutatedSnapshot(JSON.stringify(next));
+      return null;
+    },
+    [shapeDialog, applyMutatedSnapshot],
+  );
+
+  // Remove a shape by id. Used by the side panel's per-row delete button.
+  const removeTextBox = useCallback(
+    (id: string) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const snapshot = workbook.save() as unknown as Record<string, unknown>;
+      const next = deleteTextBox(snapshot, id);
+      applyMutatedSnapshot(JSON.stringify(next));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // Patch a shape's geometry / style fields from the side-panel numeric
+  // editor. Univer 0.5.x exposes no stable pixel-overlay API, so position and
+  // size are edited as cell-unit numbers in the panel (issue #188 note).
+  const patchTextBox = useCallback(
+    (id: string, patch: Partial<Omit<TextBox, "id">>) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const snapshot = workbook.save() as unknown as Record<string, unknown>;
+      const next = updateTextBox(snapshot, id, patch);
+      applyMutatedSnapshot(JSON.stringify(next));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // Group / ungroup the supplied shapes (#188). Grouping stamps a shared
+  // `groupId` on every member so the xlsx export wraps them in one
+  // `<xdr:grpSp>`. Passing an empty `groupId` clears the grouping.
+  const groupTextBoxes = useCallback(
+    (ids: string[], groupId: string | undefined) => {
+      if (ids.length === 0) return;
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      let snapshot = workbook.save() as unknown as Record<string, unknown>;
+      for (const id of ids) {
+        snapshot = updateTextBox(snapshot, id, { groupId }) as Record<
+          string,
+          unknown
+        >;
+      }
+      applyMutatedSnapshot(JSON.stringify(snapshot));
+    },
+    [applyMutatedSnapshot],
   );
 
   // Open the sort dialog with the active sheet + a default range derived from
@@ -4422,6 +6176,13 @@ export default function EditorScreen() {
       run: openImageDialog,
     },
     {
+      id: "insert.shape",
+      label: "図形を挿入",
+      category: "挿入",
+      keywords: "shape textbox rect ellipse line 図形 テキストボックス 矩形 円 矢印",
+      run: openShapeDialog,
+    },
+    {
       id: "insert.namedRange",
       label: "名前付き範囲を編集",
       category: "挿入",
@@ -4486,6 +6247,64 @@ export default function EditorScreen() {
       category: "表示",
       keywords: "history snapshots",
       run: () => setSnapshotsOpen(true),
+    },
+    {
+      id: "view.split.toggle",
+      // Label flips between "分割" (open) and "分割を解除" (close) so the
+      // single command-palette entry behaves like Excel's View → Split toggle.
+      label: activeSheetHasSplit ? "ウィンドウ分割を解除" : "ウィンドウを分割",
+      category: "表示",
+      keywords: "split window pane 分割 4分割",
+      run: () => toggleSplitPane("both"),
+    },
+    {
+      id: "view.split.horizontal",
+      label: "ウィンドウを横に分割",
+      category: "表示",
+      keywords: "split horizontal pane 横分割 2分割",
+      run: () => toggleSplitPane("horizontal"),
+    },
+    {
+      id: "view.split.vertical",
+      label: "ウィンドウを縦に分割",
+      category: "表示",
+      keywords: "split vertical pane 縦分割 2分割",
+      run: () => toggleSplitPane("vertical"),
+    },
+    {
+      id: "view.split.clear",
+      label: "ウィンドウ分割を解除",
+      category: "表示",
+      keywords: "split clear remove unsplit 解除",
+      run: clearSplitPane,
+    },
+    {
+      id: "insert.camera",
+      label: "カメラ撮影 (範囲のスナップショット画像)",
+      category: "挿入",
+      keywords: "camera snapshot picture range live image",
+      run: captureCamera,
+    },
+    {
+      id: "view.camera",
+      label: "カメラ画像パネル",
+      category: "表示",
+      keywords: "camera snapshot panel",
+      run: () => setCameraPanelOpen((v) => !v),
+    },
+    {
+      id: "tools.macro",
+      label: "マクロの記録 / 再生",
+      category: "ツール",
+      keywords: "macro record playback automation",
+      run: () => setMacroDialogOpen(true),
+    },
+    {
+      id: "tools.scriptEditor",
+      label: "スクリプトエディタ",
+      category: "ツール",
+      keywords: "script editor javascript apps script macro trigger sandbox",
+      run: () => setScriptEditorOpen(true),
     },
     {
       id: "view.settings",
@@ -4628,6 +6447,9 @@ export default function EditorScreen() {
       case "insert-image":
         openImageDialog();
         break;
+      case "insert-shape":
+        openShapeDialog();
+        break;
       case "format-number":
         openNumberFormatDialog();
         break;
@@ -4724,6 +6546,12 @@ export default function EditorScreen() {
       case "view-slicers-panel":
         setSlicersPanelOpen((v) => !v);
         break;
+      case "insert-camera":
+        captureCamera();
+        break;
+      case "view-camera-panel":
+        setCameraPanelOpen((v) => !v);
+        break;
       case "edit-quick-analysis":
         openQuickAnalysisDialog();
         break;
@@ -4763,8 +6591,17 @@ export default function EditorScreen() {
       case "tools-scenarios":
         openScenarioManagerDialog();
         break;
+      case "tools-macro":
+        setMacroDialogOpen(true);
+        break;
+      case "tools-script-editor":
+        setScriptEditorOpen(true);
+        break;
       case "data-forecast-sheet":
         openForecastSheetDialog();
+        break;
+      case "tools-analysis-toolpak":
+        openAnalysisToolpakDialog();
         break;
       case "insert-recommended-charts":
         openRecommendedChartsDialog();
@@ -4807,6 +6644,9 @@ export default function EditorScreen() {
         break;
       case "file-import-sheet":
         setSheetImportOpen(true);
+        break;
+      case "data-data-connections":
+        setDataConnectionsOpen(true);
         break;
       case "view-bookmarks-panel":
         setBookmarksPanelOpen((v) => !v);
@@ -4865,6 +6705,18 @@ export default function EditorScreen() {
       case "insert-cell-link":
         openCellLinkerDialog();
         break;
+      case "insert-checkbox":
+        insertCheckboxAtSelection();
+        break;
+      case "insert-radio-button":
+        insertFormControlAtSelection("radio");
+        break;
+      case "insert-spin-button":
+        insertFormControlAtSelection("spin");
+        break;
+      case "insert-scroll-bar":
+        insertFormControlAtSelection("scroll");
+        break;
       case "data-filter-search":
         openFilterSearchDialog();
         break;
@@ -4905,6 +6757,7 @@ export default function EditorScreen() {
     openCommentDialog,
     openChartDialog,
     openImageDialog,
+    openShapeDialog,
     openNumberFormatDialog,
     applyQuickFormat,
     openCfDialog,
@@ -4937,6 +6790,7 @@ export default function EditorScreen() {
     addActiveCellToWatch,
     openScenarioManagerDialog,
     openForecastSheetDialog,
+    openAnalysisToolpakDialog,
     openRecommendedChartsDialog,
     openSnapshotDiffDialog,
     openSpellCheckDialog,
@@ -5000,7 +6854,7 @@ export default function EditorScreen() {
       });
       if (existing.length > 0) {
         const ok = window.confirm(
-          `既存の CSV ファイル ${existing.length} 件を上書きします。続行しますか？`
+          t("confirm.csvExport.overwrite", existing.length)
         );
         if (!ok) return;
       }
@@ -5046,6 +6900,13 @@ export default function EditorScreen() {
         const r = sheet?.getSelection()?.getActiveRange();
         if (!sheet || !r) return;
         setNavActiveSheetName(sheet.getSheetName());
+        // #146 / #188: feed the shape panel filter. Cheap getter, safe to call
+        // unconditionally — null when there's no active sheet.
+        try {
+          setActiveSheetId(sheet.getSheetId());
+        } catch {
+          // best-effort
+        }
         const startCol = r.getColumn();
         const startRow = r.getRow();
         const width = (r as unknown as { getWidth?: () => number }).getWidth?.() ?? 1;
@@ -5096,6 +6957,96 @@ export default function EditorScreen() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // #183: keyboard activation for checkboxes and form controls. When the
+  // active cell hosts a control:
+  //   - checkbox:  Space toggles the boolean.
+  //   - radio:     Space / Enter selects this option.
+  //   - spin:      ArrowUp/Down step by ±step.
+  //   - scroll:    ArrowUp/Down step by ±step, PageUp/Down by ±page.
+  // We ignore the keystroke while a cell editor / dialog input is focused so
+  // typing into a cell still works. Mutations route through
+  // applyMutatedSnapshot for undo capture and respect sheet protection.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== " " && e.key !== "Enter" &&
+          e.key !== "ArrowUp" && e.key !== "ArrowDown" &&
+          e.key !== "PageUp" && e.key !== "PageDown") {
+        return;
+      }
+      // Skip when focus is in an editable field (cell editor, dialog input).
+      const active = document.activeElement;
+      if (
+        active &&
+        (active.tagName === "INPUT" ||
+          active.tagName === "TEXTAREA" ||
+          (active as HTMLElement).isContentEditable)
+      ) {
+        return;
+      }
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const sheet = workbook.getActiveSheet();
+      if (!sheet) return;
+      const subUnitId = sheet.getSheetId();
+      let row = -1;
+      let col = -1;
+      try {
+        const range = sheet.getSelection()?.getActiveRange();
+        if (range) {
+          row = range.getRow();
+          col = range.getColumn();
+        }
+      } catch {
+        return;
+      }
+      if (row < 0 || col < 0) return;
+      const snapshot = snapshotRef.current;
+
+      // Checkbox: Space toggles.
+      if (hasCheckbox(snapshot, subUnitId, row, col)) {
+        if (e.key !== " ") return;
+        if (isSheetProtectedInSnapshot(snapshot, subUnitId)) return;
+        e.preventDefault();
+        const result = toggleCheckboxInSnapshot(snapshot, subUnitId, row, col);
+        if (result.changed) {
+          applyMutatedSnapshot(JSON.stringify(result.snapshot));
+        }
+        return;
+      }
+
+      // Form controls.
+      const fc = getFormControlAt(snapshot, subUnitId, row, col);
+      if (!fc) return;
+      if (isSheetProtectedInSnapshot(snapshot, subUnitId)) return;
+      let result: ReturnType<typeof selectRadio> | null = null;
+      if (fc.kind === "radio") {
+        if (e.key !== " " && e.key !== "Enter") return;
+        result = selectRadio(snapshot, subUnitId, row, col);
+      } else {
+        // spin / scroll
+        if (e.key === "ArrowUp") {
+          result = stepControl(snapshot, subUnitId, row, col, 1, false);
+        } else if (e.key === "ArrowDown") {
+          result = stepControl(snapshot, subUnitId, row, col, -1, false);
+        } else if (e.key === "PageUp" && fc.kind === "scroll") {
+          result = stepControl(snapshot, subUnitId, row, col, 1, true);
+        } else if (e.key === "PageDown" && fc.kind === "scroll") {
+          result = stepControl(snapshot, subUnitId, row, col, -1, true);
+        } else {
+          return;
+        }
+      }
+      e.preventDefault();
+      if (result && result.changed) {
+        applyMutatedSnapshot(JSON.stringify(result.snapshot));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [applyMutatedSnapshot]);
 
   // #107: consume the coco:calc-recalc events. Calls Univer's facade calc()
   // when available (the public surface in 0.5.x exposes a workbook-level
@@ -5239,6 +7190,7 @@ export default function EditorScreen() {
 
     let univer: Univer | null = null;
     let contextMenuReg: ReturnType<typeof registerCocoContextMenu> | null = null;
+    let formulaNormalizerReg: ReturnType<typeof registerFormulaNormalizer> | null = null;
 
     try {
       // #95 note: Univer 0.5.x does not ship a `JA_JP` LocaleType, so the
@@ -5299,7 +7251,13 @@ export default function EditorScreen() {
                   patchSparklineRenders(
                     patchTableRenders(
                       patchSlicerFilters(
-                        patchOutlineRenders(patchHyperlinkRenders(JSON.parse(currentSnapshotJson))),
+                        patchFormControlRenders(
+                          patchCheckboxRenders(
+                            patchOutlineRenders(
+                              patchHyperlinkRenders(JSON.parse(currentSnapshotJson)),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -5341,8 +7299,14 @@ export default function EditorScreen() {
         openCommentDialog: () => openCommentDialogRef.current(),
         openHyperlinkDialog: () => openHyperlinkDialogRef.current(),
         openNumberFormatDialog: () => openNumberFormatDialogRef.current(),
+        captureCamera: () => captureCameraRef.current(),
       });
+
+      // #179 (area C): rewrite Japanese function-name aliases (=合計(...) →
+      // =SUM(...)) before the formula engine sees the cell edit.
+      formulaNormalizerReg = registerFormulaNormalizer(univer);
     } catch (e) {
+      formulaNormalizerReg?.dispose();
       contextMenuReg?.dispose();
       univer?.dispose();
       univerRef.current = null;
@@ -5352,12 +7316,23 @@ export default function EditorScreen() {
     }
 
     return () => {
+      formulaNormalizerReg?.dispose();
       contextMenuReg?.dispose();
       univer?.dispose();
       univerRef.current = null;
       fUniverRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // #179 (area E): hot-swap Univer's locale when the app language changes,
+  // so the editor chrome (ribbon, menus, formula helper) updates without a
+  // page reload. The Coco-side UI re-renders via App's useLocale().
+  useEffect(() => {
+    return subscribeLocale((locale) => {
+      const univer = univerRef.current;
+      if (univer) swapUniverLocale(univer, locale);
+    });
   }, []);
 
   // Sync snapshot to store on data mutations (skip selection/scroll operations).
@@ -5372,7 +7347,15 @@ export default function EditorScreen() {
     const syncSnapshot = () => {
       const workbook = fUniver.getActiveWorkbook();
       if (!workbook) return;
-      updateSnapshot(JSON.stringify(workbook.save()));
+      // #184 C-1: `FWorkbook.save()` reconstructs the snapshot from Univer's
+      // internal models, so it drops Coco's workbook-root extension keys
+      // (`_cameraLinks`, `_scenarios`) that were written straight into the
+      // store via `applyMutatedSnapshot` without a Univer re-mount. Re-graft
+      // them from the prior store snapshot so a cell edit doesn't silently
+      // wipe the user's camera links / scenarios.
+      const fresh = JSON.stringify(workbook.save());
+      const prev = useWorkbookStore.getState().currentSnapshotJson;
+      updateSnapshot(carryForwardRootExtensions(fresh, prev));
     };
 
     const cancelPendingSnapshotSync = () => {
@@ -5440,6 +7423,216 @@ export default function EditorScreen() {
       disposable.dispose();
     };
   }, [markDirty, updateSnapshot]);
+
+  // #131 — macro recorder hook. Subscribes to Univer's high-level COMMAND
+  // stream (not MUTATION; replaying a COMMAND re-generates the right MUTATIONs
+  // so undo + snapshot sync keep working). The observer is a no-op when the
+  // recorder is idle, so the cost is one Set.has() per command.
+  useEffect(() => {
+    if (!fUniverRef.current) return;
+    const fUniver = fUniverRef.current;
+    const disposable = fUniver.onCommandExecuted((info, options) => {
+      if (info.type !== CommandType.COMMAND) return;
+      observeMacroCommand(info.id, info.params, {
+        fromCollab: options?.fromCollab === true,
+      });
+    });
+    return () => disposable.dispose();
+  }, []);
+
+  // #189 — script triggers. Books can embed JS snippets (snapshot._scripts)
+  // that register onOpen / onEdit / timer triggers via the `Coco.*` API.
+  // This effect:
+  //   - onOpen : fires every registered onOpen handler once the workbook is
+  //              ready (after a short settle delay so Facade is populated).
+  //   - onEdit : hooks the MUTATION command stream and fires onEdit handlers
+  //              with an EditEvent for each cell write. Protected sheets are
+  //              still write-blocked inside ScriptApi.
+  //   - timer  : schedules setInterval per registered timer trigger.
+  // Triggers run through `fireTrigger` — #189 C2: in the browser this routes
+  // through the sandboxed-iframe executor (handlers are kept inside the
+  // iframe; the parent only sends fire-trigger messages). Each run is
+  // appended to the execution log.
+  useEffect(() => {
+    if (!fUniverRef.current) return;
+    const fUniver = fUniverRef.current;
+    let disposed = false;
+    const timerIds: ReturnType<typeof setInterval>[] = [];
+    // Per-script collected triggers, refreshed when scripts change.
+    let collected: CollectedTriggers[] = [];
+    // C1 — re-entry guard. `fireAll("onEdit")` handlers may write cells,
+    // which re-enters the MUTATION listener below. Without this flag every
+    // onEdit-driven write would re-fire onEdit → infinite loop. Set for the
+    // whole duration of an onEdit dispatch (which is serialized).
+    let firingEdit = false;
+    // M1 — per-timer "already running" guard so a slow handler doesn't pile
+    // up overlapping runs when the interval is shorter than the run time.
+    const timerRunning = new Set<string>();
+
+    /** Resolve a sheet's display name from its id via the Facade. */
+    const sheetNameById = (subUnitId: string): string => {
+      try {
+        const wb = fUniverRef.current?.getActiveWorkbook();
+        const sheets =
+          (wb as { getSheets?: () => unknown[] } | undefined)?.getSheets?.() ?? [];
+        for (const s of sheets) {
+          const sh = s as {
+            getSheetId?: () => string;
+            getSheetName?: () => string;
+          };
+          if (sh.getSheetId?.() === subUnitId) return sh.getSheetName?.() ?? "";
+        }
+      } catch {
+        /* fall through */
+      }
+      return "";
+    };
+
+    /**
+     * Fire `kind` triggers for every script that registered one. Runs are
+     * serialized (awaited one after another) so onEdit dispatches finish
+     * before the re-entry guard is lowered. After an unmount we skip
+     * `recordRun` / logging so triggers don't leave side effects (M1).
+     */
+    const fireAll = async (
+      kind: "onOpen" | "onEdit" | "timer",
+      extra: { editEvent?: EditEvent } = {},
+    ): Promise<void> => {
+      const snapshot = snapshotRef.current;
+      const scripts = readScripts(snapshot);
+      for (const c of collected) {
+        if (disposed) return;
+        if (!c.triggers.some((t) => t.kind === kind)) continue;
+        const entry = scripts.find((s) => s.id === c.scriptId);
+        if (!entry) continue;
+        const result = await fireTrigger(entry, kind, {
+          fUniver: fUniverRef.current,
+          snapshotJson: snapshotRef.current,
+          editEvent: extra.editEvent,
+        });
+        // M1 — after unmount, don't record runs or write logs.
+        if (disposed) return;
+        recordRun(entry, kind, result);
+        if (!result.ok) {
+          // eslint-disable-next-line no-console
+          console.warn(`[script:${kind}] ${entry.name}: ${result.error}`);
+        }
+      }
+    };
+
+    /** (Re)collect triggers from the current snapshot, then arm timers. */
+    const refresh = async () => {
+      const scripts = readScripts(snapshotRef.current);
+      const next: CollectedTriggers[] = [];
+      for (const s of scripts) {
+        try {
+          next.push(
+            await collectTriggers(s, {
+              fUniver: fUniverRef.current,
+              snapshotJson: snapshotRef.current,
+            }),
+          );
+        } catch {
+          /* skip scripts whose dry-run throws */
+        }
+      }
+      if (disposed) return;
+      collected = next;
+      // Re-arm timers from scratch.
+      for (const id of timerIds.splice(0)) clearInterval(id);
+      timerRunning.clear();
+      for (const c of collected) {
+        for (const t of c.triggers) {
+          if (t.kind !== "timer" || t.intervalMs <= 0) continue;
+          // M1 — skip this tick if the previous run for this timer key is
+          // still in flight; serialize via the timerRunning set.
+          const key = `${c.scriptId}#${t.intervalMs}`;
+          const id = setInterval(() => {
+            if (disposed || timerRunning.has(key)) return;
+            timerRunning.add(key);
+            void fireAll("timer").finally(() => timerRunning.delete(key));
+          }, t.intervalMs);
+          timerIds.push(id);
+        }
+      }
+    };
+
+    // Initial collection + onOpen fire after the workbook settles.
+    const openTimer = setTimeout(() => {
+      void refresh().then(() => {
+        if (!disposed) void fireAll("onOpen");
+      });
+    }, 400);
+
+    // onEdit: hook MUTATION writes.
+    const editDisposable = fUniver.onCommandExecuted((info) => {
+      // C1 — re-entry guard. onEdit handlers that write cells produce
+      // MUTATIONs; without this early return they would re-trigger onEdit
+      // forever. Skip MUTATIONs that occur while an onEdit dispatch runs.
+      if (firingEdit) return;
+      if (info.type !== CommandType.MUTATION) return;
+      const { subUnitId, writes } = extractCellWrites(info.params);
+      if (!subUnitId || writes.length === 0) return;
+      if (!collected.some((c) => c.triggers.some((t) => t.kind === "onEdit"))) return;
+      const sheetName = sheetNameById(subUnitId);
+      // Serialize all writes' onEdit dispatches, then lower the guard.
+      firingEdit = true;
+      void (async () => {
+        try {
+          for (const w of writes) {
+            if (disposed) break;
+            await fireAll("onEdit", {
+              editEvent: {
+                sheetName,
+                a1: toA1(w.row, w.col),
+                row: w.row,
+                col: w.col,
+                value: w.value,
+              },
+            });
+          }
+        } finally {
+          firingEdit = false;
+        }
+      })();
+    });
+
+    return () => {
+      disposed = true;
+      clearTimeout(openTimer);
+      for (const id of timerIds) clearInterval(id);
+      timerRunning.clear();
+      editDisposable.dispose();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSnapshotJson]);
+
+  // #186 — global-shortcut macro playback. `useGlobalShortcuts` (App level)
+  // detects Ctrl/Cmd+Shift+1..9 and emits the bound macro id; we own the
+  // Univer executor so we resolve the macro from the (encrypted) store and
+  // replay it here. Destructive macros still prompt before running.
+  useEffect(() => {
+    const unsub = onMacroPlayRequested((macroId) => {
+      void (async () => {
+        const fUniver = fUniverRef.current;
+        if (!fUniver) return;
+        const { macros } = await loadMacrosSecure();
+        const macro = macros.find((m) => m.id === macroId);
+        if (!macro) return;
+        if (summariseMacroDestructive(macro.events).length > 0) {
+          const ok = window.confirm(
+            `「${macro.name}」には破壊的な操作が含まれます。実行しますか？`,
+          );
+          if (!ok) return;
+        }
+        await playbackMacro(macro.events, {
+          executeCommand: (id, params) =>
+            fUniver.executeCommand(id, (params ?? undefined) as object | undefined),
+        });
+      })();
+    });
+    return () => unsub();
+  }, []);
 
   // Live sheet-protection enforcement. G3 marks `_protected` in the snapshot
   // and round-trips it through xlsx, but Univer itself doesn't know about
@@ -5544,6 +7737,48 @@ export default function EditorScreen() {
       if (typeof subUnitId !== "string" || typeof row !== "number" || typeof col !== "number") {
         return;
       }
+      // #150: checkbox toggle takes priority over hyperlink follow. A cell
+      // can't sensibly be both. Honour sheet protection — the
+      // beforeCommandExecute guard would block the mutation anyway, but
+      // bailing here avoids a stale snapshot push.
+      if (hasCheckbox(snapshotRef.current, subUnitId, row, col)) {
+        if (isSheetProtectedInSnapshot(snapshotRef.current, subUnitId)) return;
+        const result = toggleCheckboxInSnapshot(
+          snapshotRef.current,
+          subUnitId,
+          row,
+          col,
+        );
+        if (!result.changed) return;
+        applyMutatedSnapshot(JSON.stringify(result.snapshot));
+        return;
+      }
+      // #183: form-control activation. Radio → select; spin → step +1;
+      // scroll → step +1 page. Click is the coarse interaction; the keyboard
+      // handler offers finer control (arrows / Space). Sheet protection blocks
+      // the mutation just like the checkbox path.
+      const fc = getFormControlAt(snapshotRef.current, subUnitId, row, col);
+      if (fc) {
+        if (isSheetProtectedInSnapshot(snapshotRef.current, subUnitId)) return;
+        let result;
+        if (fc.kind === "radio") {
+          result = selectRadio(snapshotRef.current, subUnitId, row, col);
+        } else {
+          // Spin steps by one; scroll bar steps by one page on a plain click.
+          result = stepControl(
+            snapshotRef.current,
+            subUnitId,
+            row,
+            col,
+            1,
+            fc.kind === "scroll",
+          );
+        }
+        if (result.changed) {
+          applyMutatedSnapshot(JSON.stringify(result.snapshot));
+        }
+        return;
+      }
       const entry = lookupHyperlink(snapshotRef.current, subUnitId, row, col);
       if (!entry) return;
       const classified = classifyHyperlink(entry.target);
@@ -5580,6 +7815,148 @@ export default function EditorScreen() {
     // this dep, the listener stays bound to the first workbook for the
     // lifetime of the component and later workbooks' clicks never fire.
   }, [currentHandle]);
+
+  // Smart chips (#158 MVP + #185 user-extensible rules). Lazy hover-driven
+  // detection: we wire the sheets-ui `onCellHover` facade event, look up
+  // chips for the hovered (sheetId, row, col), and surface them in
+  // SmartChipPopover. The detector reads the snapshot ref so we always see
+  // the freshest cell values without re-binding on every snapshot mutation.
+  //
+  // Detection runs only on hover — no eager walk of the grid — so a 1M-row
+  // workbook pays nothing until the user points at a cell. The detector is
+  // O(cell-text-length) with a hard 8 KB bail-out, and the custom-rule pass
+  // (#185) is bounded by MAX_MATCHES_PER_CELL + a ReDoS-shape rejection in
+  // customSmartChipRules.ts, so even pathological rules stay cheap.
+  const [smartChipState, setSmartChipState] = useState<{
+    chips: SmartChip[];
+    anchor: SmartChipPopoverAnchor | null;
+    sheetId: string;
+    row: number;
+    col: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!fUniverRef.current) return;
+    const fUniver = fUniverRef.current;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+
+    const onCellHover = (workbook as unknown as {
+      onCellHover?: (
+        cb: (cell: {
+          subUnitId?: string;
+          row?: number;
+          col?: number;
+          event?: { clientX?: number; clientY?: number };
+        }) => void,
+      ) => { dispose: () => void };
+    }).onCellHover;
+    if (typeof onCellHover !== "function") return;
+
+    const disposable = onCellHover.call(workbook, (cell) => {
+      const subUnitId = typeof cell.subUnitId === "string" ? cell.subUnitId : null;
+      const row = typeof cell.row === "number" ? cell.row : null;
+      const col = typeof cell.col === "number" ? cell.col : null;
+      if (subUnitId === null || row === null || col === null) {
+        setSmartChipState(null);
+        return;
+      }
+      // Skip re-detect when hovering the same cell: avoids re-running the
+      // detector + re-rendering the popover on every mousemove pixel.
+      setSmartChipState((prev) => {
+        if (
+          prev &&
+          prev.sheetId === subUnitId &&
+          prev.row === row &&
+          prev.col === col
+        ) {
+          return prev;
+        }
+        const chips = smartChipsForCell(
+          snapshotRef.current,
+          subUnitId,
+          row,
+          col,
+        );
+        if (chips.length === 0) return null;
+        // Anchor coordinates: use the pointer position if Univer surfaced
+        // an event, with a small downward offset so the popover doesn't
+        // sit under the cursor. Fall back to top-left of the viewport.
+        const ev = cell.event;
+        const x = typeof ev?.clientX === "number" ? ev.clientX + 12 : 24;
+        const y = typeof ev?.clientY === "number" ? ev.clientY + 16 : 24;
+        return {
+          chips,
+          anchor: { x, y },
+          sheetId: subUnitId,
+          row,
+          col,
+        };
+      });
+    });
+
+    return () => disposable.dispose();
+  }, [currentHandle]);
+
+  // Action handler for a chip pick. URLs / emails / custom-rule URLs go
+  // through the existing `open_url` Tauri command (which enforces a scheme
+  // allowlist of http(s)/mailto in shell.rs — custom rule templates are
+  // validated to http(s) up-front, so they pass). Dates pop a tiny
+  // prompt-based picker for the MVP — the user sees the chip's ISO value
+  // and can confirm/edit it; we then write it back via the Univer facade.
+  const handleSmartChipActivate = useCallback(
+    (chip: SmartChip) => {
+      const url = smartChipActionUrl(chip);
+      if (url) {
+        invoke("open_url", { url }).catch((err) => {
+          // eslint-disable-next-line no-console
+          console.warn("smart-chip open_url failed:", err);
+        });
+        setSmartChipState(null);
+        return;
+      }
+      if (chip.kind === "date" && smartChipState) {
+        const current = chip.iso ?? "";
+        // window.prompt is the MVP-minimal "calendar picker". It accepts
+        // YYYY-MM-DD; we re-detect via Date.parse so the user can also
+        // type "May 20, 2026" and get a normalized date written back.
+        const input = window.prompt(
+          "日付を編集 (YYYY-MM-DD)",
+          current,
+        );
+        if (input === null) {
+          setSmartChipState(null);
+          return;
+        }
+        const trimmed = input.trim();
+        if (!trimmed) {
+          setSmartChipState(null);
+          return;
+        }
+        const parsed = Date.parse(trimmed);
+        if (!Number.isFinite(parsed)) {
+          // eslint-disable-next-line no-console
+          console.warn("smart-chip date parse failed:", trimmed);
+          setSmartChipState(null);
+          return;
+        }
+        const d = new Date(parsed);
+        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        try {
+          const fUniver = fUniverRef.current;
+          const workbook = fUniver?.getActiveWorkbook();
+          const sheet = workbook?.getActiveSheet();
+          const range = sheet?.getRange(smartChipState.row, smartChipState.col);
+          if (range) range.setValue(iso);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn("smart-chip date write failed:", err);
+        }
+        setSmartChipState(null);
+      }
+    },
+    [smartChipState],
+  );
 
   const statusLabel = SAVE_STATUS_LABELS[saveStatus] ?? saveStatus;
   const statusClass = `status-bar__status status-bar__status--${saveStatus}`;
@@ -5620,9 +7997,21 @@ export default function EditorScreen() {
 
   return (
     <div className="editor-screen">
-      <div className="editor-toolbar">
+      {/* #177: ARIA live regions for screen-reader announcements. */}
+      <LiveRegion />
+      <div
+        className="editor-toolbar"
+        role="toolbar"
+        aria-label={t("a11y.label.toolbar")}
+      >
         <div className="editor-toolbar__left">
-          <button type="button" className="toolbar-btn" onClick={goHomeAfterConfirm} title="ホームへ戻る">
+          <button
+            type="button"
+            className="toolbar-btn"
+            onClick={goHomeAfterConfirm}
+            title={t("a11y.label.goHome")}
+            aria-label={t("a11y.label.goHome")}
+          >
             {t("toolbar.home")}
           </button>
           <span
@@ -5728,6 +8117,12 @@ export default function EditorScreen() {
           indicators={commentIndicators}
           onSelect={jumpToCommentCell}
         />
+        <SmartChipPopover
+          chips={smartChipState?.chips ?? []}
+          anchor={smartChipState?.anchor ?? null}
+          onActivate={handleSmartChipActivate}
+          onDismiss={() => setSmartChipState(null)}
+        />
         <ChartPreviewPanel
           previews={chartPreviews}
           onSelect={jumpToChartRange}
@@ -5736,6 +8131,23 @@ export default function EditorScreen() {
           images={imagePreviews}
           onSelect={jumpToImageCell}
         />
+        <TextBoxesPanel
+          textBoxes={activeSheetTextBoxes}
+          sheetName={navActiveSheetName}
+          onSelect={jumpToTextBoxCell}
+          onDelete={(tb) => removeTextBox(tb.id)}
+          onPatch={patchTextBox}
+          onGroup={groupTextBoxes}
+        />
+        {cameraPanelOpen && currentSnapshotJson && (
+          <CameraLinksPanel
+            workbookSnapshotJson={currentSnapshotJson}
+            sheetNamesById={sheetNamesById}
+            onJumpToSource={jumpToCameraSource}
+            onJumpToDest={jumpToCameraDest}
+            onDelete={deleteCameraLink}
+          />
+        )}
         {tablesPanelOpen && (
           <TableInfoPanel
             workbookSnapshotJson={currentSnapshotJson ?? ""}
@@ -5812,7 +8224,11 @@ export default function EditorScreen() {
           />
         )}
       </div>
-      <div className="status-bar">
+      <div
+        className="status-bar"
+        role="status"
+        aria-label={t("a11y.label.statusBar")}
+      >
         {/* React key forces re-mount on status change so the CSS fade animation restarts. */}
         <span key={saveStatus} className={statusClass}>{statusLabel}</span>
         {editorOperationError && (
@@ -5842,6 +8258,8 @@ export default function EditorScreen() {
         {statsLabel && (
           <span className="status-bar__stats">· {statsLabel}</span>
         )}
+        {/* #192: live aggregates for the current multi-cell selection. */}
+        <StatusBarStats stats={selectionStats} />
         {/* #116: surface the calc-mode setting in the status bar so users can
             see Manual mode at a glance + click to open the options dialog. */}
         <CalculationModeIndicator
@@ -5880,6 +8298,26 @@ export default function EditorScreen() {
         />
       )}
       {snapshotsOpen && <SnapshotHistoryDialog onClose={() => setSnapshotsOpen(false)} />}
+      {macroDialogOpen && (
+        <MacroDialog
+          executor={
+            fUniverRef.current
+              ? {
+                  // Adapter — FUniver.executeCommand is generic over `P extends
+                  // object` but our recorded params are `unknown` JSON blobs.
+                  // We cast through `object` because Univer's commands accept
+                  // plain JSON-shaped objects for the whitelisted ids.
+                  executeCommand: (id, params) =>
+                    fUniverRef.current!.executeCommand(
+                      id,
+                      (params ?? undefined) as object | undefined,
+                    ),
+                }
+              : null
+          }
+          onClose={() => setMacroDialogOpen(false)}
+        />
+      )}
       {paletteOpen && (
         <CommandPalette
           commands={paletteCommands}
@@ -5951,6 +8389,13 @@ export default function EditorScreen() {
           pickFile={pickImageFile}
           onApply={applyImage}
           onClose={() => setImageDialog(null)}
+        />
+      )}
+      {shapeDialog && (
+        <InsertShapeDialog
+          initialCell={shapeDialog.cell}
+          onApply={applyShape}
+          onClose={() => setShapeDialog(null)}
         />
       )}
       {sortDialog && (
@@ -6181,6 +8626,20 @@ export default function EditorScreen() {
           onClose={() => setCustomListsCtx(null)}
         />
       )}
+      {scriptEditorOpen && (
+        <ScriptEditorDialog
+          scripts={readScripts(currentSnapshotJson)}
+          fUniver={fUniverRef.current}
+          snapshotJson={currentSnapshotJson}
+          onChange={(next: ScriptEntry[]) => {
+            // _scripts はワークブックメタ (シートと独立) なので、現在の
+            // snapshot に書き戻して updateSnapshot で永続化する。
+            const nextJson = writeScripts(currentSnapshotJson, next);
+            updateSnapshot(nextJson);
+          }}
+          onClose={() => setScriptEditorOpen(false)}
+        />
+      )}
       {calcOptionsOpen && (
         <CalculationOptionsDialog
           currentMode={calcMode}
@@ -6244,6 +8703,16 @@ export default function EditorScreen() {
             setForecastDialog(null);
           }}
           onClose={() => setForecastDialog(null)}
+        />
+      )}
+      {analysisToolpakDialog && (
+        <AnalysisToolpakDialog
+          initialRange={analysisToolpakDialog.initialRange}
+          onApply={(p) => {
+            applyAnalysisToolpak(p);
+            setAnalysisToolpakDialog(null);
+          }}
+          onClose={() => setAnalysisToolpakDialog(null)}
         />
       )}
       {recommendedChartsDialog && (
@@ -6508,6 +8977,16 @@ export default function EditorScreen() {
             setSheetImportOpen(false);
           }}
           onClose={() => setSheetImportOpen(false)}
+        />
+      )}
+      {dataConnectionsOpen && (
+        <DataConnectionsDialog
+          snapshotJson={currentSnapshotJson}
+          onAdd={handleDataConnectionAdd}
+          onRefresh={handleDataConnectionRefresh}
+          onEdit={handleDataConnectionEdit}
+          onRemove={handleDataConnectionRemove}
+          onClose={() => setDataConnectionsOpen(false)}
         />
       )}
       {numberFormatManagerOpen && (
@@ -6837,7 +9316,7 @@ export default function EditorScreen() {
                 setUpdaterState({ kind: "ready", version: targetVersion });
                 // Offer immediate relaunch; user can decline (status bar
                 // button stays visible until they restart manually).
-                if (window.confirm("更新を適用するため再起動しますか?")) {
+                if (window.confirm(t("confirm.update.relaunch"))) {
                   await relaunchApp();
                 }
               } catch (e) {

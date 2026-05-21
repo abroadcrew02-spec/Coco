@@ -1,7 +1,7 @@
 .uad-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--coco-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .uad-modal {
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 32px var(--coco-shadow);
   width: 100%;
   max-width: 560px;
   max-height: 80vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid #eee;
-  background-color: #fafafa;
+  border-bottom: 1px solid var(--coco-border);
+  background-color: var(--coco-surface);
 }
 
 .uad-title {
   font-size: 15px;
   font-weight: 600;
-  color: #217346;
+  color: var(--coco-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: #999;
+  color: var(--coco-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .uad-close:hover {
-  color: #333;
-  background-color: #eee;
+  color: var(--coco-text);
+  background-color: var(--coco-surface-hover);
 }
 
 .uad-body {
@@ -64,13 +64,13 @@
 .uad-meta {
   margin: 0;
   font-size: 13px;
-  color: #424242;
+  color: var(--coco-text);
   display: flex;
   gap: 6px;
 }
 
 .uad-meta-label {
-  color: #555;
+  color: var(--coco-text-muted);
   min-width: 110px;
 }
 
@@ -80,13 +80,13 @@
 
 .uad-divider {
   border: none;
-  border-top: 1px solid #e6ebe8;
+  border-top: 1px solid var(--coco-border);
   margin: 8px 0 4px;
 }
 
 .uad-field-label {
   font-size: 12px;
-  color: #555;
+  color: var(--coco-text-muted);
   display: block;
   margin-bottom: 4px;
 }
@@ -99,11 +99,11 @@
 .uad-notes-md {
   margin: 0;
   padding: 10px 12px;
-  background-color: #f6fbf8;
-  border: 1px solid #d0d8d4;
+  background-color: var(--coco-accent-subtle);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 6px;
   font-size: 13px;
-  color: #2d3a34;
+  color: var(--coco-text);
   line-height: 1.5;
   max-height: 280px;
   overflow-y: auto;
@@ -118,7 +118,7 @@
 .uad-notes-md h6 {
   margin: 8px 0 4px;
   font-weight: 600;
-  color: #1f2d28;
+  color: var(--coco-text);
   line-height: 1.3;
 }
 
@@ -166,12 +166,12 @@
 }
 
 .uad-notes-md a {
-  color: #217346;
+  color: var(--coco-accent);
   text-decoration: underline;
 }
 
 .uad-notes-md a:hover {
-  color: #1a5c38;
+  color: var(--coco-accent-hover);
 }
 
 .uad-notes-md code {
@@ -184,17 +184,17 @@
     "Liberation Mono",
     monospace;
   font-size: 12px;
-  background-color: #eaf3ee;
+  background-color: var(--coco-accent-subtle);
   padding: 1px 5px;
   border-radius: 3px;
-  color: #1a5c38;
+  color: var(--coco-accent-hover);
 }
 
 .uad-notes-md pre {
   margin: 6px 0;
   padding: 8px 10px;
-  background-color: #eaf3ee;
-  border: 1px solid #d0d8d4;
+  background-color: var(--coco-accent-subtle);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   overflow-x: auto;
 }
@@ -208,13 +208,13 @@
 .uad-notes-md blockquote {
   margin: 6px 0;
   padding: 2px 10px;
-  border-left: 3px solid #c5d4cd;
-  color: #4a5751;
+  border-left: 3px solid var(--coco-border-strong);
+  color: var(--coco-text-muted);
 }
 
 .uad-notes-md hr {
   border: none;
-  border-top: 1px solid #d0d8d4;
+  border-top: 1px solid var(--coco-border-strong);
   margin: 8px 0;
 }
 
@@ -225,7 +225,7 @@
 
 .uad-notes-md th,
 .uad-notes-md td {
-  border: 1px solid #d0d8d4;
+  border: 1px solid var(--coco-border-strong);
   padding: 4px 8px;
   font-size: 12px;
 }
@@ -237,7 +237,7 @@
 
 .uad-notes-empty {
   margin: 0;
-  color: #888;
+  color: var(--coco-text-faint);
   font-style: italic;
   font-size: 12px;
 }
@@ -245,19 +245,19 @@
 .uad-forced-banner {
   margin: 0 0 4px;
   padding: 10px 12px;
-  background-color: #fbecec;
-  border: 1px solid #e7c0c0;
-  border-left: 4px solid #b00020;
+  background-color: var(--coco-danger-bg);
+  border: 1px solid var(--coco-danger);
+  border-left: 4px solid var(--coco-danger);
   border-radius: 4px;
-  color: #b00020;
+  color: var(--coco-danger);
   font-size: 13px;
   font-weight: 600;
 }
 
 .uad-footer {
   padding: 12px 20px;
-  background-color: #fafafa;
-  border-top: 1px solid #eee;
+  background-color: var(--coco-surface);
+  border-top: 1px solid var(--coco-border);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -273,16 +273,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: #424242;
-  background-color: #fff;
-  border: 1px solid #d0d0d0;
+  color: var(--coco-text);
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .uad-btn:hover:not(:disabled) {
-  background-color: #f0f0f0;
-  border-color: #b0b0b0;
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-text-faint);
 }
 
 .uad-btn:disabled {
@@ -291,22 +291,22 @@
 }
 
 .uad-btn--primary {
-  background-color: #217346;
-  color: #fff;
-  border-color: #217346;
+  background-color: var(--coco-accent);
+  color: var(--coco-accent-text);
+  border-color: var(--coco-accent);
 }
 
 .uad-btn--primary:hover:not(:disabled) {
-  background-color: #1a5c38;
-  border-color: #1a5c38;
+  background-color: var(--coco-accent-hover);
+  border-color: var(--coco-accent-hover);
 }
 
 .uad-btn--danger {
-  color: #b00020;
-  border-color: #e7c0c0;
+  color: var(--coco-danger);
+  border-color: var(--coco-border);
 }
 
 .uad-btn--danger:hover:not(:disabled) {
-  background-color: #fbecec;
-  border-color: #b00020;
+  background-color: var(--coco-danger-bg);
+  border-color: var(--coco-danger);
 }

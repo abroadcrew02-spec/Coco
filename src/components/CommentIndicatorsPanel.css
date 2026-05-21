@@ -12,10 +12,10 @@
   max-height: 50vh;
   display: flex;
   flex-direction: column;
-  background: #fff;
-  border: 1px solid #d1d5db;
+  background: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 12px var(--coco-shadow);
   font-size: 12px;
   overflow: hidden;
 }
@@ -25,8 +25,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 10px;
-  background: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
+  background: var(--coco-surface);
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .cip-title {
@@ -34,7 +34,7 @@
   align-items: center;
   gap: 6px;
   font-weight: 600;
-  color: #374151;
+  color: var(--coco-text);
 }
 
 .cip-collapse {
@@ -44,11 +44,11 @@
   font-size: 16px;
   line-height: 1;
   padding: 0 4px;
-  color: #6b7280;
+  color: var(--coco-text-muted);
 }
 
 .cip-collapse:hover {
-  color: #111827;
+  color: var(--coco-text);
 }
 
 .cip-list {
@@ -60,7 +60,7 @@
 }
 
 .cip-item {
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .cip-item:last-child {
@@ -77,12 +77,12 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #1f2937;
+  color: var(--coco-text);
 }
 
 .cip-item-btn:hover,
 .cip-item-btn:focus-visible {
-  background: #eef2ff;
+  background: var(--coco-surface-hover);
   outline: none;
 }
 
@@ -99,7 +99,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #4b5563;
+  color: var(--coco-text-muted);
 }
 
 /* The triangle indicator — mirrors the Excel "note" glyph: a small red
@@ -121,8 +121,8 @@
   top: 8px;
   right: 16px;
   z-index: 25;
-  background: #fff;
-  border: 1px solid #d1d5db;
+  background: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border);
   border-radius: 999px;
   padding: 4px 10px;
   cursor: pointer;
@@ -130,16 +130,16 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 6px var(--coco-shadow);
 }
 
 .cip-badge:hover,
 .cip-badge:focus-visible {
-  background: #f3f4f6;
+  background: var(--coco-surface-hover);
   outline: none;
 }
 
 .cip-badge-count {
   font-weight: 600;
-  color: #374151;
+  color: var(--coco-text);
 }

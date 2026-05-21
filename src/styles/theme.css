@@ -1,0 +1,145 @@
+/* Coco theme tokens — issue #191 (light / dark / system).
+ *
+ * This file is the single source of truth for the `--coco-*` CSS custom
+ * properties. `:root` holds the light palette; `[data-theme="dark"]` (set on
+ * <html> by src/store/theme.ts `applyTheme`) overrides it with the dark
+ * palette. Components reference tokens via `var(--coco-...)` so a single
+ * attribute flip restyles the whole shell.
+ *
+ * Light values are lifted verbatim from the existing hardcoded palette
+ * (Excel-green #217346 accent, #f5f5f5 app background, etc.) so the light
+ * theme is pixel-identical to pre-#191 behavior. Dark values are new.
+ *
+ * NAMING CONVENTION (for the follow-up CSS-migration agent):
+ *   --coco-bg              app / page background (lowest layer)
+ *   --coco-bg-elevated     elevated panel / card / dialog background
+ *   --coco-surface         input / control surface (slightly off from bg)
+ *   --coco-surface-hover   hover state for surfaces / list rows / buttons
+ *   --coco-text            primary text
+ *   --coco-text-muted      secondary / hint / placeholder text
+ *   --coco-text-faint      tertiary text (timestamps, counts)
+ *   --coco-border          default border / divider
+ *   --coco-border-strong   emphasized border (focused inputs, dividers)
+ *   --coco-accent          brand accent (Excel green) — buttons, titles
+ *   --coco-accent-hover    accent hover/darker state
+ *   --coco-accent-text     text/icon color drawn ON an accent fill
+ *   --coco-accent-subtle   subtle accent-tinted background (selected rows)
+ *   --coco-danger          destructive / error color
+ *   --coco-danger-bg       destructive-tinted background
+ *   --coco-warning         warning color
+ *   --coco-warning-bg      warning-tinted background
+ *   --coco-info            informational color
+ *   --coco-info-bg         informational-tinted background
+ *   --coco-overlay         modal backdrop scrim
+ *   --coco-shadow          box-shadow color (rgba, includes alpha)
+ *   --coco-statusbar-bg    editor status bar background (Excel green bar)
+ *   --coco-statusbar-text  editor status bar text
+ *   --coco-focus-ring      keyboard focus outline color
+ */
+
+:root {
+  /* Backgrounds */
+  --coco-bg: #f5f5f5;
+  --coco-bg-elevated: #ffffff;
+  --coco-surface: #fafafa;
+  --coco-surface-hover: #f0f0f0;
+
+  /* Text */
+  --coco-text: #212121;
+  --coco-text-muted: #757575;
+  --coco-text-faint: #9e9e9e;
+
+  /* Borders */
+  --coco-border: #e0e0e0;
+  --coco-border-strong: #d0d0d0;
+
+  /* Accent (Excel green) */
+  --coco-accent: #217346;
+  --coco-accent-hover: #1a5c38;
+  --coco-accent-text: #ffffff;
+  --coco-accent-subtle: #eaf4ee;
+
+  /* Status colors */
+  --coco-danger: #b71c1c;
+  --coco-danger-bg: #ffebee;
+  --coco-warning: #e65100;
+  --coco-warning-bg: #fff8e1;
+  --coco-info: #1565c0;
+  --coco-info-bg: #e3f2fd;
+
+  /* Overlays / shadows */
+  --coco-overlay: rgba(0, 0, 0, 0.45);
+  --coco-shadow: rgba(0, 0, 0, 0.2);
+
+  /* Editor status bar */
+  --coco-statusbar-bg: #217346;
+  --coco-statusbar-text: rgba(255, 255, 255, 0.9);
+
+  /* Focus */
+  --coco-focus-ring: #4a90e2;
+
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  /* Backgrounds */
+  --coco-bg: #1e1e1e;
+  --coco-bg-elevated: #2a2a2a;
+  --coco-surface: #333333;
+  --coco-surface-hover: #3d3d3d;
+
+  /* Text */
+  --coco-text: #e8e8e8;
+  --coco-text-muted: #a0a0a0;
+  --coco-text-faint: #7a7a7a;
+
+  /* Borders */
+  --coco-border: #3d3d3d;
+  --coco-border-strong: #525252;
+
+  /* Accent (brighter green so it reads on dark surfaces) */
+  --coco-accent: #3fa566;
+  --coco-accent-hover: #53b97a;
+  --coco-accent-text: #0f1a13;
+  --coco-accent-subtle: #1f3a2a;
+
+  /* Status colors */
+  --coco-danger: #ef9a9a;
+  --coco-danger-bg: #3a2222;
+  --coco-warning: #ffb74d;
+  --coco-warning-bg: #3a3322;
+  --coco-info: #90caf9;
+  --coco-info-bg: #22303a;
+
+  /* Overlays / shadows */
+  --coco-overlay: rgba(0, 0, 0, 0.6);
+  --coco-shadow: rgba(0, 0, 0, 0.5);
+
+  /* Editor status bar (kept green-tinted but darkened) */
+  --coco-statusbar-bg: #1a5c38;
+  --coco-statusbar-text: rgba(255, 255, 255, 0.92);
+
+  /* Focus */
+  --coco-focus-ring: #5b9fe6;
+
+  color-scheme: dark;
+}
+
+/* Visible keyboard focus (issue #177).
+ *
+ * `:focus-visible` only matches when the browser heuristically decides the
+ * user is navigating by keyboard, so mouse clicks don't draw a ring while
+ * keyboard Tab navigation always does. Applied broadly to interactive
+ * elements; `--coco-focus-ring` is themed (light / dark) above.
+ *
+ * The `:focus:not(:focus-visible)` rule suppresses the legacy focus outline
+ * on pointer interaction in browsers that still apply `:focus` styling. */
+:where(button, a, input, select, textarea, [tabindex], [role="button"]):focus-visible {
+  outline: 2px solid var(--coco-focus-ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+:where(button, a, input, select, textarea, [tabindex], [role="button"]):focus:not(:focus-visible) {
+  outline: none;
+}

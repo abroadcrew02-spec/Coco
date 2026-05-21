@@ -115,13 +115,16 @@ describe("HelpDialog", () => {
     it("calls onClose when × is clicked", async () => {
       const user = userEvent.setup();
       render(<HelpDialog onClose={onClose} />);
-      await user.click(screen.getByRole("button", { name: "閉じる" }));
+      await user.click(screen.getByRole("button", { name: "ダイアログを閉じる" }));
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
     it("Escape closes the dialog", () => {
+      // #177 review M2: Escape is handled by the focus trap (on the dialog
+      // element), not the window-capture listener — that listener now only
+      // handles F1 / Ctrl+/ to avoid double-firing onClose.
       render(<HelpDialog onClose={onClose} />);
-      fireEvent.keyDown(window, { key: "Escape" });
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 

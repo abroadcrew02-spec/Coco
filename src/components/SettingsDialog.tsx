@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { getLocale, setLocale, t, type Locale } from "../i18n/locale";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import {
   type UpdateChannel,
   isAutoCheckEnabled,
@@ -10,6 +12,22 @@ import {
   setChannel as persistChannel,
   checkForUpdate,
 } from "../store/updater";
+import {
+  type ThemeMode,
+  getThemeMode,
+  setThemeMode,
+  applyThemeMode,
+  notifyThemeChanged,
+  THEME_MODE_LABELS,
+} from "../store/theme";
+import {
+  ALLOWED_DOMAINS_KEY,
+  isLikelyValidDomainPattern,
+  parseAllowedDomains,
+  serializeAllowedDomains,
+} from "../store/urlFetch";
+import SmartChipRulesEditor from "./SmartChipRulesEditor";
+import UrlFetchCredentialsEditor from "./UrlFetchCredentialsEditor";
 import "./SettingsDialog.css";
 
 interface Props {
@@ -57,6 +75,9 @@ export default function SettingsDialog({ onClose }: Props) {
     useState<boolean>(suppressCsvPocWarning);
   const initialLocale = getLocale();
   const [pendingLocale, setPendingLocale] = useState<Locale>(initialLocale);
+  // Theme (#191): applied immediately on change (no "apply" gate) so the
+  // user sees the result while the dialog is still open.
+  const [theme, setThemeState] = useState<ThemeMode>(getThemeMode);
   // Auto-update: read current localStorage state at dialog open; persist on apply.
   const initialAutoUpdate = isAutoCheckEnabled();
   const [pendingAutoUpdate, setPendingAutoUpdate] = useState<boolean>(initialAutoUpdate);
@@ -72,18 +93,36 @@ export default function SettingsDialog({ onClose }: Props) {
       .then(setAppVersion)
       .catch(() => undefined);
   }, []);
+  // #138: allow-listed domains for the http_fetch command. Stored as a JSON
+  // array of patterns under `urlFetch.allowedDomains` so the Rust core and
+  // the renderer agree on the wire format.
+  const [initialAllowedDomainsText, setInitialAllowedDomainsText] =
+    useState<string>("");
+  const [pendingAllowedDomainsText, setPendingAllowedDomainsText] =
+    useState<string>("");
+  useEffect(() => {
+    void (async () => {
+      try {
+        const raw = await invoke<string | null>("get_setting", {
+          key: ALLOWED_DOMAINS_KEY,
+        });
+        const text = parseAllowedDomains(raw).join("\n");
+        setInitialAllowedDomainsText(text);
+        setPendingAllowedDomainsText(text);
+      } catch {
+        // Best-effort: leave both empty so the textarea starts blank.
+      }
+    })();
+  }, []);
+  const allowedDomainsInvalidLines = pendingAllowedDomainsText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !isLikelyValidDomainPattern(line));
   const lastChecked = getLastCheckedAt();
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // #177: focus trap, initial focus, Escape-to-close, focus restoration.
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, onClose);
 
   const apply = async () => {
     if (pendingInterval !== intervalMs) {
@@ -107,6 +146,17 @@ export default function SettingsDialog({ onClose }: Props) {
     if (pendingChannel !== initialChannel) {
       persistChannel(pendingChannel);
     }
+    if (pendingAllowedDomainsText !== initialAllowedDomainsText) {
+      const lines = pendingAllowedDomainsText.split(/\r?\n/);
+      const json = serializeAllowedDomains(lines);
+      try {
+        await invoke("set_setting", { key: ALLOWED_DOMAINS_KEY, value: json });
+        setInitialAllowedDomainsText(pendingAllowedDomainsText);
+      } catch {
+        // Persistence failure is non-fatal for closing the dialog; the other
+        // settings have already applied.
+      }
+    }
     onClose();
   };
 
@@ -117,11 +167,13 @@ export default function SettingsDialog({ onClose }: Props) {
     pendingSuppressPoc !== suppressCsvPocWarning ||
     pendingLocale !== initialLocale ||
     pendingAutoUpdate !== initialAutoUpdate ||
-    pendingChannel !== initialChannel;
+    pendingChannel !== initialChannel ||
+    pendingAllowedDomainsText !== initialAllowedDomainsText;
 
   return (
     <div className="settings-backdrop" onClick={onClose}>
       <div
+        ref={modalRef}
         className="settings-modal"
         role="dialog"
         aria-modal="true"
@@ -130,7 +182,12 @@ export default function SettingsDialog({ onClose }: Props) {
       >
         <header className="settings-header">
           <h2 id="settings-title" className="settings-title">{t("dialog.settings")}</h2>
-          <button type="button" className="settings-close" onClick={onClose} aria-label="閉じる">
+          <button
+            type="button"
+            className="settings-close"
+            onClick={onClose}
+            aria-label={t("a11y.label.closeDialog")}
+          >
             ×
           </button>
         </header>
@@ -216,6 +273,12 @@ export default function SettingsDialog({ onClose }: Props) {
           </details>
           <details className="settings-section">
             <summary className="settings-section-summary">
+              <h3>スマートチップのカスタムルール</h3>
+            </summary>
+            <SmartChipRulesEditor />
+          </details>
+          <details className="settings-section">
+            <summary className="settings-section-summary">
               <h3>{t("settings.language")}</h3>
             </summary>
             <p className="settings-hint">{t("settings.languageHint")}</p>
@@ -239,6 +302,62 @@ export default function SettingsDialog({ onClose }: Props) {
                 <span>{t("settings.languageEn")}</span>
               </label>
             </div>
+          </details>
+          <details className="settings-section">
+            <summary className="settings-section-summary">
+              <h3>{t("settings.theme")}</h3>
+            </summary>
+            <p className="settings-hint">{t("settings.themeHint")}</p>
+            <div className="settings-radio-group">
+              {(["light", "dark", "system"] as ThemeMode[]).map((mode) => (
+                <label key={mode} className="settings-radio">
+                  <input
+                    type="radio"
+                    name="coco-theme"
+                    checked={theme === mode}
+                    onChange={() => {
+                      setThemeState(mode);
+                      setThemeMode(mode);
+                      applyThemeMode(mode);
+                      notifyThemeChanged();
+                    }}
+                  />
+                  <span>
+                    {THEME_MODE_LABELS[mode][
+                      initialLocale === "ja-JP" ? "ja" : "en"
+                    ]}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </details>
+          <details className="settings-section">
+            <summary className="settings-section-summary">
+              <h3>外部 API 連携 / 許可ドメイン</h3>
+            </summary>
+            <p className="settings-hint">
+              スクリプトや拡張機能から HTTP 通信を許可するホスト名を 1 行ずつ入力してください。例: <code>api.example.com</code> または <code>*.example.com</code>。空のリストではすべての外部通信がブロックされます。GET/POST のみ、最大 10 MB、タイムアウト 30 秒です。
+            </p>
+            <textarea
+              className="settings-textarea url-fetch-domains-textarea"
+              rows={5}
+              spellCheck={false}
+              value={pendingAllowedDomainsText}
+              onChange={(e) => setPendingAllowedDomainsText(e.target.value)}
+              placeholder={"api.example.com\n*.example.org"}
+              aria-label="許可ドメイン (1 行 1 ドメイン)"
+            />
+            {allowedDomainsInvalidLines.length > 0 && (
+              <p className="settings-hint url-fetch-invalid">
+                次のエントリは無効な形式です:{" "}
+                <strong>{allowedDomainsInvalidLines.join(", ")}</strong>
+              </p>
+            )}
+            <p className="settings-hint url-fetch-note">
+              ※ 127.0.0.1 / localhost / 169.254.169.254 / プライベート IP / file: スキームは常にブロックされます。リダイレクトは追跡しません。
+            </p>
+            <h4 className="url-fetch-cred-heading">認証情報</h4>
+            <UrlFetchCredentialsEditor />
           </details>
           <details className="settings-section">
             <summary className="settings-section-summary">

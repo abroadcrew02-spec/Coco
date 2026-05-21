@@ -72,6 +72,7 @@ const jaJP = {
   "dialog.calcOptions": "計算オプション",
   "dialog.scenarioManager": "シナリオの管理",
   "dialog.forecastSheet": "予測シート",
+  "dialog.analysisToolpak": "分析ツールパック",
   "dialog.recommendedCharts": "おすすめグラフ",
   "dialog.cfManageRules": "条件付き書式 — ルールの管理",
   "dialog.snapshotDiff": "スナップショット比較",
@@ -131,9 +132,65 @@ const jaJP = {
   "panel.watchWindow": "ウォッチウィンドウ",
   // Settings dialog — language section (new)
   "settings.language": "言語 / Language",
-  "settings.languageHint": "表示言語を切り替えます。変更後は再読み込みで反映されます。",
+  "settings.languageHint": "表示言語を切り替えます。変更は即座に反映されます。",
   "settings.languageJa": "日本語 (ja-JP)",
   "settings.languageEn": "English (en-US)",
+  // Settings dialog — theme section (#191)
+  "settings.theme": "テーマ / 外観",
+  "settings.themeHint":
+    "ライト / ダーク / システム設定に従う から選択します。変更は即座に反映されます。",
+  // Confirmation prompts (#179 — area A: window.confirm i18n)
+  "confirm.comment.delete": "このコメントを削除しますか？",
+  "confirm.comment.bulkDelete":
+    "解決済みのコメント {0} 件を削除します。よろしいですか？",
+  "confirm.hyperlink.delete": "このハイパーリンクを削除しますか？",
+  "confirm.hyperlink.bulkDelete":
+    "{0}のリンク {1} 件を削除します。よろしいですか？",
+  "hyperlink.kind.internal": "ブック内",
+  "hyperlink.kind.external": "外部",
+  "confirm.image.delete": "この画像を削除しますか？",
+  "confirm.image.bulkDelete":
+    "シート「{0}」の画像 {1} 枚を削除します。よろしいですか？",
+  "confirm.recents.clear": "最近使ったファイル一覧をすべて削除しますか？",
+  "confirm.convertToRange":
+    "テーブル {0} を通常の範囲に変換します。スタイルは保持されますか？",
+  "confirm.documentInspector.strip":
+    "「{0}」({1} 件) をすべて削除します。よろしいですか？\n(この操作は Coco の元に戻す履歴に記録されます。)",
+  "confirm.cell.overwrite":
+    "アクティブセルに値 \"{0}\" があります。{1} で上書きしますか？",
+  "confirm.csvExport.overwrite":
+    "既存の CSV ファイル {0} 件を上書きします。続行しますか？",
+  "confirm.update.relaunch": "更新を適用するため再起動しますか?",
+  "confirm.discardUnsaved.continue":
+    "未保存の変更があります。破棄して続行しますか？",
+  "confirm.discardUnsaved.exit": "未保存の変更があります。破棄して終了しますか？",
+  // Toast / status error fallbacks (#179 — area B)
+  "error.save.failed": "保存に失敗しました",
+  "error.autosave.failed": "自動保存に失敗しました",
+  "error.export.failed": "エクスポートに失敗しました",
+  "error.exportHtml.failed": "HTML エクスポートに失敗しました",
+  "error.exportPdf.failed": "PDF エクスポートに失敗しました",
+  "error.exportBundle.failed": "バンドル出力に失敗しました",
+  "error.exportCsv.failed": "CSV エクスポートに失敗しました",
+  "error.pin.failed": "ピンの保存に失敗しました",
+  "error.pinOrder.failed": "並び順の保存に失敗しました",
+  "error.setting.failed": "設定保存に失敗しました",
+  "error.snapshotRequired": "保存できるスナップショットがありません",
+  // Screen-reader announcements (#177)
+  "a11y.cell.empty": "空のセル",
+  "a11y.cell.position": "列{0} 行{1}: {2}",
+  "a11y.range.selected": "範囲 {0} を選択、{1} セル",
+  "a11y.edit.start": "編集モード",
+  "a11y.edit.commit": "確定しました",
+  "a11y.edit.cancel": "編集を取り消しました",
+  "a11y.status.saved": "保存しました",
+  "a11y.status.saving": "保存中",
+  "a11y.status.saveFailed": "保存に失敗しました",
+  // ARIA labels for icon-only / ambiguous controls (#177)
+  "a11y.label.goHome": "ホームへ戻る",
+  "a11y.label.closeDialog": "ダイアログを閉じる",
+  "a11y.label.toolbar": "エディタツールバー",
+  "a11y.label.statusBar": "ステータスバー",
 } as const;
 
 type StringKey = keyof typeof jaJP;
@@ -190,6 +247,7 @@ const enUS: Record<StringKey, string> = {
   "dialog.calcOptions": "Calculation Options",
   "dialog.scenarioManager": "Scenario Manager",
   "dialog.forecastSheet": "Forecast Sheet",
+  "dialog.analysisToolpak": "Analysis ToolPak",
   "dialog.recommendedCharts": "Recommended Charts",
   "dialog.cfManageRules": "Conditional Formatting — Manage Rules",
   "dialog.snapshotDiff": "Compare Snapshots",
@@ -249,9 +307,60 @@ const enUS: Record<StringKey, string> = {
   "panel.watchWindow": "Watch Window",
   "settings.language": "Language / 言語",
   "settings.languageHint":
-    "Switch UI language. Reload the app to apply the change.",
+    "Switch the UI language. Changes apply immediately.",
   "settings.languageJa": "日本語 (ja-JP)",
   "settings.languageEn": "English (en-US)",
+  "settings.theme": "Theme / Appearance",
+  "settings.themeHint":
+    "Choose Light / Dark / Match system. Changes apply immediately.",
+  "confirm.comment.delete": "Delete this comment?",
+  "confirm.comment.bulkDelete": "Delete {0} resolved comment(s)?",
+  "confirm.hyperlink.delete": "Delete this hyperlink?",
+  "confirm.hyperlink.bulkDelete": "Delete {1} {0} link(s)?",
+  "hyperlink.kind.internal": "in-workbook",
+  "hyperlink.kind.external": "external",
+  "confirm.image.delete": "Delete this image?",
+  "confirm.image.bulkDelete": "Delete {1} image(s) on sheet \"{0}\"?",
+  "confirm.recents.clear": "Clear the entire recent files list?",
+  "confirm.convertToRange":
+    "Convert table {0} to a normal range. Keep the styles?",
+  "confirm.documentInspector.strip":
+    "Remove all of \"{0}\" ({1} item(s))?\n(This action is recorded in Coco's undo history.)",
+  "confirm.cell.overwrite":
+    "The active cell already contains \"{0}\". Overwrite it with {1}?",
+  "confirm.csvExport.overwrite":
+    "Overwrite {0} existing CSV file(s)?",
+  "confirm.update.relaunch": "Restart now to apply the update?",
+  "confirm.discardUnsaved.continue":
+    "You have unsaved changes. Discard them and continue?",
+  "confirm.discardUnsaved.exit":
+    "You have unsaved changes. Discard them and exit?",
+  "error.save.failed": "Failed to save.",
+  "error.autosave.failed": "Autosave failed.",
+  "error.export.failed": "Export failed.",
+  "error.exportHtml.failed": "HTML export failed.",
+  "error.exportPdf.failed": "PDF export failed.",
+  "error.exportBundle.failed": "Bundle export failed.",
+  "error.exportCsv.failed": "CSV export failed.",
+  "error.pin.failed": "Failed to save the pin.",
+  "error.pinOrder.failed": "Failed to save the order.",
+  "error.setting.failed": "Failed to save the setting.",
+  "error.snapshotRequired": "There is no snapshot available to save.",
+  // Screen-reader announcements (#177)
+  "a11y.cell.empty": "empty cell",
+  "a11y.cell.position": "column {0} row {1}: {2}",
+  "a11y.range.selected": "Range {0} selected, {1} cells",
+  "a11y.edit.start": "Edit mode",
+  "a11y.edit.commit": "Committed",
+  "a11y.edit.cancel": "Edit cancelled",
+  "a11y.status.saved": "Saved",
+  "a11y.status.saving": "Saving",
+  "a11y.status.saveFailed": "Save failed",
+  // ARIA labels for icon-only / ambiguous controls (#177)
+  "a11y.label.goHome": "Back to home",
+  "a11y.label.closeDialog": "Close dialog",
+  "a11y.label.toolbar": "Editor toolbar",
+  "a11y.label.statusBar": "Status bar",
 };
 
 export const strings: Record<Locale, Record<StringKey, string>> = {
@@ -276,14 +385,44 @@ export function getLocale(): Locale {
   return nav.toLowerCase().startsWith("ja") ? "ja-JP" : "en-US";
 }
 
+// #179 (area E): in-process subscribers notified when the locale changes,
+// so the Coco UI layer can re-render immediately without a page reload.
+const localeListeners = new Set<(locale: Locale) => void>();
+
+/**
+ * Register a callback fired whenever `setLocale` changes the active locale.
+ * Returns an unsubscribe function. Used by `useLocale()` to re-render the
+ * Coco UI layer on a language switch.
+ */
+export function subscribeLocale(listener: (locale: Locale) => void): () => void {
+  localeListeners.add(listener);
+  return () => localeListeners.delete(listener);
+}
+
 export function setLocale(locale: Locale): void {
   try {
     localStorage.setItem(LOCALE_STORAGE_KEY, locale);
   } catch {
     // Best-effort — caller will see no error.
   }
+  // Notify in-process subscribers even if localStorage threw — the value is
+  // still resolvable via getLocale() within this session.
+  for (const listener of localeListeners) {
+    listener(locale);
+  }
 }
 
-export function t(key: StringKey): string {
-  return strings[getLocale()][key];
+/**
+ * Translate `key` for the active locale. Optional positional `args`
+ * replace `{0}`, `{1}`, ... placeholders in the string (same convention
+ * Univer's own locale bundle uses), so callers can localize messages
+ * that interpolate runtime values.
+ */
+export function t(key: StringKey, ...args: (string | number)[]): string {
+  const raw = strings[getLocale()][key];
+  if (args.length === 0) return raw;
+  return raw.replace(/\{(\d+)\}/g, (match, index) => {
+    const value = args[Number(index)];
+    return value === undefined ? match : String(value);
+  });
 }

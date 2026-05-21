@@ -1,16 +1,36 @@
 import { describe, it, expect } from "vitest";
 import { friendlyError } from "./errorMessages";
 
+// #179: friendlyError is locale-aware. Pass the locale explicitly so these
+// assertions stay deterministic regardless of the host's navigator.language.
 describe("friendlyError", () => {
   describe("null/empty inputs", () => {
     it("returns null for null input", () => {
-      expect(friendlyError(null)).toBeNull();
+      expect(friendlyError(null, "ja-JP")).toBeNull();
     });
     it("returns null for undefined input", () => {
-      expect(friendlyError(undefined)).toBeNull();
+      expect(friendlyError(undefined, "ja-JP")).toBeNull();
     });
     it("returns null for empty string", () => {
-      expect(friendlyError("")).toBeNull();
+      expect(friendlyError("", "ja-JP")).toBeNull();
+    });
+  });
+
+  describe("en-US locale", () => {
+    it("maps an exact code to the English message", () => {
+      expect(friendlyError("XLSX_BUILD_FAILED", "en-US")).toBe(
+        "An error occurred while building the xlsx file."
+      );
+    });
+    it("formats a prefix-match pattern in English", () => {
+      expect(friendlyError("Sheet not found: sheet-99", "en-US")).toBe(
+        "The specified sheet was not found (sheet-99)."
+      );
+    });
+    it("passes unknown codes through unchanged", () => {
+      expect(friendlyError("SOMETHING_NEW_2026", "en-US")).toBe(
+        "SOMETHING_NEW_2026"
+      );
     });
   });
 
@@ -29,75 +49,75 @@ describe("friendlyError", () => {
     ];
     for (const [code, expected] of cases) {
       it(`maps ${code} → human message`, () => {
-        expect(friendlyError(code)).toBe(expected);
+        expect(friendlyError(code, "ja-JP")).toBe(expected);
       });
     }
   });
 
   describe("prefix-match patterns", () => {
     it("formats Integrity check failed", () => {
-      expect(friendlyError("Integrity check failed: bad page")).toBe(
+      expect(friendlyError("Integrity check failed: bad page", "ja-JP")).toBe(
         "保存後の整合性チェックに失敗しました（bad page）"
       );
     });
     it("formats rename failed", () => {
-      expect(friendlyError("rename failed: Access denied (os error 5)")).toBe(
+      expect(friendlyError("rename failed: Access denied (os error 5)", "ja-JP")).toBe(
         "一時ファイルの最終置換に失敗しました（Access denied (os error 5)）"
       );
     });
     it("formats Sheet not found", () => {
-      expect(friendlyError("Sheet not found: sheet-99")).toBe(
+      expect(friendlyError("Sheet not found: sheet-99", "ja-JP")).toBe(
         "指定されたシートが見つかりません（sheet-99）"
       );
     });
     it("formats Failed to open xlsx", () => {
-      expect(friendlyError("Failed to open xlsx: invalid signature")).toBe(
+      expect(friendlyError("Failed to open xlsx: invalid signature", "ja-JP")).toBe(
         "xlsx を開けませんでした（invalid signature）"
       );
     });
     it("formats security scan failed", () => {
-      expect(friendlyError("security scan failed: io error")).toBe(
+      expect(friendlyError("security scan failed: io error", "ja-JP")).toBe(
         "セキュリティ検査に失敗しました（io error）"
       );
     });
     it("formats backup rotation failed", () => {
-      expect(friendlyError("backup rotation failed: disk full")).toBe(
+      expect(friendlyError("backup rotation failed: disk full", "ja-JP")).toBe(
         "バックアップのローテーションに失敗しました（disk full）"
       );
     });
     it("formats File not found", () => {
-      expect(friendlyError("File not found: /tmp/missing.coco")).toBe(
+      expect(friendlyError("File not found: /tmp/missing.coco", "ja-JP")).toBe(
         "ファイルが見つかりません（/tmp/missing.coco）"
       );
     });
     it("formats Recovery file is missing with candidate-cleanup hint", () => {
-      const result = friendlyError("Recovery file is missing: /tmp/recovery/wb.coco");
+      const result = friendlyError("Recovery file is missing: /tmp/recovery/wb.coco", "ja-JP");
       expect(result).toContain("復元ファイルが見つかりません");
       expect(result).toContain("/tmp/recovery/wb.coco");
       expect(result).toContain("候補一覧から自動的に取り除きました");
     });
     it("formats Recovery candidate not found", () => {
-      expect(friendlyError("Recovery candidate not found: wb-123")).toBe(
+      expect(friendlyError("Recovery candidate not found: wb-123", "ja-JP")).toBe(
         "復元候補が見つかりません（wb-123）"
       );
     });
     it("formats Snapshot not found", () => {
-      const result = friendlyError("Snapshot not found: 42");
+      const result = friendlyError("Snapshot not found: 42", "ja-JP");
       expect(result).toContain("スナップショットが見つかりません");
       expect(result).toContain("42");
     });
     it("formats Invalid xlsx (zip)", () => {
-      expect(friendlyError("Invalid xlsx (zip): unexpected EOF")).toBe(
+      expect(friendlyError("Invalid xlsx (zip): unexpected EOF", "ja-JP")).toBe(
         "xlsx として開けません。ZIP 構造が不正です（unexpected EOF）"
       );
     });
     it("formats REVEAL_SPAWN_FAILED", () => {
-      expect(friendlyError("REVEAL_SPAWN_FAILED: No such file (os error 2)")).toBe(
+      expect(friendlyError("REVEAL_SPAWN_FAILED: No such file (os error 2)", "ja-JP")).toBe(
         "ファイルマネージャを起動できませんでした（No such file (os error 2)）"
       );
     });
     it("trims whitespace in the detail tail", () => {
-      expect(friendlyError("Sheet not found:    sheet-1   ")).toBe(
+      expect(friendlyError("Sheet not found:    sheet-1   ", "ja-JP")).toBe(
         "指定されたシートが見つかりません（sheet-1）"
       );
     });
@@ -105,16 +125,16 @@ describe("friendlyError", () => {
 
   describe("pass-through", () => {
     it("returns unknown codes unchanged", () => {
-      expect(friendlyError("SOMETHING_NEW_2026")).toBe("SOMETHING_NEW_2026");
+      expect(friendlyError("SOMETHING_NEW_2026", "ja-JP")).toBe("SOMETHING_NEW_2026");
     });
     it("returns free-form Tauri errors unchanged", () => {
-      expect(friendlyError("Tauri command 'foo' is not registered")).toBe(
+      expect(friendlyError("Tauri command 'foo' is not registered", "ja-JP")).toBe(
         "Tauri command 'foo' is not registered"
       );
     });
     it("does not match a code that merely contains a known one as substring", () => {
       // "XLSX_INVALID_EXTENSION" is exact; a variant should pass through.
-      expect(friendlyError("MAYBE_XLSX_INVALID_EXTENSION_BUT_NEW")).toBe(
+      expect(friendlyError("MAYBE_XLSX_INVALID_EXTENSION_BUT_NEW", "ja-JP")).toBe(
         "MAYBE_XLSX_INVALID_EXTENSION_BUT_NEW"
       );
     });
@@ -125,7 +145,7 @@ describe("friendlyError", () => {
       // Rust historically emits "Sheet not found: <id>", but a programming
       // error could ship just the prefix. Confirm the result is still
       // user-facing (Japanese) and does not throw on the empty slice.
-      const result = friendlyError("Sheet not found:");
+      const result = friendlyError("Sheet not found:", "ja-JP");
       expect(result).toBe("指定されたシートが見つかりません（）");
     });
 
@@ -133,7 +153,7 @@ describe("friendlyError", () => {
       // "Sheet not found" (no colon) shares the leading text but is NOT
       // a recognized prefix. Must not get the friendly wrapping or it would
       // corrupt unrelated logs.
-      const result = friendlyError("Sheet not found anywhere in the workbook");
+      const result = friendlyError("Sheet not found anywhere in the workbook", "ja-JP");
       expect(result).toBe("Sheet not found anywhere in the workbook");
     });
 
@@ -141,8 +161,8 @@ describe("friendlyError", () => {
       // The bare "CSV_TOO_LARGE" hits the FRIENDLY exact map; the
       // "CSV_TOO_LARGE: <tail>" form hits the PREFIX_FRIENDLY entry and
       // must yield the same user-facing string (no diagnostic tail leaked).
-      const exact = friendlyError("CSV_TOO_LARGE");
-      const withTail = friendlyError("CSV_TOO_LARGE: more than 5M cells");
+      const exact = friendlyError("CSV_TOO_LARGE", "ja-JP");
+      const withTail = friendlyError("CSV_TOO_LARGE: more than 5M cells", "ja-JP");
       expect(exact).toBe("CSV のセル数が上限（500万）を超えています。");
       expect(withTail).toBe(exact);
     });

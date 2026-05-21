@@ -38,6 +38,19 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // #181: registry of in-flight streaming HTTP requests, shared so the
+        // `http_fetch_cancel` command can reach the streams started by
+        // `http_fetch_stream`.
+        .manage(std::sync::Arc::new(
+            commands::http_fetch_stream::StreamRegistry::default(),
+        ))
+        // #182: registry of live WebSocket + SSE connections, shared so the
+        // `ws_send` / `ws_close` / `sse_close` commands can reach the
+        // background tasks started by `ws_connect` / `sse_connect`, and so the
+        // concurrent-connection cap is enforced process-wide.
+        .manage(std::sync::Arc::new(
+            commands::ws_fetch::ConnRegistry::default(),
+        ))
         .setup(|app| {
             // #82: best-effort startup sweep of orphan recovery .coco files
             // (file present, no recovery_candidates row). Scoped to the
@@ -97,6 +110,7 @@ pub fn run() {
                 .text("view-pivots-panel", "ピボット一覧")
                 .text("view-slicers-panel", "スライサー一覧")
                 .text("view-charts-canvas-panel", "グラフ表示")
+                .text("view-camera-panel", "カメラ画像一覧")
                 .text("view-errors-panel", "エラー一覧")
                 .text("view-trace-panel", "依存関係...")
                 .text("view-watch-window", "ウォッチウィンドウ")
@@ -119,16 +133,23 @@ pub fn run() {
                 .text("insert-comment", "コメント...")
                 .text("insert-chart", "グラフ...")
                 .text("insert-image", "画像...")
+                .text("insert-shape", "図形...")
                 .separator()
                 .text("insert-table", "テーブル...")
                 .text("insert-sparkline", "スパークライン...")
                 .text("insert-pivot", "ピボットテーブル...")
                 .text("insert-slicer", "スライサー...")
+                .text("insert-camera", "カメラ撮影 (範囲のスナップショット)")
                 .text("insert-recommended-charts", "おすすめグラフ...")
                 .separator()
                 .text("insert-function", "関数の挿入...\tShift+F3")
                 .text("insert-symbol", "記号 / シンボル...")
                 .text("insert-cell-link", "セルリンクの挿入...")
+                .separator()
+                .text("insert-checkbox", "チェックボックス")
+                .text("insert-radio-button", "ラジオボタン")
+                .text("insert-spin-button", "スピンボタン")
+                .text("insert-scroll-bar", "スクロールバー")
                 .build()?;
             let format_menu = SubmenuBuilder::new(app, "書式")
                 .text("format-number", "表示形式...")
@@ -172,6 +193,8 @@ pub fn run() {
                 .text("data-sort-by-color", "色で並べ替え...")
                 .text("data-filter-by-color", "色でフィルター...")
                 .text("data-filter-search", "値で検索フィルター...")
+                .separator()
+                .text("data-data-connections", "外部データ接続...")
                 .build()?;
             let tools_menu = SubmenuBuilder::new(app, "ツール")
                 .text("tools-sheet-protection", "シート保護...")
@@ -182,6 +205,10 @@ pub fn run() {
                 .text("tools-document-inspector", "ドキュメント検査...")
                 .separator()
                 .text("tools-scenarios", "シナリオの管理...")
+                .text("tools-analysis-toolpak", "分析ツールパック...")
+                .separator()
+                .text("tools-macro", "マクロの記録 / 再生...")
+                .text("tools-script-editor", "スクリプトエディタ...")
                 .separator()
                 .text("calc-options", "計算オプション...")
                 .text("calc-recalc-all", "再計算\tF9")
@@ -239,6 +266,9 @@ pub fn run() {
             commands::csv_io::workbook_export_csv,
             commands::csv_io::workbook_import_csv,
             commands::csv_io::list_sheet_names,
+            commands::data_connection::data_connection_load,
+            commands::data_connection::data_connection_load_web,
+            commands::data_connection::data_connection_load_sqlite,
             commands::html_export::workbook_export_html,
             commands::pdf_export::workbook_export_pdf,
             commands::workspace_bundle::workbook_export_workspace_bundle,
@@ -254,6 +284,17 @@ pub fn run() {
             commands::file_io::read_file_bytes_base64,
             commands::file_io::write_file_bytes_base64,
             commands::file_io::existing_csv_export_paths,
+            commands::http_fetch::http_fetch,
+            commands::http_fetch_stream::http_fetch_stream,
+            commands::http_fetch_stream::http_fetch_cancel,
+            commands::ws_fetch::ws_connect,
+            commands::ws_fetch::ws_send,
+            commands::ws_fetch::ws_close,
+            commands::ws_fetch::sse_connect,
+            commands::ws_fetch::sse_close,
+            commands::url_fetch_credentials::url_fetch_set_credential,
+            commands::url_fetch_credentials::url_fetch_delete_credential,
+            commands::url_fetch_credentials::url_fetch_list_credentials,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

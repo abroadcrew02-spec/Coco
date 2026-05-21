@@ -7,6 +7,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
 
 import { confirmDiscardIfUnsaved } from "./dirtyGuard";
 import { useWorkbookStore } from "./useWorkbookStore";
+import { t } from "../i18n/locale";
 
 let confirmFn: ReturnType<typeof vi.fn>;
 
@@ -64,11 +65,13 @@ describe("confirmDiscardIfUnsaved", () => {
     expect(confirmFn).toHaveBeenCalledWith("カスタムメッセージ");
   });
 
-  it("uses the default message when none provided", () => {
+  it("uses the localized default message when none provided", () => {
     useWorkbookStore.setState({ screen: "editor", saveStatus: "unsaved" });
     confirmFn.mockReturnValue(false);
     confirmDiscardIfUnsaved();
     const arg = confirmFn.mock.calls[0][0] as string;
-    expect(arg).toContain("未保存の変更");
+    // #179: the default message is now locale-aware — assert it matches the
+    // active-locale string rather than a hard-coded language.
+    expect(arg).toBe(t("confirm.discardUnsaved.continue"));
   });
 });

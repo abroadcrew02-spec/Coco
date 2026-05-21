@@ -11,10 +11,10 @@
   max-height: 50vh;
   display: flex;
   flex-direction: column;
-  background: #fff;
-  border: 1px solid #d1d5db;
+  background: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 12px var(--coco-shadow);
   font-size: 12px;
   overflow: hidden;
 }
@@ -24,8 +24,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 10px;
-  background: #eff6ff;
-  border-bottom: 1px solid #bfdbfe;
+  background: var(--coco-info-bg);
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .ftp-title {
@@ -33,11 +33,11 @@
   align-items: center;
   gap: 6px;
   font-weight: 600;
-  color: #1d4ed8;
+  color: var(--coco-info);
 }
 
 .ftp-glyph {
-  color: #2563eb;
+  color: var(--coco-info);
   font-size: 13px;
   line-height: 1;
 }
@@ -49,11 +49,11 @@
   font-size: 16px;
   line-height: 1;
   padding: 0 4px;
-  color: #6b7280;
+  color: var(--coco-text-muted);
 }
 
 .ftp-collapse:hover {
-  color: #111827;
+  color: var(--coco-text);
 }
 
 .ftp-active {
@@ -61,19 +61,19 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  background: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
+  background: var(--coco-surface);
+  border-bottom: 1px solid var(--coco-border);
   font-family: "Consolas", "Menlo", monospace;
   font-size: 11px;
 }
 
 .ftp-active-label {
-  color: #6b7280;
+  color: var(--coco-text-muted);
   font-family: inherit;
 }
 
 .ftp-active-ref {
-  color: #111827;
+  color: var(--coco-text);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -81,7 +81,7 @@
 }
 
 .ftp-active-empty {
-  color: #9ca3af;
+  color: var(--coco-text-faint);
   font-family: inherit;
   font-style: italic;
 }
@@ -92,7 +92,7 @@
 }
 
 .ftp-section {
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .ftp-section:last-child {
@@ -107,15 +107,15 @@
   padding: 6px 10px 4px;
   font-size: 11px;
   font-weight: 600;
-  color: #4b5563;
-  background: #f9fafb;
+  color: var(--coco-text-muted);
+  background: var(--coco-surface);
   text-transform: none;
 }
 
 .ftp-section-count {
   font-size: 10px;
-  color: #fff;
-  background: #6b7280;
+  color: var(--coco-accent-text);
+  background: var(--coco-text-muted);
   border-radius: 10px;
   padding: 0 6px;
   min-width: 18px;
@@ -126,7 +126,7 @@
   margin: 0;
   padding: 6px 10px 10px;
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--coco-text-faint);
   font-style: italic;
 }
 
@@ -137,7 +137,7 @@
 }
 
 .ftp-item {
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .ftp-item:last-child {
@@ -154,19 +154,19 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #1f2937;
+  color: var(--coco-text);
 }
 
 .ftp-item-btn:hover,
 .ftp-item-btn:focus-visible {
-  background: #eff6ff;
+  background: var(--coco-info-bg);
   outline: none;
 }
 
 .ftp-cell-ref {
   font-family: "Consolas", "Menlo", monospace;
   font-size: 11px;
-  color: #4338ca;
+  color: var(--coco-info);
   white-space: nowrap;
   flex-shrink: 0;
   min-width: 36px;
@@ -174,7 +174,7 @@
 
 .ftp-sheet {
   font-size: 11px;
-  color: #6b7280;
+  color: var(--coco-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -187,7 +187,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #1f2937;
+  color: var(--coco-text);
   font-family: "Consolas", "Menlo", monospace;
   font-size: 11px;
 }
@@ -199,8 +199,8 @@
   top: 8px;
   right: 158px;
   z-index: 25;
-  background: #fff;
-  border: 1px solid #bfdbfe;
+  background: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border);
   border-radius: 999px;
   padding: 4px 10px;
   cursor: pointer;
@@ -208,16 +208,16 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 6px var(--coco-shadow);
 }
 
 .ftp-badge:hover,
 .ftp-badge:focus-visible {
-  background: #eff6ff;
+  background: var(--coco-info-bg);
   outline: none;
 }
 
 .ftp-badge-count {
   font-weight: 600;
-  color: #1d4ed8;
+  color: var(--coco-info);
 }

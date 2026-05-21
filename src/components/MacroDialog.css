@@ -1,0 +1,295 @@
+.macro-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1250;
+}
+
+.macro-modal {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  max-width: 560px;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.macro-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #eee;
+  background-color: #fafafa;
+}
+
+.macro-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.macro-close {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  color: #666;
+  padding: 4px 8px;
+}
+
+.macro-close:hover {
+  color: #000;
+}
+
+.macro-body {
+  padding: 16px 20px;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.macro-section-title {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #444;
+}
+
+.macro-record-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.macro-input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.macro-input:disabled {
+  background-color: #f5f5f5;
+  color: #999;
+}
+
+.macro-btn {
+  padding: 6px 14px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: #fff;
+  color: #333;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.macro-btn:hover:not(:disabled) {
+  background-color: #f0f0f0;
+}
+
+.macro-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.macro-btn--primary {
+  background-color: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.macro-btn--primary:hover:not(:disabled) {
+  background-color: #1d4ed8;
+}
+
+.macro-hint {
+  margin: 8px 0 0 0;
+  font-size: 12px;
+  color: #666;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.macro-rec-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #dc2626;
+  animation: macro-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes macro-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.macro-empty {
+  margin: 0;
+  font-size: 13px;
+  color: #888;
+  padding: 12px;
+  background-color: #fafafa;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.macro-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.macro-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eee;
+}
+
+.macro-item:last-child {
+  border-bottom: none;
+}
+
+.macro-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.macro-item-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.macro-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #222;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.macro-item-sub {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+}
+
+.macro-item-actions {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+/* #186 — shortcut slot badge shown next to a bound macro. */
+.macro-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background-color: #e0e7ff;
+  color: #3730a3;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* #186 — per-macro shortcut <select>. */
+.macro-shortcut-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  color: #888;
+}
+
+.macro-select {
+  padding: 5px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 12px;
+  background-color: #fff;
+}
+
+.macro-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* #186 — editable script (DSL) editor. */
+.macro-dsl-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background-color: #fafafa;
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+}
+
+.macro-dsl-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  resize: vertical;
+}
+
+.macro-dsl-errors {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 11px;
+  color: #dc2626;
+}
+
+.macro-dsl-ok {
+  margin: 0;
+  font-size: 11px;
+  color: #16a34a;
+}
+
+.macro-dsl-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.macro-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid #eee;
+  background-color: #fafafa;
+}
+
+.macro-status {
+  font-size: 12px;
+  color: #666;
+  flex: 1;
+}

@@ -1,0 +1,19 @@
+/* Visually-hidden but screen-reader-accessible (issue #177).
+ *
+ * The standard "visually hidden" clip pattern: the element stays in the
+ * accessibility tree (so NVDA / JAWS / Narrator read its text and announce
+ * live-region updates) while occupying no visible space and never affecting
+ * layout. Do NOT use display:none / visibility:hidden — those remove the
+ * node from the accessibility tree and silence the announcement. */
+.coco-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

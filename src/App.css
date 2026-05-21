@@ -9,7 +9,7 @@ html, body, #root {
   height: 100%;
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background-color: #f5f5f5;
+  background-color: var(--coco-bg);
 }
 
 .app {
@@ -24,7 +24,7 @@ html, body, #root {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #217346;
+  color: var(--coco-accent);
   font-size: 13px;
 }
 
@@ -34,29 +34,29 @@ html, body, #root {
   justify-content: center;
   height: 100%;
   padding: 24px;
-  background: #f5f7f6;
+  background: var(--coco-bg);
 }
 
 .editor-error__panel {
   width: min(100%, 440px);
   padding: 24px;
-  border: 1px solid #d8e1dc;
+  border: 1px solid var(--coco-border);
   border-radius: 8px;
-  background: #ffffff;
-  color: #24342c;
-  box-shadow: 0 16px 36px rgba(31, 45, 38, 0.12);
+  background: var(--coco-bg-elevated);
+  color: var(--coco-text);
+  box-shadow: 0 16px 36px var(--coco-shadow);
 }
 
 .editor-error__panel h1 {
   margin-bottom: 12px;
-  color: #184d32;
+  color: var(--coco-accent);
   font-size: 18px;
   line-height: 1.4;
 }
 
 .editor-error__panel p {
   margin-bottom: 20px;
-  color: #4f6358;
+  color: var(--coco-text-muted);
   font-size: 13px;
   line-height: 1.7;
 }
@@ -66,13 +66,13 @@ html, body, #root {
   padding: 0 16px;
   border: none;
   border-radius: 6px;
-  background: #217346;
-  color: #ffffff;
+  background: var(--coco-accent);
+  color: var(--coco-accent-text);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
 }
 
 .editor-error__button:hover {
-  background: #1a5c38;
+  background: var(--coco-accent-hover);
 }

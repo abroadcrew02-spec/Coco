@@ -1,8 +1,12 @@
 pub mod csv_io;
+pub mod data_connection;
 pub mod file_io;
 pub mod file_replace;
 pub mod html_export;
+pub mod http_fetch;
+pub mod http_fetch_stream;
 pub mod pdf_export;
+pub mod url_fetch_credentials;
 pub mod recovery;
 pub mod security;
 pub mod settings;
@@ -10,4 +14,5 @@ pub mod sheet_import;
 pub mod shell;
 pub mod workbook;
 pub mod workspace_bundle;
+pub mod ws_fetch;
 pub mod xlsx_io;

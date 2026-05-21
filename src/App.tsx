@@ -18,6 +18,7 @@ import { useWindowTitle } from "./hooks/useWindowTitle";
 import { useFileDrop } from "./hooks/useFileDrop";
 import { useCloseGuard, onCloseRequest } from "./hooks/useCloseGuard";
 import { useMenuActions } from "./hooks/useMenuActions";
+import { useLocale } from "./hooks/useLocale";
 import HomeScreen from "./components/HomeScreen";
 import SecurityBlockDialog from "./components/SecurityBlockDialog";
 import HelpDialog from "./components/HelpDialog";
@@ -26,6 +27,12 @@ import SettingsDialog from "./components/SettingsDialog";
 import CloseConfirmDialog from "./components/CloseConfirmDialog";
 import XlsmMacroLossDialog from "./components/XlsmMacroLossDialog";
 import { confirmDiscardIfUnsaved } from "./store/dirtyGuard";
+import {
+  applyThemeMode,
+  getThemeMode,
+  onThemeChanged,
+  subscribeSystemTheme,
+} from "./store/theme";
 
 // EditorScreen pulls in the ~10MB Univer bundle. Lazy-load it so the Home
 // screen renders instantly without waiting for Univer to parse.
@@ -89,6 +96,10 @@ export default function App() {
     goHome,
   } = useWorkbookStore();
 
+  // #179 (area E): re-render the whole Coco UI tree when the locale changes
+  // so a language switch reflects immediately without a page reload.
+  useLocale();
+
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [closeResolve, setCloseResolve] = useState<
@@ -114,6 +125,28 @@ export default function App() {
       u1();
       u2();
       u3();
+    };
+  }, []);
+
+  // Theme (#191): re-apply on mode change (Settings dialog) and, while the
+  // mode is "system", follow the OS color-scheme as it flips. main.tsx
+  // already applied the persisted theme before the first paint.
+  useEffect(() => {
+    let unsubSystem: (() => void) | null = null;
+    const sync = () => {
+      const mode = getThemeMode();
+      applyThemeMode(mode);
+      unsubSystem?.();
+      unsubSystem = null;
+      if (mode === "system") {
+        unsubSystem = subscribeSystemTheme(() => applyThemeMode("system"));
+      }
+    };
+    sync();
+    const unsubChanged = onThemeChanged(sync);
+    return () => {
+      unsubChanged();
+      unsubSystem?.();
     };
   }, []);
 

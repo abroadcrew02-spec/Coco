@@ -905,6 +905,55 @@ pub(crate) fn parse_xlsx_freeze_panes(
     out
 }
 
+/// Project a Coco `_freezePane` declaration onto Univer's native
+/// `IWorksheetData.freeze` field (`{ xSplit, ySplit, startRow, startColumn }`).
+///
+/// Without this, opening an xlsx that carries a frozen / split pane shows no
+/// visual freeze until the user toggles it via the View menu: Univer's freeze
+/// renderer only activates when `sheets.<id>.freeze` is populated, but the
+/// import path historically wrote only the Coco-private `_freezePane` marker.
+/// This helper closes that gap (issue #178, item 3) so the freeze / split is
+/// visible immediately on direct open.
+///
+/// Semantics:
+///   * `state="frozen"` — `row`/`col` are fixed row/column counts (the OOXML
+///     `xSplit`/`ySplit` of a frozen pane). They map directly onto Univer's
+///     `IFreeze`.
+///   * `state="split"`  — `row`/`col` carry the raw `xSplit`/`ySplit` verbatim.
+///     Coco-authored splits store row/col indices here; Excel-authored splits
+///     store pixel/twip offsets. Univer 0.5.x has no split renderer, so the
+///     freeze renderer is the visual approximation either way.
+///
+/// `row_count`/`col_count` are the sheet's dimensions. A pane anchor at or
+/// beyond those bounds (e.g. an Excel pixel-offset split that dwarfs the sheet)
+/// is rejected — projecting it would produce a nonsensical freeze. The
+/// `_freezePane` marker still round-trips in that case; only the visual
+/// projection is skipped. Returns `None` when no projection should be written.
+fn freeze_field_for_pane(
+    row: u64,
+    col: u64,
+    row_count: u64,
+    col_count: u64,
+) -> Option<Value> {
+    if row == 0 && col == 0 {
+        return None;
+    }
+    // Reject anchors that fall outside the sheet — clamping would silently
+    // shift the freeze line, so we drop the projection instead.
+    if row >= row_count || col >= col_count {
+        return None;
+    }
+    // Univer's "no freeze on this axis" sentinel is startRow/startColumn = -1.
+    let start_row: i64 = if row > 0 { row as i64 } else { -1 };
+    let start_column: i64 = if col > 0 { col as i64 } else { -1 };
+    Some(json!({
+        "xSplit": col,
+        "ySplit": row,
+        "startRow": start_row,
+        "startColumn": start_column,
+    }))
+}
+
 /// Read `xl/workbook.xml` from an xlsx and return the sheet-visibility map.
 /// Best-effort: returns empty on read or parse failure.
 pub(crate) fn parse_xlsx_sheet_visibility<R: Read + Seek>(
@@ -4797,6 +4846,19 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                 obj.insert("state".into(), Value::String("split".into()));
             }
             sheet_obj["_freezePane"] = Value::Object(obj);
+            // #178: also project onto Univer's native `freeze` field so the
+            // freeze / split renderer activates immediately on direct open,
+            // without waiting for a View-menu toggle. `_freezePane` above
+            // still drives xlsx round-trip (it carries the `state`
+            // discriminator); `freeze` is the in-app visual.
+            if let Some(freeze) = freeze_field_for_pane(
+                fp.row as u64,
+                fp.col as u64,
+                row_count as u64,
+                col_count as u64,
+            ) {
+                sheet_obj["freeze"] = freeze;
+            }
         }
 
         // Workbook-level sheet visibility. Opt-in: omit `_sheetState` when the
@@ -5638,6 +5700,21 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                                     .write_formula(row_idx, col_idx, f)
                                     .map_err(|e| e.to_string())?;
                             }
+                            // #176: rust_xlsxwriter stores 0 as every formula's
+                            // result and flags the file for full recalc on open.
+                            // For an external-book reference (`=[Book]Sheet!A1`)
+                            // that's lossy: Univer cannot recompute it (single-
+                            // workbook editor — the referenced unit is never
+                            // loaded), so the imported cached value is the only
+                            // thing the user can see. Re-emit that cached value
+                            // as the formula result so the closed-book fallback
+                            // survives the round-trip. Normal formulas are left
+                            // alone — Univer recalculates them at render time.
+                            if formula_is_external_ref(f) {
+                                if let Some(result) = cached_formula_result(cell_val) {
+                                    worksheet.set_formula_result(row_idx, col_idx, result);
+                                }
+                            }
                             formula_count += 1;
                             cell_count += 1;
                             if cell_count > MAX_EXPORT_CELLS {
@@ -6179,6 +6256,54 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
 //     `<externalReferences>` block spliced back in. Per req 5.3.2, cached
 //     values survive but Coco never auto-fetches the external workbook.
 // ============================================================================
+
+/// True when a formula string is an external-book reference, i.e. it carries
+/// an OOXML `[index]` / `[Book.xlsx]` workbook bracket before a sheet name —
+/// `=[1]Sheet1!A1`, `='[1]Sheet 1'!A1`, `=SUM([2]Data!B2:B9)`. Univer's
+/// formula engine cannot evaluate these in Coco (single-workbook editor — the
+/// referenced unit is never loaded), so on export their imported cached value
+/// must be re-emitted as the formula result (#176).
+///
+/// The check is intentionally conservative: a `[` that is not a workbook
+/// bracket (e.g. a structured table reference `Table1[Col]`) is not followed
+/// by a sheet-name `!`, so the `]` ... `!` ordering test rejects it.
+pub(crate) fn formula_is_external_ref(formula: &str) -> bool {
+    let mut search_from = 0;
+    while let Some(open_rel) = formula[search_from..].find('[') {
+        let open = search_from + open_rel;
+        let Some(close_rel) = formula[open + 1..].find(']') else {
+            return false;
+        };
+        let close = open + 1 + close_rel;
+        // A workbook bracket is immediately followed by the sheet portion of
+        // the reference, which always contains a `!`. A structured table
+        // reference like `Table1[Column]` has no `!` after the `]` before the
+        // next bracket / end, so it is correctly rejected.
+        if let Some(bang_rel) = formula[close + 1..].find('!') {
+            // Reject if another `[` sits between `]` and `!` — that would mean
+            // the `!` belongs to a later, unrelated reference.
+            let between = &formula[close + 1..close + 1 + bang_rel];
+            if !between.contains('[') {
+                return true;
+            }
+        }
+        search_from = close + 1;
+    }
+    false
+}
+
+/// Stringify a formula cell's cached value (`v`) for `set_formula_result`.
+/// Returns `None` when the cell has no usable cached value (so the export
+/// path leaves rust_xlsxwriter's default `0` result untouched). Errors (`t:"e"`
+/// with a null `v`) round-trip the stored error literal when present.
+pub(crate) fn cached_formula_result(cell: &Value) -> Option<String> {
+    match cell.get("v") {
+        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+        Some(Value::Number(n)) => Some(n.to_string()),
+        Some(Value::Bool(b)) => Some(if *b { "TRUE".into() } else { "FALSE".into() }),
+        _ => None,
+    }
+}
 
 const PRESERVED_PART_SIZE_CAP: usize = 16 * 1024 * 1024;
 const PRESERVED_TOTAL_SIZE_CAP: usize = 32 * 1024 * 1024;
@@ -7094,10 +7219,18 @@ const COCO_EXTENSION_SHEET_FIELDS: &[(&str, &str)] = &[
     ("_slicers", "slicers"),
     ("_note", "notes"),
     ("_charts", "charts"),
+    // #150 / #183: cell checkboxes + form controls (radio / spin / scroll).
+    // The control's *value* lives in a plain cell so it round-trips through
+    // xlsx natively; this part preserves the control metadata (which cells
+    // are decorated, group ids, min/max/step) that has no OOXML equivalent
+    // Coco's writer can emit. Re-read on import and merged back per sheet.
+    ("_checkboxes", "checkboxes"),
+    ("_formControls", "formControls"),
 ];
 
 /// Workbook-root fields preserved as standalone JSON parts.
-const COCO_EXTENSION_ROOT_FIELDS: &[(&str, &str)] = &[("_scenarios", "scenarios")];
+const COCO_EXTENSION_ROOT_FIELDS: &[(&str, &str)] =
+    &[("_scenarios", "scenarios"), ("_cameraLinks", "cameraLinks")];
 
 /// Threaded-comments extra-field keys captured per cell inside `_comments[]`.
 const COCO_THREADED_COMMENT_KEYS: &[&str] = &[
@@ -7121,9 +7254,36 @@ fn coco_extension_label_ja(file_stem: &str) -> &'static str {
         "notes" => "シートメモ",
         "charts" => "Coco作成のチャート",
         "scenarios" => "シナリオ",
+        "cameraLinks" => "カメラ画像",
+        "checkboxes" => "チェックボックス",
+        "formControls" => "フォームコントロール",
         "threadedComments" => "コメント返信/解決状態",
         _ => "Coco拡張データ",
     }
+}
+
+/// #184 M-1: blank the `dataUrl` of every entry in a `_cameraLinks` array so
+/// the xlsx-bound bundle stays small. Each `dataUrl` is a baked PNG that the
+/// frontend regenerates from its source range on load; only the link metadata
+/// (id, ranges, anchors, broken flag) needs to survive the round trip.
+/// Non-array / non-object input is returned untouched.
+fn strip_camera_data_urls(val: &Value) -> Value {
+    let Some(arr) = val.as_array() else {
+        return val.clone();
+    };
+    let stripped: Vec<Value> = arr
+        .iter()
+        .map(|entry| {
+            let mut e = entry.clone();
+            if let Some(obj) = e.as_object_mut() {
+                if obj.contains_key("dataUrl") {
+                    obj.insert("dataUrl".to_string(), Value::String(String::new()));
+                }
+            }
+            e
+        })
+        .collect();
+    Value::Array(stripped)
 }
 
 /// Build the per-feature JSON bundles that must be written into the output
@@ -7170,7 +7330,18 @@ fn build_coco_extension_bundles(
     for (snap_key, file_stem) in COCO_EXTENSION_ROOT_FIELDS {
         if let Some(val) = snapshot.get(*snap_key) {
             if !val.is_null() {
-                if let Ok(bytes) = serde_json::to_vec(val) {
+                // #184 M-1: a camera link's `dataUrl` is a baked PNG (base64,
+                // up to a few hundred KB) — persisting all 50 into the xlsx
+                // would bloat the file by tens of MB. Strip every `dataUrl`
+                // before serializing; the frontend's live re-render effect
+                // re-bakes them from the source range after load. .coco saves
+                // (SQLite) keep the dataUrl since size pressure there is lower.
+                let payload = if *file_stem == "cameraLinks" {
+                    strip_camera_data_urls(val)
+                } else {
+                    val.clone()
+                };
+                if let Ok(bytes) = serde_json::to_vec(&payload) {
                     bundles.insert(
                         format!("xl/cocoExtensions/{file_stem}.json"),
                         bytes,
@@ -7496,5 +7667,159 @@ fn merge_coco_extensions_into_snapshot(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod camera_link_tests {
+    use super::strip_camera_data_urls;
+    use serde_json::json;
+
+    #[test]
+    fn blanks_data_url_on_every_link() {
+        let input = json!([
+            { "id": "camera-1", "dataUrl": "data:image/png;base64,AAAA", "broken": false },
+            { "id": "camera-2", "dataUrl": "data:image/png;base64,BBBB", "broken": true },
+        ]);
+        let out = strip_camera_data_urls(&input);
+        let arr = out.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        for entry in arr {
+            assert_eq!(entry.get("dataUrl").unwrap().as_str().unwrap(), "");
+        }
+        // Non-dataUrl metadata survives untouched.
+        assert_eq!(arr[0].get("id").unwrap(), "camera-1");
+        assert_eq!(arr[1].get("broken").unwrap(), &json!(true));
+    }
+
+    #[test]
+    fn leaves_links_without_data_url_alone() {
+        let input = json!([{ "id": "camera-1", "broken": false }]);
+        let out = strip_camera_data_urls(&input);
+        assert!(out.as_array().unwrap()[0].get("dataUrl").is_none());
+    }
+
+    #[test]
+    fn passes_non_array_through_unchanged() {
+        let input = json!({ "not": "an array" });
+        assert_eq!(strip_camera_data_urls(&input), input);
+    }
+}
+
+#[cfg(test)]
+mod freeze_projection_tests {
+    use super::freeze_field_for_pane;
+    use serde_json::json;
+
+    #[test]
+    fn frozen_pane_projects_onto_univer_freeze() {
+        // A 3-row / 2-col frozen pane on a generously sized sheet.
+        let out = freeze_field_for_pane(3, 2, 1000, 100).unwrap();
+        assert_eq!(
+            out,
+            json!({ "xSplit": 2, "ySplit": 3, "startRow": 3, "startColumn": 2 })
+        );
+    }
+
+    #[test]
+    fn row_only_pane_uses_minus_one_column_sentinel() {
+        // Horizontal-only split/freeze: startColumn stays at Univer's
+        // "no freeze on this axis" sentinel (-1).
+        let out = freeze_field_for_pane(5, 0, 1000, 100).unwrap();
+        assert_eq!(
+            out,
+            json!({ "xSplit": 0, "ySplit": 5, "startRow": 5, "startColumn": -1 })
+        );
+    }
+
+    #[test]
+    fn col_only_pane_uses_minus_one_row_sentinel() {
+        // Vertical-only split/freeze: startRow stays at the -1 sentinel.
+        let out = freeze_field_for_pane(0, 4, 1000, 100).unwrap();
+        assert_eq!(
+            out,
+            json!({ "xSplit": 4, "ySplit": 0, "startRow": -1, "startColumn": 4 })
+        );
+    }
+
+    #[test]
+    fn degenerate_zero_zero_pane_is_dropped() {
+        // {0,0} is a no-op pane — no projection.
+        assert!(freeze_field_for_pane(0, 0, 1000, 100).is_none());
+    }
+
+    #[test]
+    fn out_of_bounds_anchor_is_rejected() {
+        // Excel-authored splits store pixel/twip offsets in row/col, which can
+        // dwarf the sheet. Such an anchor must NOT be projected (clamping
+        // would silently shift the freeze line).
+        assert!(freeze_field_for_pane(5000, 0, 1000, 100).is_none());
+        assert!(freeze_field_for_pane(0, 9999, 1000, 100).is_none());
+        // Anchor exactly at the bound is also out of range (0-based indices).
+        assert!(freeze_field_for_pane(1000, 0, 1000, 100).is_none());
+        assert!(freeze_field_for_pane(0, 100, 1000, 100).is_none());
+    }
+
+    #[test]
+    fn in_bounds_anchor_just_below_limit_is_kept() {
+        // The last valid index (count - 1) still projects.
+        let out = freeze_field_for_pane(999, 99, 1000, 100).unwrap();
+        assert_eq!(
+            out,
+            json!({ "xSplit": 99, "ySplit": 999, "startRow": 999, "startColumn": 99 })
+        );
+    }
+}
+
+#[cfg(test)]
+mod external_ref_tests {
+    use super::{cached_formula_result, formula_is_external_ref};
+    use serde_json::json;
+
+    #[test]
+    fn detects_external_book_references() {
+        assert!(formula_is_external_ref("=[1]Sheet1!A1"));
+        assert!(formula_is_external_ref("=[Other.xlsx]Sheet1!A1"));
+        assert!(formula_is_external_ref("='[1]Sheet 1'!A1"));
+        assert!(formula_is_external_ref("=SUM([2]Data!B2:B9)"));
+        assert!(formula_is_external_ref("=[1]Sheet1!A1+[1]Sheet1!A2"));
+    }
+
+    #[test]
+    fn rejects_non_external_formulas() {
+        assert!(!formula_is_external_ref("=SUM(A1:A10)"));
+        assert!(!formula_is_external_ref("=Sheet2!A1"));
+        // Structured table references use brackets but no sheet `!`.
+        assert!(!formula_is_external_ref("=SUM(Table1[Amount])"));
+        assert!(!formula_is_external_ref("=Table1[Col]+Table1[Other]"));
+        assert!(!formula_is_external_ref("=A1"));
+        // Unbalanced bracket — treated as non-external rather than panicking.
+        assert!(!formula_is_external_ref("=[1Sheet1!A1"));
+    }
+
+    #[test]
+    fn cached_result_stringifies_value_types() {
+        assert_eq!(
+            cached_formula_result(&json!({ "f": "=[1]S!A1", "v": 42 })),
+            Some("42".to_string())
+        );
+        assert_eq!(
+            cached_formula_result(&json!({ "f": "=[1]S!A1", "v": "hello" })),
+            Some("hello".to_string())
+        );
+        assert_eq!(
+            cached_formula_result(&json!({ "f": "=[1]S!A1", "v": true })),
+            Some("TRUE".to_string())
+        );
+        // No cached value, or empty string, or null → None (leave default 0).
+        assert_eq!(cached_formula_result(&json!({ "f": "=[1]S!A1" })), None);
+        assert_eq!(
+            cached_formula_result(&json!({ "f": "=[1]S!A1", "v": "" })),
+            None
+        );
+        assert_eq!(
+            cached_formula_result(&json!({ "f": "=[1]S!A1", "v": null })),
+            None
+        );
     }
 }

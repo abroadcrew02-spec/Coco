@@ -1,7 +1,7 @@
 .ipd-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--coco-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .ipd-modal {
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 32px var(--coco-shadow);
   width: 100%;
   max-width: 720px;
   max-height: 85vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid #eee;
-  background-color: #fafafa;
+  border-bottom: 1px solid var(--coco-border);
+  background-color: var(--coco-surface);
 }
 
 .ipd-title {
   font-size: 15px;
   font-weight: 600;
-  color: #217346;
+  color: var(--coco-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: #999;
+  color: var(--coco-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .ipd-close:hover {
-  color: #333;
-  background-color: #eee;
+  color: var(--coco-text);
+  background-color: var(--coco-surface-hover);
 }
 
 .ipd-body {
@@ -69,7 +69,7 @@
 
 .ipd-field-label {
   font-size: 12px;
-  color: #555;
+  color: var(--coco-text-muted);
 }
 
 .ipd-input,
@@ -77,17 +77,17 @@
 .ipd-input-sm {
   padding: 6px 8px;
   font-size: 13px;
-  border: 1px solid #c8d0cc;
+  border: 1px solid var(--coco-border-strong);
   border-radius: 3px;
   font-family: inherit;
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
 }
 
 .ipd-input:focus,
 .ipd-select-sm:focus,
 .ipd-input-sm:focus {
   outline: none;
-  border-color: #217346;
+  border-color: var(--coco-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
 }
 
@@ -107,13 +107,13 @@
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: #424242;
+  color: var(--coco-text);
 }
 
 .ipd-fields {
-  border: 1px solid #d0d8d4;
+  border: 1px solid var(--coco-border-strong);
   border-radius: 6px;
-  background-color: #f6fbf8;
+  background-color: var(--coco-accent-subtle);
   padding: 8px 10px;
   margin: 0;
   max-height: 300px;
@@ -122,7 +122,7 @@
 
 .ipd-fields legend {
   font-size: 12px;
-  color: #555;
+  color: var(--coco-text-muted);
   padding: 0 4px;
 }
 
@@ -136,8 +136,8 @@
   text-align: center;
   padding: 4px 6px;
   font-weight: 500;
-  color: #555;
-  border-bottom: 1px solid #e2ebe5;
+  color: var(--coco-text-muted);
+  border-bottom: 1px solid var(--coco-border);
   white-space: nowrap;
 }
 
@@ -153,7 +153,7 @@
 .ipd-table td {
   padding: 3px 6px;
   text-align: center;
-  border-bottom: 1px solid #ecf3ee;
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .ipd-table tr:last-child td {
@@ -163,7 +163,7 @@
 .ipd-cell-name {
   text-align: left !important;
   font-weight: 500;
-  color: #424242;
+  color: var(--coco-text);
   max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -173,23 +173,23 @@
 .ipd-error {
   margin: 0;
   font-size: 12px;
-  color: #b00020;
+  color: var(--coco-danger);
 }
 
 .ipd-info {
   margin: 0;
   font-size: 12px;
-  color: #1b6d3c;
-  background-color: #eef7f1;
-  border: 1px solid #cfe6d7;
+  color: var(--coco-accent);
+  background-color: var(--coco-accent-subtle);
+  border: 1px solid var(--coco-border);
   border-radius: 4px;
   padding: 6px 8px;
 }
 
 .ipd-footer {
   padding: 12px 20px;
-  background-color: #fafafa;
-  border-top: 1px solid #eee;
+  background-color: var(--coco-surface);
+  border-top: 1px solid var(--coco-border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -198,7 +198,7 @@
 .ipd-hint {
   margin: 0;
   font-size: 11px;
-  color: #757575;
+  color: var(--coco-text-muted);
   line-height: 1.5;
 }
 
@@ -212,16 +212,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: #424242;
-  background-color: #fff;
-  border: 1px solid #d0d0d0;
+  color: var(--coco-text);
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .ipd-btn:hover:not(:disabled) {
-  background-color: #f0f0f0;
-  border-color: #b0b0b0;
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-border-strong);
 }
 
 .ipd-btn:disabled {
@@ -230,12 +230,12 @@
 }
 
 .ipd-btn--primary {
-  background-color: #217346;
-  color: #fff;
-  border-color: #217346;
+  background-color: var(--coco-accent);
+  color: var(--coco-accent-text);
+  border-color: var(--coco-accent);
 }
 
 .ipd-btn--primary:hover:not(:disabled) {
-  background-color: #1a5c38;
-  border-color: #1a5c38;
+  background-color: var(--coco-accent-hover);
+  border-color: var(--coco-accent-hover);
 }

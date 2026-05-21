@@ -12,10 +12,10 @@
   max-height: calc(100vh - 200px);
   display: flex;
   flex-direction: column;
-  background: #fff;
-  border: 1px solid #d1d5db;
+  background: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 12px var(--coco-shadow);
   font-size: 12px;
   overflow: hidden;
 }
@@ -25,8 +25,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 10px;
-  background: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
+  background: var(--coco-surface);
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .cpp-title {
@@ -34,7 +34,7 @@
   align-items: center;
   gap: 6px;
   font-weight: 600;
-  color: #374151;
+  color: var(--coco-text);
 }
 
 .cpp-icon {
@@ -49,11 +49,11 @@
   font-size: 16px;
   line-height: 1;
   padding: 0 4px;
-  color: #6b7280;
+  color: var(--coco-text-muted);
 }
 
 .cpp-collapse:hover {
-  color: #111827;
+  color: var(--coco-text);
 }
 
 .cpp-list {
@@ -65,7 +65,7 @@
 }
 
 .cpp-item {
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .cpp-item:last-child {
@@ -82,12 +82,12 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  color: #1f2937;
+  color: var(--coco-text);
 }
 
 .cpp-item-btn:hover,
 .cpp-item-btn:focus-visible {
-  background: #eef2ff;
+  background: var(--coco-surface-hover);
   outline: none;
 }
 
@@ -109,7 +109,7 @@
 
 .cpp-type {
   font-size: 10px;
-  color: #6b7280;
+  color: var(--coco-text-muted);
   flex-shrink: 0;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -117,7 +117,7 @@
 
 .cpp-chart-title {
   font-size: 11px;
-  color: #4b5563;
+  color: var(--coco-text-muted);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -128,19 +128,19 @@
   display: block;
   width: 100%;
   height: auto;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--coco-border);
   border-radius: 4px;
-  background: #ffffff;
+  background: var(--coco-bg-elevated);
 }
 
 .cpp-svg--empty {
-  background: #f9fafb;
+  background: var(--coco-surface);
 }
 
 .cpp-empty {
   margin: 4px 0 0;
   font-size: 10px;
-  color: #9ca3af;
+  color: var(--coco-text-faint);
   font-style: italic;
 }
 
@@ -151,8 +151,8 @@
   top: 8px;
   left: 16px;
   z-index: 25;
-  background: #fff;
-  border: 1px solid #d1d5db;
+  background: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border);
   border-radius: 999px;
   padding: 4px 10px;
   cursor: pointer;
@@ -160,16 +160,16 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 6px var(--coco-shadow);
 }
 
 .cpp-badge:hover,
 .cpp-badge:focus-visible {
-  background: #f3f4f6;
+  background: var(--coco-surface-hover);
   outline: none;
 }
 
 .cpp-badge-count {
   font-weight: 600;
-  color: #374151;
+  color: var(--coco-text);
 }

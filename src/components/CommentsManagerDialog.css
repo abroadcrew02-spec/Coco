@@ -5,7 +5,7 @@
 .cmd-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--coco-overlay);
   z-index: 1000;
   display: flex;
   align-items: center;
@@ -13,16 +13,16 @@
 }
 
 .cmd-modal {
-  background: #fff;
+  background: var(--coco-bg-elevated);
   border-radius: 8px;
   width: min(960px, 95vw);
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 12px 32px var(--coco-shadow);
   overflow: hidden;
   font-size: 13px;
-  color: #1f2937;
+  color: var(--coco-text);
 }
 
 .cmd-header {
@@ -30,15 +30,15 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  background: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
+  background: var(--coco-surface);
+  border-bottom: 1px solid var(--coco-border);
 }
 
 .cmd-title {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #111827;
+  color: var(--coco-text);
 }
 
 .cmd-close {
@@ -48,11 +48,11 @@
   font-size: 20px;
   line-height: 1;
   padding: 4px 8px;
-  color: #6b7280;
+  color: var(--coco-text-muted);
 }
 
 .cmd-close:hover {
-  color: #111827;
+  color: var(--coco-text);
 }
 
 .cmd-filters {
@@ -60,8 +60,8 @@
   align-items: center;
   gap: 12px;
   padding: 10px 16px;
-  border-bottom: 1px solid #e5e7eb;
-  background: #fcfcfd;
+  border-bottom: 1px solid var(--coco-border);
+  background: var(--coco-surface);
   flex-wrap: wrap;
 }
 
@@ -69,24 +69,24 @@
   flex: 1;
   min-width: 220px;
   padding: 6px 10px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   font-size: 13px;
 }
 
 .cmd-author-select {
   padding: 6px 8px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   font-size: 13px;
-  background: #fff;
+  background: var(--coco-bg-elevated);
 }
 
 .cmd-show-resolved {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #374151;
+  color: var(--coco-text);
   cursor: pointer;
   user-select: none;
 }
@@ -95,12 +95,12 @@
   flex: 1;
   overflow-y: auto;
   padding: 0 16px;
-  background: #fff;
+  background: var(--coco-bg-elevated);
 }
 
 .cmd-empty {
   text-align: center;
-  color: #9ca3af;
+  color: var(--coco-text-faint);
   padding: 32px 0;
   margin: 0;
 }
@@ -117,32 +117,32 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #6b7280;
+  color: var(--coco-text-muted);
   padding: 8px 6px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--coco-border);
   position: sticky;
   top: 0;
-  background: #fff;
+  background: var(--coco-bg-elevated);
 }
 
 .cmd-table tbody td {
   padding: 8px 6px;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--coco-border);
   vertical-align: top;
 }
 
 .cmd-row:hover {
-  background: #f9fafb;
+  background: var(--coco-surface-hover);
 }
 
 .cmd-row--resolved .cmd-cell-body {
   text-decoration: line-through;
-  color: #9ca3af;
+  color: var(--coco-text-faint);
 }
 
 .cmd-cell-sheet {
   font-weight: 500;
-  color: #374151;
+  color: var(--coco-text);
   white-space: nowrap;
 }
 
@@ -155,7 +155,7 @@
 
 .cmd-cell-author {
   white-space: nowrap;
-  color: #4b5563;
+  color: var(--coco-text-muted);
 }
 
 .cmd-cell-body {
@@ -163,18 +163,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #1f2937;
+  color: var(--coco-text);
 }
 
 .cmd-cell-time {
   white-space: nowrap;
-  color: #6b7280;
+  color: var(--coco-text-muted);
   font-size: 12px;
 }
 
 .cmd-cell-replies {
   text-align: center;
-  color: #374151;
+  color: var(--coco-text);
 }
 
 .cmd-badge {
@@ -200,15 +200,15 @@
 .cmd-mini-btn {
   padding: 3px 8px;
   font-size: 12px;
-  border: 1px solid #d1d5db;
-  background: #fff;
+  border: 1px solid var(--coco-border-strong);
+  background: var(--coco-bg-elevated);
   border-radius: 4px;
   cursor: pointer;
-  color: #374151;
+  color: var(--coco-text);
 }
 
 .cmd-mini-btn:hover:not(:disabled) {
-  background: #f3f4f6;
+  background: var(--coco-surface-hover);
 }
 
 .cmd-mini-btn:disabled {
@@ -217,12 +217,12 @@
 }
 
 .cmd-mini-btn--danger {
-  color: #b91c1c;
-  border-color: #fca5a5;
+  color: var(--coco-danger);
+  border-color: var(--coco-danger);
 }
 
 .cmd-mini-btn--danger:hover:not(:disabled) {
-  background: #fee2e2;
+  background: var(--coco-danger-bg);
 }
 
 .cmd-footer {
@@ -230,8 +230,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-top: 1px solid #e5e7eb;
-  background: #f9fafb;
+  border-top: 1px solid var(--coco-border);
+  background: var(--coco-surface);
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -245,16 +245,16 @@
 
 .cmd-btn {
   padding: 6px 12px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
-  background: #fff;
+  background: var(--coco-bg-elevated);
   cursor: pointer;
   font-size: 13px;
-  color: #374151;
+  color: var(--coco-text);
 }
 
 .cmd-btn:hover:not(:disabled) {
-  background: #f3f4f6;
+  background: var(--coco-surface-hover);
 }
 
 .cmd-btn:disabled {
@@ -263,20 +263,38 @@
 }
 
 .cmd-btn--primary {
-  background: #2563eb;
-  color: #fff;
-  border-color: #2563eb;
+  background: var(--coco-info);
+  color: var(--coco-accent-text);
+  border-color: var(--coco-info);
 }
 
 .cmd-btn--primary:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: var(--coco-info);
+  filter: brightness(0.92);
 }
 
 .cmd-btn--danger {
-  color: #b91c1c;
-  border-color: #fca5a5;
+  color: var(--coco-danger);
+  border-color: var(--coco-danger);
 }
 
 .cmd-btn--danger:hover:not(:disabled) {
-  background: #fee2e2;
+  background: var(--coco-danger-bg);
+}
+
+/* Dark mode — the modal body/header already use tokens that go dark; only
+   the hardcoded cell-ref indigo and the open/resolved badge colors need
+   dark-tone equivalents to stay readable against the dark panel. */
+[data-theme="dark"] .cmd-cell-ref {
+  color: #a5b4fc;
+}
+
+[data-theme="dark"] .cmd-badge {
+  background: #3a3322;
+  color: #fcd34d;
+}
+
+[data-theme="dark"] .cmd-badge--resolved {
+  background: #14352a;
+  color: #6ee7b7;
 }

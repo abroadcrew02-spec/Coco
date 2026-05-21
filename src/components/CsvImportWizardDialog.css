@@ -1,7 +1,7 @@
 .ciw-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--coco-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .ciw-modal {
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 32px var(--coco-shadow);
   width: 100%;
   max-width: 720px;
   max-height: 88vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid #eee;
-  background-color: #fafafa;
+  border-bottom: 1px solid var(--coco-border);
+  background-color: var(--coco-surface);
 }
 
 .ciw-title {
   font-size: 15px;
   font-weight: 600;
-  color: #217346;
+  color: var(--coco-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: #999;
+  color: var(--coco-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .ciw-close:hover {
-  color: #333;
-  background-color: #eee;
+  color: var(--coco-text);
+  background-color: var(--coco-surface-hover);
 }
 
 .ciw-stepper {
@@ -57,19 +57,19 @@
   gap: 6px;
   padding: 10px 20px 0;
   font-size: 11px;
-  color: #757575;
+  color: var(--coco-text-muted);
   flex-wrap: wrap;
 }
 
 .ciw-stepper-item {
   padding: 3px 10px;
   border-radius: 12px;
-  background-color: #eee;
+  background-color: var(--coco-surface-hover);
 }
 
 .ciw-stepper-item--active {
-  background-color: #217346;
-  color: #fff;
+  background-color: var(--coco-accent);
+  color: var(--coco-accent-text);
   font-weight: 600;
 }
 
@@ -90,23 +90,23 @@
 
 .ciw-field-label {
   font-size: 12px;
-  color: #555;
+  color: var(--coco-text-muted);
 }
 
 .ciw-input,
 .ciw-select {
   padding: 6px 8px;
   font-size: 13px;
-  border: 1px solid #c8d0cc;
+  border: 1px solid var(--coco-border-strong);
   border-radius: 3px;
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   font-family: inherit;
 }
 
 .ciw-input:focus,
 .ciw-select:focus {
   outline: none;
-  border-color: #217346;
+  border-color: var(--coco-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
 }
 
@@ -116,7 +116,7 @@
   align-items: center;
   flex-wrap: wrap;
   font-size: 13px;
-  color: #424242;
+  color: var(--coco-text);
 }
 
 .ciw-checkbox {
@@ -127,9 +127,9 @@
 }
 
 .ciw-fieldset {
-  border: 1px solid #d0d8d4;
+  border: 1px solid var(--coco-border);
   border-radius: 6px;
-  background-color: #f6fbf8;
+  background-color: var(--coco-accent-subtle);
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -140,40 +140,40 @@
 .ciw-fieldset legend {
   font-size: 12px;
   font-weight: 600;
-  color: #217346;
+  color: var(--coco-accent);
   padding: 0 4px;
 }
 
 .ciw-detected {
   font-size: 12px;
-  color: #555;
+  color: var(--coco-text-muted);
   display: flex;
   gap: 6px;
   align-items: baseline;
 }
 
 .ciw-detected strong {
-  color: #217346;
+  color: var(--coco-accent);
   font-weight: 600;
 }
 
 .ciw-raw-preview {
-  border: 1px solid #d0d8d4;
+  border: 1px solid var(--coco-border);
   border-radius: 6px;
-  background-color: #fafafa;
+  background-color: var(--coco-surface);
   padding: 8px 10px;
   max-height: 180px;
   overflow: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   white-space: pre;
-  color: #333;
+  color: var(--coco-text);
 }
 
 .ciw-preview {
-  border: 1px solid #d0d8d4;
+  border: 1px solid var(--coco-border);
   border-radius: 6px;
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   overflow: auto;
   max-height: 280px;
 }
@@ -186,7 +186,7 @@
 
 .ciw-preview-table th,
 .ciw-preview-table td {
-  border: 1px solid #e0e6e3;
+  border: 1px solid var(--coco-border);
   padding: 4px 8px;
   text-align: left;
   vertical-align: top;
@@ -194,8 +194,8 @@
 }
 
 .ciw-preview-table th {
-  background-color: #f6fbf8;
-  color: #217346;
+  background-color: var(--coco-accent-subtle);
+  color: var(--coco-accent);
   font-weight: 600;
   font-size: 11px;
   position: sticky;
@@ -203,7 +203,7 @@
 }
 
 .ciw-preview-table th.ciw-type-header {
-  background-color: #eef6f1;
+  background-color: var(--coco-accent-subtle);
   padding: 4px 6px;
 }
 
@@ -216,15 +216,15 @@
 .ciw-preview-empty {
   padding: 12px;
   font-size: 12px;
-  color: #888;
+  color: var(--coco-text-faint);
   text-align: center;
 }
 
 .ciw-summary {
   font-size: 12px;
-  color: #424242;
-  background-color: #f6fbf8;
-  border: 1px solid #d0d8d4;
+  color: var(--coco-text);
+  background-color: var(--coco-accent-subtle);
+  border: 1px solid var(--coco-border);
   border-radius: 6px;
   padding: 10px 12px;
   display: flex;
@@ -233,7 +233,7 @@
 }
 
 .ciw-summary dt {
-  color: #555;
+  color: var(--coco-text-muted);
   font-weight: 600;
   display: inline-block;
   min-width: 96px;
@@ -242,23 +242,23 @@
 .ciw-error {
   margin: 0;
   font-size: 12px;
-  color: #b00020;
+  color: var(--coco-danger);
 }
 
 .ciw-warn {
   margin: 0;
   font-size: 11px;
-  color: #8a6d3b;
-  background-color: #fcf8e3;
-  border: 1px solid #faebcc;
+  color: var(--coco-warning);
+  background-color: var(--coco-warning-bg);
+  border: 1px solid var(--coco-warning);
   border-radius: 4px;
   padding: 6px 8px;
 }
 
 .ciw-footer {
   padding: 12px 20px;
-  background-color: #fafafa;
-  border-top: 1px solid #eee;
+  background-color: var(--coco-surface);
+  border-top: 1px solid var(--coco-border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -267,7 +267,7 @@
 .ciw-hint {
   margin: 0;
   font-size: 11px;
-  color: #757575;
+  color: var(--coco-text-muted);
   line-height: 1.5;
 }
 
@@ -286,16 +286,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: #424242;
-  background-color: #fff;
-  border: 1px solid #d0d0d0;
+  color: var(--coco-text);
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .ciw-btn:hover:not(:disabled) {
-  background-color: #f0f0f0;
-  border-color: #b0b0b0;
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-border-strong);
 }
 
 .ciw-btn:disabled {
@@ -304,12 +304,12 @@
 }
 
 .ciw-btn--primary {
-  background-color: #217346;
-  color: #fff;
-  border-color: #217346;
+  background-color: var(--coco-accent);
+  color: var(--coco-accent-text);
+  border-color: var(--coco-accent);
 }
 
 .ciw-btn--primary:hover:not(:disabled) {
-  background-color: #1a5c38;
-  border-color: #1a5c38;
+  background-color: var(--coco-accent-hover);
+  border-color: var(--coco-accent-hover);
 }

@@ -1,7 +1,7 @@
 .security-block-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--coco-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -11,9 +11,9 @@
 .security-block-modal {
   display: flex;
   gap: 16px;
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 32px var(--coco-shadow);
   width: 100%;
   max-width: 520px;
   padding: 20px;
@@ -37,13 +37,13 @@
 .security-block-title {
   font-size: 16px;
   font-weight: 600;
-  color: #b71c1c;
+  color: var(--coco-danger);
   margin: 0 0 6px;
 }
 
 .security-block-hint {
   font-size: 13px;
-  color: #5d4037;
+  color: var(--coco-text-muted);
   margin: 0 0 12px;
   line-height: 1.5;
 }
@@ -62,15 +62,15 @@
   align-items: flex-start;
   gap: 8px;
   padding: 8px 10px;
-  background-color: #fff8e1;
-  border: 1px solid #ffe082;
+  background-color: var(--coco-warning-bg);
+  border: 1px solid var(--coco-warning);
   border-radius: 4px;
   font-size: 12px;
 }
 
 .security-block-item--blocking {
-  background-color: #ffebee;
-  border-color: #ef9a9a;
+  background-color: var(--coco-danger-bg);
+  border-color: var(--coco-danger);
 }
 
 .security-block-code {
@@ -78,21 +78,21 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   font-weight: 600;
-  color: #b71c1c;
-  background-color: #fff;
-  border: 1px solid #ef9a9a;
+  color: var(--coco-danger);
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-danger);
   border-radius: 3px;
   padding: 1px 6px;
 }
 
 .security-block-item:not(.security-block-item--blocking) .security-block-code {
-  color: #e65100;
-  border-color: #ffb74d;
+  color: var(--coco-warning);
+  border-color: var(--coco-warning);
 }
 
 .security-block-message {
   flex: 1;
-  color: #424242;
+  color: var(--coco-text);
   word-break: break-word;
 }
 
@@ -102,7 +102,7 @@
 
 .security-block-soft summary {
   font-size: 12px;
-  color: #757575;
+  color: var(--coco-text-muted);
   cursor: pointer;
   padding: 4px 0;
 }
@@ -119,24 +119,24 @@
   font-weight: 500;
   border-radius: 4px;
   cursor: pointer;
-  border: 1px solid #d0d0d0;
-  background-color: #fff;
-  color: #424242;
+  border: 1px solid var(--coco-border-strong);
+  background-color: var(--coco-bg-elevated);
+  color: var(--coco-text);
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
 .security-block-btn:hover {
-  background-color: #f0f0f0;
-  border-color: #b0b0b0;
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-border-strong);
 }
 
 .security-block-btn--primary {
-  background-color: #217346;
-  color: #fff;
-  border-color: #217346;
+  background-color: var(--coco-accent);
+  color: var(--coco-accent-text);
+  border-color: var(--coco-accent);
 }
 
 .security-block-btn--primary:hover {
-  background-color: #1a5c38;
-  border-color: #1a5c38;
+  background-color: var(--coco-accent-hover);
+  border-color: var(--coco-accent-hover);
 }

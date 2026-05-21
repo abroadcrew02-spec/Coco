@@ -1,7 +1,7 @@
 .gsd-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--coco-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .gsd-modal {
-  background-color: #fff;
+  background-color: var(--coco-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 32px var(--coco-shadow);
   width: 100%;
   max-width: 420px;
   max-height: 80vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid #eee;
-  background-color: #fafafa;
+  border-bottom: 1px solid var(--coco-border);
+  background-color: var(--coco-surface);
 }
 
 .gsd-title {
   font-size: 15px;
   font-weight: 600;
-  color: #217346;
+  color: var(--coco-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: #999;
+  color: var(--coco-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .gsd-close:hover {
-  color: #333;
-  background-color: #eee;
+  color: var(--coco-text);
+  background-color: var(--coco-surface-hover);
 }
 
 .gsd-body {
@@ -69,32 +69,32 @@
 
 .gsd-field-label {
   font-size: 12px;
-  color: #555;
+  color: var(--coco-text-muted);
 }
 
 .gsd-input {
   padding: 6px 8px;
   font-size: 13px;
-  border: 1px solid #c8d0cc;
+  border: 1px solid var(--coco-border-strong);
   border-radius: 3px;
   font-family: inherit;
 }
 
 .gsd-input:focus {
   outline: none;
-  border-color: #217346;
+  border-color: var(--coco-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
 }
 
 .gsd-input:disabled {
-  background-color: #f5f5f5;
-  color: #777;
+  background-color: var(--coco-bg);
+  color: var(--coco-text-muted);
 }
 
 .gsd-error {
   margin: 0;
   font-size: 12px;
-  color: #b00020;
+  color: var(--coco-danger);
 }
 
 .gsd-status {
@@ -102,18 +102,18 @@
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: #444;
+  color: var(--coco-text);
   padding: 8px 10px;
-  background-color: #f3f7f4;
-  border: 1px solid #d8e3dc;
+  background-color: var(--coco-accent-subtle);
+  border: 1px solid var(--coco-border);
   border-radius: 4px;
 }
 
 .gsd-spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid #c8d0cc;
-  border-top-color: #217346;
+  border: 2px solid var(--coco-border-strong);
+  border-top-color: var(--coco-accent);
   border-radius: 50%;
   animation: gsd-spin 0.8s linear infinite;
   display: inline-block;
@@ -133,20 +133,20 @@
 }
 
 .gsd-result--ok {
-  background-color: #f1faf4;
-  border-color: #b9d8c4;
+  background-color: var(--coco-accent-subtle);
+  border-color: var(--coco-border);
 }
 
 .gsd-result--bad {
-  background-color: #fdf3f3;
-  border-color: #ecc4c4;
+  background-color: var(--coco-danger-bg);
+  border-color: var(--coco-border);
 }
 
 .gsd-result-headline {
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: #2b2b2b;
+  color: var(--coco-text);
 }
 
 .gsd-result-grid {
@@ -158,20 +158,20 @@
 }
 
 .gsd-result-grid dt {
-  color: #666;
+  color: var(--coco-text-muted);
 }
 
 .gsd-result-grid dd {
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #1a1a1a;
+  color: var(--coco-text);
   word-break: break-all;
 }
 
 .gsd-footer {
   padding: 12px 20px;
-  background-color: #fafafa;
-  border-top: 1px solid #eee;
+  background-color: var(--coco-surface);
+  border-top: 1px solid var(--coco-border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -180,7 +180,7 @@
 .gsd-hint {
   margin: 0;
   font-size: 11px;
-  color: #757575;
+  color: var(--coco-text-muted);
   line-height: 1.5;
 }
 
@@ -194,16 +194,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: #424242;
-  background-color: #fff;
-  border: 1px solid #d0d0d0;
+  color: var(--coco-text);
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .gsd-btn:hover:not(:disabled) {
-  background-color: #f0f0f0;
-  border-color: #b0b0b0;
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-border-strong);
 }
 
 .gsd-btn:disabled {
@@ -212,12 +212,12 @@
 }
 
 .gsd-btn--primary {
-  background-color: #217346;
-  color: #fff;
-  border-color: #217346;
+  background-color: var(--coco-accent);
+  color: var(--coco-accent-text);
+  border-color: var(--coco-accent);
 }
 
 .gsd-btn--primary:hover:not(:disabled) {
-  background-color: #1a5c38;
-  border-color: #1a5c38;
+  background-color: var(--coco-accent-hover);
+  border-color: var(--coco-accent-hover);
 }

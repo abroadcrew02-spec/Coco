@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { t } from "../i18n/locale";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import "./NamedRangesDialog.css";
 
 export interface NamedRangeEntry {
@@ -69,17 +70,8 @@ export default function NamedRangesDialog({ initialRanges, onSave, onClose }: Pr
   const [formName, setFormName] = useState("");
   const [formFormula, setFormFormula] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, onClose);
 
   const isDirty = useMemo(() => {
     if (ranges.length !== initialRanges.length) return true;
@@ -154,6 +146,7 @@ export default function NamedRangesDialog({ initialRanges, onSave, onClose }: Pr
   return (
     <div className="nr-backdrop" onClick={onClose}>
       <div
+        ref={modalRef}
         className="nr-modal"
         role="dialog"
         aria-modal="true"
@@ -162,7 +155,12 @@ export default function NamedRangesDialog({ initialRanges, onSave, onClose }: Pr
       >
         <header className="nr-header">
           <h2 id="nr-title" className="nr-title">{t("dialog.namedRanges")}</h2>
-          <button type="button" className="nr-close" onClick={onClose} aria-label="閉じる">
+          <button
+            type="button"
+            className="nr-close"
+            onClick={onClose}
+            aria-label={t("a11y.label.closeDialog")}
+          >
             ×
           </button>
         </header>

@@ -1,0 +1,186 @@
+/* Floating camera-image panel (#184). Positioned along the right edge of
+   univer-wrap, below the image-preview panel so workbooks carrying both
+   embedded images AND camera snapshots can show each without overlap.
+   Pointer-events isolated to the panel; the grid stays interactive
+   underneath. Same UX shape as ImagePreviewPanel. */
+
+.cam-root {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  /* Sit below the image-preview panel (itself offset by 50vh + 16px,
+     220px-ish wide). A larger offset keeps the two from colliding. */
+  transform: translateY(8px);
+  z-index: 24;
+  width: 240px;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px var(--coco-shadow);
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.cam-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--coco-border);
+  background-color: var(--coco-accent-subtle);
+}
+
+.cam-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--coco-accent);
+}
+
+.cam-count {
+  font-size: 11px;
+  color: var(--coco-accent-text);
+  background-color: var(--coco-accent);
+  border-radius: 10px;
+  padding: 1px 8px;
+  min-width: 22px;
+  text-align: center;
+}
+
+.cam-empty {
+  margin: 0;
+  padding: 16px 14px;
+  font-size: 12px;
+  color: var(--coco-text-muted);
+  line-height: 1.5;
+}
+
+.cam-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.cam-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--coco-border);
+}
+
+.cam-item:last-child {
+  border-bottom: none;
+}
+
+.cam-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cam-src {
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--coco-accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.cam-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  border: 1px solid var(--coco-border-strong);
+  border-radius: 3px;
+  background-color: var(--coco-bg-elevated);
+  color: var(--coco-text);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cam-btn:hover:not(:disabled) {
+  background-color: var(--coco-surface-hover);
+}
+
+.cam-btn--danger {
+  color: var(--coco-danger);
+  border-color: var(--coco-border);
+}
+
+.cam-btn--danger:hover:not(:disabled) {
+  background-color: var(--coco-danger-bg);
+}
+
+.cam-thumb-btn {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+}
+
+.cam-thumb-btn:hover .cam-thumb,
+.cam-thumb-btn:focus-visible .cam-thumb {
+  border-color: var(--coco-accent);
+  outline: none;
+}
+
+.cam-thumb {
+  display: block;
+  max-width: 100%;
+  max-height: 140px;
+  object-fit: contain;
+  background-color: var(--coco-surface);
+  border: 1px solid var(--coco-border);
+  border-radius: 3px;
+}
+
+.cam-ref-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 48px;
+  font-family: "Consolas", "Menlo", monospace;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--coco-danger);
+  background-color: var(--coco-danger-bg);
+  border: 1px dashed var(--coco-danger);
+  border-radius: 3px;
+}
+
+.cam-ref-error--stale {
+  color: var(--coco-text-muted);
+  background-color: var(--coco-surface);
+  border-color: var(--coco-border);
+  font-weight: 500;
+}
+
+.cam-dst-btn {
+  align-self: flex-start;
+  padding: 1px 6px;
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 11px;
+  border: 0;
+  background: transparent;
+  color: var(--coco-text-muted);
+  cursor: pointer;
+}
+
+.cam-dst-btn:hover {
+  color: var(--coco-accent);
+  text-decoration: underline;
+}

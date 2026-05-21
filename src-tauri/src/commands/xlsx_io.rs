@@ -905,6 +905,55 @@ pub(crate) fn parse_xlsx_freeze_panes(
     out
 }
 
+/// Project a Coco `_freezePane` declaration onto Univer's native
+/// `IWorksheetData.freeze` field (`{ xSplit, ySplit, startRow, startColumn }`).
+///
+/// Without this, opening an xlsx that carries a frozen / split pane shows no
+/// visual freeze until the user toggles it via the View menu: Univer's freeze
+/// renderer only activates when `sheets.<id>.freeze` is populated, but the
+/// import path historically wrote only the Coco-private `_freezePane` marker.
+/// This helper closes that gap (issue #178, item 3) so the freeze / split is
+/// visible immediately on direct open.
+///
+/// Semantics:
+///   * `state="frozen"` — `row`/`col` are fixed row/column counts (the OOXML
+///     `xSplit`/`ySplit` of a frozen pane). They map directly onto Univer's
+///     `IFreeze`.
+///   * `state="split"`  — `row`/`col` carry the raw `xSplit`/`ySplit` verbatim.
+///     Coco-authored splits store row/col indices here; Excel-authored splits
+///     store pixel/twip offsets. Univer 0.5.x has no split renderer, so the
+///     freeze renderer is the visual approximation either way.
+///
+/// `row_count`/`col_count` are the sheet's dimensions. A pane anchor at or
+/// beyond those bounds (e.g. an Excel pixel-offset split that dwarfs the sheet)
+/// is rejected — projecting it would produce a nonsensical freeze. The
+/// `_freezePane` marker still round-trips in that case; only the visual
+/// projection is skipped. Returns `None` when no projection should be written.
+fn freeze_field_for_pane(
+    row: u64,
+    col: u64,
+    row_count: u64,
+    col_count: u64,
+) -> Option<Value> {
+    if row == 0 && col == 0 {
+        return None;
+    }
+    // Reject anchors that fall outside the sheet — clamping would silently
+    // shift the freeze line, so we drop the projection instead.
+    if row >= row_count || col >= col_count {
+        return None;
+    }
+    // Univer's "no freeze on this axis" sentinel is startRow/startColumn = -1.
+    let start_row: i64 = if row > 0 { row as i64 } else { -1 };
+    let start_column: i64 = if col > 0 { col as i64 } else { -1 };
+    Some(json!({
+        "xSplit": col,
+        "ySplit": row,
+        "startRow": start_row,
+        "startColumn": start_column,
+    }))
+}
+
 /// Read `xl/workbook.xml` from an xlsx and return the sheet-visibility map.
 /// Best-effort: returns empty on read or parse failure.
 pub(crate) fn parse_xlsx_sheet_visibility<R: Read + Seek>(
@@ -4797,6 +4846,19 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                 obj.insert("state".into(), Value::String("split".into()));
             }
             sheet_obj["_freezePane"] = Value::Object(obj);
+            // #178: also project onto Univer's native `freeze` field so the
+            // freeze / split renderer activates immediately on direct open,
+            // without waiting for a View-menu toggle. `_freezePane` above
+            // still drives xlsx round-trip (it carries the `state`
+            // discriminator); `freeze` is the in-app visual.
+            if let Some(freeze) = freeze_field_for_pane(
+                fp.row as u64,
+                fp.col as u64,
+                row_count as u64,
+                col_count as u64,
+            ) {
+                sheet_obj["freeze"] = freeze;
+            }
         }
 
         // Workbook-level sheet visibility. Opt-in: omit `_sheetState` when the
@@ -7641,6 +7703,71 @@ mod camera_link_tests {
     fn passes_non_array_through_unchanged() {
         let input = json!({ "not": "an array" });
         assert_eq!(strip_camera_data_urls(&input), input);
+    }
+}
+
+#[cfg(test)]
+mod freeze_projection_tests {
+    use super::freeze_field_for_pane;
+    use serde_json::json;
+
+    #[test]
+    fn frozen_pane_projects_onto_univer_freeze() {
+        // A 3-row / 2-col frozen pane on a generously sized sheet.
+        let out = freeze_field_for_pane(3, 2, 1000, 100).unwrap();
+        assert_eq!(
+            out,
+            json!({ "xSplit": 2, "ySplit": 3, "startRow": 3, "startColumn": 2 })
+        );
+    }
+
+    #[test]
+    fn row_only_pane_uses_minus_one_column_sentinel() {
+        // Horizontal-only split/freeze: startColumn stays at Univer's
+        // "no freeze on this axis" sentinel (-1).
+        let out = freeze_field_for_pane(5, 0, 1000, 100).unwrap();
+        assert_eq!(
+            out,
+            json!({ "xSplit": 0, "ySplit": 5, "startRow": 5, "startColumn": -1 })
+        );
+    }
+
+    #[test]
+    fn col_only_pane_uses_minus_one_row_sentinel() {
+        // Vertical-only split/freeze: startRow stays at the -1 sentinel.
+        let out = freeze_field_for_pane(0, 4, 1000, 100).unwrap();
+        assert_eq!(
+            out,
+            json!({ "xSplit": 4, "ySplit": 0, "startRow": -1, "startColumn": 4 })
+        );
+    }
+
+    #[test]
+    fn degenerate_zero_zero_pane_is_dropped() {
+        // {0,0} is a no-op pane — no projection.
+        assert!(freeze_field_for_pane(0, 0, 1000, 100).is_none());
+    }
+
+    #[test]
+    fn out_of_bounds_anchor_is_rejected() {
+        // Excel-authored splits store pixel/twip offsets in row/col, which can
+        // dwarf the sheet. Such an anchor must NOT be projected (clamping
+        // would silently shift the freeze line).
+        assert!(freeze_field_for_pane(5000, 0, 1000, 100).is_none());
+        assert!(freeze_field_for_pane(0, 9999, 1000, 100).is_none());
+        // Anchor exactly at the bound is also out of range (0-based indices).
+        assert!(freeze_field_for_pane(1000, 0, 1000, 100).is_none());
+        assert!(freeze_field_for_pane(0, 100, 1000, 100).is_none());
+    }
+
+    #[test]
+    fn in_bounds_anchor_just_below_limit_is_kept() {
+        // The last valid index (count - 1) still projects.
+        let out = freeze_field_for_pane(999, 99, 1000, 100).unwrap();
+        assert_eq!(
+            out,
+            json!({ "xSplit": 99, "ySplit": 999, "startRow": 999, "startColumn": 99 })
+        );
     }
 }
 

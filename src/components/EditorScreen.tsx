@@ -442,6 +442,13 @@ import {
 } from "../store/snapshotStats";
 import { isSheetProtectedInSnapshot } from "../store/sheetProtection";
 import { extractCellStyle, applyCellStyle } from "../store/formatPainter";
+import {
+  computeSplitEntry,
+  hasSplitPane,
+  writeSplitPaneInto,
+  type SplitMode,
+  type SplitSnapshotShape,
+} from "../store/splitPane";
 import { inferAutoSumRange, buildSumFormula } from "../store/autoSum";
 import {
   applyQuickNumberFormat,
@@ -1006,6 +1013,128 @@ export default function EditorScreen() {
     if (!getReadyWorkbook("名前付き範囲")) return;
     setNamedRanges(readNamedRanges());
   }, [getReadyWorkbook, readNamedRanges]);
+
+  // --- Window split (issue #156) -------------------------------------------
+  //
+  // "Split" is the Excel "View → Split" feature: divide the active sheet into
+  // 2 or 4 viewports at the active cell, each scrolling independently. Unlike
+  // freeze panes (the top/left region is locked), split panes have NO locked
+  // region — all panes scroll.
+  //
+  // Univer 0.5.x does not expose a dedicated split-pane API; only freeze. The
+  // closest visual approximation is `FWorksheet.setFreeze` which renders 4
+  // viewports with independent scroll. We use that for the in-session view and
+  // persist `state="split"` in `_freezePane` so xlsx round-trip preserves
+  // Excel's distinction.
+  const applySplitToFacade = useCallback(
+    (
+      workbook: ReturnType<FUniver["getActiveWorkbook"]>,
+      sheetId: string,
+      row: number,
+      col: number,
+    ) => {
+      try {
+        if (!workbook) return;
+        const sheets = workbook.getSheets();
+        const target = sheets.find((s) => s.getSheetId() === sheetId);
+        if (!target) return;
+        if (row === 0 && col === 0) {
+          target.cancelFreeze();
+          return;
+        }
+        target.setFreeze({
+          xSplit: col,
+          ySplit: row,
+          startRow: row,
+          startColumn: col,
+        });
+      } catch {
+        // Best-effort.
+      }
+    },
+    [],
+  );
+
+  const toggleSplitPane = useCallback(
+    (mode: SplitMode = "both") => {
+      const ready = getReadyWorkbook("ウィンドウ分割");
+      if (!ready) return;
+      const { workbook } = ready;
+      const activeSheet = workbook.getActiveSheet();
+      if (!activeSheet) return;
+      const sheetId = activeSheet.getSheetId();
+
+      const fresh = workbook.save() as unknown as SplitSnapshotShape;
+      if (!fresh.sheets || !fresh.sheets[sheetId]) return;
+
+      const freshJson = JSON.stringify(fresh);
+      if (hasSplitPane(freshJson, sheetId)) {
+        writeSplitPaneInto(fresh, sheetId, null);
+        applyMutatedSnapshot(JSON.stringify(fresh));
+        applySplitToFacade(workbook, sheetId, 0, 0);
+        return;
+      }
+
+      let activeRow = 0;
+      let activeCol = 0;
+      try {
+        const sel = activeSheet.getSelection();
+        const range = sel?.getActiveRange();
+        if (range) {
+          activeRow = range.getRow();
+          activeCol = range.getColumn();
+        }
+      } catch {
+        // Best-effort.
+      }
+      const entry = computeSplitEntry(activeRow, activeCol, mode);
+      if (!entry) {
+        setEditorOperationError(
+          "ウィンドウ分割: アクティブセルが A1 のため分割位置を決められません。別のセルを選択してから再度お試しください。",
+        );
+        return;
+      }
+      writeSplitPaneInto(fresh, sheetId, entry);
+      applyMutatedSnapshot(JSON.stringify(fresh));
+      applySplitToFacade(workbook, sheetId, entry.row, entry.col);
+    },
+    [getReadyWorkbook, applyMutatedSnapshot, applySplitToFacade],
+  );
+
+  const clearSplitPane = useCallback(() => {
+    const ready = getReadyWorkbook("ウィンドウ分割を解除");
+    if (!ready) return;
+    const { workbook } = ready;
+    const activeSheet = workbook.getActiveSheet();
+    if (!activeSheet) return;
+    const sheetId = activeSheet.getSheetId();
+    const fresh = workbook.save() as unknown as SplitSnapshotShape;
+    if (!fresh.sheets || !fresh.sheets[sheetId]) return;
+    if (!hasSplitPane(JSON.stringify(fresh), sheetId)) return;
+    writeSplitPaneInto(fresh, sheetId, null);
+    applyMutatedSnapshot(JSON.stringify(fresh));
+    applySplitToFacade(workbook, sheetId, 0, 0);
+  }, [getReadyWorkbook, applyMutatedSnapshot, applySplitToFacade]);
+
+  const activeSheetHasSplit = (() => {
+    if (!currentSnapshotJson) return false;
+    const fUniver = fUniverRef.current;
+    let sid: string | undefined;
+    try {
+      sid = fUniver?.getActiveWorkbook()?.getActiveSheet()?.getSheetId();
+    } catch {
+      sid = undefined;
+    }
+    if (!sid) {
+      try {
+        const snap = JSON.parse(currentSnapshotJson) as { sheetOrder?: string[] };
+        sid = snap.sheetOrder?.[0];
+      } catch {
+        return false;
+      }
+    }
+    return hasSplitPane(currentSnapshotJson, sid ?? null);
+  })();
 
   // Data-validation dialog plumbing. We work directly on the snapshot JSON
   // rather than going through Univer because the @univerjs/sheets-data
@@ -5785,6 +5914,36 @@ export default function EditorScreen() {
       category: "表示",
       keywords: "history snapshots",
       run: () => setSnapshotsOpen(true),
+    },
+    {
+      id: "view.split.toggle",
+      // Label flips between "分割" (open) and "分割を解除" (close) so the
+      // single command-palette entry behaves like Excel's View → Split toggle.
+      label: activeSheetHasSplit ? "ウィンドウ分割を解除" : "ウィンドウを分割",
+      category: "表示",
+      keywords: "split window pane 分割 4分割",
+      run: () => toggleSplitPane("both"),
+    },
+    {
+      id: "view.split.horizontal",
+      label: "ウィンドウを横に分割",
+      category: "表示",
+      keywords: "split horizontal pane 横分割 2分割",
+      run: () => toggleSplitPane("horizontal"),
+    },
+    {
+      id: "view.split.vertical",
+      label: "ウィンドウを縦に分割",
+      category: "表示",
+      keywords: "split vertical pane 縦分割 2分割",
+      run: () => toggleSplitPane("vertical"),
+    },
+    {
+      id: "view.split.clear",
+      label: "ウィンドウ分割を解除",
+      category: "表示",
+      keywords: "split clear remove unsplit 解除",
+      run: clearSplitPane,
     },
     {
       id: "insert.camera",

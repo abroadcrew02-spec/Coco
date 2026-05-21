@@ -128,8 +128,63 @@ describe("HomeScreen", () => {
     });
   });
 
-  describe("primary actions", () => {
-    it("clicking 新規ワークブック dispatches workbook_new", async () => {
+  describe("left navigation rail", () => {
+    it("renders ホーム / 新規 / 開く nav items", () => {
+      render(<HomeScreen />);
+      expect(screen.getByRole("button", { name: /ホーム/ })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /新規/ })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /開く/ })).toBeTruthy();
+    });
+
+    it("defaults to the ホーム view with the home title", () => {
+      render(<HomeScreen />);
+      expect(screen.getByRole("heading", { name: "ホーム", level: 1 })).toBeTruthy();
+    });
+
+    it("clicking 新規 switches to the new view (template gallery heading)", async () => {
+      const user = userEvent.setup();
+      render(<HomeScreen />);
+      await user.click(screen.getByRole("button", { name: /新規/ }));
+      expect(screen.getByRole("heading", { name: "新規", level: 1 })).toBeTruthy();
+      expect(screen.getByText("テンプレートから作成")).toBeTruthy();
+    });
+
+    it("clicking 開く switches to the open view with a browse button", async () => {
+      const user = userEvent.setup();
+      render(<HomeScreen />);
+      await user.click(screen.getByRole("button", { name: /開く/ }));
+      expect(screen.getByRole("heading", { name: "開く", level: 1 })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /ファイルを参照/ })).toBeTruthy();
+    });
+
+    it("the active nav item carries the active modifier class", async () => {
+      const user = userEvent.setup();
+      const { container } = render(<HomeScreen />);
+      const active = container.querySelector(".home-nav-item--active");
+      expect(active?.textContent).toContain("ホーム");
+      await user.click(screen.getByRole("button", { name: /新規/ }));
+      expect(container.querySelector(".home-nav-item--active")?.textContent).toContain(
+        "新規",
+      );
+    });
+  });
+
+  describe("template tiles (新規 section)", () => {
+    it("renders a tile per catalog template inline on the home view", () => {
+      const { container } = render(<HomeScreen />);
+      const tiles = container.querySelectorAll(".home-template-tile");
+      // 8 catalog templates (blank + 7 prebuilt).
+      expect(tiles).toHaveLength(8);
+    });
+
+    it("renders the blank workbook tile first with the blank modifier", () => {
+      const { container } = render(<HomeScreen />);
+      const blank = container.querySelector('[data-testid="home-template-blank"]');
+      expect(blank).toBeTruthy();
+      expect(blank?.className).toContain("home-template-tile--blank");
+    });
+
+    it("clicking the blank tile dispatches workbook_new", async () => {
       const user = userEvent.setup();
       invokeMock.mockResolvedValue({
         workbookId: "wb",
@@ -138,12 +193,43 @@ describe("HomeScreen", () => {
         snapshotJson: "{}",
       });
       render(<HomeScreen />);
-      await user.click(screen.getByRole("button", { name: /新規ワークブック/ }));
+      await user.click(screen.getByTestId("home-template-blank"));
       expect(invokeMock).toHaveBeenCalledWith("workbook_new");
     });
 
-    it("clicking ファイルを開く + selecting a .xlsx dispatches workbook_import_xlsx", async () => {
+    it("clicking a prebuilt template seeds the editor snapshot", async () => {
       const user = userEvent.setup();
+      invokeMock.mockResolvedValue({
+        workbookId: "wb",
+        path: null,
+        sourceType: "new",
+        snapshotJson: "{}",
+      });
+      render(<HomeScreen />);
+      await user.click(screen.getByTestId("home-template-monthly-budget"));
+      expect(invokeMock).toHaveBeenCalledWith("workbook_new");
+      // The template snapshot replaces the blank handle snapshot.
+      expect(useWorkbookStore.getState().currentSnapshotJson).not.toBe("{}");
+      expect(useWorkbookStore.getState().currentSnapshotJson).toContain("月次予算");
+    });
+
+    it("その他のテンプレート opens the modal gallery", async () => {
+      const user = userEvent.setup();
+      render(<HomeScreen />);
+      await user.click(screen.getByTestId("home-template-more"));
+      expect(screen.getByText("テンプレートから新規作成")).toBeTruthy();
+    });
+  });
+
+  describe("open view file actions", () => {
+    async function gotoOpenView() {
+      const user = userEvent.setup();
+      render(<HomeScreen />);
+      await user.click(screen.getByRole("button", { name: /開く/ }));
+      return user;
+    }
+
+    it("ファイルを参照 + selecting a .xlsx dispatches workbook_import_xlsx", async () => {
       openMock.mockResolvedValue("/tmp/book.xlsx");
       invokeMock.mockResolvedValue({
         handle: {
@@ -154,45 +240,42 @@ describe("HomeScreen", () => {
         },
         warnings: [],
       });
-      render(<HomeScreen />);
-      await user.click(screen.getByRole("button", { name: /ファイルを開く/ }));
+      const user = await gotoOpenView();
+      await user.click(screen.getByRole("button", { name: /ファイルを参照/ }));
       expect(openMock).toHaveBeenCalledTimes(1);
       const importCall = invokeMock.mock.calls.find((c) => c[0] === "workbook_import_xlsx");
       expect(importCall).toBeTruthy();
       expect(importCall![1]).toEqual({ path: "/tmp/book.xlsx" });
     });
 
-    it("clicking ファイルを開く + selecting a .csv dispatches workbook_import_csv", async () => {
-      const user = userEvent.setup();
+    it("ファイルを参照 + selecting a .csv dispatches workbook_import_csv", async () => {
       openMock.mockResolvedValue("/tmp/data.csv");
       invokeMock.mockResolvedValue({
         handle: { workbookId: "wb", path: "/tmp/data.csv", sourceType: "xlsx", snapshotJson: "{}" },
         warnings: [],
       });
-      render(<HomeScreen />);
-      await user.click(screen.getByRole("button", { name: /ファイルを開く/ }));
+      const user = await gotoOpenView();
+      await user.click(screen.getByRole("button", { name: /ファイルを参照/ }));
       const importCall = invokeMock.mock.calls.find((c) => c[0] === "workbook_import_csv");
       expect(importCall).toBeTruthy();
     });
 
-    it("clicking ファイルを開く + selecting a .coco dispatches workbook_open_coco", async () => {
-      const user = userEvent.setup();
+    it("ファイルを参照 + selecting a .coco dispatches workbook_open_coco", async () => {
       openMock.mockResolvedValue("/tmp/wb.coco");
       invokeMock.mockResolvedValue({
         handle: { workbookId: "wb", path: "/tmp/wb.coco", sourceType: "coco", snapshotJson: "{}" },
         warnings: [],
       });
-      render(<HomeScreen />);
-      await user.click(screen.getByRole("button", { name: /ファイルを開く/ }));
+      const user = await gotoOpenView();
+      await user.click(screen.getByRole("button", { name: /ファイルを参照/ }));
       const openCall = invokeMock.mock.calls.find((c) => c[0] === "workbook_open_coco");
       expect(openCall).toBeTruthy();
     });
 
     it("cancelling the open dialog does not invoke any import command", async () => {
-      const user = userEvent.setup();
       openMock.mockResolvedValue(null);
-      render(<HomeScreen />);
-      await user.click(screen.getByRole("button", { name: /ファイルを開く/ }));
+      const user = await gotoOpenView();
+      await user.click(screen.getByRole("button", { name: /ファイルを参照/ }));
       const importCalls = invokeMock.mock.calls.filter((c) =>
         ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(c[0] as string)
       );
@@ -1160,11 +1243,69 @@ describe("HomeScreen", () => {
     });
   });
 
-  describe("header buttons", () => {
-    it("renders help and settings icon buttons", () => {
+  describe("nav rail footer (settings / help)", () => {
+    it("renders 設定 and ヘルプ buttons in the nav footer", () => {
+      const { container } = render(<HomeScreen />);
+      const footer = container.querySelector(".home-nav-footer");
+      expect(footer).toBeTruthy();
+      expect(footer!.textContent).toContain("設定");
+      expect(footer!.textContent).toContain("ヘルプ");
+    });
+  });
+
+  describe("recents table format", () => {
+    beforeEach(() => {
+      useWorkbookStore.setState({
+        recentFiles: [
+          { path: "/tmp/a.xlsx", name: "a.xlsx", lastOpened: "2026-05-13T10:00:00Z", exists: true },
+          { path: "/tmp/b.csv", name: "b.csv", lastOpened: "2026-05-12T10:00:00Z", exists: true },
+        ],
+      });
+    });
+
+    it("renders the recents as a table with 名前 / 場所 / 変更日 columns", () => {
+      const { container } = render(<HomeScreen />);
+      const table = container.querySelector("table.recent-table");
+      expect(table).toBeTruthy();
+      const headers = Array.from(table!.querySelectorAll("thead th")).map(
+        (th) => th.textContent?.trim(),
+      );
+      expect(headers).toContain("名前");
+      expect(headers).toContain("場所");
+      expect(headers).toContain("変更日");
+    });
+
+    it("each recent row is a table row carrying name + path cells", () => {
+      const { container } = render(<HomeScreen />);
+      const rows = container.querySelectorAll(".recent-table tbody .recent-item");
+      expect(rows).toHaveLength(2);
+      expect(rows[0].querySelector(".recent-name")?.textContent).toContain("a.xlsx");
+      expect(rows[0].querySelector(".recent-path")?.textContent).toBe("/tmp/a.xlsx");
+    });
+
+    it("renders お気に入り / 最近使ったアイテム tabs", () => {
       render(<HomeScreen />);
-      expect(screen.getByLabelText("ヘルプ")).toBeTruthy();
-      expect(screen.getByLabelText("設定")).toBeTruthy();
+      expect(screen.getByRole("tab", { name: "最近使ったアイテム" })).toBeTruthy();
+      expect(screen.getByRole("tab", { name: "お気に入り" })).toBeTruthy();
+    });
+
+    it("the お気に入り tab shows only pinned files", async () => {
+      const user = userEvent.setup();
+      useWorkbookStore.setState({ pinnedPaths: ["/tmp/a.xlsx"] });
+      const { container } = render(<HomeScreen />);
+      await user.click(screen.getByRole("tab", { name: "お気に入り" }));
+      const rows = container.querySelectorAll(".recent-table tbody .recent-item");
+      expect(rows).toHaveLength(1);
+      expect(rows[0].textContent).toContain("a.xlsx");
+    });
+
+    it("the お気に入り tab shows an empty hint when nothing is pinned", async () => {
+      const user = userEvent.setup();
+      render(<HomeScreen />);
+      await user.click(screen.getByRole("tab", { name: "お気に入り" }));
+      expect(
+        screen.getByText("お気に入りに登録したファイルはありません"),
+      ).toBeTruthy();
     });
   });
 });

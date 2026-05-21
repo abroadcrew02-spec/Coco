@@ -100,8 +100,8 @@ describe("App", () => {
   describe("screen routing", () => {
     it("renders HomeScreen when screen=home", () => {
       render(<App />);
-      // HomeScreen contains the 新規ワークブック CTA.
-      expect(screen.getByText("新規ワークブック")).toBeTruthy();
+      // HomeScreen's left nav rail exposes a ホーム item.
+      expect(screen.getByRole("button", { name: /ホーム/ })).toBeTruthy();
       expect(screen.queryByTestId("editor-screen-stub")).toBeNull();
     });
 
@@ -148,7 +148,7 @@ describe("App", () => {
         fireEvent.click(screen.getByRole("button", { name: "ホームへ戻る" }));
 
         await waitFor(() => {
-          expect(screen.getByText("新規ワークブック")).toBeTruthy();
+          expect(screen.getByRole("button", { name: /ホーム/ })).toBeTruthy();
           expect(screen.queryByText("エディタを表示できませんでした")).toBeNull();
         });
       } finally {
@@ -407,7 +407,7 @@ describe("App", () => {
       useWorkbookStore.getState().goHome();
       await waitFor(() => {
         expect(screen.queryByTestId("editor-screen-stub")).toBeNull();
-        expect(screen.getByText("新規ワークブック")).toBeTruthy();
+        expect(screen.getByRole("button", { name: /ホーム/ })).toBeTruthy();
       });
     });
   });

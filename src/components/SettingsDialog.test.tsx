@@ -226,14 +226,15 @@ describe("SettingsDialog", () => {
       expect(radio).toBeTruthy();
     });
 
-    it("renders exactly eight collapsible sections, only the first open by default", () => {
+    it("renders exactly nine collapsible sections, only the first open by default", () => {
       const { container } = render(<SettingsDialog onClose={onClose} />);
       const sections = container.querySelectorAll<HTMLDetailsElement>(
         "details.settings-section"
       );
       // Autosave / CSV export / CSV import / CSV PoC banner /
-      // Smart-chip custom rules / Language / Theme / Updates
-      expect(sections.length).toBe(8);
+      // Smart-chip custom rules / Language / Theme /
+      // External API (allow list + credentials) / Updates
+      expect(sections.length).toBe(9);
       // Autosave (index 0) is the only one open by default.
       expect(sections[0].open).toBe(true);
       expect(sections[1].open).toBe(false);
@@ -243,6 +244,7 @@ describe("SettingsDialog", () => {
       expect(sections[5].open).toBe(false);
       expect(sections[6].open).toBe(false);
       expect(sections[7].open).toBe(false);
+      expect(sections[8].open).toBe(false);
     });
   });
 

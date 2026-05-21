@@ -265,6 +265,10 @@ pub fn run() {
             commands::file_io::read_file_bytes_base64,
             commands::file_io::write_file_bytes_base64,
             commands::file_io::existing_csv_export_paths,
+            commands::http_fetch::http_fetch,
+            commands::url_fetch_credentials::url_fetch_set_credential,
+            commands::url_fetch_credentials::url_fetch_delete_credential,
+            commands::url_fetch_credentials::url_fetch_list_credentials,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

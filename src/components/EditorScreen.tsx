@@ -480,6 +480,17 @@ import { rectToA1 } from "../store/cameraRender";
 import { validateMutation, extractCellWrites } from "../store/dataValidation";
 import { getLocale, subscribeLocale, t } from "../i18n/locale";
 import { swapUniverLocale } from "./univerLocaleSwap";
+import ScriptEditorDialog from "./ScriptEditorDialog";
+import {
+  type ScriptEntry,
+  type EditEvent,
+  type CollectedTriggers,
+  readScripts,
+  writeScripts,
+  collectTriggers,
+  fireTrigger,
+  recordRun,
+} from "../store/scriptRuntime";
 import "./EditorScreen.css";
 
 // req 5.4.1: "loading" blocks editing (snapshot is being replaced); "saving"
@@ -763,6 +774,8 @@ export default function EditorScreen() {
   } | null>(null);
   const [insertFunctionCtx, setInsertFunctionCtx] = useState<{ sheetId: string; cellRef: string } | null>(null);
   const [customListsCtx, setCustomListsCtx] = useState<{ initialActiveRange: string } | null>(null);
+  // #136 / #189: スクリプトエディタ。
+  const [scriptEditorOpen, setScriptEditorOpen] = useState(false);
   const [calcOptionsOpen, setCalcOptionsOpen] = useState(false);
   const [calcMode, setCalcModeState] = useState<CalcMode>(() => getCalcMode());
   const [watchWindowOpen, setWatchWindowOpen] = useState(false);
@@ -5967,6 +5980,13 @@ export default function EditorScreen() {
       run: () => setMacroDialogOpen(true),
     },
     {
+      id: "tools.scriptEditor",
+      label: "スクリプトエディタ",
+      category: "ツール",
+      keywords: "script editor javascript apps script macro trigger sandbox",
+      run: () => setScriptEditorOpen(true),
+    },
+    {
       id: "view.settings",
       label: "設定",
       category: "表示",
@@ -6253,6 +6273,9 @@ export default function EditorScreen() {
         break;
       case "tools-macro":
         setMacroDialogOpen(true);
+        break;
+      case "tools-script-editor":
+        setScriptEditorOpen(true);
         break;
       case "data-forecast-sheet":
         openForecastSheetDialog();
@@ -7093,6 +7116,173 @@ export default function EditorScreen() {
     });
     return () => disposable.dispose();
   }, []);
+
+  // #189 — script triggers. Books can embed JS snippets (snapshot._scripts)
+  // that register onOpen / onEdit / timer triggers via the `Coco.*` API.
+  // This effect:
+  //   - onOpen : fires every registered onOpen handler once the workbook is
+  //              ready (after a short settle delay so Facade is populated).
+  //   - onEdit : hooks the MUTATION command stream and fires onEdit handlers
+  //              with an EditEvent for each cell write. Protected sheets are
+  //              still write-blocked inside ScriptApi.
+  //   - timer  : schedules setInterval per registered timer trigger.
+  // Triggers run through `fireTrigger` — #189 C2: in the browser this routes
+  // through the sandboxed-iframe executor (handlers are kept inside the
+  // iframe; the parent only sends fire-trigger messages). Each run is
+  // appended to the execution log.
+  useEffect(() => {
+    if (!fUniverRef.current) return;
+    const fUniver = fUniverRef.current;
+    let disposed = false;
+    const timerIds: ReturnType<typeof setInterval>[] = [];
+    // Per-script collected triggers, refreshed when scripts change.
+    let collected: CollectedTriggers[] = [];
+    // C1 — re-entry guard. `fireAll("onEdit")` handlers may write cells,
+    // which re-enters the MUTATION listener below. Without this flag every
+    // onEdit-driven write would re-fire onEdit → infinite loop. Set for the
+    // whole duration of an onEdit dispatch (which is serialized).
+    let firingEdit = false;
+    // M1 — per-timer "already running" guard so a slow handler doesn't pile
+    // up overlapping runs when the interval is shorter than the run time.
+    const timerRunning = new Set<string>();
+
+    /** Resolve a sheet's display name from its id via the Facade. */
+    const sheetNameById = (subUnitId: string): string => {
+      try {
+        const wb = fUniverRef.current?.getActiveWorkbook();
+        const sheets =
+          (wb as { getSheets?: () => unknown[] } | undefined)?.getSheets?.() ?? [];
+        for (const s of sheets) {
+          const sh = s as {
+            getSheetId?: () => string;
+            getSheetName?: () => string;
+          };
+          if (sh.getSheetId?.() === subUnitId) return sh.getSheetName?.() ?? "";
+        }
+      } catch {
+        /* fall through */
+      }
+      return "";
+    };
+
+    /**
+     * Fire `kind` triggers for every script that registered one. Runs are
+     * serialized (awaited one after another) so onEdit dispatches finish
+     * before the re-entry guard is lowered. After an unmount we skip
+     * `recordRun` / logging so triggers don't leave side effects (M1).
+     */
+    const fireAll = async (
+      kind: "onOpen" | "onEdit" | "timer",
+      extra: { editEvent?: EditEvent } = {},
+    ): Promise<void> => {
+      const snapshot = snapshotRef.current;
+      const scripts = readScripts(snapshot);
+      for (const c of collected) {
+        if (disposed) return;
+        if (!c.triggers.some((t) => t.kind === kind)) continue;
+        const entry = scripts.find((s) => s.id === c.scriptId);
+        if (!entry) continue;
+        const result = await fireTrigger(entry, kind, {
+          fUniver: fUniverRef.current,
+          snapshotJson: snapshotRef.current,
+          editEvent: extra.editEvent,
+        });
+        // M1 — after unmount, don't record runs or write logs.
+        if (disposed) return;
+        recordRun(entry, kind, result);
+        if (!result.ok) {
+          // eslint-disable-next-line no-console
+          console.warn(`[script:${kind}] ${entry.name}: ${result.error}`);
+        }
+      }
+    };
+
+    /** (Re)collect triggers from the current snapshot, then arm timers. */
+    const refresh = async () => {
+      const scripts = readScripts(snapshotRef.current);
+      const next: CollectedTriggers[] = [];
+      for (const s of scripts) {
+        try {
+          next.push(
+            await collectTriggers(s, {
+              fUniver: fUniverRef.current,
+              snapshotJson: snapshotRef.current,
+            }),
+          );
+        } catch {
+          /* skip scripts whose dry-run throws */
+        }
+      }
+      if (disposed) return;
+      collected = next;
+      // Re-arm timers from scratch.
+      for (const id of timerIds.splice(0)) clearInterval(id);
+      timerRunning.clear();
+      for (const c of collected) {
+        for (const t of c.triggers) {
+          if (t.kind !== "timer" || t.intervalMs <= 0) continue;
+          // M1 — skip this tick if the previous run for this timer key is
+          // still in flight; serialize via the timerRunning set.
+          const key = `${c.scriptId}#${t.intervalMs}`;
+          const id = setInterval(() => {
+            if (disposed || timerRunning.has(key)) return;
+            timerRunning.add(key);
+            void fireAll("timer").finally(() => timerRunning.delete(key));
+          }, t.intervalMs);
+          timerIds.push(id);
+        }
+      }
+    };
+
+    // Initial collection + onOpen fire after the workbook settles.
+    const openTimer = setTimeout(() => {
+      void refresh().then(() => {
+        if (!disposed) void fireAll("onOpen");
+      });
+    }, 400);
+
+    // onEdit: hook MUTATION writes.
+    const editDisposable = fUniver.onCommandExecuted((info) => {
+      // C1 — re-entry guard. onEdit handlers that write cells produce
+      // MUTATIONs; without this early return they would re-trigger onEdit
+      // forever. Skip MUTATIONs that occur while an onEdit dispatch runs.
+      if (firingEdit) return;
+      if (info.type !== CommandType.MUTATION) return;
+      const { subUnitId, writes } = extractCellWrites(info.params);
+      if (!subUnitId || writes.length === 0) return;
+      if (!collected.some((c) => c.triggers.some((t) => t.kind === "onEdit"))) return;
+      const sheetName = sheetNameById(subUnitId);
+      // Serialize all writes' onEdit dispatches, then lower the guard.
+      firingEdit = true;
+      void (async () => {
+        try {
+          for (const w of writes) {
+            if (disposed) break;
+            await fireAll("onEdit", {
+              editEvent: {
+                sheetName,
+                a1: toA1(w.row, w.col),
+                row: w.row,
+                col: w.col,
+                value: w.value,
+              },
+            });
+          }
+        } finally {
+          firingEdit = false;
+        }
+      })();
+    });
+
+    return () => {
+      disposed = true;
+      clearTimeout(openTimer);
+      for (const id of timerIds) clearInterval(id);
+      timerRunning.clear();
+      editDisposable.dispose();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSnapshotJson]);
 
   // #186 — global-shortcut macro playback. `useGlobalShortcuts` (App level)
   // detects Ctrl/Cmd+Shift+1..9 and emits the bound macro id; we own the
@@ -8095,6 +8285,20 @@ export default function EditorScreen() {
             setCustomListsCtx(null);
           }}
           onClose={() => setCustomListsCtx(null)}
+        />
+      )}
+      {scriptEditorOpen && (
+        <ScriptEditorDialog
+          scripts={readScripts(currentSnapshotJson)}
+          fUniver={fUniverRef.current}
+          snapshotJson={currentSnapshotJson}
+          onChange={(next: ScriptEntry[]) => {
+            // _scripts はワークブックメタ (シートと独立) なので、現在の
+            // snapshot に書き戻して updateSnapshot で永続化する。
+            const nextJson = writeScripts(currentSnapshotJson, next);
+            updateSnapshot(nextJson);
+          }}
+          onClose={() => setScriptEditorOpen(false)}
         />
       )}
       {calcOptionsOpen && (

@@ -62,6 +62,7 @@ const EDITOR_COMMAND_IDS = new Set([
   "watch-add-active",
   "tools-scenarios",
   "tools-macro",
+  "tools-script-editor",
   "data-forecast-sheet",
   "tools-analysis-toolpak",
   "insert-recommended-charts",

@@ -17,6 +17,9 @@ const mutationSnapshotSyncSource =
   editorSource.match(/\/\/ Sync snapshot to store on data mutations[\s\S]*?\n  \}, \[markDirty, updateSnapshot\]\);/)?.[0] ?? "";
 const toolbarSource =
   editorSource.match(/<div className="editor-toolbar">[\s\S]*?\n      \{sheetPicker && \(/)?.[0] ?? "";
+// #189 — the script-trigger useEffect (onOpen / onEdit / timer wiring).
+const triggerEffectSource =
+  editorSource.match(/\/\/ #189 — script triggers\.[\s\S]*?\n  \}, \[currentSnapshotJson\]\);/)?.[0] ?? "";
 
 describe("EditorScreen Univer plugin wiring", () => {
   it("imports and registers the Find/Replace plugins (Ctrl+F / Ctrl+H)", () => {
@@ -145,6 +148,34 @@ describe("EditorScreen Univer plugin wiring", () => {
       /registerSnapshotFlush\(\(\) => \{\s*cancelPendingSnapshotSync\(\);\s*syncSnapshot\(\);\s*\}\)/,
     );
     expect(mutationSnapshotSyncSource).toMatch(/unregisterSnapshotFlush\(\);/);
+  });
+
+  it("guards onEdit triggers against the MUTATION re-entry loop (#189 C1)", () => {
+    // The MUTATION listener fires onEdit handlers; those handlers can write
+    // cells, producing more MUTATIONs. Without a re-entry guard this loops
+    // forever. The fix: a `firingEdit` flag set for the whole dispatch, and
+    // an early return at the top of the listener while it is set.
+    expect(triggerEffectSource).toMatch(/let firingEdit = false;/);
+    expect(triggerEffectSource).toMatch(/if \(firingEdit\) return;/);
+    expect(triggerEffectSource).toMatch(/firingEdit = true;/);
+    expect(triggerEffectSource).toMatch(/firingEdit = false;/);
+    // The fire-and-forget `void fireTrigger(...).then(...)` is gone — runs
+    // are awaited (serialized) so the guard covers async handler execution.
+    expect(triggerEffectSource).not.toMatch(/void fireTrigger\(/);
+    expect(triggerEffectSource).toMatch(/await fireTrigger\(entry, kind/);
+  });
+
+  it("skips overlapping timer ticks and no-ops after unmount (#189 M1)", () => {
+    // M1: a slow timer handler must not pile up. Each timer key tracks an
+    // in-flight run in `timerRunning`; a tick is skipped while its key is set.
+    expect(triggerEffectSource).toMatch(/const timerRunning = new Set<string>\(\)/);
+    expect(triggerEffectSource).toMatch(/if \(disposed \|\| timerRunning\.has\(key\)\) return;/);
+    expect(triggerEffectSource).toMatch(/timerRunning\.add\(key\)/);
+    expect(triggerEffectSource).toMatch(/\.finally\(\(\) => timerRunning\.delete\(key\)\)/);
+    // M1: after unmount, fireAll re-checks `disposed` before recordRun/log.
+    expect(triggerEffectSource).toMatch(
+      /if \(disposed\) return;\s*\n\s*recordRun\(entry, kind, result\);/,
+    );
   });
 
   it("routes native editor menu commands to existing editor handlers", () => {

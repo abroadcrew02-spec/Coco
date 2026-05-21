@@ -206,6 +206,7 @@ pub fn run() {
                 .text("tools-analysis-toolpak", "分析ツールパック...")
                 .separator()
                 .text("tools-macro", "マクロの記録 / 再生...")
+                .text("tools-script-editor", "スクリプトエディタ...")
                 .separator()
                 .text("calc-options", "計算オプション...")
                 .text("calc-recalc-all", "再計算\tF9")

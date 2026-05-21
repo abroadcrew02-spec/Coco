@@ -9,6 +9,8 @@ import { recoveryReasonLabel } from "../store/recoveryLabels";
 import { friendlyError } from "../store/errorMessages";
 import { t } from "../i18n/locale";
 import { timeAgoJa } from "./timeAgo";
+import { TEMPLATE_CATALOG, buildTemplateSnapshot } from "../store/templates";
+import TemplatesGalleryDialog from "./TemplatesGalleryDialog";
 import type { RecentFile, RecoveryCandidate } from "../types/workbook";
 import "./HomeScreen.css";
 
@@ -22,6 +24,10 @@ const RETURNING_USER_TIPS: ReadonlyArray<string> = [
   "Ctrl+K でハイパーリンク",
   "Ctrl+F でセル内検索",
 ];
+
+// Left-rail navigation views. "home" is the Excel-style landing surface;
+// "new" focuses the template gallery; "open" drives the file dialog.
+type NavView = "home" | "new" | "open";
 
 export default function HomeScreen() {
   const {
@@ -43,7 +49,15 @@ export default function HomeScreen() {
     togglePinned,
     pinnedOrder,
     reorderPinned,
+    updateSnapshot,
   } = useWorkbookStore();
+
+  // Active left-rail view. Defaults to the home landing surface.
+  const [navView, setNavView] = useState<NavView>("home");
+  // Recents pane sub-tab: all recents vs. the pinned-only ("favorites") view.
+  const [recentsTab, setRecentsTab] = useState<"recent" | "pinned">("recent");
+  // "Other templates" still routes through the existing modal gallery.
+  const [galleryOpen, setGalleryOpen] = useState(false);
 
   // Inline filter — shown only when there are enough recents to make
   // scanning awkward. Below the threshold, an input would just be noise.
@@ -72,12 +86,18 @@ export default function HomeScreen() {
     }
     return 0;
   });
+  // When the "pinned" sub-tab is active, restrict the source list to pinned
+  // entries. The filter + keyboard nav then operate on that narrowed set.
+  const tabScopedRecents =
+    recentsTab === "pinned"
+      ? sortedRecents.filter((f) => pinnedPaths.includes(f.path))
+      : sortedRecents;
   const filteredRecents = filterQuery.trim()
-    ? sortedRecents.filter((f) =>
+    ? tabScopedRecents.filter((f) =>
         f.name.toLowerCase().includes(filterQuery.trim().toLowerCase()) ||
         f.path.toLowerCase().includes(filterQuery.trim().toLowerCase())
       )
-    : sortedRecents;
+    : tabScopedRecents;
 
   // Clamp focused index when the list shrinks (e.g. user types a filter that
   // excludes the focused row). -1 if no rows match.
@@ -203,253 +223,121 @@ export default function HomeScreen() {
     else await openCoco(file.path);
   };
 
-  return (
-    <div className="home-screen">
-      <div className="home-header">
-        <h1 className="home-title">Coco</h1>
-        <p className="home-subtitle">ローカルファースト表計算</p>
-        <div className="home-header-actions">
-          <button
-            type="button"
-            className="home-icon-btn"
-            onClick={requestHelp}
-            title="ヘルプ (F1)"
-            aria-label="ヘルプ"
-          >
-            ?
-          </button>
-          <button
-            type="button"
-            className="home-icon-btn"
-            onClick={requestSettings}
-            title="設定"
-            aria-label="設定"
-          >
-            ⚙
-          </button>
-        </div>
-      </div>
-      <div className="home-actions">
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={newWorkbook}
-          title="新規ワークブックを作成 (Ctrl+N)"
-        >
-          新規ワークブック
-        </button>
-        <button
-          type="button"
-          className="btn-secondary"
-          onClick={handleOpenFile}
-          title="既存ファイルを開く (Ctrl+O)"
-        >
-          ファイルを開く
-        </button>
-      </div>
-      {recentFiles.length > 0 && recentFiles[0].exists && (
-        <button
-          type="button"
-          className="home-continue"
-          onClick={() => handleRecentFile(recentFiles[0])}
-          title="前回作業していたファイルを開く"
-        >
-          <span className="home-continue__label">前回のファイルを続ける</span>
-          <span className="home-continue__name">{recentFiles[0].name}</span>
-        </button>
-      )}
-      {(lastError || importWarnings.length > 0) && (
-        <div className="home-error">
-          <div className="home-error__content">
-            {lastError && <span className="home-error__title">{lastError}</span>}
-            {importWarnings.map((w, i) => (
-              <span key={i} className={`home-error__item home-error__item--${w.severity}`}>
-                {w.message}
-              </span>
-            ))}
-          </div>
-          <button
-            type="button"
-            className="home-error__dismiss"
-            onClick={() => {
-              clearError();
-              dismissWarnings();
-            }}
-          >
-            ×
-          </button>
-        </div>
-      )}
-      {recoveryCandidates.length > 0 && (
-        <div className="home-section">
-          <h2>復元候補</h2>
-          <ul className="recovery-list">
-            {recoveryCandidates.map((c: RecoveryCandidate) => {
-              const saved = Date.parse(c.savedAt);
-              const ageLabel = Number.isFinite(saved) ? timeAgoJa(saved) : null;
-              const fullDate = Number.isFinite(saved)
-                ? new Date(saved).toLocaleString("ja-JP")
-                : c.savedAt;
-              return (
-              <li key={c.candidateId} className="recovery-item">
-                <div className="recovery-item__main">
-                  <span className="recovery-item__title">{c.originalPath ?? "無題のワークブック"}</span>
-                  <span className="recovery-date" title={fullDate}>
-                    {ageLabel ?? fullDate} · {recoveryReasonLabel(c.reason)}
-                  </span>
-                </div>
-                <div className="recovery-item__actions">
-                  <button
-                    type="button"
-                    className="btn-tertiary"
-                    onClick={() => restoreCandidate(c.candidateId)}
-                  >
-                    復元
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-tertiary btn-tertiary--danger"
-                    onClick={() => dismissCandidate(c.candidateId)}
-                  >
-                    破棄
-                  </button>
-                </div>
-              </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
-      {recentFiles.length > 0 && (
-        <div className="home-section">
-          <div className="home-section-header">
-            <h2>最近使ったファイル</h2>
-            <button
-              type="button"
-              className="link-btn"
-              onClick={() => {
-                if (window.confirm(t("confirm.recents.clear"))) {
-                  clearRecents();
-                }
-              }}
-            >
-              すべて削除
-            </button>
-          </div>
-          {recentFiles.length >= FILTER_THRESHOLD && (
-            <input
-              ref={filterInputRef}
-              type="search"
-              className="recent-filter"
-              placeholder="ファイル名 / パスで絞り込み... (Ctrl+F)"
-              value={filterQuery}
-              onChange={(e) => setFilterQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape" && filterQuery) {
-                  e.preventDefault();
-                  setFilterQuery("");
-                }
-              }}
-              aria-label="最近使ったファイルを絞り込む"
-            />
-          )}
-          {filterQuery.trim() && filteredRecents.length === 0 && (
-            <p className="recent-empty-filter">該当するファイルがありません</p>
-          )}
-          {filterQuery.trim() && filteredRecents.length > 0 && (
-            <p className="recent-filter-count" aria-live="polite">
-              {filteredRecents.length} / {recentFiles.length} 件一致
-            </p>
-          )}
-          <ul className="recent-list">
-            {filteredRecents.map((f: RecentFile, idx: number) => {
-              const opened = Date.parse(f.lastOpened);
-              const ageLabel = Number.isFinite(opened) ? timeAgoJa(opened) : null;
-              const fullDate = Number.isFinite(opened)
-                ? new Date(opened).toLocaleString("ja-JP")
-                : f.lastOpened;
-              const isPinned = pinnedPaths.includes(f.path);
-              const isFocused = idx === focusedRecentIdx;
-              const separatorBefore = showSeparator && idx === firstUnpinnedIdx;
-              // Type badge — derived from extension via routeOpenPath so it
-              // stays consistent with how the file would be opened.
-              const route = routeOpenPath(f.path);
-              const kindLabel =
-                route.kind === "xlsx"
-                  ? f.path.toLowerCase().endsWith(".xlsm")
-                    ? "xlsm"
-                    : "xlsx"
-                  : route.kind === "csv"
-                  ? f.path.toLowerCase().endsWith(".tsv")
-                    ? "tsv"
-                    : "csv"
-                  : route.kind === "coco"
-                  ? "coco"
-                  : "?";
-              return [
-                separatorBefore && (
-                  <li
-                    key={`sep-${f.path}`}
-                    className="recent-separator"
-                    aria-hidden="true"
-                  >
-                    最近開いたファイル
-                  </li>
-                ),
-              <li
-                key={f.path}
-                ref={(el) => {
-                  // Scroll the focused row into view when keyboard nav moves
-                  // past the visible area. Browsers no-op when the row is
-                  // already visible, so this doesn't cause jitter on click.
-                  if (el && isFocused) {
-                    el.scrollIntoView({ block: "nearest", behavior: "auto" });
-                  }
-                }}
-                className={`recent-item ${!f.exists ? "recent-item--missing" : ""} ${isPinned ? "recent-item--pinned" : ""} ${isFocused ? "recent-item--focused" : ""} ${dragOverPath === f.path ? "recent-item--drag-over" : ""}`}
-                onClick={() => handleRecentFile(f)}
-                onMouseEnter={() => setFocusedRecentIdx(idx)}
-                draggable={isPinned}
-                onDragStart={(e) => {
-                  if (!isPinned) return;
-                  e.dataTransfer.setData("text/plain", f.path);
-                  e.dataTransfer.effectAllowed = "move";
-                }}
-                onDragOver={(e) => {
-                  // Only allow drop onto another pinned row. Without this,
-                  // dragging a pinned item over an unpinned one would show
-                  // a drop cursor that resolves to a no-op.
-                  if (!isPinned) return;
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "move";
-                  if (dragOverPath !== f.path) setDragOverPath(f.path);
-                }}
-                onDragLeave={() => {
-                  if (dragOverPath === f.path) setDragOverPath(null);
-                }}
-                onDrop={(e) => {
-                  if (!isPinned) return;
-                  e.preventDefault();
-                  const dragged = e.dataTransfer.getData("text/plain");
-                  setDragOverPath(null);
-                  if (dragged && dragged !== f.path && pinnedPaths.includes(dragged)) {
-                    void reorderPinned(dragged, f.path);
-                  }
-                }}
-                onDragEnd={() => setDragOverPath(null)}
+  // Create a new workbook from a template tile. The blank tile falls through
+  // to the plain newWorkbook() path; every other id seeds the editor with a
+  // pre-built snapshot. newWorkbook() flips screen→editor + stamps a fresh
+  // workbookId; the follow-up updateSnapshot lands before the editor mounts,
+  // so Univer initializes straight from the template snapshot.
+  const handleUseTemplate = async (id: string) => {
+    setGalleryOpen(false);
+    await newWorkbook();
+    const snapshotJson = buildTemplateSnapshot(id);
+    if (snapshotJson) updateSnapshot(snapshotJson);
+  };
+
+  // ── Recents table (shared between the home view and the "open" pane) ──────
+  const renderRecentsTable = () => (
+    <table className="recent-table">
+      <thead>
+        <tr>
+          <th className="recent-col-name" scope="col">名前</th>
+          <th className="recent-col-path" scope="col">場所</th>
+          <th className="recent-col-when" scope="col">変更日</th>
+          <th className="recent-col-actions" scope="col">
+            <span className="recent-col-actions-label">操作</span>
+          </th>
+        </tr>
+      </thead>
+      <tbody className="recent-list">
+        {filteredRecents.map((f: RecentFile, idx: number) => {
+          const opened = Date.parse(f.lastOpened);
+          const ageLabel = Number.isFinite(opened) ? timeAgoJa(opened) : null;
+          const fullDate = Number.isFinite(opened)
+            ? new Date(opened).toLocaleString("ja-JP")
+            : f.lastOpened;
+          const isPinned = pinnedPaths.includes(f.path);
+          const isFocused = idx === focusedRecentIdx;
+          const separatorBefore = showSeparator && idx === firstUnpinnedIdx;
+          // Type badge — derived from extension via routeOpenPath so it
+          // stays consistent with how the file would be opened.
+          const route = routeOpenPath(f.path);
+          const kindLabel =
+            route.kind === "xlsx"
+              ? f.path.toLowerCase().endsWith(".xlsm")
+                ? "xlsm"
+                : "xlsx"
+              : route.kind === "csv"
+              ? f.path.toLowerCase().endsWith(".tsv")
+                ? "tsv"
+                : "csv"
+              : route.kind === "coco"
+              ? "coco"
+              : "?";
+          return [
+            separatorBefore && (
+              <tr
+                key={`sep-${f.path}`}
+                className="recent-separator-row"
+                aria-hidden="true"
               >
-                <span className="recent-name">
-                  {isPinned && <span className="recent-pin-indicator" aria-hidden="true">📌</span>}
-                  <span className={`recent-kind recent-kind--${kindLabel}`}>{kindLabel}</span>
-                  {f.name}
-                </span>
-                <span className="recent-path">{f.path}</span>
-                {ageLabel && (
-                  <span className="recent-when" title={`最終アクセス: ${fullDate}`}>
-                    {ageLabel}
-                  </span>
-                )}
+                <td colSpan={4} className="recent-separator">
+                  最近開いたファイル
+                </td>
+              </tr>
+            ),
+            <tr
+              key={f.path}
+              ref={(el) => {
+                // Scroll the focused row into view when keyboard nav moves
+                // past the visible area. Browsers no-op when the row is
+                // already visible, so this doesn't cause jitter on click.
+                if (el && isFocused) {
+                  el.scrollIntoView({ block: "nearest", behavior: "auto" });
+                }
+              }}
+              className={`recent-item ${!f.exists ? "recent-item--missing" : ""} ${isPinned ? "recent-item--pinned" : ""} ${isFocused ? "recent-item--focused" : ""} ${dragOverPath === f.path ? "recent-item--drag-over" : ""}`}
+              onClick={() => handleRecentFile(f)}
+              onMouseEnter={() => setFocusedRecentIdx(idx)}
+              draggable={isPinned}
+              onDragStart={(e) => {
+                if (!isPinned) return;
+                e.dataTransfer.setData("text/plain", f.path);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(e) => {
+                // Only allow drop onto another pinned row. Without this,
+                // dragging a pinned item over an unpinned one would show
+                // a drop cursor that resolves to a no-op.
+                if (!isPinned) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (dragOverPath !== f.path) setDragOverPath(f.path);
+              }}
+              onDragLeave={() => {
+                if (dragOverPath === f.path) setDragOverPath(null);
+              }}
+              onDrop={(e) => {
+                if (!isPinned) return;
+                e.preventDefault();
+                const dragged = e.dataTransfer.getData("text/plain");
+                setDragOverPath(null);
+                if (dragged && dragged !== f.path && pinnedPaths.includes(dragged)) {
+                  void reorderPinned(dragged, f.path);
+                }
+              }}
+              onDragEnd={() => setDragOverPath(null)}
+            >
+              <td className="recent-name">
+                {isPinned && <span className="recent-pin-indicator" aria-hidden="true">📌</span>}
+                <span className={`recent-kind recent-kind--${kindLabel}`}>{kindLabel}</span>
+                {f.name}
                 {!f.exists && <span className="recent-badge">見つかりません</span>}
+              </td>
+              <td className="recent-path">{f.path}</td>
+              <td className="recent-when" title={ageLabel ? `最終アクセス: ${fullDate}` : undefined}>
+                {ageLabel ?? ""}
+              </td>
+              <td className="recent-actions">
                 <button
                   type="button"
                   className="recent-pin"
@@ -490,35 +378,353 @@ export default function HomeScreen() {
                 >
                   ×
                 </button>
-              </li>,
-              ];
-            })}
-          </ul>
+              </td>
+            </tr>,
+          ];
+        })}
+      </tbody>
+    </table>
+  );
+
+  // ── "New" section: template tiles surfaced inline (Excel Start screen) ────
+  const renderTemplateTiles = () => (
+    <ul className="home-template-grid" aria-label="テンプレート">
+      {TEMPLATE_CATALOG.map((tpl) => (
+        <li key={tpl.id}>
+          <button
+            type="button"
+            className={
+              "home-template-tile" +
+              (tpl.id === "blank" ? " home-template-tile--blank" : "")
+            }
+            onClick={() => void handleUseTemplate(tpl.id)}
+            data-testid={`home-template-${tpl.id}`}
+            title={tpl.descriptionJa}
+          >
+            <span className="home-template-thumb" aria-hidden="true">
+              {tpl.thumbnailEmoji}
+            </span>
+            <span className="home-template-name">{tpl.nameJa}</span>
+          </button>
+        </li>
+      ))}
+      <li>
+        <button
+          type="button"
+          className="home-template-more"
+          onClick={() => setGalleryOpen(true)}
+          data-testid="home-template-more"
+        >
+          その他のテンプレート…
+        </button>
+      </li>
+    </ul>
+  );
+
+  // ── Recovery candidates (Coco-specific) ───────────────────────────────────
+  const renderRecovery = () =>
+    recoveryCandidates.length > 0 && (
+      <div className="home-section">
+        <h2>復元候補</h2>
+        <ul className="recovery-list">
+          {recoveryCandidates.map((c: RecoveryCandidate) => {
+            const saved = Date.parse(c.savedAt);
+            const ageLabel = Number.isFinite(saved) ? timeAgoJa(saved) : null;
+            const fullDate = Number.isFinite(saved)
+              ? new Date(saved).toLocaleString("ja-JP")
+              : c.savedAt;
+            return (
+              <li key={c.candidateId} className="recovery-item">
+                <div className="recovery-item__main">
+                  <span className="recovery-item__title">{c.originalPath ?? "無題のワークブック"}</span>
+                  <span className="recovery-date" title={fullDate}>
+                    {ageLabel ?? fullDate} · {recoveryReasonLabel(c.reason)}
+                  </span>
+                </div>
+                <div className="recovery-item__actions">
+                  <button
+                    type="button"
+                    className="btn-tertiary"
+                    onClick={() => restoreCandidate(c.candidateId)}
+                  >
+                    復元
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-tertiary btn-tertiary--danger"
+                    onClick={() => dismissCandidate(c.candidateId)}
+                  >
+                    破棄
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    );
+
+  // ── Recents pane (table + tabs + filter), shared by home & open views ─────
+  const renderRecentsPane = () => (
+    <div className="home-section home-recents">
+      <div className="home-section-header">
+        <div className="home-recents-tabs" role="tablist" aria-label="ファイル一覧">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={recentsTab === "recent"}
+            className={
+              "home-recents-tab" +
+              (recentsTab === "recent" ? " home-recents-tab--active" : "")
+            }
+            onClick={() => setRecentsTab("recent")}
+          >
+            最近使ったアイテム
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={recentsTab === "pinned"}
+            className={
+              "home-recents-tab" +
+              (recentsTab === "pinned" ? " home-recents-tab--active" : "")
+            }
+            onClick={() => setRecentsTab("pinned")}
+          >
+            お気に入り
+          </button>
         </div>
+        <button
+          type="button"
+          className="link-btn"
+          onClick={() => {
+            if (window.confirm(t("confirm.recents.clear"))) {
+              clearRecents();
+            }
+          }}
+        >
+          すべて削除
+        </button>
+      </div>
+      {recentFiles.length >= FILTER_THRESHOLD && (
+        <input
+          ref={filterInputRef}
+          type="search"
+          className="recent-filter"
+          placeholder="ファイル名 / パスで絞り込み... (Ctrl+F)"
+          value={filterQuery}
+          onChange={(e) => setFilterQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && filterQuery) {
+              e.preventDefault();
+              setFilterQuery("");
+            }
+          }}
+          aria-label="最近使ったファイルを絞り込む"
+        />
       )}
-      {isFirstRun && (
-        <section className="home-welcome" aria-labelledby="home-welcome-title">
-          <h2 id="home-welcome-title" className="home-welcome__title">
-            Coco へようこそ
-          </h2>
-          <p className="home-welcome__tagline">
-            ローカルファーストの xlsx スプレッドシート。
-            <br />
-            オフラインで安全に編集できます。
-          </p>
-          <ol className="home-welcome__steps">
-            <li>ファイルを開く / ドロップ</li>
-            <li>編集 / 保存 (Ctrl+S)</li>
-            <li>シートタブで複数シート</li>
-          </ol>
-        </section>
+      {filterQuery.trim() && filteredRecents.length === 0 && (
+        <p className="recent-empty-filter">該当するファイルがありません</p>
       )}
-      {recentFiles.length > 0 && (
-        <p className="home-tip" role="note">
-          <span className="home-tip__icon" aria-hidden="true">💡</span>
-          <span className="home-tip__label">ヒント:</span>
-          <span className="home-tip__body">{tip}</span>
+      {filterQuery.trim() && filteredRecents.length > 0 && (
+        <p className="recent-filter-count" aria-live="polite">
+          {filteredRecents.length} / {tabScopedRecents.length} 件一致
         </p>
+      )}
+      {recentsTab === "pinned" && tabScopedRecents.length === 0 ? (
+        <p className="recent-empty-filter">お気に入りに登録したファイルはありません</p>
+      ) : (
+        renderRecentsTable()
+      )}
+    </div>
+  );
+
+  return (
+    <div className="home-screen">
+      {/* Left navigation rail — Excel Start screen layout. */}
+      <nav className="home-nav" aria-label="ホームナビゲーション">
+        <div className="home-nav-brand">
+          <span className="home-nav-logo">Coco</span>
+        </div>
+        <ul className="home-nav-list">
+          <li>
+            <button
+              type="button"
+              className={
+                "home-nav-item" + (navView === "home" ? " home-nav-item--active" : "")
+              }
+              aria-current={navView === "home" ? "page" : undefined}
+              onClick={() => setNavView("home")}
+            >
+              <span className="home-nav-icon" aria-hidden="true">🏠</span>
+              <span className="home-nav-label">ホーム</span>
+            </button>
+          </li>
+          <li>
+            <button
+              type="button"
+              className={
+                "home-nav-item" + (navView === "new" ? " home-nav-item--active" : "")
+              }
+              aria-current={navView === "new" ? "page" : undefined}
+              onClick={() => setNavView("new")}
+            >
+              <span className="home-nav-icon" aria-hidden="true">➕</span>
+              <span className="home-nav-label">新規</span>
+            </button>
+          </li>
+          <li>
+            <button
+              type="button"
+              className={
+                "home-nav-item" + (navView === "open" ? " home-nav-item--active" : "")
+              }
+              aria-current={navView === "open" ? "page" : undefined}
+              onClick={() => setNavView("open")}
+            >
+              <span className="home-nav-icon" aria-hidden="true">📂</span>
+              <span className="home-nav-label">開く</span>
+            </button>
+          </li>
+        </ul>
+        <div className="home-nav-footer">
+          <button
+            type="button"
+            className="home-nav-item home-nav-item--minor"
+            onClick={requestSettings}
+            title="設定"
+          >
+            <span className="home-nav-icon" aria-hidden="true">⚙</span>
+            <span className="home-nav-label">設定</span>
+          </button>
+          <button
+            type="button"
+            className="home-nav-item home-nav-item--minor"
+            onClick={requestHelp}
+            title="ヘルプ (F1)"
+          >
+            <span className="home-nav-icon" aria-hidden="true">?</span>
+            <span className="home-nav-label">ヘルプ</span>
+          </button>
+        </div>
+      </nav>
+
+      {/* Main content area — content depends on the active rail view. */}
+      <main className="home-main">
+        {(lastError || importWarnings.length > 0) && (
+          <div className="home-error">
+            <div className="home-error__content">
+              {lastError && <span className="home-error__title">{lastError}</span>}
+              {importWarnings.map((w, i) => (
+                <span key={i} className={`home-error__item home-error__item--${w.severity}`}>
+                  {w.message}
+                </span>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="home-error__dismiss"
+              onClick={() => {
+                clearError();
+                dismissWarnings();
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {navView === "home" && (
+          <>
+            <h1 className="home-view-title">ホーム</h1>
+            {recentFiles.length > 0 && recentFiles[0].exists && (
+              <button
+                type="button"
+                className="home-continue"
+                onClick={() => handleRecentFile(recentFiles[0])}
+                title="前回作業していたファイルを開く"
+              >
+                <span className="home-continue__label">前回のファイルを続ける</span>
+                <span className="home-continue__name">{recentFiles[0].name}</span>
+              </button>
+            )}
+            <section className="home-section" aria-labelledby="home-new-title">
+              <h2 id="home-new-title">新規</h2>
+              {renderTemplateTiles()}
+            </section>
+            {renderRecovery()}
+            {recentFiles.length > 0 && renderRecentsPane()}
+            {isFirstRun && (
+              <section className="home-welcome" aria-labelledby="home-welcome-title">
+                <h2 id="home-welcome-title" className="home-welcome__title">
+                  Coco へようこそ
+                </h2>
+                <p className="home-welcome__tagline">
+                  ローカルファーストの xlsx スプレッドシート。
+                  <br />
+                  オフラインで安全に編集できます。
+                </p>
+                <ol className="home-welcome__steps">
+                  <li>ファイルを開く / ドロップ</li>
+                  <li>編集 / 保存 (Ctrl+S)</li>
+                  <li>シートタブで複数シート</li>
+                </ol>
+              </section>
+            )}
+            {recentFiles.length > 0 && (
+              <p className="home-tip" role="note">
+                <span className="home-tip__icon" aria-hidden="true">💡</span>
+                <span className="home-tip__label">ヒント:</span>
+                <span className="home-tip__body">{tip}</span>
+              </p>
+            )}
+          </>
+        )}
+
+        {navView === "new" && (
+          <>
+            <h1 className="home-view-title">新規</h1>
+            <section className="home-section" aria-labelledby="home-new-view-title">
+              <h2 id="home-new-view-title">テンプレートから作成</h2>
+              {renderTemplateTiles()}
+            </section>
+          </>
+        )}
+
+        {navView === "open" && (
+          <>
+            <h1 className="home-view-title">開く</h1>
+            <section className="home-section">
+              <h2>ファイルを開く</h2>
+              <div className="home-open-actions">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={handleOpenFile}
+                  title="既存ファイルを開く (Ctrl+O)"
+                >
+                  ファイルを参照…
+                </button>
+                <span className="home-open-hint">
+                  xlsx / xlsm / csv / tsv / coco に対応
+                </span>
+              </div>
+            </section>
+            {renderRecovery()}
+            {recentFiles.length > 0 ? (
+              renderRecentsPane()
+            ) : (
+              <p className="home-empty">最近使ったファイルはありません</p>
+            )}
+          </>
+        )}
+      </main>
+
+      {galleryOpen && (
+        <TemplatesGalleryDialog
+          onUseTemplate={(id) => void handleUseTemplate(id)}
+          onClose={() => setGalleryOpen(false)}
+        />
       )}
     </div>
   );

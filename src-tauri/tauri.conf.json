@@ -1,6 +1,6 @@
 {
   "productName": "Coco",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.coco.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -50,7 +50,7 @@
       "endpoints": [
         "https://github.com/abroadcrew02-spec/Coco/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNGMzZGNzIxM0ZCOEY5QzcKUldUSCtiZy9JZmMyUC9QS3lEUFNmT0FpdFRMY0I5Y1Q0c2poTGFRdE1qSlRJWmtuVzZmQi80WkgK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM5QjlBMTM4QkRCRTIxOApSV1FZNHR1TEU1cWJBOSt1MHpXVjRSdk5RV2ZxZjl2OTMrMGU4VHJwVzhobmV1d043SFlUVnErcQo="
     }
   }
 }

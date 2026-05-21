@@ -44,6 +44,13 @@ pub fn run() {
         .manage(std::sync::Arc::new(
             commands::http_fetch_stream::StreamRegistry::default(),
         ))
+        // #182: registry of live WebSocket + SSE connections, shared so the
+        // `ws_send` / `ws_close` / `sse_close` commands can reach the
+        // background tasks started by `ws_connect` / `sse_connect`, and so the
+        // concurrent-connection cap is enforced process-wide.
+        .manage(std::sync::Arc::new(
+            commands::ws_fetch::ConnRegistry::default(),
+        ))
         .setup(|app| {
             // #82: best-effort startup sweep of orphan recovery .coco files
             // (file present, no recovery_candidates row). Scoped to the
@@ -274,6 +281,11 @@ pub fn run() {
             commands::http_fetch::http_fetch,
             commands::http_fetch_stream::http_fetch_stream,
             commands::http_fetch_stream::http_fetch_cancel,
+            commands::ws_fetch::ws_connect,
+            commands::ws_fetch::ws_send,
+            commands::ws_fetch::ws_close,
+            commands::ws_fetch::sse_connect,
+            commands::ws_fetch::sse_close,
             commands::url_fetch_credentials::url_fetch_set_credential,
             commands::url_fetch_credentials::url_fetch_delete_credential,
             commands::url_fetch_credentials::url_fetch_list_credentials,

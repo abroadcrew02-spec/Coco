@@ -359,3 +359,272 @@ export async function streamFetch(
     },
   };
 }
+
+// --- Real-time: WebSocket + SSE (issue #182) -----------------------------
+//
+// `httpFetch` / `streamFetch` cover finite request/response exchanges. For
+// long-lived, bidirectional channels (WebSocket) or open-ended server push
+// (Server-Sent Events) the renderer routes through Rust the same way: Rust
+// owns the socket, applies the same allow-list / SSRF / header guards, caps
+// the concurrent-connection count (DoS defence) and the per-message size,
+// then relays inbound traffic via `coco:ws-message` / `coco:sse-event`.
+
+/** Event name Rust emits for every inbound WebSocket message. */
+export const WS_MESSAGE_EVENT = "coco:ws-message";
+/** Event name Rust emits for every inbound Server-Sent Event. */
+export const SSE_EVENT = "coco:sse-event";
+
+/** Opaque identifier for a live WS or SSE connection. */
+export type ConnectionId = number;
+
+/** Discriminator for an outbound or inbound WebSocket frame. */
+export type WsMessageKind = "text" | "binary" | "close" | "error";
+
+/** Payload of a `coco:ws-message` event. */
+export interface WsMessageEvent {
+  connId: ConnectionId;
+  /** `text` | `binary` | `close` | `error`. */
+  kind: WsMessageKind;
+  /**
+   * For `text`: the message text. For `binary`: base64-encoded bytes.
+   * For `close`: empty. For `error`: an opaque `WS_FETCH_*` tag.
+   */
+  data: string;
+}
+
+/** Callbacks driven by {@link wsConnect}. */
+export interface WsHandlers {
+  /** Inbound text frame. */
+  onText?: (text: string) => void;
+  /** Inbound binary frame, decoded to raw bytes. */
+  onBinary?: (bytes: Uint8Array) => void;
+  /** The connection closed (server- or client-initiated). */
+  onClose?: () => void;
+  /** A transport error occurred; `tag` is an opaque `WS_FETCH_*` string. */
+  onError?: (tag: string) => void;
+}
+
+/** Handle returned by {@link wsConnect}. */
+export interface WsConnection {
+  connId: ConnectionId;
+  /** Send a UTF-8 text frame. */
+  sendText: (text: string) => Promise<void>;
+  /** Send a binary frame (raw bytes are base64-encoded for transport). */
+  sendBinary: (bytes: Uint8Array) => Promise<void>;
+  /** Close the connection and stop listening. Safe to call more than once. */
+  close: () => Promise<void>;
+}
+
+/** Payload of a `coco:sse-event` event. */
+export interface SseEventPayload {
+  connId: ConnectionId;
+  /** SSE event name (absent ⇒ the default `message`). */
+  event?: string;
+  /** Joined data lines. */
+  data?: string;
+  /** Server-provided last-event-id, if any. */
+  id?: string;
+  /** True on the final event of the stream. */
+  done: boolean;
+  /** Opaque `WS_FETCH_*` tag on a failed stream. */
+  error?: string;
+}
+
+/** Callbacks driven by {@link sseConnect}. */
+export interface SseHandlers {
+  /** A server-sent event arrived. */
+  onEvent?: (ev: { event?: string; data?: string; id?: string }) => void;
+  /** The stream completed normally. */
+  onDone?: () => void;
+  /** The stream failed; `tag` is an opaque `WS_FETCH_*` string. */
+  onError?: (tag: string) => void;
+}
+
+/** Handle returned by {@link sseConnect}. */
+export interface SseConnection {
+  connId: ConnectionId;
+  /** Close the stream and stop listening. Safe to call more than once. */
+  close: () => Promise<void>;
+}
+
+/** Encode raw bytes to a base64 string (for outbound binary WS frames). */
+function encodeBase64(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+/**
+ * Open a WebSocket connection via the Rust backend.
+ *
+ * The URL host must be on the allow list (Settings → 許可ドメイン) and is
+ * re-validated for `ws`/`wss` + SSRF by Rust. `headers` and `subprotocols`
+ * are caller-specified; hop-by-hop / `Sec-WebSocket-*` headers are rejected.
+ *
+ * Subscribes to `coco:ws-message` *before* issuing the connect command so no
+ * early frame is missed. The subscription is torn down automatically on
+ * close / error, and by the returned `close()`.
+ *
+ * Throws an opaque `WS_FETCH_*` tag if the connection is rejected up front
+ * (bad URL, not allow-listed, concurrent-connection cap reached, ...).
+ */
+export async function wsConnect(
+  url: string,
+  handlers: WsHandlers = {},
+  opts: { headers?: Record<string, string>; subprotocols?: string[] } = {},
+): Promise<WsConnection> {
+  let connId: ConnectionId | null = null;
+  let unlisten: UnlistenFn | null = null;
+  let finished = false;
+  const pending: WsMessageEvent[] = [];
+
+  const teardown = () => {
+    if (unlisten) {
+      unlisten();
+      unlisten = null;
+    }
+  };
+
+  const handle = (ev: WsMessageEvent) => {
+    if (finished) return;
+    switch (ev.kind) {
+      case "text":
+        handlers.onText?.(ev.data);
+        break;
+      case "binary":
+        handlers.onBinary?.(decodeBase64(ev.data));
+        break;
+      case "close":
+        finished = true;
+        teardown();
+        handlers.onClose?.();
+        break;
+      case "error":
+        finished = true;
+        teardown();
+        handlers.onError?.(ev.data);
+        break;
+    }
+  };
+
+  unlisten = await listen<WsMessageEvent>(WS_MESSAGE_EVENT, (event) => {
+    const payload = event.payload;
+    if (connId === null) {
+      pending.push(payload);
+      return;
+    }
+    if (payload.connId !== connId) return;
+    handle(payload);
+  });
+
+  try {
+    connId = await invoke<ConnectionId>("ws_connect", {
+      url,
+      headers: opts.headers ?? null,
+      subprotocols: opts.subprotocols ?? null,
+    });
+  } catch (e) {
+    teardown();
+    throw e;
+  }
+
+  // Drain anything that arrived before the id was known.
+  for (const ev of pending) {
+    if (ev.connId === connId) handle(ev);
+  }
+
+  return {
+    connId,
+    sendText: async (text: string) => {
+      await invoke("ws_send", { connId, kind: "text", data: text });
+    },
+    sendBinary: async (bytes: Uint8Array) => {
+      await invoke("ws_send", {
+        connId,
+        kind: "binary",
+        data: encodeBase64(bytes),
+      });
+    },
+    close: async () => {
+      teardown();
+      if (connId !== null) await invoke("ws_close", { connId });
+    },
+  };
+}
+
+/**
+ * Open a Server-Sent Events stream via the Rust backend.
+ *
+ * The URL host must be on the allow list and is re-validated for `http`/
+ * `https` + SSRF by Rust. Subscribes to `coco:sse-event` before issuing the
+ * connect command; the subscription is torn down automatically on the
+ * terminal (`done`) event and by the returned `close()`.
+ *
+ * Throws an opaque `WS_FETCH_*` tag if the stream is rejected up front.
+ */
+export async function sseConnect(
+  url: string,
+  handlers: SseHandlers = {},
+  opts: { headers?: Record<string, string> } = {},
+): Promise<SseConnection> {
+  let connId: ConnectionId | null = null;
+  let unlisten: UnlistenFn | null = null;
+  let finished = false;
+  const pending: SseEventPayload[] = [];
+
+  const teardown = () => {
+    if (unlisten) {
+      unlisten();
+      unlisten = null;
+    }
+  };
+
+  const handle = (ev: SseEventPayload) => {
+    if (finished) return;
+    if (ev.error !== undefined) {
+      finished = true;
+      teardown();
+      handlers.onError?.(ev.error);
+      return;
+    }
+    if (ev.done) {
+      finished = true;
+      teardown();
+      handlers.onDone?.();
+      return;
+    }
+    handlers.onEvent?.({ event: ev.event, data: ev.data, id: ev.id });
+  };
+
+  unlisten = await listen<SseEventPayload>(SSE_EVENT, (event) => {
+    const payload = event.payload;
+    if (connId === null) {
+      pending.push(payload);
+      return;
+    }
+    if (payload.connId !== connId) return;
+    handle(payload);
+  });
+
+  try {
+    connId = await invoke<ConnectionId>("sse_connect", {
+      url,
+      headers: opts.headers ?? null,
+    });
+  } catch (e) {
+    teardown();
+    throw e;
+  }
+
+  for (const ev of pending) {
+    if (ev.connId === connId) handle(ev);
+  }
+
+  return {
+    connId,
+    close: async () => {
+      teardown();
+      if (connId !== null) await invoke("sse_close", { connId });
+    },
+  };
+}

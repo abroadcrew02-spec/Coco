@@ -31,8 +31,12 @@ import {
   isValidCredentialInput,
   streamFetch,
   cancelStreamFetch,
+  wsConnect,
+  sseConnect,
   type UrlFetchCredentialInput,
   type HttpFetchChunkEvent,
+  type WsMessageEvent,
+  type SseEventPayload,
 } from "./urlFetch";
 
 const mockedInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
@@ -377,5 +381,229 @@ describe("streamFetch (#181)", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("http_fetch_cancel", {
       requestId: 42,
     });
+  });
+});
+
+describe("wsConnect (#182)", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    unlistenSpy.mockReset();
+    lastEventHandler = null;
+  });
+
+  /** Push a `coco:ws-message` event into the last-registered handler. */
+  const emitWs = (ev: WsMessageEvent): void => {
+    if (!lastEventHandler) throw new Error("no event handler registered");
+    lastEventHandler({ payload: ev });
+  };
+
+  it("connects with headers and subprotocols and returns a handle", async () => {
+    mockedInvoke.mockResolvedValueOnce(3);
+    const conn = await wsConnect(
+      "wss://api.example.com/feed",
+      {},
+      { headers: { Authorization: "Bearer t" }, subprotocols: ["graphql-ws"] },
+    );
+    expect(conn.connId).toBe(3);
+    expect(mockedInvoke).toHaveBeenCalledWith("ws_connect", {
+      url: "wss://api.example.com/feed",
+      headers: { Authorization: "Bearer t" },
+      subprotocols: ["graphql-ws"],
+    });
+  });
+
+  it("forwards null for missing optional headers/subprotocols", async () => {
+    mockedInvoke.mockResolvedValueOnce(1);
+    await wsConnect("wss://example.com/s");
+    expect(mockedInvoke).toHaveBeenCalledWith("ws_connect", {
+      url: "wss://example.com/s",
+      headers: null,
+      subprotocols: null,
+    });
+  });
+
+  it("routes text and binary frames to the matching handlers", async () => {
+    mockedInvoke.mockResolvedValueOnce(5);
+    const texts: string[] = [];
+    const bins: string[] = [];
+    await wsConnect("wss://example.com/s", {
+      onText: (t) => texts.push(t),
+      onBinary: (b) => bins.push(new TextDecoder().decode(b)),
+    });
+    emitWs({ connId: 5, kind: "text", data: "hello" });
+    // base64 of "bin" -> "Ymlu"
+    emitWs({ connId: 5, kind: "binary", data: btoa("bin") });
+    expect(texts).toEqual(["hello"]);
+    expect(bins).toEqual(["bin"]);
+  });
+
+  it("ignores frames addressed to a different connId", async () => {
+    mockedInvoke.mockResolvedValueOnce(8);
+    const texts: string[] = [];
+    await wsConnect("wss://example.com/s", { onText: (t) => texts.push(t) });
+    emitWs({ connId: 999, kind: "text", data: "nope" });
+    emitWs({ connId: 8, kind: "text", data: "yes" });
+    expect(texts).toEqual(["yes"]);
+  });
+
+  it("fires onClose and tears the listener down on a close frame", async () => {
+    mockedInvoke.mockResolvedValueOnce(2);
+    let closed = false;
+    await wsConnect("wss://example.com/s", {
+      onClose: () => {
+        closed = true;
+      },
+    });
+    emitWs({ connId: 2, kind: "close", data: "" });
+    expect(closed).toBe(true);
+    expect(unlistenSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes an error frame to onError with the opaque tag", async () => {
+    mockedInvoke.mockResolvedValueOnce(4);
+    let tag = "";
+    await wsConnect("wss://example.com/s", {
+      onError: (t) => {
+        tag = t;
+      },
+    });
+    emitWs({ connId: 4, kind: "error", data: "WS_FETCH_READ_FAILED" });
+    expect(tag).toBe("WS_FETCH_READ_FAILED");
+    expect(unlistenSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("sendText / sendBinary / close forward to the right commands", async () => {
+    mockedInvoke.mockResolvedValueOnce(7);
+    const conn = await wsConnect("wss://example.com/s");
+
+    mockedInvoke.mockResolvedValueOnce(undefined);
+    await conn.sendText("ping");
+    expect(mockedInvoke).toHaveBeenLastCalledWith("ws_send", {
+      connId: 7,
+      kind: "text",
+      data: "ping",
+    });
+
+    mockedInvoke.mockResolvedValueOnce(undefined);
+    await conn.sendBinary(new Uint8Array([98, 105, 110]));
+    expect(mockedInvoke).toHaveBeenLastCalledWith("ws_send", {
+      connId: 7,
+      kind: "binary",
+      data: btoa("bin"),
+    });
+
+    mockedInvoke.mockResolvedValueOnce(true);
+    await conn.close();
+    expect(mockedInvoke).toHaveBeenLastCalledWith("ws_close", { connId: 7 });
+    expect(unlistenSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("tears the listener down if ws_connect rejects up front", async () => {
+    mockedInvoke.mockRejectedValueOnce("WS_FETCH_TOO_MANY_CONNECTIONS");
+    await expect(wsConnect("wss://example.com/s")).rejects.toBe(
+      "WS_FETCH_TOO_MANY_CONNECTIONS",
+    );
+    expect(unlistenSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores frames that arrive after a terminal close", async () => {
+    mockedInvoke.mockResolvedValueOnce(9);
+    const texts: string[] = [];
+    await wsConnect("wss://example.com/s", { onText: (t) => texts.push(t) });
+    emitWs({ connId: 9, kind: "close", data: "" });
+    emitWs({ connId: 9, kind: "text", data: "late" });
+    expect(texts).toEqual([]);
+  });
+});
+
+describe("sseConnect (#182)", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    unlistenSpy.mockReset();
+    lastEventHandler = null;
+  });
+
+  const emitSse = (ev: SseEventPayload): void => {
+    if (!lastEventHandler) throw new Error("no event handler registered");
+    lastEventHandler({ payload: ev });
+  };
+
+  it("connects with headers and returns a handle", async () => {
+    mockedInvoke.mockResolvedValueOnce(2);
+    const conn = await sseConnect(
+      "https://api.example.com/sse",
+      {},
+      { headers: { Authorization: "Bearer t" } },
+    );
+    expect(conn.connId).toBe(2);
+    expect(mockedInvoke).toHaveBeenCalledWith("sse_connect", {
+      url: "https://api.example.com/sse",
+      headers: { Authorization: "Bearer t" },
+    });
+  });
+
+  it("delivers events and fires onDone on the terminal event", async () => {
+    mockedInvoke.mockResolvedValueOnce(1);
+    const events: Array<{ event?: string; data?: string }> = [];
+    let done = false;
+    await sseConnect(
+      "https://api.example.com/sse",
+      {
+        onEvent: (e) => events.push(e),
+        onDone: () => {
+          done = true;
+        },
+      },
+    );
+    emitSse({ connId: 1, event: "tick", data: "1", id: "7", done: false });
+    emitSse({ connId: 1, data: "2", done: false });
+    emitSse({ connId: 1, done: true });
+    expect(events).toEqual([
+      { event: "tick", data: "1", id: "7" },
+      { event: undefined, data: "2", id: undefined },
+    ]);
+    expect(done).toBe(true);
+    expect(unlistenSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes a stream error to onError with the opaque tag", async () => {
+    mockedInvoke.mockResolvedValueOnce(3);
+    let tag = "";
+    await sseConnect("https://api.example.com/sse", {
+      onError: (t) => {
+        tag = t;
+      },
+    });
+    emitSse({ connId: 3, done: true, error: "WS_FETCH_READ_FAILED" });
+    expect(tag).toBe("WS_FETCH_READ_FAILED");
+    expect(unlistenSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores events addressed to a different connId", async () => {
+    mockedInvoke.mockResolvedValueOnce(4);
+    const events: string[] = [];
+    await sseConnect("https://api.example.com/sse", {
+      onEvent: (e) => events.push(e.data ?? ""),
+    });
+    emitSse({ connId: 999, data: "nope", done: false });
+    emitSse({ connId: 4, data: "yes", done: false });
+    expect(events).toEqual(["yes"]);
+  });
+
+  it("close forwards to sse_close and tears the listener down", async () => {
+    mockedInvoke.mockResolvedValueOnce(6);
+    const conn = await sseConnect("https://api.example.com/sse");
+    mockedInvoke.mockResolvedValueOnce(true);
+    await conn.close();
+    expect(mockedInvoke).toHaveBeenLastCalledWith("sse_close", { connId: 6 });
+    expect(unlistenSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("tears the listener down if sse_connect rejects up front", async () => {
+    mockedInvoke.mockRejectedValueOnce("WS_FETCH_NOT_ALLOWED");
+    await expect(sseConnect("https://evil.com/sse")).rejects.toBe(
+      "WS_FETCH_NOT_ALLOWED",
+    );
+    expect(unlistenSpy).toHaveBeenCalledTimes(1);
   });
 });

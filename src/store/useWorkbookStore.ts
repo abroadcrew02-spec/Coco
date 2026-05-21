@@ -4,6 +4,7 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { friendlyError } from "./errorMessages";
 import { t } from "../i18n/locale";
 import { flushPendingSnapshot } from "./snapshotSync";
+import { flushTextBoxesToPreservedParts } from "./textBoxes";
 import type {
   AppScreen,
   SaveStatus,
@@ -411,9 +412,12 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       set({ saveStatus: "saving" });
       try {
         if (currentLower.endsWith(".xlsx")) {
+          // #146 / #188: flush in-memory shapes into preserved drawing parts
+          // before handing the snapshot to the Rust exporter.
+          const saveJson = flushTextBoxesToPreservedParts(currentSnapshotJson);
           const result = await invoke<ExportResult>("workbook_export_xlsx", {
             path: currentPath,
-            snapshotJson: currentSnapshotJson,
+            snapshotJson: saveJson,
           });
           // #70: if edits arrived while we were saving, downgrade success to
           // "unsaved" so closeGuard can still warn.
@@ -486,6 +490,11 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       const isCoco = lower.endsWith(".coco");
       const isXlsx = lower.endsWith(".xlsx");
       const command = isCoco ? "workbook_save_as" : "workbook_export_xlsx";
+      // #146 / #188: flush in-memory shapes into preserved drawing parts for
+      // the xlsx route. .coco preserves `_textBoxes` directly so we skip it.
+      const xlsxJson = isCoco
+        ? currentSnapshotJson
+        : flushTextBoxesToPreservedParts(currentSnapshotJson);
       const args = isCoco
         ? {
             workbookId: currentHandle.workbookId,
@@ -494,7 +503,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
           }
         : {
             path: isXlsx ? path : path.replace(/\.[^./\\]*$/, "") + ".xlsx",
-            snapshotJson: currentSnapshotJson,
+            snapshotJson: xlsxJson,
           };
 
       const result = (await invoke(command, args)) as SaveResult | ExportResult;
@@ -659,9 +668,12 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       wasDirtyBeforeExport: priorDirty,
     });
     try {
+      // #146 / #188: flush in-memory shapes into preserved drawing parts so
+      // the Rust exporter emits them as `<xdr:sp>` / `<xdr:grpSp>` shapes.
+      const exportJson = flushTextBoxesToPreservedParts(currentSnapshotJson);
       const result = await invoke<ExportResult>("workbook_export_xlsx", {
         path: chosen,
-        snapshotJson: currentSnapshotJson,
+        snapshotJson: exportJson,
       });
       // req 5.4.2: export does not change the working .coco path. dirty state
       // also survives export — `wasDirtyBeforeExport` keeps the close guard

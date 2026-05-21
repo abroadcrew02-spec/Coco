@@ -120,6 +120,7 @@ pub fn run() {
                 .text("insert-comment", "コメント...")
                 .text("insert-chart", "グラフ...")
                 .text("insert-image", "画像...")
+                .text("insert-shape", "図形...")
                 .separator()
                 .text("insert-table", "テーブル...")
                 .text("insert-sparkline", "スパークライン...")

@@ -13,6 +13,7 @@ const EDITOR_COMMAND_IDS = new Set([
   "insert-comment",
   "insert-chart",
   "insert-image",
+  "insert-shape",
   "insert-table",
   "insert-sparkline",
   "format-number",

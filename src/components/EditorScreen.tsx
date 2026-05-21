@@ -391,6 +391,19 @@ import InsertImageDialog, {
   type ImageFormValue,
   type ImagePickResult,
 } from "./InsertImageDialog";
+import InsertShapeDialog, {
+  type ShapeFormValue,
+} from "./InsertShapeDialog";
+import TextBoxesPanel from "./TextBoxesPanel";
+import {
+  a1ToColRow as tbA1ToColRow,
+  addTextBox,
+  deleteTextBox,
+  updateTextBox,
+  listTextBoxesForSheet,
+  makeTextBoxId,
+  type TextBox,
+} from "../store/textBoxes";
 import SortDialog, { type SortFormValue } from "./SortDialog";
 import SheetTabColorDialog from "./SheetTabColorDialog";
 import CommandPalette, { type PaletteCommand } from "./CommandPalette";
@@ -615,6 +628,13 @@ export default function EditorScreen() {
     sheetId: string;
     cell: string;
   } | null>(null);
+  // Insert-shape dialog (#146 / #188): null while closed. Captures the active
+  // sheet + the top-left of the active range so the shape anchors where the
+  // user clicked. Same shape as imageDialog.
+  const [shapeDialog, setShapeDialog] = useState<{
+    sheetId: string;
+    cell: string;
+  } | null>(null);
   // Sort dialog: null while closed. Pins the active sheet + a default A1 range
   // derived from the current selection at open time so the user's input lands
   // on a stable target even if focus shifts.
@@ -794,6 +814,9 @@ export default function EditorScreen() {
   // Univer 0.5.x's selection observable API isn't stable.
   const [navActiveSheetName, setNavActiveSheetName] = useState("Sheet1");
   const [navActiveCellRef, setNavActiveCellRef] = useState("A1");
+  // #146 / #188: track the active sheet id so the TextBoxesPanel can filter to
+  // the current sheet. Same 300ms-poll cadence as navActiveSheetName above.
+  const [activeSheetId, setActiveSheetId] = useState<string | null>(null);
   const [sheetImportOpen, setSheetImportOpen] = useState(false);
   const [bookmarksPanelOpen, setBookmarksPanelOpen] = useState(false);
   // #109: per-workbook session id so bookmarks for unsaved workbooks don't
@@ -4607,6 +4630,36 @@ export default function EditorScreen() {
     }
   }, []);
 
+  // #146 / #188: derive the shape (text box / rect / ellipse / line) list for
+  // the active sheet from the live snapshot. Filtered client-side so the panel
+  // auto-refreshes on sheet switch / insert / delete without manual invalidation.
+  const activeSheetTextBoxes: TextBox[] = activeSheetId
+    ? listTextBoxesForSheet(currentSnapshotJson ?? null, activeSheetId)
+    : [];
+
+  // Jump the Univer selection to a shape's anchor cell when the user clicks a
+  // panel row. Switches sheets first if the shape lives on a different sheet —
+  // mirrors jumpToImageCell.
+  const jumpToTextBoxCell = useCallback((tb: TextBox) => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    if (!workbook) return;
+    try {
+      const target = workbook.getSheetBySheetId(tb.sheetId);
+      if (!target) return;
+      const active = workbook.getActiveSheet();
+      if (!active || active.getSheetId() !== tb.sheetId) {
+        workbook.setActiveSheet(target);
+      }
+      const a1 = colRowToA1(tb.x, tb.y);
+      const range = target.getRange(a1);
+      if (range) range.activate();
+    } catch {
+      // best-effort
+    }
+  }, []);
+
   // #184: jump the Univer selection to a camera link's source range / dst
   // anchor when the user clicks an entry in CameraLinksPanel.
   const jumpToCameraSource = useCallback(
@@ -5126,6 +5179,124 @@ export default function EditorScreen() {
     [imageDialog, applyMutatedSnapshot],
   );
 
+  // #146 / #188 — Insert-shape dialog plumbing. Snapshots the active sheet +
+  // the top-left of the active range so the shape anchors at the user's actual
+  // cursor cell (same pattern as openImageDialog).
+  const openShapeDialog = useCallback(() => {
+    const ready = getReadyWorkbook("図形の挿入");
+    if (!ready) return;
+    const { workbook } = ready;
+    const sheet = workbook.getActiveSheet();
+    if (!sheet) return;
+    const sheetId = sheet.getSheetId();
+    let cell = "A1";
+    try {
+      const sel = sheet.getSelection();
+      const range = sel?.getActiveRange();
+      if (range) {
+        const a1 = range.getA1Notation();
+        cell = a1.includes(":") ? a1.split(":")[0] : a1;
+      }
+    } catch {
+      // fall back to A1
+    }
+    setShapeDialog({ sheetId, cell });
+  }, [getReadyWorkbook]);
+
+  // Apply a new shape (text box / rect / ellipse / line) by mutating the
+  // snapshot's `_textBoxes` array. The shape stays in-memory only until the
+  // user saves to xlsx; on save the round-trip serialises every shape into
+  // the matching drawing XML via `_textBoxes` → `<xdr:sp>` / `<xdr:grpSp>`
+  // injection. Returns null on success, or a localized error string on
+  // rejection (matching applyImage's contract).
+  const applyShape = useCallback(
+    (value: ShapeFormValue): string | null => {
+      if (!shapeDialog) return "ダイアログの状態が無効です";
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return "ワークブックがまだ準備できていません";
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return "アクティブなワークブックがありません";
+      const snapshot = workbook.save() as unknown as Record<string, unknown>;
+      const sheetOrder = (snapshot.sheetOrder as string[] | undefined) ?? [];
+      if (!sheetOrder.includes(shapeDialog.sheetId)) {
+        return "対象シートが見つかりません";
+      }
+      const pos = tbA1ToColRow(value.cell);
+      if (!pos) return "アンカーセルの解析に失敗しました";
+      const tb: TextBox = {
+        id: makeTextBoxId(),
+        type: value.type,
+        sheetId: shapeDialog.sheetId,
+        x: pos.col,
+        y: pos.row,
+        w: value.w,
+        h: value.h,
+        text: value.text,
+        fontFamily: value.fontFamily,
+        fontSize: value.fontSize,
+        color: value.color,
+        backgroundColor: value.backgroundColor,
+        borderColor: value.borderColor,
+      };
+      const next = addTextBox(snapshot, tb);
+      applyMutatedSnapshot(JSON.stringify(next));
+      return null;
+    },
+    [shapeDialog, applyMutatedSnapshot],
+  );
+
+  // Remove a shape by id. Used by the side panel's per-row delete button.
+  const removeTextBox = useCallback(
+    (id: string) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const snapshot = workbook.save() as unknown as Record<string, unknown>;
+      const next = deleteTextBox(snapshot, id);
+      applyMutatedSnapshot(JSON.stringify(next));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // Patch a shape's geometry / style fields from the side-panel numeric
+  // editor. Univer 0.5.x exposes no stable pixel-overlay API, so position and
+  // size are edited as cell-unit numbers in the panel (issue #188 note).
+  const patchTextBox = useCallback(
+    (id: string, patch: Partial<Omit<TextBox, "id">>) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      const snapshot = workbook.save() as unknown as Record<string, unknown>;
+      const next = updateTextBox(snapshot, id, patch);
+      applyMutatedSnapshot(JSON.stringify(next));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // Group / ungroup the supplied shapes (#188). Grouping stamps a shared
+  // `groupId` on every member so the xlsx export wraps them in one
+  // `<xdr:grpSp>`. Passing an empty `groupId` clears the grouping.
+  const groupTextBoxes = useCallback(
+    (ids: string[], groupId: string | undefined) => {
+      if (ids.length === 0) return;
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      const workbook = fUniver.getActiveWorkbook();
+      if (!workbook) return;
+      let snapshot = workbook.save() as unknown as Record<string, unknown>;
+      for (const id of ids) {
+        snapshot = updateTextBox(snapshot, id, { groupId }) as Record<
+          string,
+          unknown
+        >;
+      }
+      applyMutatedSnapshot(JSON.stringify(snapshot));
+    },
+    [applyMutatedSnapshot],
+  );
+
   // Open the sort dialog with the active sheet + a default range derived from
   // the current selection. Falls back to A1:A1 when there's no live selection.
   const openSortDialog = useCallback(() => {
@@ -5543,6 +5714,13 @@ export default function EditorScreen() {
       run: openImageDialog,
     },
     {
+      id: "insert.shape",
+      label: "図形を挿入",
+      category: "挿入",
+      keywords: "shape textbox rect ellipse line 図形 テキストボックス 矩形 円 矢印",
+      run: openShapeDialog,
+    },
+    {
       id: "insert.namedRange",
       label: "名前付き範囲を編集",
       category: "挿入",
@@ -5769,6 +5947,9 @@ export default function EditorScreen() {
         break;
       case "insert-image":
         openImageDialog();
+        break;
+      case "insert-shape":
+        openShapeDialog();
         break;
       case "format-number":
         openNumberFormatDialog();
@@ -6071,6 +6252,7 @@ export default function EditorScreen() {
     openCommentDialog,
     openChartDialog,
     openImageDialog,
+    openShapeDialog,
     openNumberFormatDialog,
     applyQuickFormat,
     openCfDialog,
@@ -6213,6 +6395,13 @@ export default function EditorScreen() {
         const r = sheet?.getSelection()?.getActiveRange();
         if (!sheet || !r) return;
         setNavActiveSheetName(sheet.getSheetName());
+        // #146 / #188: feed the shape panel filter. Cheap getter, safe to call
+        // unconditionally — null when there's no active sheet.
+        try {
+          setActiveSheetId(sheet.getSheetId());
+        } catch {
+          // best-effort
+        }
         const startCol = r.getColumn();
         const startRow = r.getRow();
         const width = (r as unknown as { getWidth?: () => number }).getWidth?.() ?? 1;
@@ -7258,6 +7447,14 @@ export default function EditorScreen() {
           images={imagePreviews}
           onSelect={jumpToImageCell}
         />
+        <TextBoxesPanel
+          textBoxes={activeSheetTextBoxes}
+          sheetName={navActiveSheetName}
+          onSelect={jumpToTextBoxCell}
+          onDelete={(tb) => removeTextBox(tb.id)}
+          onPatch={patchTextBox}
+          onGroup={groupTextBoxes}
+        />
         {cameraPanelOpen && currentSnapshotJson && (
           <CameraLinksPanel
             workbookSnapshotJson={currentSnapshotJson}
@@ -7504,6 +7701,13 @@ export default function EditorScreen() {
           pickFile={pickImageFile}
           onApply={applyImage}
           onClose={() => setImageDialog(null)}
+        />
+      )}
+      {shapeDialog && (
+        <InsertShapeDialog
+          initialCell={shapeDialog.cell}
+          onApply={applyShape}
+          onClose={() => setShapeDialog(null)}
         />
       )}
       {sortDialog && (

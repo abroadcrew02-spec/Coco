@@ -4,6 +4,21 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
+// `listen` registers an event handler and returns an unlisten fn. The mock
+// captures the latest registered handler so streaming tests can drive events.
+let lastEventHandler:
+  | ((event: { payload: unknown }) => void)
+  | null = null;
+const unlistenSpy = vi.fn();
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(
+    async (_name: string, handler: (event: { payload: unknown }) => void) => {
+      lastEventHandler = handler;
+      return unlistenSpy;
+    },
+  ),
+}));
+
 import { invoke } from "@tauri-apps/api/core";
 import {
   httpFetch,
@@ -14,10 +29,19 @@ import {
   deleteUrlFetchCredential,
   listUrlFetchCredentials,
   isValidCredentialInput,
+  streamFetch,
+  cancelStreamFetch,
   type UrlFetchCredentialInput,
+  type HttpFetchChunkEvent,
 } from "./urlFetch";
 
 const mockedInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
+
+/** Push a `http-fetch-chunk` event into the last-registered `listen` handler. */
+function emitChunk(ev: HttpFetchChunkEvent): void {
+  if (!lastEventHandler) throw new Error("no event handler registered");
+  lastEventHandler({ payload: ev });
+}
 
 describe("httpFetch", () => {
   beforeEach(() => {
@@ -217,5 +241,141 @@ describe("isValidCredentialInput", () => {
         clientId: "cid",
       }),
     ).toBe(true);
+  });
+});
+
+describe("streamFetch (#181)", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    unlistenSpy.mockReset();
+    lastEventHandler = null;
+  });
+
+  /** base64 of the ASCII bytes of `s`. */
+  const b64 = (s: string): string =>
+    btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+
+  it("starts the stream with method/headers/body and returns a handle", async () => {
+    mockedInvoke.mockResolvedValueOnce(7);
+    const handle = await streamFetch({
+      url: "https://api.example.com/big",
+      method: "POST",
+      headers: { Authorization: "Bearer t" },
+      body: "{}",
+    });
+    expect(handle.requestId).toBe(7);
+    expect(mockedInvoke).toHaveBeenCalledWith("http_fetch_stream", {
+      url: "https://api.example.com/big",
+      method: "POST",
+      headers: { Authorization: "Bearer t" },
+      body: "{}",
+    });
+  });
+
+  it("decodes chunks in order and fires onDone on the terminal event", async () => {
+    mockedInvoke.mockResolvedValueOnce(1);
+    const chunks: string[] = [];
+    let doneTotal = -1;
+    await streamFetch(
+      { url: "https://api.example.com/x" },
+      {
+        onChunk: (c) => chunks.push(new TextDecoder().decode(c.bytes)),
+        onDone: (received) => {
+          doneTotal = received;
+        },
+      },
+    );
+    emitChunk({
+      requestId: 1,
+      status: 200,
+      headers: { "content-type": "text/plain" },
+      chunk: b64("hello "),
+      received: 6,
+      done: false,
+    });
+    emitChunk({ requestId: 1, chunk: b64("world"), received: 11, done: false });
+    emitChunk({ requestId: 1, chunk: "", received: 11, done: true });
+
+    expect(chunks).toEqual(["hello ", "world"]);
+    expect(doneTotal).toBe(11);
+    // The terminal event tears the listener down.
+    expect(unlistenSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores events addressed to a different requestId", async () => {
+    mockedInvoke.mockResolvedValueOnce(2);
+    const chunks: string[] = [];
+    await streamFetch(
+      { url: "https://api.example.com/x" },
+      { onChunk: (c) => chunks.push(new TextDecoder().decode(c.bytes)) },
+    );
+    emitChunk({ requestId: 999, chunk: b64("nope"), received: 4, done: false });
+    emitChunk({ requestId: 2, chunk: b64("yes"), received: 3, done: false });
+    expect(chunks).toEqual(["yes"]);
+  });
+
+  it("routes a mid-stream cap-exceeded error to onError", async () => {
+    mockedInvoke.mockResolvedValueOnce(3);
+    let errTag = "";
+    let errReceived = -1;
+    await streamFetch(
+      { url: "https://api.example.com/huge" },
+      {
+        onError: (tag, received) => {
+          errTag = tag;
+          errReceived = received;
+        },
+      },
+    );
+    emitChunk({ requestId: 3, chunk: b64("partial"), received: 7, done: false });
+    emitChunk({
+      requestId: 3,
+      chunk: "",
+      received: 7,
+      done: true,
+      error: "URL_FETCH_RESPONSE_TOO_LARGE",
+    });
+    expect(errTag).toBe("URL_FETCH_RESPONSE_TOO_LARGE");
+    expect(errReceived).toBe(7);
+    expect(unlistenSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancel() forwards the requestId to http_fetch_cancel", async () => {
+    mockedInvoke.mockResolvedValueOnce(5); // http_fetch_stream
+    const handle = await streamFetch({ url: "https://api.example.com/x" });
+    mockedInvoke.mockResolvedValueOnce(true); // http_fetch_cancel
+    await handle.cancel();
+    expect(mockedInvoke).toHaveBeenLastCalledWith("http_fetch_cancel", {
+      requestId: 5,
+    });
+  });
+
+  it("ignores events that arrive after the terminal event", async () => {
+    mockedInvoke.mockResolvedValueOnce(6);
+    const chunks: string[] = [];
+    await streamFetch(
+      { url: "https://api.example.com/x" },
+      { onChunk: (c) => chunks.push(new TextDecoder().decode(c.bytes)) },
+    );
+    emitChunk({ requestId: 6, chunk: "", received: 0, done: true });
+    emitChunk({ requestId: 6, chunk: b64("late"), received: 4, done: false });
+    expect(chunks).toEqual([]);
+  });
+
+  it("tears the listener down if the command rejects up front", async () => {
+    mockedInvoke.mockRejectedValueOnce("URL_FETCH_NOT_ALLOWED");
+    await expect(
+      streamFetch({ url: "https://evil.com" }),
+    ).rejects.toBe("URL_FETCH_NOT_ALLOWED");
+    expect(unlistenSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancelStreamFetch forwards the id and returns the Rust result", async () => {
+    mockedInvoke.mockResolvedValueOnce(false);
+    const ok = await cancelStreamFetch(42);
+    expect(ok).toBe(false);
+    expect(mockedInvoke).toHaveBeenCalledWith("http_fetch_cancel", {
+      requestId: 42,
+    });
   });
 });

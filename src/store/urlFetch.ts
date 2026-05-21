@@ -6,6 +6,7 @@
 // content. Errors are returned as opaque tag strings (see http_fetch.rs).
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export const ALLOWED_DOMAINS_KEY = "urlFetch.allowedDomains";
 
@@ -186,4 +187,175 @@ export function isValidCredentialInput(c: UrlFetchCredentialInput): boolean {
     if (!c.clientId || c.clientId.trim().length === 0) return false;
   }
   return true;
+}
+
+// --- Streaming responses (issue #181) ------------------------------------
+//
+// `httpFetch` buffers the whole response and then checks the 10 MiB cap. For
+// large downloads (or progress UIs) `streamFetch` instead reads the body
+// chunk-by-chunk: Rust emits `http-fetch-chunk` events and enforces the byte
+// cap *mid-stream* so a malicious server cannot exhaust memory. The same
+// allow-list / SSRF / header guards apply as for `httpFetch`.
+
+/** Event name Rust emits for every streamed chunk and the terminal marker. */
+export const HTTP_FETCH_CHUNK_EVENT = "http-fetch-chunk";
+
+/** Opaque identifier for an in-flight streaming request. */
+export type RequestId = number;
+
+/** Payload of a single `http-fetch-chunk` event. */
+export interface HttpFetchChunkEvent {
+  /** The request this event belongs to. */
+  requestId: RequestId;
+  /** HTTP status — present only on the first event. */
+  status?: number;
+  /** Response headers — present only on the first event. */
+  headers?: Record<string, string>;
+  /** Base64-encoded chunk bytes (empty on the terminal event). */
+  chunk: string;
+  /** Running total of body bytes received so far. */
+  received: number;
+  /** True on the final event of the stream. */
+  done: boolean;
+  /** Opaque error tag (e.g. `URL_FETCH_RESPONSE_TOO_LARGE`) on failure. */
+  error?: string;
+}
+
+/** Decoded chunk handed to a {@link StreamFetchHandlers.onChunk} callback. */
+export interface StreamChunk {
+  requestId: RequestId;
+  status?: number;
+  headers?: Record<string, string>;
+  /** The decoded chunk bytes. */
+  bytes: Uint8Array;
+  received: number;
+}
+
+/** Callbacks driven by {@link streamFetch}. */
+export interface StreamFetchHandlers {
+  /** Called for every body chunk, in order. */
+  onChunk?: (chunk: StreamChunk) => void;
+  /** Called once when the stream completes successfully. */
+  onDone?: (received: number) => void;
+  /** Called once with the opaque tag if the stream fails (incl. cancel). */
+  onError?: (tag: string, received: number) => void;
+}
+
+/** Handle returned by {@link streamFetch}; lets the caller cancel + clean up. */
+export interface StreamFetchHandle {
+  requestId: RequestId;
+  /** Ask Rust to abort the stream. Safe to call after completion (no-op). */
+  cancel: () => Promise<void>;
+}
+
+/** Decode a base64 string into raw bytes. */
+function decodeBase64(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/**
+ * Cancel an in-flight streaming request. Resolves to `true` if Rust still knew
+ * the id (and so flagged it for abort), `false` if it had already finished.
+ */
+export async function cancelStreamFetch(
+  requestId: RequestId,
+): Promise<boolean> {
+  return await invoke<boolean>("http_fetch_cancel", { requestId });
+}
+
+/**
+ * Perform a streaming HTTP request via the Rust backend.
+ *
+ * Subscribes to `http-fetch-chunk` events *before* issuing the command (so no
+ * early chunk is missed), then starts the stream. The returned handle exposes
+ * the `requestId` and a `cancel()` that aborts the stream mid-flight.
+ *
+ * The event subscription is torn down automatically once the stream reaches
+ * its terminal (`done`) event — success, error or cancel.
+ *
+ * Throws an opaque `URL_FETCH_*` tag if the request is rejected up front
+ * (bad URL, not allow-listed, bad header, ...).
+ */
+export async function streamFetch(
+  req: HttpFetchRequest,
+  handlers: StreamFetchHandlers = {},
+): Promise<StreamFetchHandle> {
+  const method: HttpMethod = req.method ?? "GET";
+
+  // requestId is not known until the command returns, but events may already
+  // be flowing — buffer any that arrive before we learn our id.
+  let requestId: RequestId | null = null;
+  let unlisten: UnlistenFn | null = null;
+  let finished = false;
+  const pending: HttpFetchChunkEvent[] = [];
+
+  const teardown = () => {
+    if (unlisten) {
+      unlisten();
+      unlisten = null;
+    }
+  };
+
+  const handle = (ev: HttpFetchChunkEvent) => {
+    if (finished) return;
+    if (ev.error !== undefined) {
+      finished = true;
+      teardown();
+      handlers.onError?.(ev.error, ev.received);
+      return;
+    }
+    if (ev.done) {
+      finished = true;
+      teardown();
+      handlers.onDone?.(ev.received);
+      return;
+    }
+    handlers.onChunk?.({
+      requestId: ev.requestId,
+      status: ev.status,
+      headers: ev.headers,
+      bytes: decodeBase64(ev.chunk),
+      received: ev.received,
+    });
+  };
+
+  unlisten = await listen<HttpFetchChunkEvent>(
+    HTTP_FETCH_CHUNK_EVENT,
+    (event) => {
+      const payload = event.payload;
+      if (requestId === null) {
+        pending.push(payload);
+        return;
+      }
+      if (payload.requestId !== requestId) return;
+      handle(payload);
+    },
+  );
+
+  try {
+    requestId = await invoke<RequestId>("http_fetch_stream", {
+      url: req.url,
+      method,
+      headers: req.headers ?? null,
+      body: req.body ?? null,
+    });
+  } catch (e) {
+    teardown();
+    throw e;
+  }
+
+  // Drain anything that arrived before the id was known.
+  for (const ev of pending) {
+    if (ev.requestId === requestId) handle(ev);
+  }
+
+  return {
+    requestId,
+    cancel: async () => {
+      if (requestId !== null) await cancelStreamFetch(requestId);
+    },
+  };
 }

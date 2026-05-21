@@ -38,6 +38,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // #181: registry of in-flight streaming HTTP requests, shared so the
+        // `http_fetch_cancel` command can reach the streams started by
+        // `http_fetch_stream`.
+        .manage(std::sync::Arc::new(
+            commands::http_fetch_stream::StreamRegistry::default(),
+        ))
         .setup(|app| {
             // #82: best-effort startup sweep of orphan recovery .coco files
             // (file present, no recovery_candidates row). Scoped to the
@@ -266,6 +272,8 @@ pub fn run() {
             commands::file_io::write_file_bytes_base64,
             commands::file_io::existing_csv_export_paths,
             commands::http_fetch::http_fetch,
+            commands::http_fetch_stream::http_fetch_stream,
+            commands::http_fetch_stream::http_fetch_cancel,
             commands::url_fetch_credentials::url_fetch_set_credential,
             commands::url_fetch_credentials::url_fetch_delete_credential,
             commands::url_fetch_credentials::url_fetch_list_credentials,

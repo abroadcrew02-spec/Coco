@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { getLocale, setLocale, t, type Locale } from "../i18n/locale";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import {
   type UpdateChannel,
   isAutoCheckEnabled,
@@ -119,16 +120,9 @@ export default function SettingsDialog({ onClose }: Props) {
     .filter((line) => line.length > 0 && !isLikelyValidDomainPattern(line));
   const lastChecked = getLastCheckedAt();
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // #177: focus trap, initial focus, Escape-to-close, focus restoration.
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, onClose);
 
   const apply = async () => {
     if (pendingInterval !== intervalMs) {
@@ -179,6 +173,7 @@ export default function SettingsDialog({ onClose }: Props) {
   return (
     <div className="settings-backdrop" onClick={onClose}>
       <div
+        ref={modalRef}
         className="settings-modal"
         role="dialog"
         aria-modal="true"
@@ -187,7 +182,12 @@ export default function SettingsDialog({ onClose }: Props) {
       >
         <header className="settings-header">
           <h2 id="settings-title" className="settings-title">{t("dialog.settings")}</h2>
-          <button type="button" className="settings-close" onClick={onClose} aria-label="閉じる">
+          <button
+            type="button"
+            className="settings-close"
+            onClick={onClose}
+            aria-label={t("a11y.label.closeDialog")}
+          >
             ×
           </button>
         </header>

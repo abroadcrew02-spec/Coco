@@ -197,6 +197,13 @@ import CustomListsDialog from "./CustomListsDialog";
 import CalculationOptionsDialog from "./CalculationOptionsDialog";
 import CalculationModeIndicator from "./CalculationModeIndicator";
 import StatusBarStats from "./StatusBarStats";
+import LiveRegion from "./LiveRegion";
+import {
+  announce,
+  announceError,
+  buildCellAnnouncement,
+  buildRangeAnnouncement,
+} from "../store/announce";
 import {
   type SelectionStats,
   computeSelectionStats,
@@ -2852,6 +2859,87 @@ export default function EditorScreen() {
     const id = window.setInterval(tick, 250);
     return () => window.clearInterval(id);
   }, []);
+
+  // #177: announce the active cell / range to screen readers (NVDA / JAWS /
+  // Narrator) whenever the selection moves. Polls the active range — same
+  // mechanism as the #192 status-bar summary above — because Univer 0.5.x's
+  // selection observable isn't stable across patches. Announcing only on a
+  // *change* of range key avoids spamming the live region every tick.
+  const lastAnnouncedRangeKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const tick = () => {
+      const workbook = fUniverRef.current?.getActiveWorkbook();
+      if (!workbook) return;
+      try {
+        const sheet = workbook.getActiveSheet();
+        const r = sheet?.getSelection()?.getActiveRange();
+        if (!r) return;
+        const range = r as unknown as {
+          getHeight?: () => number;
+          getWidth?: () => number;
+          getRow?: () => number;
+          getColumn?: () => number;
+          getValue?: () => unknown;
+        };
+        const row = range.getRow?.() ?? 0;
+        const col = range.getColumn?.() ?? 0;
+        const height = range.getHeight?.() ?? 1;
+        const width = range.getWidth?.() ?? 1;
+        const sheetId =
+          (sheet as unknown as { getSheetId?: () => string }).getSheetId?.() ??
+          "";
+        const rangeKey = `${sheetId}:${row},${col},${height},${width}`;
+        if (rangeKey === lastAnnouncedRangeKeyRef.current) return;
+        // Skip the very first poll: announcing the cell the editor simply
+        // opened on would be noise. Establish the baseline silently.
+        const isFirst = lastAnnouncedRangeKeyRef.current === null;
+        lastAnnouncedRangeKeyRef.current = rangeKey;
+        if (isFirst) return;
+        if (height <= 1 && width <= 1) {
+          announce(buildCellAnnouncement(row, col, range.getValue?.()));
+        } else {
+          announce(
+            buildRangeAnnouncement(
+              row,
+              col,
+              row + height - 1,
+              col + width - 1,
+            ),
+          );
+        }
+      } catch {
+        // Univer's selection API can throw mid-teardown — ignore.
+      }
+    };
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // #177: announce save-status changes (saving / saved / failed) to screen
+  // readers. The sighted status bar already shows these; this mirrors them
+  // into the live region so assistive-tech users get the same feedback.
+  const lastAnnouncedSaveStatusRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = lastAnnouncedSaveStatusRef.current;
+    lastAnnouncedSaveStatusRef.current = saveStatus;
+    // Skip the initial render — only announce genuine transitions.
+    if (prev === null || prev === saveStatus) return;
+    if (saveStatus === "saved") {
+      announce(t("a11y.status.saved"));
+    } else if (saveStatus === "saving") {
+      announce(t("a11y.status.saving"));
+    } else if (saveStatus === "save_failed") {
+      announceError(t("a11y.status.saveFailed"));
+    }
+  }, [saveStatus]);
+
+  // #177: route editor operation errors / status messages through the
+  // assertive live region so screen readers speak them immediately.
+  useEffect(() => {
+    if (editorOperationError) {
+      announceError(editorOperationError);
+    }
+  }, [editorOperationError]);
 
   // --- Sheet Visibility (Hide/Unhide) ---------------------------------------
   const hideActiveSheet = useCallback(() => {
@@ -7909,9 +7997,21 @@ export default function EditorScreen() {
 
   return (
     <div className="editor-screen">
-      <div className="editor-toolbar">
+      {/* #177: ARIA live regions for screen-reader announcements. */}
+      <LiveRegion />
+      <div
+        className="editor-toolbar"
+        role="toolbar"
+        aria-label={t("a11y.label.toolbar")}
+      >
         <div className="editor-toolbar__left">
-          <button type="button" className="toolbar-btn" onClick={goHomeAfterConfirm} title="ホームへ戻る">
+          <button
+            type="button"
+            className="toolbar-btn"
+            onClick={goHomeAfterConfirm}
+            title={t("a11y.label.goHome")}
+            aria-label={t("a11y.label.goHome")}
+          >
             {t("toolbar.home")}
           </button>
           <span
@@ -8124,7 +8224,11 @@ export default function EditorScreen() {
           />
         )}
       </div>
-      <div className="status-bar">
+      <div
+        className="status-bar"
+        role="status"
+        aria-label={t("a11y.label.statusBar")}
+      >
         {/* React key forces re-mount on status change so the CSS fade animation restarts. */}
         <span key={saveStatus} className={statusClass}>{statusLabel}</span>
         {editorOperationError && (

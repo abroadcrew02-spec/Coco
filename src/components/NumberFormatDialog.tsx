@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { t } from "../i18n/locale";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import "./NumberFormatDialog.css";
 
 export interface NumberFormatValue {
@@ -50,17 +51,8 @@ export default function NumberFormatDialog({
   const [customCode, setCustomCode] = useState(
     initialPreset === "custom" ? (initialCode ?? "") : "",
   );
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, onClose);
 
   const submit = () => {
     let code: string;
@@ -77,6 +69,7 @@ export default function NumberFormatDialog({
   return (
     <div className="nf-backdrop" onClick={onClose}>
       <div
+        ref={modalRef}
         className="nf-modal"
         role="dialog"
         aria-modal="true"
@@ -85,7 +78,12 @@ export default function NumberFormatDialog({
       >
         <header className="nf-header">
           <h2 id="nf-title" className="nf-title">{t("dialog.numberFormat")}</h2>
-          <button type="button" className="nf-close" onClick={onClose} aria-label="閉じる">
+          <button
+            type="button"
+            className="nf-close"
+            onClick={onClose}
+            aria-label={t("a11y.label.closeDialog")}
+          >
             ×
           </button>
         </header>

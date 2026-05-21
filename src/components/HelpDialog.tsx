@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { t } from "../i18n/locale";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import "./HelpDialog.css";
 
 interface Props {
@@ -49,6 +50,11 @@ const UNIVER_SHORTCUTS: Shortcut[] = [
 
 export default function HelpDialog({ onClose }: Props) {
   const [version, setVersion] = useState<string | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  // #177: focus trap + focus restoration. Escape is handled solely by the
+  // focus trap (#177 review M2) — the window listener below only handles the
+  // F1 / Ctrl+/ special-casing to avoid double-firing onClose.
+  useFocusTrap(modalRef, onClose);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -56,7 +62,7 @@ export default function HelpDialog({ onClose }: Props) {
       // useGlobalShortcuts doesn't re-open the dialog the instant we close
       // it. The global listener registers on `window` too, and without
       // immediate-stop both handlers fire on the same event.
-      if (e.key === "Escape" || e.key === "F1") {
+      if (e.key === "F1") {
         e.preventDefault();
         e.stopImmediatePropagation();
         onClose();
@@ -78,6 +84,7 @@ export default function HelpDialog({ onClose }: Props) {
   return (
     <div className="help-backdrop" onClick={onClose}>
       <div
+        ref={modalRef}
         className="help-modal"
         role="dialog"
         aria-modal="true"
@@ -86,7 +93,12 @@ export default function HelpDialog({ onClose }: Props) {
       >
         <header className="help-header">
           <h2 id="help-title" className="help-title">{t("dialog.help")}</h2>
-          <button type="button" className="help-close" onClick={onClose} aria-label="閉じる">
+          <button
+            type="button"
+            className="help-close"
+            onClick={onClose}
+            aria-label={t("a11y.label.closeDialog")}
+          >
             ×
           </button>
         </header>

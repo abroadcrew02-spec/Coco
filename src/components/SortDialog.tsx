@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { t } from "../i18n/locale";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import "./SortDialog.css";
 
 export interface SortLevel {
@@ -60,17 +61,8 @@ export default function SortDialog({ initialRange, onApply, onClose }: Props) {
     { column: 1, ascending: true },
   ]);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, onClose);
 
   const updateLevel = (idx: number, patch: Partial<SortLevel>) => {
     setLevels((prev) => prev.map((lv, i) => (i === idx ? { ...lv, ...patch } : lv)));
@@ -113,6 +105,7 @@ export default function SortDialog({ initialRange, onApply, onClose }: Props) {
   return (
     <div className="sd-backdrop" onClick={onClose}>
       <div
+        ref={modalRef}
         className="sd-modal"
         role="dialog"
         aria-modal="true"
@@ -121,7 +114,12 @@ export default function SortDialog({ initialRange, onApply, onClose }: Props) {
       >
         <header className="sd-header">
           <h2 id="sd-title" className="sd-title">{t("dialog.sort")}</h2>
-          <button type="button" className="sd-close" onClick={onClose} aria-label="閉じる">
+          <button
+            type="button"
+            className="sd-close"
+            onClick={onClose}
+            aria-label={t("a11y.label.closeDialog")}
+          >
             ×
           </button>
         </header>

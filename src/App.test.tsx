@@ -260,8 +260,8 @@ describe("App", () => {
       render(<App />);
       requestHelp();
       await waitFor(() => screen.getByText("Coco — ヘルプ"));
-      // The × header button in HelpDialog has aria-label="閉じる".
-      const closers = screen.getAllByLabelText("閉じる");
+      // The × header button in HelpDialog has aria-label="ダイアログを閉じる".
+      const closers = screen.getAllByLabelText("ダイアログを閉じる");
       fireEvent.click(closers[0]);
       await waitFor(() => {
         expect(screen.queryByText("Coco — ヘルプ")).toBeNull();

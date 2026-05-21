@@ -122,7 +122,9 @@ describe("NamedRangesDialog", () => {
         onClose={onClose}
       />,
     );
-    fireEvent.keyDown(window, { key: "Escape" });
+    // #177: Escape is handled by the useFocusTrap hook, which listens on the
+    // dialog container — fire the key event there rather than on window.
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onSave).not.toHaveBeenCalled();
   });

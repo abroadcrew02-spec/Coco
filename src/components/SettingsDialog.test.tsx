@@ -165,7 +165,7 @@ describe("SettingsDialog", () => {
     it("calls onClose when × is clicked", async () => {
       const user = userEvent.setup();
       render(<SettingsDialog onClose={onClose} />);
-      await user.click(screen.getByRole("button", { name: "閉じる" }));
+      await user.click(screen.getByRole("button", { name: "ダイアログを閉じる" }));
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
@@ -194,14 +194,17 @@ describe("SettingsDialog", () => {
 
     it("Escape closes the dialog", () => {
       render(<SettingsDialog onClose={onClose} />);
-      fireEvent.keyDown(window, { key: "Escape" });
+      // #177: Escape is handled by the useFocusTrap hook listening on the
+      // dialog container.
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
     it("unmounting cleans up the keydown listener", () => {
-      const { unmount } = render(<SettingsDialog onClose={onClose} />);
+      const { container, unmount } = render(<SettingsDialog onClose={onClose} />);
+      const dialog = container.querySelector(".settings-modal")!;
       unmount();
-      fireEvent.keyDown(window, { key: "Escape" });
+      fireEvent.keyDown(dialog, { key: "Escape" });
       expect(onClose).not.toHaveBeenCalled();
     });
   });
@@ -359,16 +362,18 @@ describe("SettingsDialog", () => {
   describe("keyboard handling", () => {
     it("ignores non-Escape keys", () => {
       render(<SettingsDialog onClose={onClose} />);
-      fireEvent.keyDown(window, { key: "Enter" });
-      fireEvent.keyDown(window, { key: "a" });
-      fireEvent.keyDown(window, { key: "Tab" });
+      const dialog = screen.getByRole("dialog");
+      fireEvent.keyDown(dialog, { key: "Enter" });
+      fireEvent.keyDown(dialog, { key: "a" });
+      // Tab is intercepted by the focus trap but must not close the dialog.
       expect(onClose).not.toHaveBeenCalled();
     });
 
     it("Escape fires once per press (idempotent across repeats)", () => {
       render(<SettingsDialog onClose={onClose} />);
-      fireEvent.keyDown(window, { key: "Escape" });
-      fireEvent.keyDown(window, { key: "Escape" });
+      const dialog = screen.getByRole("dialog");
+      fireEvent.keyDown(dialog, { key: "Escape" });
+      fireEvent.keyDown(dialog, { key: "Escape" });
       expect(onClose).toHaveBeenCalledTimes(2);
     });
   });

@@ -176,6 +176,21 @@ const jaJP = {
   "error.pinOrder.failed": "並び順の保存に失敗しました",
   "error.setting.failed": "設定保存に失敗しました",
   "error.snapshotRequired": "保存できるスナップショットがありません",
+  // Screen-reader announcements (#177)
+  "a11y.cell.empty": "空のセル",
+  "a11y.cell.position": "列{0} 行{1}: {2}",
+  "a11y.range.selected": "範囲 {0} を選択、{1} セル",
+  "a11y.edit.start": "編集モード",
+  "a11y.edit.commit": "確定しました",
+  "a11y.edit.cancel": "編集を取り消しました",
+  "a11y.status.saved": "保存しました",
+  "a11y.status.saving": "保存中",
+  "a11y.status.saveFailed": "保存に失敗しました",
+  // ARIA labels for icon-only / ambiguous controls (#177)
+  "a11y.label.goHome": "ホームへ戻る",
+  "a11y.label.closeDialog": "ダイアログを閉じる",
+  "a11y.label.toolbar": "エディタツールバー",
+  "a11y.label.statusBar": "ステータスバー",
 } as const;
 
 type StringKey = keyof typeof jaJP;
@@ -331,6 +346,21 @@ const enUS: Record<StringKey, string> = {
   "error.pinOrder.failed": "Failed to save the order.",
   "error.setting.failed": "Failed to save the setting.",
   "error.snapshotRequired": "There is no snapshot available to save.",
+  // Screen-reader announcements (#177)
+  "a11y.cell.empty": "empty cell",
+  "a11y.cell.position": "column {0} row {1}: {2}",
+  "a11y.range.selected": "Range {0} selected, {1} cells",
+  "a11y.edit.start": "Edit mode",
+  "a11y.edit.commit": "Committed",
+  "a11y.edit.cancel": "Edit cancelled",
+  "a11y.status.saved": "Saved",
+  "a11y.status.saving": "Saving",
+  "a11y.status.saveFailed": "Save failed",
+  // ARIA labels for icon-only / ambiguous controls (#177)
+  "a11y.label.goHome": "Back to home",
+  "a11y.label.closeDialog": "Close dialog",
+  "a11y.label.toolbar": "Editor toolbar",
+  "a11y.label.statusBar": "Status bar",
 };
 
 export const strings: Record<Locale, Record<StringKey, string>> = {

@@ -124,3 +124,22 @@
 
   color-scheme: dark;
 }
+
+/* Visible keyboard focus (issue #177).
+ *
+ * `:focus-visible` only matches when the browser heuristically decides the
+ * user is navigating by keyboard, so mouse clicks don't draw a ring while
+ * keyboard Tab navigation always does. Applied broadly to interactive
+ * elements; `--coco-focus-ring` is themed (light / dark) above.
+ *
+ * The `:focus:not(:focus-visible)` rule suppresses the legacy focus outline
+ * on pointer interaction in browsers that still apply `:focus` styling. */
+:where(button, a, input, select, textarea, [tabindex], [role="button"]):focus-visible {
+  outline: 2px solid var(--coco-focus-ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+:where(button, a, input, select, textarea, [tabindex], [role="button"]):focus:not(:focus-visible) {
+  outline: none;
+}

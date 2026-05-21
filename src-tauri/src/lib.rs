@@ -193,6 +193,8 @@ pub fn run() {
                 .text("data-sort-by-color", "色で並べ替え...")
                 .text("data-filter-by-color", "色でフィルター...")
                 .text("data-filter-search", "値で検索フィルター...")
+                .separator()
+                .text("data-data-connections", "外部データ接続...")
                 .build()?;
             let tools_menu = SubmenuBuilder::new(app, "ツール")
                 .text("tools-sheet-protection", "シート保護...")
@@ -264,6 +266,9 @@ pub fn run() {
             commands::csv_io::workbook_export_csv,
             commands::csv_io::workbook_import_csv,
             commands::csv_io::list_sheet_names,
+            commands::data_connection::data_connection_load,
+            commands::data_connection::data_connection_load_web,
+            commands::data_connection::data_connection_load_sqlite,
             commands::html_export::workbook_export_html,
             commands::pdf_export::workbook_export_pdf,
             commands::workspace_bundle::workbook_export_workspace_bundle,

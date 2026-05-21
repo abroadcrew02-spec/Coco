@@ -104,6 +104,7 @@ const EDITOR_COMMAND_IDS = new Set([
   "insert-scroll-bar",
   "help-check-update",
   "data-filter-search",
+  "data-data-connections",
 ]);
 
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route

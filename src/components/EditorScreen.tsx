@@ -304,6 +304,21 @@ import NavigationBox, { type NavigationTarget } from "./NavigationBox";
 import { resolveNamedRange as resolveNavNamed } from "../store/navigationBox";
 import SheetImportDialog from "./SheetImportDialog";
 import { addImportedSheetToSnapshot } from "../store/sheetImport";
+import DataConnectionsDialog, {
+  type AddConnectionInput,
+} from "./DataConnectionsDialog";
+import {
+  type DataConnection,
+  type EtlStep,
+  type SheetFragment as DataConnSheetFragment,
+  addConnection as addConnectionToSnapshot,
+  applyFragmentToSheet as applyDataConnFragment,
+  listConnections as listDataConnections,
+  makeConnectionId,
+  removeConnection as removeConnectionFromSnapshot,
+  transformFragment as transformDataConnFragment,
+  updateConnection as updateConnectionInSnapshot,
+} from "../store/dataConnections";
 import BookmarksPanel from "./BookmarksPanel";
 import {
   addBookmark,
@@ -838,6 +853,8 @@ export default function EditorScreen() {
   // the current sheet. Same 300ms-poll cadence as navActiveSheetName above.
   const [activeSheetId, setActiveSheetId] = useState<string | null>(null);
   const [sheetImportOpen, setSheetImportOpen] = useState(false);
+  // #140 / #190: external data connections (Power Query) — modal dialog.
+  const [dataConnectionsOpen, setDataConnectionsOpen] = useState(false);
   const [bookmarksPanelOpen, setBookmarksPanelOpen] = useState(false);
   // #109: per-workbook session id so bookmarks for unsaved workbooks don't
   // bleed across "default". Regenerated whenever the workbook handle changes
@@ -4160,6 +4177,221 @@ export default function EditorScreen() {
     [applyMutatedSnapshot],
   );
 
+  // --- #140 / #190: External data connections (Power Query) ---
+  // Loads a source (CSV/JSON file, Web/REST endpoint or local SQLite DB) via
+  // the backend, runs the connection's ETL step pipeline, and merges the
+  // result into the snapshot under a sheet owned by the connection record.
+  const loadDataConnectionFragment = useCallback(
+    async (
+      conn: Pick<DataConnection, "type" | "sourcePath" | "web" | "sqlite" | "targetSheetName">,
+    ): Promise<DataConnSheetFragment> => {
+      type RawResult = {
+        sheetName: string;
+        rowCount: number;
+        columnCount: number;
+        headers: string[];
+        cellData: Record<string, Record<string, unknown>>;
+        encoding: string;
+      };
+      let result: RawResult;
+      if (conn.type === "web") {
+        if (!conn.web) throw new Error("Web 接続の設定がありません");
+        result = await invoke<RawResult>("data_connection_load_web", {
+          url: conn.web.url,
+          format: conn.web.format,
+          headers:
+            conn.web.headers && Object.keys(conn.web.headers).length > 0
+              ? conn.web.headers
+              : null,
+          sheetName: conn.targetSheetName,
+        });
+      } else if (conn.type === "sqlite") {
+        if (!conn.sqlite) throw new Error("SQLite 接続の設定がありません");
+        result = await invoke<RawResult>("data_connection_load_sqlite", {
+          dbPath: conn.sqlite.dbPath,
+          query: conn.sqlite.query,
+          sheetName: conn.targetSheetName,
+        });
+      } else {
+        result = await invoke<RawResult>("data_connection_load", {
+          sourcePath: conn.sourcePath,
+          sourceType: conn.type,
+        });
+      }
+      return {
+        cellData: result.cellData,
+        rowCount: result.rowCount,
+        columnCount: result.columnCount,
+        headers: result.headers,
+      };
+    },
+    [],
+  );
+
+  const handleDataConnectionAdd = useCallback(
+    async (input: AddConnectionInput) => {
+      const connection: DataConnection = {
+        id: makeConnectionId(),
+        name: input.name,
+        type: input.type,
+        sourcePath: input.sourcePath,
+        targetSheetId: null,
+        targetSheetName: input.targetSheetName,
+        lastRefreshedAt: null,
+        steps: [],
+      };
+      if (input.type === "web") {
+        connection.web = {
+          url: input.webUrl ?? "",
+          format: input.webFormat ?? "auto",
+          headers: input.webHeaders ?? {},
+        };
+      } else if (input.type === "sqlite") {
+        connection.sqlite = {
+          dbPath: input.sourcePath,
+          query: input.sqliteQuery ?? "",
+        };
+      }
+      const rawFragment = await loadDataConnectionFragment(connection);
+      const fragment = transformDataConnFragment(rawFragment, connection.steps);
+      // Re-read the live snapshot AFTER the async load so concurrent edits
+      // aren't lost.
+      const liveSnap = useWorkbookStore.getState().currentSnapshotJson;
+      if (!liveSnap) throw new Error("ワークブックがありません");
+      const snapshot = JSON.parse(liveSnap) as Record<string, unknown>;
+      const { sheetId } = applyDataConnFragment(snapshot, connection, fragment);
+      connection.targetSheetId = sheetId;
+      connection.lastRefreshedAt = Date.now();
+      addConnectionToSnapshot(snapshot, connection);
+      applyMutatedSnapshot(JSON.stringify(snapshot));
+    },
+    [applyMutatedSnapshot, loadDataConnectionFragment],
+  );
+
+  const handleDataConnectionRefresh = useCallback(
+    async (connectionId: string) => {
+      const liveBefore = useWorkbookStore.getState().currentSnapshotJson;
+      if (!liveBefore) throw new Error("ワークブックがありません");
+      const snapBefore = JSON.parse(liveBefore) as Record<string, unknown>;
+      const conn = listDataConnections(snapBefore).find((c) => c.id === connectionId);
+      if (!conn) throw new Error("接続が見つかりません");
+      const rawFragment = await loadDataConnectionFragment(conn);
+      // Re-parse the live snapshot AFTER the async load.
+      const liveAfter = useWorkbookStore.getState().currentSnapshotJson;
+      if (!liveAfter) throw new Error("ワークブックがありません");
+      const snapAfter = JSON.parse(liveAfter) as Record<string, unknown>;
+      const liveConn = listDataConnections(snapAfter).find((c) => c.id === connectionId);
+      if (!liveConn) throw new Error("接続が削除されています");
+      const fragment = transformDataConnFragment(rawFragment, liveConn.steps);
+      const { sheetId } = applyDataConnFragment(snapAfter, liveConn, fragment);
+      updateConnectionInSnapshot(snapAfter, connectionId, {
+        targetSheetId: sheetId,
+        lastRefreshedAt: Date.now(),
+      });
+      applyMutatedSnapshot(JSON.stringify(snapAfter));
+    },
+    [applyMutatedSnapshot, loadDataConnectionFragment],
+  );
+
+  const handleDataConnectionEdit = useCallback(
+    async (
+      connectionId: string,
+      patch: {
+        name: string;
+        targetSheetName: string;
+        steps: EtlStep[];
+        scheduleOnOpen: boolean;
+        scheduleIntervalMinutes: number;
+      },
+    ) => {
+      const live = useWorkbookStore.getState().currentSnapshotJson;
+      if (!live) throw new Error("ワークブックがありません");
+      const snap = JSON.parse(live) as Record<string, unknown>;
+      // Rename the underlying sheet too so the new name is visible.
+      const conn = listDataConnections(snap).find((c) => c.id === connectionId);
+      if (conn && conn.targetSheetId) {
+        const sheets = (snap.sheets ?? {}) as Record<string, { name?: string } | undefined>;
+        const sheet = sheets[conn.targetSheetId];
+        if (sheet && typeof sheet === "object") {
+          sheet.name = patch.targetSheetName;
+        }
+      }
+      updateConnectionInSnapshot(snap, connectionId, {
+        name: patch.name,
+        targetSheetName: patch.targetSheetName,
+        steps: patch.steps,
+        schedule: {
+          onOpen: patch.scheduleOnOpen,
+          intervalMinutes: patch.scheduleIntervalMinutes,
+        },
+      });
+      applyMutatedSnapshot(JSON.stringify(snap));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  const handleDataConnectionRemove = useCallback(
+    async (connectionId: string) => {
+      const live = useWorkbookStore.getState().currentSnapshotJson;
+      if (!live) throw new Error("ワークブックがありません");
+      const snap = JSON.parse(live) as Record<string, unknown>;
+      removeConnectionFromSnapshot(snap, connectionId);
+      applyMutatedSnapshot(JSON.stringify(snap));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // #190 Phase 5: scheduled refresh. Fires connections marked `onOpen` once
+  // when the workbook handle changes, and sets up per-connection interval
+  // timers for connections with `intervalMinutes > 0`. The timers re-read the
+  // live snapshot each tick, so edits to a connection's schedule take effect
+  // on the next dialog save (which replaces the handle? no — we re-scan).
+  const dataConnOnOpenFiredRef = useRef<string | null>(null);
+  useEffect(() => {
+    const handle = currentHandle;
+    if (!handle) return;
+    const handleKey = JSON.stringify(handle);
+    const snapJson = useWorkbookStore.getState().currentSnapshotJson;
+    if (!snapJson) return;
+    let conns: DataConnection[];
+    try {
+      conns = listDataConnections(JSON.parse(snapJson) as Record<string, unknown>);
+    } catch {
+      return;
+    }
+    // Fire on-open refreshes exactly once per workbook handle.
+    if (dataConnOnOpenFiredRef.current !== handleKey) {
+      dataConnOnOpenFiredRef.current = handleKey;
+      for (const c of conns) {
+        if (c.schedule?.onOpen) {
+          void handleDataConnectionRefresh(c.id).catch(() => {
+            // Background refresh failures are non-fatal — surfaced in the
+            // dialog when the user next opens it.
+          });
+        }
+      }
+    }
+    // Interval timers: one per connection with intervalMinutes > 0.
+    const timers: ReturnType<typeof setInterval>[] = [];
+    for (const c of conns) {
+      const minutes = c.schedule?.intervalMinutes ?? 0;
+      if (minutes > 0) {
+        const id = c.id;
+        timers.push(
+          setInterval(
+            () => {
+              void handleDataConnectionRefresh(id).catch(() => {});
+            },
+            minutes * 60_000,
+          ),
+        );
+      }
+    }
+    return () => {
+      for (const t of timers) clearInterval(t);
+    };
+  }, [currentHandle, handleDataConnectionRefresh]);
+
   const addCurrentCellAsBookmark = useCallback(() => {
     const fUniver = fUniverRef.current;
     const workbook = fUniver?.getActiveWorkbook();
@@ -6324,6 +6556,9 @@ export default function EditorScreen() {
         break;
       case "file-import-sheet":
         setSheetImportOpen(true);
+        break;
+      case "data-data-connections":
+        setDataConnectionsOpen(true);
         break;
       case "view-bookmarks-panel":
         setBookmarksPanelOpen((v) => !v);
@@ -8638,6 +8873,16 @@ export default function EditorScreen() {
             setSheetImportOpen(false);
           }}
           onClose={() => setSheetImportOpen(false)}
+        />
+      )}
+      {dataConnectionsOpen && (
+        <DataConnectionsDialog
+          snapshotJson={currentSnapshotJson}
+          onAdd={handleDataConnectionAdd}
+          onRefresh={handleDataConnectionRefresh}
+          onEdit={handleDataConnectionEdit}
+          onRemove={handleDataConnectionRemove}
+          onClose={() => setDataConnectionsOpen(false)}
         />
       )}
       {numberFormatManagerOpen && (

@@ -42,12 +42,16 @@ describe("Ribbon — tabs", () => {
     expect(tabs).toHaveLength(8);
   });
 
-  it("starts on the File tab with its panel visible (#202)", () => {
+  it("starts on the Home tab with its panel visible (#204)", () => {
     renderRibbon();
-    const file = screen.getByRole("tab", { name: /^file$|ファイル/i });
-    expect(file.getAttribute("aria-selected")).toBe("true");
+    const home = screen.getByRole("tab", { name: /^home$|ホーム/i });
+    expect(home.getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tabpanel").getAttribute("id")).toBe(
-      "ribbon-panel-file",
+      "ribbon-panel-home",
+    );
+    // The File tab still sits first in the strip — order is unchanged (#204).
+    expect(screen.getAllByRole("tab")[0].getAttribute("id")).toBe(
+      "ribbon-tab-file",
     );
   });
 
@@ -63,10 +67,11 @@ describe("Ribbon — tabs", () => {
 
   it("ArrowRight moves selection to the next tab", () => {
     renderRibbon();
-    const file = screen.getByRole("tab", { name: /^file$|ファイル/i });
-    fireEvent.keyDown(file, { key: "ArrowRight" });
-    const home = screen.getByRole("tab", { name: /home|ホーム/i });
-    expect(home.getAttribute("aria-selected")).toBe("true");
+    // Home is selected by default (#204); ArrowRight advances to Insert.
+    const home = screen.getByRole("tab", { name: /^home$|ホーム/i });
+    fireEvent.keyDown(home, { key: "ArrowRight" });
+    const insert = screen.getByRole("tab", { name: /insert|挿入/i });
+    expect(insert.getAttribute("aria-selected")).toBe("true");
   });
 
   it("End jumps to the last tab, Home back to the first", () => {
@@ -79,11 +84,45 @@ describe("Ribbon — tabs", () => {
     expect(tabs[0].getAttribute("aria-selected")).toBe("true");
   });
 
-  it("renders the Home button and file name in the tab strip (#202)", () => {
+  it("renders the file name in the tab strip (#202)", () => {
     renderRibbon();
-    fireEvent.click(screen.getByRole("button", { name: /home|ホーム/i }));
-    expect(onGoHome).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Book1.xlsx")).toBeTruthy();
+  });
+
+  it("has no standalone Home button in the tab strip (#204)", () => {
+    renderRibbon();
+    // The strip now holds only the tablist + file name — the "← Home" button
+    // moved into the File tab. The only buttons in the strip are the tabs.
+    const strip = document.querySelector(".ribbon__strip");
+    expect(strip?.querySelector(".ribbon__home-btn")).toBeNull();
+    const stripButtons = strip?.querySelectorAll("button") ?? [];
+    for (const btn of stripButtons) {
+      expect(btn.getAttribute("role")).toBe("tab");
+    }
+  });
+});
+
+describe("Ribbon — go home (#204)", () => {
+  it("the File tab's Back to Home button calls onGoHome", () => {
+    renderRibbon();
+    fireEvent.click(screen.getByRole("tab", { name: /^file$|ファイル/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /back to home|ホームに戻る/i }),
+    );
+    expect(onGoHome).toHaveBeenCalledTimes(1);
+  });
+
+  it("the Back to Home button does not emit a menu-action or editor command", () => {
+    const cmdHandler = vi.fn();
+    window.addEventListener("coco:editor-command", cmdHandler);
+    renderRibbon();
+    fireEvent.click(screen.getByRole("tab", { name: /^file$|ファイル/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /back to home|ホームに戻る/i }),
+    );
+    expect(emitMock).not.toHaveBeenCalled();
+    expect(cmdHandler).not.toHaveBeenCalled();
+    window.removeEventListener("coco:editor-command", cmdHandler);
   });
 });
 
@@ -112,14 +151,15 @@ describe("Ribbon — button actions", () => {
 
   it("menuAction button emits the menu-action window event (#202)", () => {
     renderRibbon();
-    // The File tab is active by default; "Save" is a menuAction button.
+    // "Save" is a menuAction button on the File tab (#204: Home is default).
+    fireEvent.click(screen.getByRole("tab", { name: /^file$|ファイル/i }));
     fireEvent.click(screen.getByRole("button", { name: /^save$|^保存$/i }));
     expect(emitMock).toHaveBeenCalledWith("menu-action", "save");
   });
 
   it("only the active tab's buttons are rendered", () => {
     renderRibbon();
-    // PivotTable lives on the Insert tab — absent while File is active.
+    // PivotTable lives on the Insert tab — absent while Home is active.
     expect(
       screen.queryByRole("button", { name: /pivottable|ピボットテーブル/i }),
     ).toBeNull();
@@ -131,6 +171,7 @@ describe("Ribbon — button actions", () => {
 
   it("File tab exposes the Exit (close) button (#202)", () => {
     renderRibbon();
+    fireEvent.click(screen.getByRole("tab", { name: /^file$|ファイル/i }));
     fireEvent.click(screen.getByRole("button", { name: /^exit$|^終了$/i }));
     expect(emitMock).toHaveBeenCalledWith("menu-action", "close");
   });

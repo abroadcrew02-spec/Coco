@@ -12,6 +12,8 @@
 //                   uses this to drive new/open/save/export/settings through
 //                   the existing `useMenuActions` dispatcher, now that the
 //                   Tauri native menu bar has been removed.
+//   goHome        — in-app navigation back to the start screen (#204): the
+//                   File tab's "Back to Home" button calls the `onGoHome` prop.
 //
 // Accessibility (#177): the tablist supports ←/→/Home/End; tabs use a roving
 // tabindex; each panel uses a roving tabindex across its buttons so Tab moves
@@ -34,8 +36,8 @@ interface Props {
    *  facade call. Kept as a prop so all `fUniverRef` plumbing stays there.
    *  #202 Phase 3: `color` is supplied by color-palette dropdown swatches. */
   onUniverAction: (op: UniverActionId, color?: string) => void;
-  /** #202: "← Home" navigation, folded into the tab strip's left edge so the
-   *  former standalone toolbar row is gone (one row saved). */
+  /** "Back to Home" navigation. #204: invoked by the File tab's `goHome`
+   *  button (previously a standalone strip button). */
   onGoHome: () => void;
   /** Active workbook file label, shown at the tab strip's right edge. */
   fileLabel: string;
@@ -49,7 +51,12 @@ export default function Ribbon({
   fileLabel,
   filePath,
 }: Props) {
-  const [activeTabId, setActiveTabId] = useState(RIBBON_TABS[0].id);
+  // #204: default to the Home tab. The File tab sits first in `RIBBON_TABS`
+  // (#202), but Home is the expected landing tab — fall back to the first tab
+  // only if Home is somehow absent.
+  const [activeTabId, setActiveTabId] = useState(
+    () => (RIBBON_TABS.find((tab) => tab.id === "home") ?? RIBBON_TABS[0]).id,
+  );
   // Roving tabindex within the active panel — index of the focusable button.
   const [activeBtnIndex, setActiveBtnIndex] = useState(0);
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -99,11 +106,15 @@ export default function Ribbon({
         void getCurrentWindow()
           .emit("menu-action", action.menuId)
           .catch(() => undefined);
+      } else if (action.kind === "goHome") {
+        // #204: in-app navigation back to the start screen (unsaved-changes
+        // guarded by EditorScreen's `goHomeAfterConfirm`).
+        onGoHome();
       } else {
         onUniverAction(action.op, action.color);
       }
     },
-    [onUniverAction],
+    [onUniverAction, onGoHome],
   );
 
   const handleButton = useCallback(
@@ -135,15 +146,6 @@ export default function Ribbon({
   return (
     <div className="ribbon" role="region" aria-label={t("ribbon.a11y.ribbon")}>
       <div className="ribbon__strip">
-        <button
-          type="button"
-          className="ribbon__home-btn"
-          onClick={onGoHome}
-          title={t("a11y.label.goHome")}
-          aria-label={t("a11y.label.goHome")}
-        >
-          {t("toolbar.home")}
-        </button>
         <div
           className="ribbon__tablist"
           role="tablist"

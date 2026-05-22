@@ -192,31 +192,32 @@ if (!existsSync(bundleDir)) {
   process.exit(1);
 }
 
-// NSIS produces *.nsis.zip; MSI produces *.msi.zip. Match either.
-const zipSuffix = bundleFormat === "nsis" ? ".nsis.zip" : ".msi.zip";
+// Tauri v2 emits the installer itself as the updater artifact (no .zip):
+// NSIS -> *-setup.exe, MSI -> *.msi. Each is signed -> *.sig sibling.
+const artifactSuffix = bundleFormat === "nsis" ? "-setup.exe" : ".msi";
 
-function findUpdaterZip() {
+function findUpdaterArtifact() {
   const entries = readdirSync(bundleDir);
   // Prefer the file whose name contains the package version (filters stale
   // bundles from prior versioned builds, same rationale as pack-distbin.mjs #59).
-  const versioned = entries.filter((e) => e.endsWith(zipSuffix) && e.includes(pkgVersion));
+  const versioned = entries.filter((e) => e.endsWith(artifactSuffix) && e.includes(pkgVersion));
   if (versioned.length > 0) return versioned[0];
-  const any = entries.filter((e) => e.endsWith(zipSuffix));
+  const any = entries.filter((e) => e.endsWith(artifactSuffix));
   if (any.length > 0) return any[0];
   return null;
 }
 
-const zipName = findUpdaterZip();
-if (!zipName) {
+const artifactName = findUpdaterArtifact();
+if (!artifactName) {
   console.error(
-    `[build-latest-json] no *${zipSuffix} found in ${bundleDir}\n` +
-      `  Tauri's updater needs the zipped installer artifact. Check\n` +
-      `  src-tauri/tauri.conf.json -> bundle.${bundleFormat}.updater = true.`,
+    `[build-latest-json] no *${artifactSuffix} found in ${bundleDir}\n` +
+      `  'tauri build' must run with bundle.createUpdaterArtifacts = true and\n` +
+      `  TAURI_SIGNING_PRIVATE_KEY set so the signed installer is emitted.`,
   );
   process.exit(1);
 }
 
-const sigName = zipName + ".sig";
+const sigName = artifactName + ".sig";
 const sigPath = join(bundleDir, sigName);
 if (!existsSync(sigPath)) {
   console.error(
@@ -272,7 +273,7 @@ const notes = readNotes(pkgVersion);
 // channel, platforms. V8 preserves insertion order for string keys, so we just
 // add fields in that order conditionally.
 // -----------------------------------------------------------------------------
-const url = `https://github.com/${repoSlug}/releases/download/v${pkgVersion}/${basename(zipName)}`;
+const url = `https://github.com/${repoSlug}/releases/download/v${pkgVersion}/${basename(artifactName)}`;
 
 const latest = {};
 latest.version = pkgVersion;

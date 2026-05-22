@@ -14,13 +14,55 @@
 }
 
 /* --- Tab strip ------------------------------------------------------------ */
+/* #202: the strip row holds the "← Home" button, the tablist and the file
+ * name — folding the former standalone toolbar row into the ribbon. */
+.ribbon__strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 2px 6px 0;
+  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--coco-border);
+}
+
+.ribbon__home-btn {
+  appearance: none;
+  flex-shrink: 0;
+  margin-bottom: 2px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--coco-text);
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ribbon__home-btn:hover {
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-text-faint);
+}
+
 .ribbon__tablist {
   display: flex;
   align-items: flex-end;
   gap: 2px;
-  padding: 2px 6px 0;
-  background-color: var(--coco-surface);
-  border-bottom: 1px solid var(--coco-border);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ribbon__filename {
+  flex-shrink: 1;
+  margin-bottom: 3px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--coco-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
 }
 
 .ribbon__tab {
@@ -75,7 +117,9 @@
 }
 
 /* Buttons stack vertically (3 small per column) and wrap into new columns;
- * a large button occupies the full 3-row height in one column (#200). */
+ * a large button occupies the full 3-row height in one column (#200).
+ * #202: no `max-width` — the group is exactly as wide as its columns of
+ * buttons, so icon-only buttons let every tab fit without horizontal scroll. */
 .ribbon__group-buttons {
   display: flex;
   flex-direction: column;
@@ -83,7 +127,6 @@
   align-content: flex-start;
   gap: 2px;
   height: 72px;
-  max-width: 320px;
 }
 
 .ribbon__group-label {
@@ -142,6 +185,21 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Icon-only small button (#202): no label, a near-square ~26px hit target.
+ * Excel renders B/I/U, alignment and number-symbol controls this way, which
+ * shrinks the per-button width from ~150px to ~26px and lets every tab fit a
+ * normal window without horizontal scrolling. */
+.ribbon-btn--small.ribbon-btn--icon-only {
+  min-width: 0;
+  width: 26px;
+  justify-content: center;
+  padding: 2px;
+}
+
+.ribbon-btn--small.ribbon-btn--icon-only .ribbon-btn__icon {
+  width: auto;
 }
 
 /* Large: tall vertical button — big icon above, label below. Spans the full

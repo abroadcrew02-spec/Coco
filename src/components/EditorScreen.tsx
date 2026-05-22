@@ -6580,6 +6580,13 @@ export default function EditorScreen() {
       } else if (mod && !e.shiftKey && e.key === "s") {
         e.preventDefault();
         save();
+      } else if (mod && !e.shiftKey && (e.key === "p" || e.key === "P")) {
+        // Ctrl+P / Cmd+P — print preview. Previously bound only via the native
+        // menu accelerator (#202 removed the native menu); handled here so the
+        // shortcut keeps opening Coco's in-app preview instead of the WebView's
+        // default browser print.
+        e.preventDefault();
+        openQuickPrintDialog();
       } else if (mod && e.key === "F3") {
         e.preventDefault();
         openNamedRangesDialog();
@@ -6617,6 +6624,7 @@ export default function EditorScreen() {
     [
       save,
       promptSaveAs,
+      openQuickPrintDialog,
       openNamedRangesDialog,
       openCfDialog,
       openHyperlinkDialog,
@@ -8219,7 +8227,7 @@ export default function EditorScreen() {
   );
 
   const fileName = currentHandle?.path
-    ? currentHandle.path.split(/[\\/]/).pop()
+    ? currentHandle.path.split(/[\\/]/).pop() ?? "無題のワークブック"
     : currentHandle?.sourceType === "xlsx"
     ? "xlsx 由来（未保存）"
     : "無題のワークブック";
@@ -8250,33 +8258,16 @@ export default function EditorScreen() {
     <div className="editor-screen">
       {/* #177: ARIA live regions for screen-reader announcements. */}
       <LiveRegion />
-      <div
-        className="editor-toolbar"
-        role="toolbar"
-        aria-label={t("a11y.label.toolbar")}
-      >
-        <div className="editor-toolbar__left">
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={goHomeAfterConfirm}
-            title={t("a11y.label.goHome")}
-            aria-label={t("a11y.label.goHome")}
-          >
-            {t("toolbar.home")}
-          </button>
-          <span
-            className="editor-toolbar__filename"
-            title={currentHandle?.path ?? undefined}
-          >
-            {fileLabel}
-          </span>
-        </div>
-      </div>
-      {/* #198: Excel-like ribbon — replaces the flat toolbar's per-feature
-          buttons. The native menu bar (src-tauri) stays as a parallel surface.
-          The Name Box lives in the formula bar below. */}
-      <Ribbon onUniverAction={handleUniverAction} />
+      {/* #198 / #202: Excel-like ribbon — replaces the flat toolbar's
+          per-feature buttons and the removed native menu bar. The "← Home"
+          navigation and file name are folded into the ribbon's tab strip
+          (one row saved). The Name Box lives in the formula bar below. */}
+      <Ribbon
+        onUniverAction={handleUniverAction}
+        onGoHome={goHomeAfterConfirm}
+        fileLabel={fileLabel}
+        filePath={currentHandle?.path ?? undefined}
+      />
       <FormulaBar
         activeSheetName={navActiveSheetName}
         activeCellRef={navActiveCellRef}

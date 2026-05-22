@@ -9,8 +9,28 @@ import { EDITOR_COMMAND_IDS } from "../../hooks/useMenuActions";
 import {
   RIBBON_TABS,
   ribbonEditorCommandIds,
+  ribbonMenuActionIds,
   type RibbonButtonDef,
 } from "./ribbonDefs";
+
+// #202: the menu-only ids `useMenuActions` dispatches via its own switch
+// (everything not in EDITOR_COMMAND_IDS). The File tab's `menuAction` buttons
+// must target one of these so file/store operations still work.
+const MENU_ACTION_IDS = new Set([
+  "new",
+  "open",
+  "save",
+  "save-as",
+  "export-xlsx",
+  "export-csv",
+  "export-html",
+  "export-pdf",
+  "export-workspace-bundle",
+  "import-workspace-bundle",
+  "settings",
+  "help",
+  "close",
+]);
 
 function allButtons(): RibbonButtonDef[] {
   return RIBBON_TABS.flatMap((tab) => tab.groups.flatMap((g) => g.buttons));
@@ -26,6 +46,13 @@ describe("ribbonDefs — command id integrity", () => {
 
   it("references at least one editor command", () => {
     expect(ribbonEditorCommandIds().length).toBeGreaterThan(0);
+  });
+
+  it("every menuAction button targets an id useMenuActions dispatches (#202)", () => {
+    const unknown = ribbonMenuActionIds().filter(
+      (id) => !MENU_ACTION_IDS.has(id),
+    );
+    expect(unknown).toEqual([]);
   });
 });
 
@@ -45,14 +72,16 @@ describe("ribbonDefs — structural integrity", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("exposes the six Excel-style tabs in order", () => {
+  it("exposes the Excel-style tabs in order, File first (#202)", () => {
     expect(RIBBON_TABS.map((t) => t.id)).toEqual([
+      "file",
       "home",
       "insert",
       "formulas",
       "data",
       "review",
       "view",
+      "tools",
     ]);
   });
 
@@ -70,6 +99,9 @@ describe("ribbonDefs — structural integrity", () => {
       if (btn.action.kind === "editorCommand") {
         expect(typeof btn.action.commandId).toBe("string");
         expect(btn.action.commandId.length).toBeGreaterThan(0);
+      } else if (btn.action.kind === "menuAction") {
+        expect(typeof btn.action.menuId).toBe("string");
+        expect(btn.action.menuId.length).toBeGreaterThan(0);
       } else {
         expect(btn.action.kind).toBe("univer");
         expect(typeof btn.action.op).toBe("string");

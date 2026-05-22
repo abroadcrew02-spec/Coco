@@ -43,58 +43,9 @@
   white-space: pre-wrap;
 }
 
-/* Top quick toolbar */
-.editor-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 4px 10px;
-  background-color: var(--coco-surface);
-  border-bottom: 1px solid var(--coco-border);
-  flex-shrink: 0;
-  min-height: 34px;
-  flex-wrap: wrap;
-}
-
-.editor-toolbar__left,
-.editor-toolbar__right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* Logical group inside the toolbar (e.g. "編集" / "挿入"). Visually a tight
-   cluster of buttons separated from neighboring groups by .toolbar-divider. */
-.toolbar-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* Vertical separator between toolbar groups. Aria-hidden in the DOM since
-   the group landmark already communicates the boundary to assistive tech. */
-.toolbar-divider {
-  display: inline-block;
-  width: 1px;
-  height: 22px;
-  background-color: var(--coco-border-strong);
-  margin: 0 2px;
-  flex-shrink: 0;
-}
-
-.editor-toolbar__filename {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--coco-text);
-  margin-left: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 360px;
-}
-
+/* #202: the standalone quick toolbar was removed — "← Home" and the file name
+   now live in the ribbon's tab strip. `.toolbar-btn` is kept: still used by the
+   editor init-error fallback and the script editor dialog. */
 .toolbar-btn {
   padding: 4px 10px;
   font-size: 12px;

@@ -23,7 +23,7 @@
 import { useCallback, useRef, useState } from "react";
 import { t } from "../../i18n/locale";
 import type { RibbonAction, RibbonButtonDef } from "./ribbonDefs";
-import RibbonDropdown from "./RibbonDropdown";
+import RibbonDropdown, { type DropdownCloseReason } from "./RibbonDropdown";
 
 interface Props {
   def: RibbonButtonDef;
@@ -53,9 +53,14 @@ export default function RibbonButton({
   const wrapRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  const closeDropdown = useCallback(() => {
+  // Close the dropdown. Focus returns to the trigger only when the popover
+  // closed via the keyboard (Esc) or by selecting an item (#203 M1) — for an
+  // outside click or a Tab away, leave focus wherever the user moved it.
+  const closeDropdown = useCallback((reason: DropdownCloseReason) => {
     setOpen(false);
-    triggerRef.current?.focus();
+    if (reason === "esc" || reason === "select") {
+      triggerRef.current?.focus();
+    }
   }, []);
 
   const handleSelect = useCallback(
@@ -106,6 +111,7 @@ export default function RibbonButton({
       {hasDropdown && open && (
         <RibbonDropdown
           def={def}
+          triggerRef={triggerRef}
           onSelect={handleSelect}
           onClose={closeDropdown}
         />

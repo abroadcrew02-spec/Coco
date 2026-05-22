@@ -158,7 +158,10 @@ describe("Ribbon — dropdown buttons (#202 Phase 3)", () => {
     renderRibbon();
     fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
     fireEvent.click(fontColorButton());
-    const swatches = screen.getAllByRole("menuitemradio");
+    // #203 m1: swatches are plain `menuitem`s (action triggers, not radios).
+    const swatches = screen
+      .getAllByRole("menuitem")
+      .filter((el) => el.classList.contains("ribbon-dropdown__swatch"));
     expect(swatches.length).toBeGreaterThan(0);
     fireEvent.click(swatches[1]);
     expect(onUniverAction).toHaveBeenCalledTimes(1);
@@ -172,7 +175,10 @@ describe("Ribbon — dropdown buttons (#202 Phase 3)", () => {
     renderRibbon();
     fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
     fireEvent.click(fontColorButton());
-    fireEvent.click(screen.getAllByRole("menuitemradio")[0]);
+    const swatch = screen
+      .getAllByRole("menuitem")
+      .find((el) => el.classList.contains("ribbon-dropdown__swatch"))!;
+    fireEvent.click(swatch);
     expect(screen.queryByRole("menu")).toBeNull();
     expect(fontColorButton().getAttribute("aria-expanded")).toBe("false");
   });
@@ -202,5 +208,92 @@ describe("Ribbon — dropdown buttons (#202 Phase 3)", () => {
     expect(evt.detail).toBe("format-currency");
     expect(screen.queryByRole("menu")).toBeNull();
     window.removeEventListener("coco:editor-command", handler);
+  });
+});
+
+describe("Ribbon — dropdown bug fixes (#203)", () => {
+  function fontColorButton() {
+    return screen.getByRole("button", { name: /font color|フォントの色/i });
+  }
+
+  // #203 C1: re-clicking the trigger of an open dropdown must close it. The
+  // outside-pointerdown listener must treat the trigger as "not outside" so it
+  // doesn't close-then-reopen on the following click.
+  it("re-clicking the trigger of an open dropdown closes it (C1)", () => {
+    renderRibbon();
+    fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
+    const btn = fontColorButton();
+    fireEvent.click(btn);
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("menu")).toBeTruthy();
+    // Re-click: the real browser sequence is pointerdown (capture) then click.
+    fireEvent.pointerDown(btn);
+    fireEvent.click(btn);
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  // #203 M1: an outside click closes the popover but must NOT yank focus back
+  // to the trigger — focus should land wherever the user clicked.
+  it("an outside click closes the popover without restoring trigger focus (M1)", () => {
+    renderRibbon();
+    fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
+    const btn = fontColorButton();
+    fireEvent.click(btn);
+    expect(screen.getByRole("menu")).toBeTruthy();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).not.toBe(btn);
+  });
+
+  // #203 M1 (counterpart): Escape DOES restore focus to the trigger.
+  it("Escape closes the popover and restores trigger focus (M1)", () => {
+    renderRibbon();
+    fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
+    const btn = fontColorButton();
+    fireEvent.click(btn);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(btn);
+  });
+
+  // #203 M2: the color palette must not nest a non-menuitem inside role="menu".
+  // The native <input type=color> is replaced by a `menuitem` button.
+  it("the 'more colors' control is a menuitem, not a raw color input (M2)", () => {
+    renderRibbon();
+    fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
+    fireEvent.click(fontColorButton());
+    const more = screen.getByRole("menuitem", {
+      name: /more colors|その他の色/i,
+    });
+    expect(more.tagName).toBe("BUTTON");
+    // No raw color input participates in the menu's accessibility tree.
+    const menu = screen.getByRole("menu");
+    expect(menu.querySelectorAll('input[type="color"]:not([aria-hidden])'))
+      .toHaveLength(0);
+  });
+
+  // #203 M3: Tab closes the dropdown so it isn't left orphaned-open.
+  it("Tab closes the dropdown (M3)", () => {
+    renderRibbon();
+    fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
+    fireEvent.click(fontColorButton());
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Tab" });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  // #203 m1/m2: swatches are `menuitem` (not `menuitemradio`) and grouped.
+  it("color swatches are menuitems wrapped in a role=group (m1/m2)", () => {
+    renderRibbon();
+    fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
+    fireEvent.click(fontColorButton());
+    expect(screen.queryAllByRole("menuitemradio")).toHaveLength(0);
+    const swatches = screen
+      .getAllByRole("menuitem")
+      .filter((el) => el.classList.contains("ribbon-dropdown__swatch"));
+    expect(swatches.length).toBeGreaterThan(0);
+    expect(swatches[0].getAttribute("aria-checked")).toBeNull();
+    // The swatch grid itself carries role=group inside the menu.
+    expect(swatches[0].closest('[role="group"]')).not.toBeNull();
   });
 });

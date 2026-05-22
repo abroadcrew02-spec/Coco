@@ -19,13 +19,12 @@
 // validation. `validate_ws_url` accepts `ws`/`wss` (and `http`/`https` for
 // SSE) but applies the identical SSRF predicate against the *hostname* so a
 // literal loopback / link-local / private-range / cloud-metadata target is
-// rejected. Note this is a hostname-based allow-list / SSRF check: it does
-// NOT defend against DNS rebinding, where the host validates fine but an
-// attacker-controlled DNS re-resolves the name to an internal IP at connect
-// time (the validation and the actual socket connect resolve the host
-// independently — a TOCTOU gap). This is a known residual risk inherited
-// from `http_fetch`; a real fix (resolve once, then connect to the pinned
-// IP) is tracked separately.
+// rejected. The host-based check is then backed by a post-resolution IP
+// screen (issue #195): `resolve_and_screen` resolves the host once, rejects
+// the request if any A/AAAA record is an internal address, and the actual
+// connection is pinned to those screened IPs — so an attacker-controlled DNS
+// cannot rebind an allow-listed name to 127.0.0.1 / 169.254.169.254 / a
+// private range between validation and connect (the DNS-rebinding TOCTOU).
 // Additional DoS defences specific to long-lived connections:
 //   - a hard cap on the number of *concurrent* connections (`MAX_CONNECTIONS`),
 //   - a per-message size cap (`MAX_MESSAGE_BYTES`) on both directions,
@@ -48,7 +47,9 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::protocol::{Message as WsMessage, WebSocketConfig};
 use url::{Host, Url};
 
-use crate::commands::http_fetch::{parse_allowed_domains, host_matches, ALLOWED_DOMAINS_KEY};
+use crate::commands::http_fetch::{
+    host_matches, parse_allowed_domains, resolve_and_screen, ALLOWED_DOMAINS_KEY,
+};
 use crate::db::app_db::open_app_db_at;
 
 /// Event emitted for every inbound WebSocket message.
@@ -582,6 +583,20 @@ pub async fn ws_connect(
     validate_headers(&hdrs)?;
     validate_subprotocols(&protos)?;
 
+    // #195: resolve + screen the host before any socket opens. tokio-tungstenite
+    // has no `resolve_to_addrs`, so we resolve here and connect the TCP socket
+    // ourselves below to a screened IP — closing the DNS-rebinding TOCTOU.
+    let host = parsed
+        .host_str()
+        .ok_or("WS_FETCH_INVALID_URL".to_string())?
+        .to_ascii_lowercase();
+    let port = parsed
+        .port_or_known_default()
+        .ok_or("WS_FETCH_INVALID_URL".to_string())?;
+    let addrs = resolve_and_screen(&host, port)
+        .await
+        .map_err(|e| e.tag().to_string())?;
+
     // Reserve a slot — fails closed at the concurrency cap (DoS defence).
     let registry = registry.inner().clone();
     let (conn_id, outbound) = registry.register_ws().map_err(|e| match e {
@@ -598,14 +613,37 @@ pub async fn ws_connect(
     };
 
     // Establish the connection up front (bounded by CONNECT_TIMEOUT_SECS) so
-    // the command can report a handshake failure synchronously. The config
-    // caps inbound message/frame size so an oversize frame fails as a
-    // protocol error on read rather than exhausting memory (see C1).
-    let connect = tokio_tungstenite::connect_async_with_config(
-        request,
-        Some(ws_socket_config()),
-        false,
-    );
+    // the command can report a handshake failure synchronously.
+    //
+    // #195: unlike reqwest, tokio-tungstenite cannot pin a resolved IP, so we
+    // open the TCP socket ourselves to one of the screened `addrs` and hand
+    // the *connected* stream to `client_async_tls_with_config`. The WS `Host`
+    // header and the TLS SNI both derive from the upgrade `Request` (the
+    // allow-listed domain), not from the socket peer — so pinning the socket
+    // to a screened IP does not break TLS validation. Passing `None` as the
+    // connector reuses tungstenite's default webpki-roots TLS config (wired
+    // via the `rustls-tls-webpki-roots` feature); for a plain `ws://` URL
+    // tungstenite skips TLS entirely. The config caps inbound message/frame
+    // size so an oversize frame fails as a protocol error on read (see C1).
+    let connect = async {
+        let tcp = tokio::net::TcpStream::connect(&addrs[..])
+            .await
+            .map_err(|e| {
+                log::warn!("ws_connect tcp connect failed: {}", e);
+                "WS_FETCH_CONNECT_FAILED".to_string()
+            })?;
+        tokio_tungstenite::client_async_tls_with_config(
+            request,
+            tcp,
+            Some(ws_socket_config()),
+            None,
+        )
+        .await
+        .map_err(|e| {
+            log::warn!("ws_connect handshake failed: {}", e);
+            "WS_FETCH_CONNECT_FAILED".to_string()
+        })
+    };
     let stream = match tokio::time::timeout(
         Duration::from_secs(CONNECT_TIMEOUT_SECS),
         connect,
@@ -613,10 +651,9 @@ pub async fn ws_connect(
     .await
     {
         Ok(Ok((stream, _resp))) => stream,
-        Ok(Err(e)) => {
-            log::warn!("ws_connect handshake failed: {}", e);
+        Ok(Err(tag)) => {
             registry.unregister(conn_id);
-            return Err("WS_FETCH_CONNECT_FAILED".to_string());
+            return Err(tag);
         }
         Err(_) => {
             log::warn!("ws_connect handshake timed out");
@@ -864,6 +901,19 @@ pub async fn sse_connect(
         validate_ws_url(&url, Transport::Sse, &allowed).map_err(|e| e.tag().to_string())?;
     validate_headers(&hdrs)?;
 
+    // #195: resolve + screen the host before reserving a slot; the screened
+    // IPs are pinned onto the reqwest client in `run_sse`.
+    let host = parsed
+        .host_str()
+        .ok_or("WS_FETCH_INVALID_URL".to_string())?
+        .to_ascii_lowercase();
+    let port = parsed
+        .port_or_known_default()
+        .ok_or("WS_FETCH_INVALID_URL".to_string())?;
+    let addrs = resolve_and_screen(&host, port)
+        .await
+        .map_err(|e| e.tag().to_string())?;
+
     let registry = registry.inner().clone();
     let (conn_id, close_rx) = registry.register_sse().map_err(|e| match e {
         RegisterError::TooManyConnections => "WS_FETCH_TOO_MANY_CONNECTIONS".to_string(),
@@ -875,7 +925,7 @@ pub async fn sse_connect(
             registry,
             id: conn_id,
         };
-        let result = run_sse(&app_for_task, conn_id, parsed, hdrs, close_rx).await;
+        let result = run_sse(&app_for_task, conn_id, parsed, hdrs, close_rx, host, addrs).await;
         if let Err(tag) = result {
             emit_event(&app_for_task, SSE_EVENT, SseEvent {
                 conn_id,
@@ -900,11 +950,17 @@ async fn run_sse(
     parsed: Url,
     headers: HashMap<String, String>,
     mut close_rx: mpsc::UnboundedReceiver<()>,
+    host: String,
+    addrs: Vec<std::net::SocketAddr>,
 ) -> Result<(), String> {
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
         // Redirects disabled — a 3xx could bounce off the allow list.
+        // NOTE: `resolve_to_addrs` pins the connection to the IPs screened by
+        // `resolve_and_screen` (#195). This is sound only because redirects
+        // are off — re-enabling them would require re-screening each hop.
         .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(&host, &addrs)
         .build()
         .map_err(|e| {
             log::warn!("sse_connect client build failed: {}", e);

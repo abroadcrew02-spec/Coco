@@ -437,7 +437,11 @@ function castCell(v: CellScalar, to: CastType): CellScalar {
       if (typeof v === "number") return v;
       const s = String(v ?? "").trim();
       if (s === "") return v;
-      const ms = Date.parse(s);
+      // A bare `YYYY-MM-DD` / `YYYY/MM/DD` string is parsed by Date.parse in
+      // LOCAL time for non-ISO forms, drifting the serial by a day across
+      // timezones. Parse such date-only strings as UTC for a stable result.
+      const m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/.exec(s);
+      const ms = m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : Date.parse(s);
       if (Number.isNaN(ms)) return v;
       // Excel epoch: 1899-12-30. 86400000 ms per day.
       return Math.round((ms / 86400000 + 25569) * 1e6) / 1e6;
@@ -575,6 +579,26 @@ export function describeStep(step: EtlStep): string {
 
 // --- Phase 4: SQLite query sanity check -----------------------------------
 
+/** Scan for a statement-separating `;` that lies OUTSIDE a single-quoted
+ *  string literal. SQLite escapes an embedded quote as `''`. A blunt
+ *  `.includes(";")` would flag `SELECT ';' AS x` as multi-statement. */
+function hasStatementSeparator(sql: string): boolean {
+  let inStr = false;
+  for (let i = 0; i < sql.length; i++) {
+    const c = sql[i];
+    if (c === "'") {
+      if (inStr && sql[i + 1] === "'") {
+        i++;
+      } else {
+        inStr = !inStr;
+      }
+    } else if (c === ";" && !inStr) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Lightweight guard rejecting obvious non-SELECT statements before they
  *  reach the backend. The backend opens the DB read-only so writes fail
  *  anyway — this just gives the user a clearer error sooner. Returns null
@@ -594,7 +618,7 @@ export function validateSqliteQuery(query: string): string | null {
   // Reject statement-chaining that could smuggle a write past the prefix check.
   // A trailing semicolon is fine; an embedded one followed by more SQL is not.
   const body = withoutComments.replace(/;\s*$/, "");
-  if (body.includes(";")) {
+  if (hasStatementSeparator(body)) {
     return "複数ステートメントは実行できません";
   }
   return null;

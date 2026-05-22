@@ -19,7 +19,7 @@
 //   responses, WebSocket/SSE, response cache.
 
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::time::Duration;
 
@@ -147,6 +147,84 @@ pub fn validate_url(url_str: &str, allowed: &[String]) -> Result<Url, UrlCheckEr
     Ok(parsed)
 }
 
+/// True if `ip` is an internal / dangerous address that a fetch must never
+/// reach. This is the *post-resolution* SSRF screen — `validate_url` only sees
+/// the hostname, which an attacker-controlled DNS can rebind to one of these
+/// addresses between validation and connect (issue #195, DNS rebinding /
+/// TOCTOU). Every resolved address is run through this predicate and a single
+/// blocked address fails the whole request closed.
+pub(crate) fn is_blocked_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                // 169.254.0.0/16 — link-local, also the cloud-metadata range.
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_multicast()
+                || v4.is_documentation()
+                // 0.0.0.0/8 — "this network"; some stacks route 0.x to local.
+                || v4.octets()[0] == 0
+                // 100.64.0.0/10 — CGNAT (RFC 6598), routable to ISP infra.
+                || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64)
+                // 192.0.0.0/24 — IETF protocol assignments.
+                || (v4.octets()[0] == 192 && v4.octets()[1] == 0 && v4.octets()[2] == 0)
+        }
+        IpAddr::V6(v6) => {
+            // An IPv4-mapped address (::ffff:0:0/96) must be screened as the
+            // embedded v4 — `::ffff:127.0.0.1` is loopback in disguise.
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_blocked_ip(&IpAddr::V4(mapped));
+            }
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                // fc00::/7 — unique-local addresses.
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                // fe80::/10 — link-local.
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// Resolve `host:port` (A + AAAA records) and screen every resolved address
+/// with `is_blocked_ip`. Fail-closed: an empty result, a lookup error/timeout
+/// or *any* blocked address rejects the whole request. The returned
+/// `Vec<SocketAddr>` is then pinned onto the HTTP/WS client so the real
+/// connection can only reach the screened IPs — closing the DNS-rebinding
+/// TOCTOU gap (issue #195).
+pub(crate) async fn resolve_and_screen(
+    host: &str,
+    port: u16,
+) -> Result<Vec<SocketAddr>, UrlCheckError> {
+    // Bound the lookup so a stalling DNS server cannot hang the request.
+    let lookup = tokio::time::timeout(
+        Duration::from_secs(REQUEST_TIMEOUT_SECS),
+        tokio::net::lookup_host((host, port)),
+    )
+    .await;
+    let addrs: Vec<SocketAddr> = match lookup {
+        Ok(Ok(iter)) => iter.collect(),
+        Ok(Err(e)) => {
+            log::warn!("resolve_and_screen lookup failed: {}", e);
+            return Err(UrlCheckError::BlockedHost);
+        }
+        Err(_) => {
+            log::warn!("resolve_and_screen lookup timed out");
+            return Err(UrlCheckError::BlockedHost);
+        }
+    };
+    if addrs.is_empty() {
+        return Err(UrlCheckError::BlockedHost);
+    }
+    if addrs.iter().any(|a| is_blocked_ip(&a.ip())) {
+        log::warn!("resolve_and_screen rejected: host resolved to a blocked IP");
+        return Err(UrlCheckError::BlockedHost);
+    }
+    Ok(addrs)
+}
+
 /// HTTP method whitelist: keep MVP scope to GET and POST per issue spec.
 fn parse_method(method: &str) -> Result<reqwest::Method, String> {
     match method.to_ascii_uppercase().as_str() {
@@ -223,11 +301,32 @@ pub async fn http_fetch_core(
         return Err("URL_FETCH_GET_WITH_BODY".to_string());
     }
 
+    // #195: resolve the host *now* and screen every resolved IP, then pin the
+    // client to those addresses so the connect cannot re-resolve to an
+    // internal IP (DNS rebinding / TOCTOU). `validate_url` only checked the
+    // hostname.
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| UrlCheckError::InvalidUrl.tag().to_string())?
+        .to_ascii_lowercase();
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| UrlCheckError::InvalidUrl.tag().to_string())?;
+    let addrs = resolve_and_screen(&host, port)
+        .await
+        .map_err(|e| e.tag().to_string())?;
+
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
         // Disable redirects: a 302 could otherwise bounce us off the allow
         // list (e.g. to 169.254.169.254). Callers can re-fetch the Location.
+        // NOTE: `resolve_to_addrs` below pins the connection to the screened
+        // IPs and is correct *only* because redirects are off — a redirect
+        // target would carry a different host the pin does not cover. If
+        // redirects are ever re-enabled, the resolve+screen+pin must be
+        // re-applied per redirect hop.
         .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(&host, &addrs)
         .build()
         .map_err(|e| {
             log::warn!("http_fetch client build failed: {}", e);
@@ -335,11 +434,27 @@ async fn oauth_client_credentials_token(
         .as_deref()
         .ok_or("URL_FETCH_OAUTH_MISCONFIGURED")?;
     // The token endpoint must itself be on the allow list — no SSRF escape.
-    validate_url(token_url, allowed).map_err(|e| e.tag().to_string())?;
+    let parsed = validate_url(token_url, allowed).map_err(|e| e.tag().to_string())?;
+
+    // #195: resolve + screen the token endpoint host and pin the client to the
+    // screened IPs (same DNS-rebinding defence as `http_fetch_core`).
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| UrlCheckError::InvalidUrl.tag().to_string())?
+        .to_ascii_lowercase();
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| UrlCheckError::InvalidUrl.tag().to_string())?;
+    let addrs = resolve_and_screen(&host, port)
+        .await
+        .map_err(|e| e.tag().to_string())?;
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        // Redirects off (see the note in `http_fetch_core`): the IP pin below
+        // is only sound while no redirect can change the target host.
         .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(&host, &addrs)
         .build()
         .map_err(|e| {
             log::warn!("oauth client build failed: {}", e);
@@ -567,6 +682,58 @@ mod tests {
         let mut empty = HashMap::new();
         empty.insert("  ".into(), "v".into());
         assert!(validate_headers(&empty).is_err());
+    }
+
+    #[test]
+    fn is_blocked_ip_rejects_internal_v4_ranges() {
+        for ip in [
+            "127.0.0.1",        // loopback
+            "127.1.2.3",        // loopback /8
+            "10.0.0.1",         // private
+            "192.168.1.1",      // private
+            "172.16.0.1",       // private
+            "169.254.169.254",  // link-local — cloud metadata
+            "0.0.0.0",          // unspecified / 0.0.0.0/8
+            "0.1.2.3",          // 0.0.0.0/8
+            "100.64.0.1",       // CGNAT
+            "192.0.0.1",        // IETF protocol assignments
+            "224.0.0.1",        // multicast
+            "255.255.255.255",  // broadcast
+        ] {
+            let parsed: IpAddr = ip.parse().unwrap();
+            assert!(is_blocked_ip(&parsed), "{} must be blocked", ip);
+        }
+    }
+
+    #[test]
+    fn is_blocked_ip_rejects_internal_v6_ranges() {
+        for ip in [
+            "::1",                       // loopback
+            "::",                        // unspecified
+            "fc00::1",                   // unique-local
+            "fdff::abcd",                // unique-local
+            "fe80::1",                   // link-local
+            "ff02::1",                   // multicast
+            "::ffff:127.0.0.1",          // IPv4-mapped loopback
+            "::ffff:169.254.169.254",    // IPv4-mapped metadata
+        ] {
+            let parsed: IpAddr = ip.parse().unwrap();
+            assert!(is_blocked_ip(&parsed), "{} must be blocked", ip);
+        }
+    }
+
+    #[test]
+    fn is_blocked_ip_allows_public_addresses() {
+        for ip in [
+            "8.8.8.8",                   // public v4
+            "1.1.1.1",                   // public v4
+            "93.184.216.34",             // public v4 (example.com)
+            "2606:2800:220:1:248:1893:25c8:1946", // public v6 (example.com)
+            "::ffff:8.8.8.8",            // IPv4-mapped public — must pass
+        ] {
+            let parsed: IpAddr = ip.parse().unwrap();
+            assert!(!is_blocked_ip(&parsed), "{} must be allowed", ip);
+        }
     }
 
     #[test]

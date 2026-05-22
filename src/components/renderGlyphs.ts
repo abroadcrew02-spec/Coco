@@ -83,6 +83,36 @@ export const ICONSET_MULTI_PREFIXES: readonly string[] = [
   "★☆☆☆☆ ", // ★☆☆☆☆ + space
 ];
 
+/** Checkbox glyphs — must match `CHECKBOX_CHECKED` / `CHECKBOX_UNCHECKED` in
+ *  `checkboxRender.ts`. The checkbox patch writes these into the cell's `p`
+ *  (rich-text) field, never `.v`. */
+export const CHECKBOX_GLYPHS = new Set<string>([
+  "☑", // ☑ BALLOT BOX WITH CHECK (checked)
+  "☐", // ☐ BALLOT BOX (unchecked)
+]);
+
+/** Form-control glyphs — must match `RADIO_SELECTED` / `RADIO_UNSELECTED` /
+ *  `SPIN_GLYPH` / `SCROLL_GLYPH` in `formControlRender.ts`. The form-control
+ *  patch writes these into the cell's `p` (rich-text) field, never `.v`.
+ *  Multi-character glyph strings (`▲▼`, `◀▮▶`) decompose into their leading
+ *  code points so a first-codepoint check still recognizes them. */
+export const FORM_CONTROL_GLYPHS = new Set<string>([
+  "◉", // ◉ FISHEYE (radio selected)
+  "○", // ○ LARGE CIRCLE (radio unselected)
+  "▲", // ▲ leading glyph of SPIN_GLYPH "▲▼"
+  "▼", // ▼ trailing glyph of SPIN_GLYPH "▲▼"
+  "◀", // ◀ leading glyph of SCROLL_GLYPH "◀▮▶"
+  "▮", // ▮ middle glyph of SCROLL_GLYPH "◀▮▶"
+  "▶", // ▶ trailing glyph of SCROLL_GLYPH "◀▮▶"
+]);
+
+/** Union of every in-cell control glyph (checkbox + form control). These are
+ *  painted into the `p` rich-text field rather than `.v`. */
+export const CONTROL_GLYPHS_ALL = new Set<string>([
+  ...CHECKBOX_GLYPHS,
+  ...FORM_CONTROL_GLYPHS,
+]);
+
 /** Error-cell display prefix written by `patchErrorIndicators`. */
 export const ERROR_PREFIX = "⚠ "; // ⚠ + space
 
@@ -102,6 +132,7 @@ const SINGLE_GLYPH_DECORATION_SET: Set<string> = new Set<string>([
  *   - starts with the comment prefix "💬 ",
  *   - starts with the error prefix "⚠ ",
  *   - starts with an iconSet glyph (single-codepoint or 5-rating multi-char) followed by a space,
+ *   - starts with a checkbox / form-control glyph (☑ ☐ ◉ ○ ▲▼ ◀▮▶),
  *   - starts with "=" (a show-formulas replacement).
  *
  * Non-string / empty values return false.
@@ -128,6 +159,11 @@ export function hasKnownDecoration(value: unknown): boolean {
     // Sparkline glyph at position 0 (no trailing space required — sparkline
     // strings are pure-glyph runs of up to 8 bars).
     if (SPARKLINE_GLYPHS_ALL.has(firstStr)) return true;
+    // Checkbox / form-control glyph at position 0 (no trailing space required —
+    // a standalone checkbox/radio cell is just the glyph). The control patches
+    // paint these into the cell's `p` rich-text field; a later patch inspecting
+    // that dataStream must treat the cell as already decorated.
+    if (CONTROL_GLYPHS_ALL.has(firstStr)) return true;
   }
   return false;
 }

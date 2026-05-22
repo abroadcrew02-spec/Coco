@@ -478,6 +478,28 @@ pub fn data_connection_load_sqlite(
     load_sqlite(&db_path, &query, sheet_name.unwrap_or_else(|| "SQLite".to_string()))
 }
 
+/// Scan for a statement-separating `;` that lies OUTSIDE a single-quoted
+/// string literal. SQLite escapes an embedded quote as `''`. A blunt
+/// `contains(';')` would flag `SELECT ';' AS x` as multi-statement.
+fn has_statement_separator(sql: &str) -> bool {
+    let mut in_str = false;
+    let mut chars = sql.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => {
+                if in_str && chars.peek() == Some(&'\'') {
+                    chars.next();
+                } else {
+                    in_str = !in_str;
+                }
+            }
+            ';' if !in_str => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 /// Reject obvious non-SELECT / multi-statement input. Mirrors the frontend
 /// guard so a direct command invocation is still safe.
 fn check_sqlite_query(query: &str) -> Result<(), String> {
@@ -485,13 +507,28 @@ fn check_sqlite_query(query: &str) -> Result<(), String> {
     if trimmed.is_empty() {
         return Err("DATA_CONN_SQLITE_EMPTY_QUERY".to_string());
     }
-    let lower = trimmed.to_ascii_lowercase();
+    // Strip ONE leading line/block comment so `-- note\nSELECT ...` still
+    // passes, matching the frontend guard.
+    let stripped = if let Some(rest) = trimmed.strip_prefix("--") {
+        match rest.find('\n') {
+            Some(i) => rest[i + 1..].trim_start(),
+            None => "",
+        }
+    } else if let Some(rest) = trimmed.strip_prefix("/*") {
+        match rest.find("*/") {
+            Some(i) => rest[i + 2..].trim_start(),
+            None => "",
+        }
+    } else {
+        trimmed
+    };
+    let lower = stripped.to_ascii_lowercase();
     if !lower.starts_with("select") && !lower.starts_with("with") {
         return Err("DATA_CONN_SQLITE_NOT_SELECT".to_string());
     }
     // Allow a single trailing `;` only.
-    let body = trimmed.trim_end_matches(';');
-    if body.contains(';') {
+    let body = stripped.trim_end_matches(';');
+    if has_statement_separator(body) {
         return Err("DATA_CONN_SQLITE_MULTI_STATEMENT".to_string());
     }
     Ok(())

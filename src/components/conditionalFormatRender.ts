@@ -1,4 +1,5 @@
 import {
+  CONTROL_GLYPHS_ALL,
   hasKnownDecoration,
   ICONSET_GLYPHS,
   ICONSET_MULTI_PREFIXES,
@@ -530,6 +531,25 @@ export function evaluateIconSet(
   if (idx >= buckets) idx = buckets - 1;
   if (idx < 0) idx = 0;
   return set[idx];
+}
+
+/**
+ * True when the cell hosts an in-grid checkbox or form control. The checkbox
+ * (`checkboxRender.ts`) and form-control (`formControlRender.ts`) patches run
+ * earlier in the pipeline and paint their glyph into the cell's `p` rich-text
+ * field — never `.v` — so a `.v`-based decoration check cannot see them. We
+ * inspect `p.body.dataStream` and treat a leading control glyph (☑ ☐ ◉ ○ ▲▼
+ * ◀▮▶) as "already decorated". Returns false for any other / malformed `p`.
+ */
+function cellHostsControlGlyph(p: unknown): boolean {
+  if (!p || typeof p !== "object") return false;
+  const body = (p as { body?: unknown }).body;
+  if (!body || typeof body !== "object") return false;
+  const stream = (body as { dataStream?: unknown }).dataStream;
+  if (typeof stream !== "string" || stream.length === 0) return false;
+  const cp = stream.codePointAt(0);
+  if (cp === undefined) return false;
+  return CONTROL_GLYPHS_ALL.has(String.fromCodePoint(cp));
 }
 
 /**
@@ -1113,6 +1133,15 @@ export function patchCfRenders<T>(snapshot: T): T {
             //     the original #118A behavior so the higher-priority rule
             //     wins cleanly.
             if (text.startsWith("=")) continue;
+            // The checkbox / form-control patches (which run earlier in the
+            // pipeline) paint their glyph into the cell's `p` rich-text field,
+            // not `.v` — so `text` above never carries the control glyph.
+            // Detect that channel explicitly: when the host cell already shows
+            // a checkbox/radio/spin/scroll glyph, skip the iconSet glyph rather
+            // than prepend a second decoration. The CF rule's style fill still
+            // applies via the styleForRule path; only the in-cell glyph is
+            // suppressed (same policy as the `hasKnownDecoration` skip below).
+            if (cellHostsControlGlyph(existing.p)) continue;
             // Detect an overlapping iconSet glyph at the start so we can
             // strip-and-replace (the original #118A behavior — higher-priority
             // overlapping iconSet rule with a different iconStyle wins).

@@ -1578,6 +1578,7 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
     let mut has_vba = false;
     let mut has_embeddings = false;
     let mut has_drawings = false;
+    let mut has_form_controls = false;
     // Collect worksheet entry indices first; per-sheet content scans need a
     // mutable borrow of the archive that can't coexist with the iteration borrow.
     let mut worksheet_indices: Vec<usize> = Vec::new();
@@ -1603,6 +1604,9 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
         }
         if name.starts_with("xl/drawings/") || name.starts_with("xl/media/") {
             has_drawings = true;
+        }
+        if name.starts_with("xl/ctrlProps/") {
+            has_form_controls = true;
         }
         if name.starts_with("xl/worksheets/sheet") && name.ends_with(".xml") {
             worksheet_indices.push(i);
@@ -1690,6 +1694,14 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
             code: "XLSX_DRAWINGS_DISCARDED".to_string(),
             message: "図形・画像が含まれていますが、Coco では保持されません。保存時に失われます。"
                 .to_string(),
+            affected_sheets: None,
+        });
+    }
+    if has_form_controls {
+        warnings.push(CompatibilityWarning {
+            severity: "warning".to_string(),
+            code: "XLSX_FORM_CONTROLS_NOT_RENDERED".to_string(),
+            message: "フォームコントロール（チェックボックス・ラジオボタン・スピンボタン等）が検出されましたが、Coco では Excel の装飾として再現されません。リンクされたセルの値は読み込まれます。".to_string(),
             affected_sheets: None,
         });
     }

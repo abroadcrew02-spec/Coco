@@ -9,7 +9,7 @@ import {
   CustomCommandExecutionError,
   type IWorkbookData,
 } from "@univerjs/core";
-import { defaultTheme } from "@univerjs/design";
+import { defaultTheme, themeInstance } from "@univerjs/design";
 import { UniverRenderEnginePlugin } from "@univerjs/engine-render";
 import { UniverFormulaEnginePlugin } from "@univerjs/engine-formula";
 import { UniverUIPlugin } from "@univerjs/ui";
@@ -504,6 +504,18 @@ import { rectToA1 } from "../store/cameraRender";
 import { validateMutation, extractCellWrites } from "../store/dataValidation";
 import { getLocale, subscribeLocale, t } from "../i18n/locale";
 import { swapUniverLocale } from "./univerLocaleSwap";
+import {
+  getEffectiveTheme,
+  onThemeChanged,
+  subscribeSystemTheme,
+} from "../store/theme";
+import {
+  darkUniverTheme,
+  lightUniverTheme,
+  darkHeaderStyle,
+  lightHeaderStyle,
+  DARK_GRIDLINE_COLOR,
+} from "./univerDarkTheme";
 import ScriptEditorDialog from "./ScriptEditorDialog";
 import {
   type ScriptEntry,
@@ -4387,27 +4399,41 @@ export default function EditorScreen() {
     [applyMutatedSnapshot, loadDataConnectionFragment],
   );
 
+  // #196 item 1: serialize data-connection refreshes. Concurrent refreshes
+  // (two `onOpen` connections, or an interval tick overlapping a manual
+  // refresh) each re-read the SAME live `currentSnapshotJson` before either's
+  // `applyMutatedSnapshot` lands, so last-write-wins silently drops one
+  // connection's update. Chain every refresh through this promise queue so the
+  // read→apply→write critical section runs strictly one refresh at a time.
+  const refreshQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const handleDataConnectionRefresh = useCallback(
-    async (connectionId: string) => {
-      const liveBefore = useWorkbookStore.getState().currentSnapshotJson;
-      if (!liveBefore) throw new Error("ワークブックがありません");
-      const snapBefore = JSON.parse(liveBefore) as Record<string, unknown>;
-      const conn = listDataConnections(snapBefore).find((c) => c.id === connectionId);
-      if (!conn) throw new Error("接続が見つかりません");
-      const rawFragment = await loadDataConnectionFragment(conn);
-      // Re-parse the live snapshot AFTER the async load.
-      const liveAfter = useWorkbookStore.getState().currentSnapshotJson;
-      if (!liveAfter) throw new Error("ワークブックがありません");
-      const snapAfter = JSON.parse(liveAfter) as Record<string, unknown>;
-      const liveConn = listDataConnections(snapAfter).find((c) => c.id === connectionId);
-      if (!liveConn) throw new Error("接続が削除されています");
-      const fragment = transformDataConnFragment(rawFragment, liveConn.steps);
-      const { sheetId } = applyDataConnFragment(snapAfter, liveConn, fragment);
-      updateConnectionInSnapshot(snapAfter, connectionId, {
-        targetSheetId: sheetId,
-        lastRefreshedAt: Date.now(),
-      });
-      applyMutatedSnapshot(JSON.stringify(snapAfter));
+    (connectionId: string) => {
+      const doRefresh = async () => {
+        const liveBefore = useWorkbookStore.getState().currentSnapshotJson;
+        if (!liveBefore) throw new Error("ワークブックがありません");
+        const snapBefore = JSON.parse(liveBefore) as Record<string, unknown>;
+        const conn = listDataConnections(snapBefore).find((c) => c.id === connectionId);
+        if (!conn) throw new Error("接続が見つかりません");
+        const rawFragment = await loadDataConnectionFragment(conn);
+        // Re-parse the live snapshot AFTER the async load.
+        const liveAfter = useWorkbookStore.getState().currentSnapshotJson;
+        if (!liveAfter) throw new Error("ワークブックがありません");
+        const snapAfter = JSON.parse(liveAfter) as Record<string, unknown>;
+        const liveConn = listDataConnections(snapAfter).find((c) => c.id === connectionId);
+        if (!liveConn) throw new Error("接続が削除されています");
+        const fragment = transformDataConnFragment(rawFragment, liveConn.steps);
+        const { sheetId } = applyDataConnFragment(snapAfter, liveConn, fragment);
+        updateConnectionInSnapshot(snapAfter, connectionId, {
+          targetSheetId: sheetId,
+          lastRefreshedAt: Date.now(),
+        });
+        applyMutatedSnapshot(JSON.stringify(snapAfter));
+      };
+      const run = refreshQueueRef.current.then(() => doRefresh());
+      // Keep the chain alive on error so one failed refresh doesn't deadlock
+      // the queue; callers still observe the real rejection via `run`.
+      refreshQueueRef.current = run.catch(() => {});
+      return run;
     },
     [applyMutatedSnapshot, loadDataConnectionFragment],
   );
@@ -7592,6 +7618,71 @@ export default function EditorScreen() {
       const univer = univerRef.current;
       if (univer) swapUniverLocale(univer, locale);
     });
+  }, []);
+
+  // #193: dark-theme support for the Univer grid canvas.
+  //
+  // The shell chrome restyles via CSS tokens (issue #191), but Univer paints
+  // its grid / row+column headers / gridlines on a <canvas>, so it can't see
+  // those tokens. We drive Univer imperatively instead — modeled on the locale
+  // hot-swap above, so the editor never has to be re-mounted on a theme flip:
+  //
+  //   * `themeInstance.setTheme()` swaps Univer's UI-chrome CSS vars *and* the
+  //     empty-cell `bgColorSecondary` background.
+  //   * `customizeColumnHeader` / `customizeRowHeader` restyle the row/column
+  //     gutter (live re-render — calls `makeDirty(true)` internally).
+  //   * `setGridLinesColor` darkens the gridlines (`undefined` = light default).
+  //
+  // This effect also runs on mount, which re-applies the theming after a file
+  // open: opening a file re-mounts EditorScreen (App keys it by workbookId),
+  // re-running `createUnit`, and `customizeRowHeader` / `setGridLinesColor` do
+  // NOT persist across `createUnit` — so the on-mount apply is what keeps a
+  // freshly opened file correctly themed.
+  useEffect(() => {
+    const applyUniverTheme = (theme: "light" | "dark") => {
+      const fUniver = fUniverRef.current;
+      const root = containerRef.current;
+      const isDark = theme === "dark";
+      try {
+        if (root) {
+          themeInstance.setTheme(
+            root,
+            isDark ? darkUniverTheme : lightUniverTheme,
+          );
+        }
+        if (fUniver) {
+          fUniver.customizeColumnHeader({
+            headerStyle: isDark ? darkHeaderStyle : lightHeaderStyle,
+          });
+          fUniver.customizeRowHeader({
+            headerStyle: isDark ? darkHeaderStyle : lightHeaderStyle,
+          });
+          fUniver
+            .getActiveWorkbook()
+            ?.getActiveSheet()
+            ?.setGridLinesColor(isDark ? DARK_GRIDLINE_COLOR : undefined);
+        }
+      } catch {
+        // Best-effort: a facade exception (e.g. no active sheet yet) must not
+        // break the editor. The next theme change / file open re-applies.
+      }
+    };
+
+    const reapply = () => applyUniverTheme(getEffectiveTheme());
+
+    // Initial apply — also covers the file-open re-mount path.
+    reapply();
+    // Re-apply on an explicit mode change (Settings dialog), and also follow
+    // the OS color-scheme as it flips. `getEffectiveTheme()` resolves the
+    // persisted mode against `prefers-color-scheme` on each call, so the
+    // system subscription is a harmless no-op re-apply while the mode is an
+    // explicit light / dark.
+    const unsubChanged = onThemeChanged(reapply);
+    const unsubSystem = subscribeSystemTheme(reapply);
+    return () => {
+      unsubChanged();
+      unsubSystem();
+    };
   }, []);
 
   // Sync snapshot to store on data mutations (skip selection/scroll operations).

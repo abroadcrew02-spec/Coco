@@ -24,6 +24,7 @@
 // The original `http_fetch` command is intentionally left untouched.
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -32,7 +33,8 @@ use serde::Serialize;
 use tauri::{Emitter, Manager};
 
 use crate::commands::http_fetch::{
-    parse_allowed_domains, validate_url, ALLOWED_DOMAINS_KEY, MAX_BODY_BYTES, REQUEST_TIMEOUT_SECS,
+    parse_allowed_domains, resolve_and_screen, validate_url, ALLOWED_DOMAINS_KEY, MAX_BODY_BYTES,
+    REQUEST_TIMEOUT_SECS,
 };
 use crate::db::app_db::open_app_db_at;
 
@@ -336,6 +338,20 @@ pub async fn http_fetch_stream(
     let parsed = validate_url(&url, &allowed).map_err(|e| e.tag().to_string())?;
     let m = parse_method(&method)?;
 
+    // #195: resolve + screen the host *before* reserving a request id, so a
+    // DNS-rebinding target is rejected without ever entering the registry.
+    // The screened addresses are pinned onto the streaming client below.
+    let host = parsed
+        .host_str()
+        .ok_or("URL_FETCH_INVALID_URL".to_string())?
+        .to_ascii_lowercase();
+    let port = parsed
+        .port_or_known_default()
+        .ok_or("URL_FETCH_INVALID_URL".to_string())?;
+    let addrs = resolve_and_screen(&host, port)
+        .await
+        .map_err(|e| e.tag().to_string())?;
+
     let registry = registry.inner().clone();
     let (request_id, cancel_flag) = registry.register();
 
@@ -356,6 +372,8 @@ pub async fn http_fetch_stream(
             m,
             hdrs,
             body,
+            host,
+            addrs,
         )
         .await;
         if let Err(tag) = result {
@@ -381,6 +399,7 @@ pub async fn http_fetch_stream(
 /// stream failed *before* it could emit its own terminal event (so the caller
 /// emits the failure). On success / mid-stream-cap / cancel it emits its own
 /// terminal event and returns `Ok(())`.
+#[allow(clippy::too_many_arguments)]
 async fn run_stream(
     app: &tauri::AppHandle,
     request_id: u64,
@@ -389,12 +408,19 @@ async fn run_stream(
     method: reqwest::Method,
     headers: HashMap<String, String>,
     body: Option<String>,
+    host: String,
+    addrs: Vec<SocketAddr>,
 ) -> Result<(), String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
         // Redirects disabled — a 3xx could bounce off the allow list (e.g. to
         // 169.254.169.254). Same policy as `http_fetch`.
+        // NOTE: `resolve_to_addrs` pins the connection to the IPs screened by
+        // `resolve_and_screen` (#195). This is sound only because redirects
+        // are off — if they are ever re-enabled, the resolve+screen+pin must
+        // be re-applied per redirect hop.
         .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(&host, &addrs)
         .build()
         .map_err(|e| {
             log::warn!("http_fetch_stream client build failed: {}", e);

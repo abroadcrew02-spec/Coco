@@ -51,11 +51,18 @@ export type RibbonAction =
 export interface RibbonButtonDef {
   /** Stable id — unique across the whole ribbon, used as React key + test hook. */
   id: string;
-  /** i18n key for the visible label + aria-label. */
+  /** i18n key for the visible (possibly abbreviated) label. */
   labelKey: StringKey;
   /** Optional glyph (emoji / unicode). Purely decorative — aria-hidden. */
   icon?: string;
   action: RibbonAction;
+  /** Visual variant (Excel-style). `large` = big vertical button occupying a
+   *  full group row; `small` = compact horizontal button. Defaults to `small`. */
+  size?: "large" | "small";
+  /** Optional i18n key for the full tooltip / aria-label text. When the
+   *  visible label is abbreviated, this carries the unshortened description.
+   *  Falls back to `labelKey` when absent. */
+  tooltipKey?: StringKey;
 }
 
 export interface RibbonGroupDef {
@@ -85,7 +92,7 @@ const homeTab: RibbonTabDef = {
       id: "clipboard",
       labelKey: "ribbon.group.clipboard",
       buttons: [
-        { id: "paste", labelKey: "ribbon.btn.paste", icon: "📋", action: univer("paste") },
+        { id: "paste", labelKey: "ribbon.btn.paste", icon: "📋", action: univer("paste"), size: "large" },
         { id: "copy", labelKey: "ribbon.btn.copy", icon: "⧉", action: univer("copy") },
         {
           id: "format-painter",
@@ -102,8 +109,20 @@ const homeTab: RibbonTabDef = {
         { id: "bold", labelKey: "ribbon.btn.bold", icon: "B", action: univer("bold") },
         { id: "italic", labelKey: "ribbon.btn.italic", icon: "I", action: univer("italic") },
         { id: "underline", labelKey: "ribbon.btn.underline", icon: "U", action: univer("underline") },
-        { id: "font-color", labelKey: "ribbon.btn.fontColor", icon: "A", action: univer("fontColor") },
-        { id: "fill-color", labelKey: "ribbon.btn.fillColor", icon: "🖍", action: univer("fillColor") },
+        {
+          id: "font-color",
+          labelKey: "ribbon.btn.fontColor.short",
+          tooltipKey: "ribbon.btn.fontColor",
+          icon: "A",
+          action: univer("fontColor"),
+        },
+        {
+          id: "fill-color",
+          labelKey: "ribbon.btn.fillColor.short",
+          tooltipKey: "ribbon.btn.fillColor",
+          icon: "🖍",
+          action: univer("fillColor"),
+        },
         { id: "borders", labelKey: "ribbon.btn.borders", icon: "▦", action: editorCommand("format-borders") },
       ],
     },
@@ -115,30 +134,84 @@ const homeTab: RibbonTabDef = {
         { id: "align-center", labelKey: "ribbon.btn.alignCenter", icon: "↔", action: univer("alignCenter") },
         { id: "align-right", labelKey: "ribbon.btn.alignRight", icon: "➡", action: univer("alignRight") },
         { id: "align-top", labelKey: "ribbon.btn.alignTop", icon: "⬆", action: univer("alignTop") },
-        { id: "align-middle", labelKey: "ribbon.btn.alignMiddle", icon: "⬍", action: univer("alignMiddle") },
+        {
+          id: "align-middle",
+          labelKey: "ribbon.btn.alignMiddle.short",
+          tooltipKey: "ribbon.btn.alignMiddle",
+          icon: "⬍",
+          action: univer("alignMiddle"),
+        },
         { id: "align-bottom", labelKey: "ribbon.btn.alignBottom", icon: "⬇", action: univer("alignBottom") },
-        { id: "wrap-text", labelKey: "ribbon.btn.wrapText", icon: "↵", action: univer("wrapText") },
-        { id: "merge-cells", labelKey: "ribbon.btn.mergeCells", icon: "⊞", action: univer("mergeCells") },
-        { id: "unmerge-cells", labelKey: "ribbon.btn.unmergeCells", icon: "⊟", action: univer("unmergeCells") },
+        {
+          id: "wrap-text",
+          labelKey: "ribbon.btn.wrapText.short",
+          tooltipKey: "ribbon.btn.wrapText",
+          icon: "↵",
+          action: univer("wrapText"),
+        },
+        {
+          id: "merge-cells",
+          labelKey: "ribbon.btn.mergeCells.short",
+          tooltipKey: "ribbon.btn.mergeCells",
+          icon: "⊞",
+          action: univer("mergeCells"),
+        },
+        {
+          id: "unmerge-cells",
+          labelKey: "ribbon.btn.unmergeCells.short",
+          tooltipKey: "ribbon.btn.unmergeCells",
+          icon: "⊟",
+          action: univer("unmergeCells"),
+        },
       ],
     },
     {
       id: "number",
       labelKey: "ribbon.group.number",
       buttons: [
-        { id: "number-format", labelKey: "ribbon.btn.numberFormat", icon: "🔢", action: editorCommand("format-number") },
+        {
+          id: "number-format",
+          labelKey: "ribbon.btn.numberFormat",
+          icon: "🔢",
+          action: editorCommand("format-number"),
+          size: "large",
+        },
         { id: "currency", labelKey: "ribbon.btn.currency", icon: "¥", action: editorCommand("format-currency") },
         { id: "percent", labelKey: "ribbon.btn.percent", icon: "%", action: editorCommand("format-percent") },
-        { id: "comma-style", labelKey: "ribbon.btn.commaStyle", icon: ",", action: univer("commaStyle") },
-        { id: "increase-decimal", labelKey: "ribbon.btn.increaseDecimal", icon: "←.0", action: univer("increaseDecimal") },
-        { id: "decrease-decimal", labelKey: "ribbon.btn.decreaseDecimal", icon: ".0→", action: univer("decreaseDecimal") },
+        {
+          id: "comma-style",
+          labelKey: "ribbon.btn.commaStyle.short",
+          tooltipKey: "ribbon.btn.commaStyle",
+          icon: ",",
+          action: univer("commaStyle"),
+        },
+        {
+          id: "increase-decimal",
+          labelKey: "ribbon.btn.increaseDecimal.short",
+          tooltipKey: "ribbon.btn.increaseDecimal",
+          icon: "←.0",
+          action: univer("increaseDecimal"),
+        },
+        {
+          id: "decrease-decimal",
+          labelKey: "ribbon.btn.decreaseDecimal.short",
+          tooltipKey: "ribbon.btn.decreaseDecimal",
+          icon: ".0→",
+          action: univer("decreaseDecimal"),
+        },
       ],
     },
     {
       id: "styles",
       labelKey: "ribbon.group.styles",
       buttons: [
-        { id: "cell-styles", labelKey: "ribbon.btn.cellStyles", icon: "🎨", action: editorCommand("format-cell-styles") },
+        {
+          id: "cell-styles",
+          labelKey: "ribbon.btn.cellStyles",
+          icon: "🎨",
+          action: editorCommand("format-cell-styles"),
+          size: "large",
+        },
         {
           id: "conditional-format",
           labelKey: "ribbon.btn.conditionalFormat",
@@ -161,7 +234,13 @@ const homeTab: RibbonTabDef = {
       id: "editing",
       labelKey: "ribbon.group.editing",
       buttons: [
-        { id: "auto-sum", labelKey: "ribbon.btn.autoSum", icon: "Σ", action: editorCommand("data-autosum") },
+        {
+          id: "auto-sum",
+          labelKey: "ribbon.btn.autoSum",
+          icon: "Σ",
+          action: editorCommand("data-autosum"),
+          size: "large",
+        },
         { id: "sort", labelKey: "ribbon.btn.sort", icon: "↕", action: editorCommand("data-sort") },
         { id: "filter-search", labelKey: "ribbon.btn.filterSearch", icon: "▽", action: editorCommand("data-filter-search") },
         {
@@ -184,7 +263,13 @@ const insertTab: RibbonTabDef = {
       id: "tables",
       labelKey: "ribbon.group.tables",
       buttons: [
-        { id: "ins-table", labelKey: "ribbon.btn.table", icon: "⊞", action: editorCommand("insert-table") },
+        {
+          id: "ins-table",
+          labelKey: "ribbon.btn.table",
+          icon: "⊞",
+          action: editorCommand("insert-table"),
+          size: "large",
+        },
         { id: "ins-pivot", labelKey: "ribbon.btn.pivot", icon: "📊", action: editorCommand("insert-pivot") },
       ],
     },
@@ -201,7 +286,13 @@ const insertTab: RibbonTabDef = {
       id: "charts",
       labelKey: "ribbon.group.charts",
       buttons: [
-        { id: "ins-chart", labelKey: "ribbon.btn.chart", icon: "📈", action: editorCommand("insert-chart") },
+        {
+          id: "ins-chart",
+          labelKey: "ribbon.btn.chart",
+          icon: "📈",
+          action: editorCommand("insert-chart"),
+          size: "large",
+        },
         {
           id: "ins-recommended-charts",
           labelKey: "ribbon.btn.recommendedCharts",
@@ -268,6 +359,7 @@ const formulasTab: RibbonTabDef = {
           labelKey: "ribbon.btn.insertFunction",
           icon: "fx",
           action: editorCommand("insert-function"),
+          size: "large",
         },
         { id: "fx-auto-sum", labelKey: "ribbon.btn.autoSum", icon: "Σ", action: editorCommand("data-autosum") },
       ],
@@ -334,6 +426,7 @@ const dataTab: RibbonTabDef = {
           labelKey: "ribbon.btn.csvImportWizard",
           icon: "📥",
           action: editorCommand("file-csv-import-wizard"),
+          size: "large",
         },
         {
           id: "data-import-sheet",
@@ -398,7 +491,8 @@ const dataTab: RibbonTabDef = {
         },
         {
           id: "data-validation",
-          labelKey: "ribbon.btn.dataValidation",
+          labelKey: "ribbon.btn.dataValidation.short",
+          tooltipKey: "ribbon.btn.dataValidation",
           icon: "✓",
           action: editorCommand("data-validation"),
         },
@@ -463,7 +557,13 @@ const reviewTab: RibbonTabDef = {
       id: "proofing",
       labelKey: "ribbon.group.proofing",
       buttons: [
-        { id: "rev-spell-check", labelKey: "ribbon.btn.spellCheck", icon: "✓", action: editorCommand("tools-spell-check") },
+        {
+          id: "rev-spell-check",
+          labelKey: "ribbon.btn.spellCheck",
+          icon: "✓",
+          action: editorCommand("tools-spell-check"),
+          size: "large",
+        },
         {
           id: "rev-error-checking",
           labelKey: "ribbon.btn.errorChecking",
@@ -485,7 +585,8 @@ const reviewTab: RibbonTabDef = {
         },
         {
           id: "rev-show-all-comments",
-          labelKey: "ribbon.btn.showAllComments",
+          labelKey: "ribbon.btn.showAllComments.short",
+          tooltipKey: "ribbon.btn.showAllComments",
           icon: "👁",
           action: editorCommand("view-show-all-comments"),
         },
@@ -538,6 +639,7 @@ const viewTab: RibbonTabDef = {
           labelKey: "ribbon.btn.showFormulas",
           icon: "ƒ",
           action: editorCommand("view-show-formulas"),
+          size: "large",
         },
         { id: "view-page-setup", labelKey: "ribbon.btn.pageSetup", icon: "📐", action: editorCommand("file-page-setup") },
         { id: "view-quick-print", labelKey: "ribbon.btn.quickPrint", icon: "🖨", action: editorCommand("file-quick-print") },

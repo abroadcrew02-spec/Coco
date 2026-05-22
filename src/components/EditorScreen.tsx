@@ -9,7 +9,7 @@ import {
   CustomCommandExecutionError,
   type IWorkbookData,
 } from "@univerjs/core";
-import { defaultTheme, themeInstance } from "@univerjs/design";
+import { defaultTheme } from "@univerjs/design";
 import { UniverRenderEnginePlugin } from "@univerjs/engine-render";
 import { UniverFormulaEnginePlugin } from "@univerjs/engine-formula";
 import { UniverUIPlugin } from "@univerjs/ui";
@@ -504,18 +504,6 @@ import { rectToA1 } from "../store/cameraRender";
 import { validateMutation, extractCellWrites } from "../store/dataValidation";
 import { getLocale, subscribeLocale, t } from "../i18n/locale";
 import { swapUniverLocale } from "./univerLocaleSwap";
-import {
-  getEffectiveTheme,
-  onThemeChanged,
-  subscribeSystemTheme,
-} from "../store/theme";
-import {
-  darkUniverTheme,
-  lightUniverTheme,
-  darkHeaderStyle,
-  lightHeaderStyle,
-  DARK_GRIDLINE_COLOR,
-} from "./univerDarkTheme";
 import ScriptEditorDialog from "./ScriptEditorDialog";
 import {
   type ScriptEntry,
@@ -586,6 +574,20 @@ export default function EditorScreen() {
   const containerRef = useRef<HTMLDivElement>(null);
   const univerRef = useRef<Univer | null>(null);
   const fUniverRef = useRef<FUniver | null>(null);
+  // StrictMode-safe stash for the Univer instance bundle. React 18 StrictMode
+  // double-invokes effects in dev (mount → cleanup → mount). Disposing Univer
+  // synchronously in the cleanup tears down its `redi` DI injector while
+  // createUnit's async `_initWorkbookListener` is still pending, producing
+  // "[redi]: Injector cannot be accessed after it was disposed" and a blank
+  // grid. We instead defer disposal onto a setTimeout(0); a StrictMode remount
+  // runs synchronously and cancels that timer, reusing the live instance.
+  const univerStashRef = useRef<{
+    univer: Univer;
+    fUniver: FUniver;
+    contextMenuReg: ReturnType<typeof registerCocoContextMenu> | null;
+    formulaNormalizerReg: ReturnType<typeof registerFormulaNormalizer> | null;
+    disposeTimer: ReturnType<typeof setTimeout> | null;
+  } | null>(null);
   // Stable refs for the openX dialog handlers so the Univer context-menu
   // commands (registered once at mount with empty-deps useEffect) always
   // see the *latest* React-side openX function, not the one captured at
@@ -7471,6 +7473,35 @@ export default function EditorScreen() {
   // Mount Univer
   useEffect(() => {
     if (!containerRef.current) return;
+
+    // StrictMode remount fast path: if a previous run stashed a live instance
+    // and scheduled (but not yet fired) its disposal, this effect re-run is the
+    // StrictMode remount. Cancel the pending disposal and reuse the existing
+    // Univer instead of creating a second one — building a new Univer here
+    // would race the disposed instance's async `_initWorkbookListener` and
+    // surface "[redi]: Injector ... disposed". See univerStashRef.
+    {
+      const stashed = univerStashRef.current;
+      if (stashed && stashed.disposeTimer !== null) {
+        clearTimeout(stashed.disposeTimer);
+        stashed.disposeTimer = null;
+        univerRef.current = stashed.univer;
+        fUniverRef.current = stashed.fUniver;
+        return () => {
+          const s = univerStashRef.current;
+          if (!s) return;
+          s.disposeTimer = setTimeout(() => {
+            s.formulaNormalizerReg?.dispose();
+            s.contextMenuReg?.dispose();
+            s.univer.dispose();
+            univerRef.current = null;
+            fUniverRef.current = null;
+            univerStashRef.current = null;
+          }, 0);
+        };
+      }
+    }
+
     setEditorOperationError(null);
 
     let univer: Univer | null = null;
@@ -7590,22 +7621,46 @@ export default function EditorScreen() {
       // #179 (area C): rewrite Japanese function-name aliases (=合計(...) →
       // =SUM(...)) before the formula engine sees the cell edit.
       formulaNormalizerReg = registerFormulaNormalizer(univer);
+
+      // Stash the live instance bundle so a StrictMode remount can reuse it
+      // (see univerStashRef) instead of constructing a second Univer.
+      univerStashRef.current = {
+        univer,
+        fUniver: fUniverRef.current,
+        contextMenuReg,
+        formulaNormalizerReg,
+        disposeTimer: null,
+      };
     } catch (e) {
+      // Genuine creation failure — no stash exists yet, so dispose
+      // synchronously here and leave univerStashRef null.
       formulaNormalizerReg?.dispose();
       contextMenuReg?.dispose();
       univer?.dispose();
       univerRef.current = null;
       fUniverRef.current = null;
+      univerStashRef.current = null;
       setEditorInitError(String(e));
       return;
     }
 
+    // Defer disposal onto a timer instead of disposing synchronously. A
+    // StrictMode remount runs within the same commit and cancels this timer
+    // (see the remount fast path above), reusing the instance; a real unmount
+    // lets the timer fire and disposes for real. Disposing synchronously here
+    // would tear down Univer's `redi` injector while createUnit's async
+    // `_initWorkbookListener` is still pending → "[redi]: Injector disposed".
     return () => {
-      formulaNormalizerReg?.dispose();
-      contextMenuReg?.dispose();
-      univer?.dispose();
-      univerRef.current = null;
-      fUniverRef.current = null;
+      const s = univerStashRef.current;
+      if (!s) return;
+      s.disposeTimer = setTimeout(() => {
+        s.formulaNormalizerReg?.dispose();
+        s.contextMenuReg?.dispose();
+        s.univer.dispose();
+        univerRef.current = null;
+        fUniverRef.current = null;
+        univerStashRef.current = null;
+      }, 0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -7618,71 +7673,6 @@ export default function EditorScreen() {
       const univer = univerRef.current;
       if (univer) swapUniverLocale(univer, locale);
     });
-  }, []);
-
-  // #193: dark-theme support for the Univer grid canvas.
-  //
-  // The shell chrome restyles via CSS tokens (issue #191), but Univer paints
-  // its grid / row+column headers / gridlines on a <canvas>, so it can't see
-  // those tokens. We drive Univer imperatively instead — modeled on the locale
-  // hot-swap above, so the editor never has to be re-mounted on a theme flip:
-  //
-  //   * `themeInstance.setTheme()` swaps Univer's UI-chrome CSS vars *and* the
-  //     empty-cell `bgColorSecondary` background.
-  //   * `customizeColumnHeader` / `customizeRowHeader` restyle the row/column
-  //     gutter (live re-render — calls `makeDirty(true)` internally).
-  //   * `setGridLinesColor` darkens the gridlines (`undefined` = light default).
-  //
-  // This effect also runs on mount, which re-applies the theming after a file
-  // open: opening a file re-mounts EditorScreen (App keys it by workbookId),
-  // re-running `createUnit`, and `customizeRowHeader` / `setGridLinesColor` do
-  // NOT persist across `createUnit` — so the on-mount apply is what keeps a
-  // freshly opened file correctly themed.
-  useEffect(() => {
-    const applyUniverTheme = (theme: "light" | "dark") => {
-      const fUniver = fUniverRef.current;
-      const root = containerRef.current;
-      const isDark = theme === "dark";
-      try {
-        if (root) {
-          themeInstance.setTheme(
-            root,
-            isDark ? darkUniverTheme : lightUniverTheme,
-          );
-        }
-        if (fUniver) {
-          fUniver.customizeColumnHeader({
-            headerStyle: isDark ? darkHeaderStyle : lightHeaderStyle,
-          });
-          fUniver.customizeRowHeader({
-            headerStyle: isDark ? darkHeaderStyle : lightHeaderStyle,
-          });
-          fUniver
-            .getActiveWorkbook()
-            ?.getActiveSheet()
-            ?.setGridLinesColor(isDark ? DARK_GRIDLINE_COLOR : undefined);
-        }
-      } catch {
-        // Best-effort: a facade exception (e.g. no active sheet yet) must not
-        // break the editor. The next theme change / file open re-applies.
-      }
-    };
-
-    const reapply = () => applyUniverTheme(getEffectiveTheme());
-
-    // Initial apply — also covers the file-open re-mount path.
-    reapply();
-    // Re-apply on an explicit mode change (Settings dialog), and also follow
-    // the OS color-scheme as it flips. `getEffectiveTheme()` resolves the
-    // persisted mode against `prefers-color-scheme` on each call, so the
-    // system subscription is a harmless no-op re-apply while the mode is an
-    // explicit light / dark.
-    const unsubChanged = onThemeChanged(reapply);
-    const unsubSystem = subscribeSystemTheme(reapply);
-    return () => {
-      unsubChanged();
-      unsubSystem();
-    };
   }, []);
 
   // Sync snapshot to store on data mutations (skip selection/scroll operations).

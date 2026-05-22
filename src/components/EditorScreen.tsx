@@ -4685,7 +4685,12 @@ export default function EditorScreen() {
   // Number-format ops (comma / decimal) take the snapshot `_fmt` path because
   // Coco doesn't register the optional @univerjs/sheets-numfmt facade.
   const handleUniverAction = useCallback(
-    (op: import("./ribbon/ribbonDefs").UniverActionId) => {
+    (
+      op: import("./ribbon/ribbonDefs").UniverActionId,
+      // #202 Phase 3: color-palette dropdowns pass the chosen color here, so
+      // fontColor / fillColor no longer need a window.prompt.
+      color?: string,
+    ) => {
       const fUniver = fUniverRef.current;
       if (!fUniver) return;
       const workbook = fUniver.getActiveWorkbook();
@@ -4758,18 +4763,13 @@ export default function EditorScreen() {
             break;
           }
           case "fontColor": {
-            const color = window.prompt(
-              t("ribbon.btn.fontColor"),
-              "#000000",
-            );
+            // #202 Phase 3: the ribbon's color-palette dropdown supplies the
+            // color; a bare click with no color is a no-op (the palette is the
+            // only way to pick one — the old window.prompt is gone).
             if (color && color.trim()) range.setFontColor(color.trim());
             break;
           }
           case "fillColor": {
-            const color = window.prompt(
-              t("ribbon.btn.fillColor"),
-              "#ffff00",
-            );
             if (color && color.trim()) range.setBackground(color.trim());
             break;
           }

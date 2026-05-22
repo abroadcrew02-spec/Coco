@@ -116,4 +116,56 @@ describe("ribbonDefs — structural integrity", () => {
       expect.arrayContaining(["clipboard", "font", "alignment", "number"]),
     );
   });
+
+  it("the File tab exposes a `close` (Exit) button — #202 reachability fix", () => {
+    expect(ribbonMenuActionIds()).toContain("close");
+  });
+});
+
+describe("ribbonDefs — dropdowns (#202 Phase 3)", () => {
+  it("font-color and fill-color buttons own a color palette dropdown", () => {
+    for (const id of ["font-color", "fill-color"]) {
+      const btn = allButtons().find((b) => b.id === id);
+      expect(btn?.dropdown?.kind).toBe("palette");
+      if (btn?.dropdown?.kind === "palette") {
+        // The palette swatches must fire the button's own univer op.
+        expect(btn.action.kind).toBe("univer");
+        if (btn.action.kind === "univer") {
+          expect(btn.dropdown.op).toBe(btn.action.op);
+        }
+      }
+    }
+  });
+
+  it("the number-format button owns a menu dropdown of format presets", () => {
+    const btn = allButtons().find((b) => b.id === "number-format");
+    expect(btn?.dropdown?.kind).toBe("menu");
+    if (btn?.dropdown?.kind === "menu") {
+      expect(btn.dropdown.items.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("every dropdown menu item has a unique id and a valid action", () => {
+    for (const btn of allButtons()) {
+      if (btn.dropdown?.kind !== "menu") continue;
+      const ids = btn.dropdown.items.map((i) => i.id);
+      expect(new Set(ids).size).toBe(ids.length);
+      for (const item of btn.dropdown.items) {
+        expect(item.action.kind).toMatch(/^(editorCommand|univer|menuAction)$/);
+      }
+    }
+  });
+
+  it("dropdown menu items only reference dispatchable command ids", () => {
+    // ribbonEditorCommandIds()/ribbonMenuActionIds() already fold in dropdown
+    // menu items — the integrity tests above therefore cover them too. This
+    // just asserts the dropdown ids actually reach those flatteners.
+    const itemCmdIds = allButtons()
+      .flatMap((b) => (b.dropdown?.kind === "menu" ? b.dropdown.items : []))
+      .filter((i) => i.action.kind === "editorCommand")
+      .map((i) => (i.action as { commandId: string }).commandId);
+    for (const id of itemCmdIds) {
+      expect(EDITOR_COMMAND_IDS.has(id)).toBe(true);
+    }
+  });
 });

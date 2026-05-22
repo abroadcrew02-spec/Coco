@@ -105,7 +105,9 @@ describe("Ribbon — button actions", () => {
     renderRibbon();
     fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
     fireEvent.click(screen.getByRole("button", { name: /^bold$|太字/i }));
-    expect(onUniverAction).toHaveBeenCalledWith("bold");
+    // #202 Phase 3: the op carries an optional color arg, `undefined` for a
+    // plain (non-palette) button like Bold.
+    expect(onUniverAction).toHaveBeenCalledWith("bold", undefined);
   });
 
   it("menuAction button emits the menu-action window event (#202)", () => {
@@ -125,5 +127,80 @@ describe("Ribbon — button actions", () => {
     expect(
       screen.getByRole("button", { name: /pivottable|ピボットテーブル/i }),
     ).toBeTruthy();
+  });
+
+  it("File tab exposes the Exit (close) button (#202)", () => {
+    renderRibbon();
+    fireEvent.click(screen.getByRole("button", { name: /^exit$|^終了$/i }));
+    expect(emitMock).toHaveBeenCalledWith("menu-action", "close");
+  });
+});
+
+describe("Ribbon — dropdown buttons (#202 Phase 3)", () => {
+  function fontColorButton() {
+    return screen.getByRole("button", { name: /font color|フォントの色/i });
+  }
+
+  it("a dropdown button does not fire its action on a plain click — it opens", () => {
+    renderRibbon();
+    fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
+    const btn = fontColorButton();
+    expect(btn.getAttribute("aria-haspopup")).toBe("menu");
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(btn);
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    expect(onUniverAction).not.toHaveBeenCalled();
+    // The color palette popover is now open.
+    expect(screen.getByRole("menu")).toBeTruthy();
+  });
+
+  it("a color-palette swatch fires the univer op with the chosen color", () => {
+    renderRibbon();
+    fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
+    fireEvent.click(fontColorButton());
+    const swatches = screen.getAllByRole("menuitemradio");
+    expect(swatches.length).toBeGreaterThan(0);
+    fireEvent.click(swatches[1]);
+    expect(onUniverAction).toHaveBeenCalledTimes(1);
+    const [op, color] = onUniverAction.mock.calls[0];
+    expect(op).toBe("fontColor");
+    expect(typeof color).toBe("string");
+    expect(color).toMatch(/^#[0-9a-fA-F]{6}$/);
+  });
+
+  it("selecting a swatch closes the popover", () => {
+    renderRibbon();
+    fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
+    fireEvent.click(fontColorButton());
+    fireEvent.click(screen.getAllByRole("menuitemradio")[0]);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(fontColorButton().getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("Escape closes the popover", () => {
+    renderRibbon();
+    fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
+    fireEvent.click(fontColorButton());
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("a menu dropdown item fires an editor command and closes", () => {
+    const handler = vi.fn();
+    window.addEventListener("coco:editor-command", handler);
+    renderRibbon();
+    fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
+    // The Number Format button owns a menu dropdown.
+    fireEvent.click(
+      screen.getByRole("button", { name: /number format|表示形式/i }),
+    );
+    const items = screen.getAllByRole("menuitem");
+    expect(items.length).toBeGreaterThan(0);
+    fireEvent.click(items[2]); // 通貨 / Currency → format-currency
+    expect(handler).toHaveBeenCalled();
+    const evt = handler.mock.calls[0][0] as CustomEvent;
+    expect(evt.detail).toBe("format-currency");
+    expect(screen.queryByRole("menu")).toBeNull();
+    window.removeEventListener("coco:editor-command", handler);
   });
 });

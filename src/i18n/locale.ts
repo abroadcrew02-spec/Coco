@@ -399,6 +399,12 @@ const jaJP = {
   "ribbon.btn.sheetHide": "シートを非表示",
   "ribbon.btn.sheetUnhide": "シートの再表示",
   "ribbon.btn.sheetMoveCopy": "シートの移動 / コピー",
+  "ribbon.btn.close": "終了",
+  // Dropdown menus (#202 Phase 3)
+  "ribbon.menu.numberFormat.general": "標準",
+  "ribbon.menu.numberFormat.number": "数値",
+  "ribbon.menu.numberFormat.more": "その他の表示形式...",
+  "ribbon.menu.color.more": "その他の色...",
   "ribbon.formulaBar.label": "数式バー",
   "ribbon.formulaBar.placeholder": "値または数式を入力",
 } as const;
@@ -769,6 +775,11 @@ const enUS: Record<StringKey, string> = {
   "ribbon.btn.sheetHide": "Hide Sheet",
   "ribbon.btn.sheetUnhide": "Unhide Sheet",
   "ribbon.btn.sheetMoveCopy": "Move / Copy Sheet",
+  "ribbon.btn.close": "Exit",
+  "ribbon.menu.numberFormat.general": "General",
+  "ribbon.menu.numberFormat.number": "Number",
+  "ribbon.menu.numberFormat.more": "More Number Formats...",
+  "ribbon.menu.color.more": "More Colors...",
   "ribbon.formulaBar.label": "Formula bar",
   "ribbon.formulaBar.placeholder": "Enter a value or formula",
 };

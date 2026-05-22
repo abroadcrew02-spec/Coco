@@ -48,11 +48,44 @@ export type UniverActionId =
   | "redo";
 
 /** Discriminated union: a button fires an existing editor command, a
- *  Univer-native facade operation, or a native-menu action id (#202). */
+ *  Univer-native facade operation, or a native-menu action id (#202).
+ *
+ *  #202 Phase 3: the `univer` variant may carry an optional `color` — color
+ *  palette dropdown items (font / fill color) reuse the existing
+ *  `fontColor` / `fillColor` ops but supply the chosen color directly, so the
+ *  former `window.prompt` color input is gone (also folds in #199). */
 export type RibbonAction =
   | { kind: "editorCommand"; commandId: string }
-  | { kind: "univer"; op: UniverActionId }
+  | { kind: "univer"; op: UniverActionId; color?: string }
   | { kind: "menuAction"; menuId: string };
+
+/** #202 Phase 3: a single item inside a dropdown menu. Fires one of the same
+ *  `RibbonAction` kinds a top-level button does — no new command ids invented. */
+export interface RibbonDropdownItemDef {
+  /** Stable id — unique within the dropdown, used as React key + test hook. */
+  id: string;
+  /** i18n key for the item's visible label. */
+  labelKey: StringKey;
+  /** Optional glyph shown left of the label. Decorative — aria-hidden. */
+  icon?: string;
+  action: RibbonAction;
+}
+
+/** #202 Phase 3: dropdown definition attached to a `RibbonButtonDef`. A button
+ *  that owns one renders a caret (▾) and, on click, opens a popover. Two
+ *  shapes are supported via the `kind` discriminant:
+ *
+ *    menu     — a flat list of `RibbonDropdownItemDef` rows (paste-special,
+ *               number-format presets, ...).
+ *    palette  — a color-swatch grid (#199): each swatch fires the button's own
+ *               `univer` op with the picked `color`. */
+export type RibbonDropdownDef =
+  | { kind: "menu"; items: RibbonDropdownItemDef[] }
+  | {
+      kind: "palette";
+      /** The Univer op each swatch fires (`fontColor` / `fillColor`). */
+      op: UniverActionId;
+    };
 
 export interface RibbonButtonDef {
   /** Stable id — unique across the whole ribbon, used as React key + test hook. */
@@ -62,6 +95,10 @@ export interface RibbonButtonDef {
   /** Optional glyph (emoji / unicode). Purely decorative — aria-hidden. */
   icon?: string;
   action: RibbonAction;
+  /** #202 Phase 3: optional dropdown. When present the button renders a caret
+   *  and opening it shows a menu / color palette; the bare `action` still
+   *  fires on a plain click (Excel's split-button behaviour). */
+  dropdown?: RibbonDropdownDef;
   /** Visual variant (Excel-style). `large` = big vertical button occupying a
    *  full group row; `small` = compact horizontal button. Defaults to `small`. */
   size?: "large" | "small";
@@ -97,6 +134,17 @@ const menuAction = (menuId: string): RibbonAction => ({
   kind: "menuAction",
   menuId,
 });
+
+/** #202 Phase 3 / #199: the color-palette swatch grid. Two rows — a standard
+ *  spectrum and a neutral ramp — chosen to mirror Excel's "標準の色". Each
+ *  entry is a hex string handed straight to the `fontColor` / `fillColor`
+ *  Univer op. The renderer also offers an "other color" `<input type=color>`
+ *  so any color outside the grid stays reachable. */
+export const RIBBON_COLOR_SWATCHES: readonly string[] = [
+  "#000000", "#404040", "#808080", "#bfbfbf", "#ffffff",
+  "#c00000", "#ff0000", "#ffc000", "#ffff00", "#92d050",
+  "#00b050", "#00b0f0", "#0070c0", "#002060", "#7030a0",
+];
 
 // --- File --------------------------------------------------------------------
 // #202: replaces the removed Tauri native "ファイル" menu. File / store
@@ -228,6 +276,9 @@ const fileTab: RibbonTabDef = {
           icon: "⟲",
           action: editorCommand("help-check-update"),
         },
+        // #202: the native menu's "終了" had no ribbon home after the menu was
+        // removed — restore reachability via the `close` menu-action.
+        { id: "file-close", labelKey: "ribbon.btn.close", icon: "⏻", action: menuAction("close") },
       ],
     },
   ],
@@ -266,6 +317,9 @@ const homeTab: RibbonTabDef = {
           icon: "A",
           action: univer("fontColor"),
           iconOnly: true,
+          // #202 Phase 3 (folds in #199): a color palette replaces the old
+          // window.prompt — each swatch fires `fontColor` with its color.
+          dropdown: { kind: "palette", op: "fontColor" },
         },
         {
           id: "fill-color",
@@ -274,6 +328,7 @@ const homeTab: RibbonTabDef = {
           icon: "🖍",
           action: univer("fillColor"),
           iconOnly: true,
+          dropdown: { kind: "palette", op: "fillColor" },
         },
         { id: "borders", labelKey: "ribbon.btn.borders", icon: "▦", action: editorCommand("format-borders"), iconOnly: true },
       ],
@@ -331,6 +386,41 @@ const homeTab: RibbonTabDef = {
           icon: "🔢",
           action: editorCommand("format-number"),
           size: "large",
+          // #202 Phase 3: Excel's number-format dropdown. Only ids that map to
+          // an existing editor command are listed — 標準/数値 open the format
+          // dialog (`format-number`), 通貨/% reuse the quick-format commands.
+          dropdown: {
+            kind: "menu",
+            items: [
+              {
+                id: "number-format-general",
+                labelKey: "ribbon.menu.numberFormat.general",
+                action: editorCommand("format-number"),
+              },
+              {
+                id: "number-format-number",
+                labelKey: "ribbon.menu.numberFormat.number",
+                action: editorCommand("format-number"),
+              },
+              {
+                id: "number-format-currency",
+                labelKey: "ribbon.btn.currency",
+                icon: "¥",
+                action: editorCommand("format-currency"),
+              },
+              {
+                id: "number-format-percent",
+                labelKey: "ribbon.btn.percent",
+                icon: "%",
+                action: editorCommand("format-percent"),
+              },
+              {
+                id: "number-format-more",
+                labelKey: "ribbon.menu.numberFormat.more",
+                action: editorCommand("format-number"),
+              },
+            ],
+          },
         },
         { id: "currency", labelKey: "ribbon.btn.currency", icon: "¥", action: editorCommand("format-currency"), iconOnly: true },
         { id: "percent", labelKey: "ribbon.btn.percent", icon: "%", action: editorCommand("format-percent"), iconOnly: true },
@@ -1045,30 +1135,38 @@ export const RIBBON_TABS: RibbonTabDef[] = [
   toolsTab,
 ];
 
-/** Flat list of every editor-command id referenced by the ribbon — used by
- *  the integrity test to assert each id is dispatchable by EditorScreen. */
-export function ribbonEditorCommandIds(): string[] {
-  const ids: string[] = [];
+/** Every `RibbonAction` the ribbon can fire — a button's bare action plus, for
+ *  buttons that own a `menu` dropdown, each menu item's action. Palette
+ *  dropdowns fire the button's own `univer` op (covered by the bare action) so
+ *  contribute no extra actions. Used by the integrity helpers below. */
+function allRibbonActions(): RibbonAction[] {
+  const actions: RibbonAction[] = [];
   for (const tab of RIBBON_TABS) {
     for (const group of tab.groups) {
       for (const btn of group.buttons) {
-        if (btn.action.kind === "editorCommand") ids.push(btn.action.commandId);
+        actions.push(btn.action);
+        if (btn.dropdown?.kind === "menu") {
+          for (const item of btn.dropdown.items) actions.push(item.action);
+        }
       }
     }
   }
-  return ids;
+  return actions;
+}
+
+/** Flat list of every editor-command id referenced by the ribbon — used by
+ *  the integrity test to assert each id is dispatchable by EditorScreen.
+ *  #202 Phase 3: also covers ids reachable only via a dropdown menu item. */
+export function ribbonEditorCommandIds(): string[] {
+  return allRibbonActions()
+    .filter((a): a is Extract<RibbonAction, { kind: "editorCommand" }> => a.kind === "editorCommand")
+    .map((a) => a.commandId);
 }
 
 /** Flat list of every native-menu action id referenced by the ribbon (#202) —
  *  used by the integrity test to assert each is handled by `useMenuActions`. */
 export function ribbonMenuActionIds(): string[] {
-  const ids: string[] = [];
-  for (const tab of RIBBON_TABS) {
-    for (const group of tab.groups) {
-      for (const btn of group.buttons) {
-        if (btn.action.kind === "menuAction") ids.push(btn.action.menuId);
-      }
-    }
-  }
-  return ids;
+  return allRibbonActions()
+    .filter((a): a is Extract<RibbonAction, { kind: "menuAction" }> => a.kind === "menuAction")
+    .map((a) => a.menuId);
 }

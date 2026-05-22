@@ -22,6 +22,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { t } from "../../i18n/locale";
 import {
   RIBBON_TABS,
+  type RibbonAction,
   type RibbonButtonDef,
   type UniverActionId,
 } from "./ribbonDefs";
@@ -30,8 +31,9 @@ import "./Ribbon.css";
 
 interface Props {
   /** Invoked for `kind: "univer"` buttons. EditorScreen maps the op id to a
-   *  facade call. Kept as a prop so all `fUniverRef` plumbing stays there. */
-  onUniverAction: (op: UniverActionId) => void;
+   *  facade call. Kept as a prop so all `fUniverRef` plumbing stays there.
+   *  #202 Phase 3: `color` is supplied by color-palette dropdown swatches. */
+  onUniverAction: (op: UniverActionId, color?: string) => void;
   /** #202: "← Home" navigation, folded into the tab strip's left edge so the
    *  former standalone toolbar row is gone (one row saved). */
   onGoHome: () => void;
@@ -83,24 +85,30 @@ export default function Ribbon({
     (g) => g.buttons,
   );
 
-  const handleButton = useCallback(
-    (def: RibbonButtonDef) => {
-      if (def.action.kind === "editorCommand") {
+  // Dispatch a single `RibbonAction` — shared by top-level button clicks and
+  // dropdown item / color-palette selections (#202 Phase 3).
+  const runAction = useCallback(
+    (action: RibbonAction) => {
+      if (action.kind === "editorCommand") {
         window.dispatchEvent(
-          new CustomEvent("coco:editor-command", { detail: def.action.commandId }),
+          new CustomEvent("coco:editor-command", { detail: action.commandId }),
         );
-      } else if (def.action.kind === "menuAction") {
+      } else if (action.kind === "menuAction") {
         // #202: re-emit the same `menu-action` event the native menu fired so
         // `useMenuActions` handles file/store operations without duplication.
-        const menuId = def.action.menuId;
         void getCurrentWindow()
-          .emit("menu-action", menuId)
+          .emit("menu-action", action.menuId)
           .catch(() => undefined);
       } else {
-        onUniverAction(def.action.op);
+        onUniverAction(action.op, action.color);
       }
     },
     [onUniverAction],
+  );
+
+  const handleButton = useCallback(
+    (def: RibbonButtonDef) => runAction(def.action),
+    [runAction],
   );
 
   // Arrow-key navigation across the active panel's buttons.
@@ -192,6 +200,7 @@ export default function Ribbon({
                     def={btn}
                     tabIndex={idx === activeBtnIndex ? 0 : -1}
                     onActivate={handleButton}
+                    onDropdownSelect={runAction}
                   />
                 );
               })}

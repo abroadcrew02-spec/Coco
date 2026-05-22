@@ -57,7 +57,11 @@ export type UniverActionId =
 export type RibbonAction =
   | { kind: "editorCommand"; commandId: string }
   | { kind: "univer"; op: UniverActionId; color?: string }
-  | { kind: "menuAction"; menuId: string };
+  | { kind: "menuAction"; menuId: string }
+  // #204: in-app navigation back to the start screen. Unlike the other kinds
+  // it carries no command id — the renderer invokes the `onGoHome` prop, which
+  // EditorScreen wires to the unsaved-changes-guarded `goHomeAfterConfirm`.
+  | { kind: "goHome" };
 
 /** #202 Phase 3: a single item inside a dropdown menu. Fires one of the same
  *  `RibbonAction` kinds a top-level button does — no new command ids invented. */
@@ -134,6 +138,7 @@ const menuAction = (menuId: string): RibbonAction => ({
   kind: "menuAction",
   menuId,
 });
+const goHome = (): RibbonAction => ({ kind: "goHome" });
 
 /** #202 Phase 3 / #199: the color-palette swatch grid. Two rows — a standard
  *  spectrum and a neutral ramp — chosen to mirror Excel's "標準の色". Each
@@ -158,6 +163,16 @@ const fileTab: RibbonTabDef = {
       id: "file-workbook",
       labelKey: "ribbon.group.fileWorkbook",
       buttons: [
+        // #204: the former standalone "← Home" strip button, folded into the
+        // File tab. Fires the `goHome` action, which the renderer routes to the
+        // `onGoHome` prop (unsaved-changes-guarded start-screen navigation).
+        {
+          id: "file-go-home",
+          labelKey: "ribbon.btn.goHome",
+          icon: "←",
+          action: goHome(),
+          size: "large",
+        },
         {
           id: "file-new",
           labelKey: "ribbon.btn.new",

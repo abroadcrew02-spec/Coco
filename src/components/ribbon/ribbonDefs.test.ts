@@ -102,11 +102,28 @@ describe("ribbonDefs — structural integrity", () => {
       } else if (btn.action.kind === "menuAction") {
         expect(typeof btn.action.menuId).toBe("string");
         expect(btn.action.menuId.length).toBeGreaterThan(0);
+      } else if (btn.action.kind === "goHome") {
+        // #204: a bare in-app navigation action — carries no payload.
+        expect(btn.action.kind).toBe("goHome");
       } else {
         expect(btn.action.kind).toBe("univer");
         expect(typeof btn.action.op).toBe("string");
       }
     }
+  });
+
+  it("the File tab exposes a `goHome` (Back to Home) button — #204", () => {
+    const file = RIBBON_TABS.find((t) => t.id === "file");
+    const goHomeBtn = file?.groups
+      .flatMap((g) => g.buttons)
+      .find((b) => b.action.kind === "goHome");
+    expect(goHomeBtn).toBeDefined();
+    expect(goHomeBtn?.id).toBe("file-go-home");
+    // The goHome action lives only on the File tab — no other tab fires it.
+    const goHomeElsewhere = RIBBON_TABS.filter((t) => t.id !== "file")
+      .flatMap((t) => t.groups.flatMap((g) => g.buttons))
+      .filter((b) => b.action.kind === "goHome");
+    expect(goHomeElsewhere).toEqual([]);
   });
 
   it("home tab covers clipboard / font / alignment groups", () => {

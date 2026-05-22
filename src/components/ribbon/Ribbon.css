@@ -14,8 +14,8 @@
 }
 
 /* --- Tab strip ------------------------------------------------------------ */
-/* #202: the strip row holds the "← Home" button, the tablist and the file
- * name — folding the former standalone toolbar row into the ribbon. */
+/* #202/#204: the strip row holds the tablist and the file name. The former
+ * "← Home" button now lives inside the File tab as a ribbon button (#204). */
 .ribbon__strip {
   display: flex;
   align-items: flex-end;
@@ -23,26 +23,6 @@
   padding: 2px 6px 0;
   background-color: var(--coco-surface);
   border-bottom: 1px solid var(--coco-border);
-}
-
-.ribbon__home-btn {
-  appearance: none;
-  flex-shrink: 0;
-  margin-bottom: 2px;
-  padding: 3px 10px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
-  border-radius: 4px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.ribbon__home-btn:hover {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-text-faint);
 }
 
 .ribbon__tablist {

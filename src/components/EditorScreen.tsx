@@ -4685,7 +4685,12 @@ export default function EditorScreen() {
   // Number-format ops (comma / decimal) take the snapshot `_fmt` path because
   // Coco doesn't register the optional @univerjs/sheets-numfmt facade.
   const handleUniverAction = useCallback(
-    (op: import("./ribbon/ribbonDefs").UniverActionId) => {
+    (
+      op: import("./ribbon/ribbonDefs").UniverActionId,
+      // #202 Phase 3: color-palette dropdowns pass the chosen color here, so
+      // fontColor / fillColor no longer need a window.prompt.
+      color?: string,
+    ) => {
       const fUniver = fUniverRef.current;
       if (!fUniver) return;
       const workbook = fUniver.getActiveWorkbook();
@@ -4758,18 +4763,13 @@ export default function EditorScreen() {
             break;
           }
           case "fontColor": {
-            const color = window.prompt(
-              t("ribbon.btn.fontColor"),
-              "#000000",
-            );
+            // #202 Phase 3: the ribbon's color-palette dropdown supplies the
+            // color; a bare click with no color is a no-op (the palette is the
+            // only way to pick one — the old window.prompt is gone).
             if (color && color.trim()) range.setFontColor(color.trim());
             break;
           }
           case "fillColor": {
-            const color = window.prompt(
-              t("ribbon.btn.fillColor"),
-              "#ffff00",
-            );
             if (color && color.trim()) range.setBackground(color.trim());
             break;
           }
@@ -6580,6 +6580,13 @@ export default function EditorScreen() {
       } else if (mod && !e.shiftKey && e.key === "s") {
         e.preventDefault();
         save();
+      } else if (mod && !e.shiftKey && (e.key === "p" || e.key === "P")) {
+        // Ctrl+P / Cmd+P — print preview. Previously bound only via the native
+        // menu accelerator (#202 removed the native menu); handled here so the
+        // shortcut keeps opening Coco's in-app preview instead of the WebView's
+        // default browser print.
+        e.preventDefault();
+        openQuickPrintDialog();
       } else if (mod && e.key === "F3") {
         e.preventDefault();
         openNamedRangesDialog();
@@ -6617,6 +6624,7 @@ export default function EditorScreen() {
     [
       save,
       promptSaveAs,
+      openQuickPrintDialog,
       openNamedRangesDialog,
       openCfDialog,
       openHyperlinkDialog,
@@ -8219,7 +8227,7 @@ export default function EditorScreen() {
   );
 
   const fileName = currentHandle?.path
-    ? currentHandle.path.split(/[\\/]/).pop()
+    ? currentHandle.path.split(/[\\/]/).pop() ?? "無題のワークブック"
     : currentHandle?.sourceType === "xlsx"
     ? "xlsx 由来（未保存）"
     : "無題のワークブック";
@@ -8250,33 +8258,16 @@ export default function EditorScreen() {
     <div className="editor-screen">
       {/* #177: ARIA live regions for screen-reader announcements. */}
       <LiveRegion />
-      <div
-        className="editor-toolbar"
-        role="toolbar"
-        aria-label={t("a11y.label.toolbar")}
-      >
-        <div className="editor-toolbar__left">
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={goHomeAfterConfirm}
-            title={t("a11y.label.goHome")}
-            aria-label={t("a11y.label.goHome")}
-          >
-            {t("toolbar.home")}
-          </button>
-          <span
-            className="editor-toolbar__filename"
-            title={currentHandle?.path ?? undefined}
-          >
-            {fileLabel}
-          </span>
-        </div>
-      </div>
-      {/* #198: Excel-like ribbon — replaces the flat toolbar's per-feature
-          buttons. The native menu bar (src-tauri) stays as a parallel surface.
-          The Name Box lives in the formula bar below. */}
-      <Ribbon onUniverAction={handleUniverAction} />
+      {/* #198 / #202: Excel-like ribbon — replaces the flat toolbar's
+          per-feature buttons and the removed native menu bar. The "← Home"
+          navigation and file name are folded into the ribbon's tab strip
+          (one row saved). The Name Box lives in the formula bar below. */}
+      <Ribbon
+        onUniverAction={handleUniverAction}
+        onGoHome={goHomeAfterConfirm}
+        fileLabel={fileLabel}
+        filePath={currentHandle?.path ?? undefined}
+      />
       <FormulaBar
         activeSheetName={navActiveSheetName}
         activeCellRef={navActiveCellRef}

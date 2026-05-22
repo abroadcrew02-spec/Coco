@@ -1,7 +1,7 @@
 // Ribbon declarative model — issue #198 (Excel-like ribbon UI).
 //
 // The ribbon is data-driven: this file declares the tab → group → button
-// hierarchy once, and `Ribbon.tsx` renders it generically. Two action kinds
+// hierarchy once, and `Ribbon.tsx` renders it generically. Three action kinds
 // are supported:
 //
 //   editorCommand  — fires the existing `coco:editor-command` window event
@@ -11,6 +11,11 @@
 //                    (FRange.setFontWeight, FWorkbook.undo, ...). These are
 //                    wired in `Ribbon.tsx` via the `onUniverAction` callback
 //                    so the heavy `fUniverRef` plumbing stays in EditorScreen.
+//   menuAction     — emits the `menu-action` window event (#202): the same
+//                    event the (now removed) Tauri native menu fired. Routes
+//                    file/store operations (new/open/save/export/settings...)
+//                    through the existing `useMenuActions` dispatcher so the
+//                    File tab works without re-implementing those flows.
 //
 // Keeping the model declarative makes the command-id ↔ EditorScreen integrity
 // trivially testable (see ribbonDefs.test.ts) and lets a11y / keyboard
@@ -42,11 +47,45 @@ export type UniverActionId =
   | "undo"
   | "redo";
 
-/** Discriminated union: a button either fires an existing editor command or
- *  a Univer-native facade operation. */
+/** Discriminated union: a button fires an existing editor command, a
+ *  Univer-native facade operation, or a native-menu action id (#202).
+ *
+ *  #202 Phase 3: the `univer` variant may carry an optional `color` — color
+ *  palette dropdown items (font / fill color) reuse the existing
+ *  `fontColor` / `fillColor` ops but supply the chosen color directly, so the
+ *  former `window.prompt` color input is gone (also folds in #199). */
 export type RibbonAction =
   | { kind: "editorCommand"; commandId: string }
-  | { kind: "univer"; op: UniverActionId };
+  | { kind: "univer"; op: UniverActionId; color?: string }
+  | { kind: "menuAction"; menuId: string };
+
+/** #202 Phase 3: a single item inside a dropdown menu. Fires one of the same
+ *  `RibbonAction` kinds a top-level button does — no new command ids invented. */
+export interface RibbonDropdownItemDef {
+  /** Stable id — unique within the dropdown, used as React key + test hook. */
+  id: string;
+  /** i18n key for the item's visible label. */
+  labelKey: StringKey;
+  /** Optional glyph shown left of the label. Decorative — aria-hidden. */
+  icon?: string;
+  action: RibbonAction;
+}
+
+/** #202 Phase 3: dropdown definition attached to a `RibbonButtonDef`. A button
+ *  that owns one renders a caret (▾) and, on click, opens a popover. Two
+ *  shapes are supported via the `kind` discriminant:
+ *
+ *    menu     — a flat list of `RibbonDropdownItemDef` rows (paste-special,
+ *               number-format presets, ...).
+ *    palette  — a color-swatch grid (#199): each swatch fires the button's own
+ *               `univer` op with the picked `color`. */
+export type RibbonDropdownDef =
+  | { kind: "menu"; items: RibbonDropdownItemDef[] }
+  | {
+      kind: "palette";
+      /** The Univer op each swatch fires (`fontColor` / `fillColor`). */
+      op: UniverActionId;
+    };
 
 export interface RibbonButtonDef {
   /** Stable id — unique across the whole ribbon, used as React key + test hook. */
@@ -56,6 +95,10 @@ export interface RibbonButtonDef {
   /** Optional glyph (emoji / unicode). Purely decorative — aria-hidden. */
   icon?: string;
   action: RibbonAction;
+  /** #202 Phase 3: optional dropdown. When present the button renders a caret
+   *  and opening it shows a menu / color palette; the bare `action` still
+   *  fires on a plain click (Excel's split-button behaviour). */
+  dropdown?: RibbonDropdownDef;
   /** Visual variant (Excel-style). `large` = big vertical button occupying a
    *  full group row; `small` = compact horizontal button. Defaults to `small`. */
   size?: "large" | "small";
@@ -63,6 +106,11 @@ export interface RibbonButtonDef {
    *  visible label is abbreviated, this carries the unshortened description.
    *  Falls back to `labelKey` when absent. */
   tooltipKey?: StringKey;
+  /** When true the button renders icon-only (no visible label) — used for
+   *  Excel's compact controls (B/I/U, alignment, number symbols). The full
+   *  description is preserved in `title` / `aria-label` via tooltipKey/labelKey.
+   *  Ignored for `large` buttons, which always show their label. */
+  iconOnly?: boolean;
 }
 
 export interface RibbonGroupDef {
@@ -82,6 +130,159 @@ const editorCommand = (commandId: string): RibbonAction => ({
   commandId,
 });
 const univer = (op: UniverActionId): RibbonAction => ({ kind: "univer", op });
+const menuAction = (menuId: string): RibbonAction => ({
+  kind: "menuAction",
+  menuId,
+});
+
+/** #202 Phase 3 / #199: the color-palette swatch grid. Two rows — a standard
+ *  spectrum and a neutral ramp — chosen to mirror Excel's "標準の色". Each
+ *  entry is a hex string handed straight to the `fontColor` / `fillColor`
+ *  Univer op. The renderer also offers an "other color" `<input type=color>`
+ *  so any color outside the grid stays reachable. */
+export const RIBBON_COLOR_SWATCHES: readonly string[] = [
+  "#000000", "#404040", "#808080", "#bfbfbf", "#ffffff",
+  "#c00000", "#ff0000", "#ffc000", "#ffff00", "#92d050",
+  "#00b050", "#00b0f0", "#0070c0", "#002060", "#7030a0",
+];
+
+// --- File --------------------------------------------------------------------
+// #202: replaces the removed Tauri native "ファイル" menu. File / store
+// operations route through `menuAction` (the `menu-action` window event) so
+// the existing `useMenuActions` dispatcher handles them unchanged.
+const fileTab: RibbonTabDef = {
+  id: "file",
+  labelKey: "ribbon.tab.file",
+  groups: [
+    {
+      id: "file-workbook",
+      labelKey: "ribbon.group.fileWorkbook",
+      buttons: [
+        {
+          id: "file-new",
+          labelKey: "ribbon.btn.new",
+          icon: "🗋",
+          action: menuAction("new"),
+          size: "large",
+        },
+        {
+          id: "file-open",
+          labelKey: "ribbon.btn.open",
+          icon: "📂",
+          action: menuAction("open"),
+          size: "large",
+        },
+        {
+          id: "file-templates",
+          labelKey: "ribbon.btn.templates",
+          icon: "🗎",
+          action: editorCommand("file-templates"),
+        },
+      ],
+    },
+    {
+      id: "file-save",
+      labelKey: "ribbon.group.fileSave",
+      buttons: [
+        {
+          id: "file-save",
+          labelKey: "ribbon.btn.save",
+          icon: "💾",
+          action: menuAction("save"),
+          size: "large",
+        },
+        {
+          id: "file-save-as",
+          labelKey: "ribbon.btn.saveAs",
+          icon: "🗃",
+          action: menuAction("save-as"),
+        },
+        { id: "file-snapshot-now", labelKey: "ribbon.btn.snapshotNow", icon: "📸", action: editorCommand("snapshot-now") },
+      ],
+    },
+    {
+      id: "file-import",
+      labelKey: "ribbon.group.fileImport",
+      buttons: [
+        {
+          id: "file-csv-import-wizard",
+          labelKey: "ribbon.btn.csvImportWizard",
+          icon: "📥",
+          action: editorCommand("file-csv-import-wizard"),
+        },
+        {
+          id: "file-import-sheet",
+          labelKey: "ribbon.btn.importSheet",
+          icon: "📄",
+          action: editorCommand("file-import-sheet"),
+        },
+        {
+          id: "file-import-workspace-bundle",
+          labelKey: "ribbon.btn.importWorkspaceBundle",
+          icon: "🗜",
+          action: menuAction("import-workspace-bundle"),
+        },
+      ],
+    },
+    {
+      id: "file-export",
+      labelKey: "ribbon.group.fileExport",
+      buttons: [
+        { id: "file-export-xlsx", labelKey: "ribbon.btn.exportXlsx", icon: "📊", action: menuAction("export-xlsx") },
+        { id: "file-export-csv", labelKey: "ribbon.btn.exportCsv", icon: "📑", action: menuAction("export-csv") },
+        { id: "file-export-html", labelKey: "ribbon.btn.exportHtml", icon: "🌐", action: menuAction("export-html") },
+        { id: "file-export-pdf", labelKey: "ribbon.btn.exportPdf", icon: "📕", action: menuAction("export-pdf") },
+        {
+          id: "file-export-workspace-bundle",
+          labelKey: "ribbon.btn.exportWorkspaceBundle",
+          icon: "🗜",
+          action: menuAction("export-workspace-bundle"),
+        },
+      ],
+    },
+    {
+      id: "file-print",
+      labelKey: "ribbon.group.filePrint",
+      buttons: [
+        {
+          id: "file-page-setup",
+          labelKey: "ribbon.btn.pageSetup",
+          icon: "📐",
+          action: editorCommand("file-page-setup"),
+        },
+        {
+          id: "file-quick-print",
+          labelKey: "ribbon.btn.quickPrint",
+          icon: "🖨",
+          action: editorCommand("file-quick-print"),
+        },
+      ],
+    },
+    {
+      id: "file-app",
+      labelKey: "ribbon.group.fileApp",
+      buttons: [
+        {
+          id: "file-settings",
+          labelKey: "ribbon.btn.settings",
+          icon: "⚙",
+          action: menuAction("settings"),
+          size: "large",
+        },
+        { id: "file-help", labelKey: "ribbon.btn.help", icon: "❓", action: menuAction("help") },
+        {
+          id: "file-check-update",
+          labelKey: "ribbon.btn.checkUpdate",
+          icon: "⟲",
+          action: editorCommand("help-check-update"),
+        },
+        // #202: the native menu's "終了" had no ribbon home after the menu was
+        // removed — restore reachability via the `close` menu-action.
+        { id: "file-close", labelKey: "ribbon.btn.close", icon: "⏻", action: menuAction("close") },
+      ],
+    },
+  ],
+};
 
 // --- Home --------------------------------------------------------------------
 const homeTab: RibbonTabDef = {
@@ -106,15 +307,19 @@ const homeTab: RibbonTabDef = {
       id: "font",
       labelKey: "ribbon.group.font",
       buttons: [
-        { id: "bold", labelKey: "ribbon.btn.bold", icon: "B", action: univer("bold") },
-        { id: "italic", labelKey: "ribbon.btn.italic", icon: "I", action: univer("italic") },
-        { id: "underline", labelKey: "ribbon.btn.underline", icon: "U", action: univer("underline") },
+        { id: "bold", labelKey: "ribbon.btn.bold", icon: "B", action: univer("bold"), iconOnly: true },
+        { id: "italic", labelKey: "ribbon.btn.italic", icon: "I", action: univer("italic"), iconOnly: true },
+        { id: "underline", labelKey: "ribbon.btn.underline", icon: "U", action: univer("underline"), iconOnly: true },
         {
           id: "font-color",
           labelKey: "ribbon.btn.fontColor.short",
           tooltipKey: "ribbon.btn.fontColor",
           icon: "A",
           action: univer("fontColor"),
+          iconOnly: true,
+          // #202 Phase 3 (folds in #199): a color palette replaces the old
+          // window.prompt — each swatch fires `fontColor` with its color.
+          dropdown: { kind: "palette", op: "fontColor" },
         },
         {
           id: "fill-color",
@@ -122,32 +327,36 @@ const homeTab: RibbonTabDef = {
           tooltipKey: "ribbon.btn.fillColor",
           icon: "🖍",
           action: univer("fillColor"),
+          iconOnly: true,
+          dropdown: { kind: "palette", op: "fillColor" },
         },
-        { id: "borders", labelKey: "ribbon.btn.borders", icon: "▦", action: editorCommand("format-borders") },
+        { id: "borders", labelKey: "ribbon.btn.borders", icon: "▦", action: editorCommand("format-borders"), iconOnly: true },
       ],
     },
     {
       id: "alignment",
       labelKey: "ribbon.group.alignment",
       buttons: [
-        { id: "align-left", labelKey: "ribbon.btn.alignLeft", icon: "⬅", action: univer("alignLeft") },
-        { id: "align-center", labelKey: "ribbon.btn.alignCenter", icon: "↔", action: univer("alignCenter") },
-        { id: "align-right", labelKey: "ribbon.btn.alignRight", icon: "➡", action: univer("alignRight") },
-        { id: "align-top", labelKey: "ribbon.btn.alignTop", icon: "⬆", action: univer("alignTop") },
+        { id: "align-left", labelKey: "ribbon.btn.alignLeft", icon: "⬅", action: univer("alignLeft"), iconOnly: true },
+        { id: "align-center", labelKey: "ribbon.btn.alignCenter", icon: "↔", action: univer("alignCenter"), iconOnly: true },
+        { id: "align-right", labelKey: "ribbon.btn.alignRight", icon: "➡", action: univer("alignRight"), iconOnly: true },
+        { id: "align-top", labelKey: "ribbon.btn.alignTop", icon: "⬆", action: univer("alignTop"), iconOnly: true },
         {
           id: "align-middle",
           labelKey: "ribbon.btn.alignMiddle.short",
           tooltipKey: "ribbon.btn.alignMiddle",
           icon: "⬍",
           action: univer("alignMiddle"),
+          iconOnly: true,
         },
-        { id: "align-bottom", labelKey: "ribbon.btn.alignBottom", icon: "⬇", action: univer("alignBottom") },
+        { id: "align-bottom", labelKey: "ribbon.btn.alignBottom", icon: "⬇", action: univer("alignBottom"), iconOnly: true },
         {
           id: "wrap-text",
           labelKey: "ribbon.btn.wrapText.short",
           tooltipKey: "ribbon.btn.wrapText",
           icon: "↵",
           action: univer("wrapText"),
+          iconOnly: true,
         },
         {
           id: "merge-cells",
@@ -155,6 +364,7 @@ const homeTab: RibbonTabDef = {
           tooltipKey: "ribbon.btn.mergeCells",
           icon: "⊞",
           action: univer("mergeCells"),
+          iconOnly: true,
         },
         {
           id: "unmerge-cells",
@@ -162,6 +372,7 @@ const homeTab: RibbonTabDef = {
           tooltipKey: "ribbon.btn.unmergeCells",
           icon: "⊟",
           action: univer("unmergeCells"),
+          iconOnly: true,
         },
       ],
     },
@@ -175,15 +386,51 @@ const homeTab: RibbonTabDef = {
           icon: "🔢",
           action: editorCommand("format-number"),
           size: "large",
+          // #202 Phase 3: Excel's number-format dropdown. Only ids that map to
+          // an existing editor command are listed — 標準/数値 open the format
+          // dialog (`format-number`), 通貨/% reuse the quick-format commands.
+          dropdown: {
+            kind: "menu",
+            items: [
+              {
+                id: "number-format-general",
+                labelKey: "ribbon.menu.numberFormat.general",
+                action: editorCommand("format-number"),
+              },
+              {
+                id: "number-format-number",
+                labelKey: "ribbon.menu.numberFormat.number",
+                action: editorCommand("format-number"),
+              },
+              {
+                id: "number-format-currency",
+                labelKey: "ribbon.btn.currency",
+                icon: "¥",
+                action: editorCommand("format-currency"),
+              },
+              {
+                id: "number-format-percent",
+                labelKey: "ribbon.btn.percent",
+                icon: "%",
+                action: editorCommand("format-percent"),
+              },
+              {
+                id: "number-format-more",
+                labelKey: "ribbon.menu.numberFormat.more",
+                action: editorCommand("format-number"),
+              },
+            ],
+          },
         },
-        { id: "currency", labelKey: "ribbon.btn.currency", icon: "¥", action: editorCommand("format-currency") },
-        { id: "percent", labelKey: "ribbon.btn.percent", icon: "%", action: editorCommand("format-percent") },
+        { id: "currency", labelKey: "ribbon.btn.currency", icon: "¥", action: editorCommand("format-currency"), iconOnly: true },
+        { id: "percent", labelKey: "ribbon.btn.percent", icon: "%", action: editorCommand("format-percent"), iconOnly: true },
         {
           id: "comma-style",
           labelKey: "ribbon.btn.commaStyle.short",
           tooltipKey: "ribbon.btn.commaStyle",
           icon: ",",
           action: univer("commaStyle"),
+          iconOnly: true,
         },
         {
           id: "increase-decimal",
@@ -191,6 +438,7 @@ const homeTab: RibbonTabDef = {
           tooltipKey: "ribbon.btn.increaseDecimal",
           icon: "←.0",
           action: univer("increaseDecimal"),
+          iconOnly: true,
         },
         {
           id: "decrease-decimal",
@@ -198,6 +446,7 @@ const homeTab: RibbonTabDef = {
           tooltipKey: "ribbon.btn.decreaseDecimal",
           icon: ".0→",
           action: univer("decreaseDecimal"),
+          iconOnly: true,
         },
       ],
     },
@@ -217,6 +466,18 @@ const homeTab: RibbonTabDef = {
           labelKey: "ribbon.btn.conditionalFormat",
           icon: "▤",
           action: editorCommand("format-conditional"),
+        },
+        {
+          id: "cf-manage-rules",
+          labelKey: "ribbon.btn.cfManageRules",
+          icon: "📋",
+          action: editorCommand("format-cf-manage-rules"),
+        },
+        {
+          id: "quick-cf",
+          labelKey: "ribbon.btn.quickCf",
+          icon: "✨",
+          action: editorCommand("format-quick-cf"),
         },
         { id: "table", labelKey: "ribbon.btn.table", icon: "⊞", action: editorCommand("insert-table") },
       ],
@@ -749,26 +1010,163 @@ const viewTab: RibbonTabDef = {
   ],
 };
 
+// --- Tools -------------------------------------------------------------------
+// #202: replaces the removed Tauri native "ツール" menu — the what-if / macro /
+// scripting long-tail plus calculation and sheet-management commands that have
+// no natural home on the other Excel tabs.
+const toolsTab: RibbonTabDef = {
+  id: "tools",
+  labelKey: "ribbon.tab.tools",
+  groups: [
+    {
+      id: "tools-what-if",
+      labelKey: "ribbon.group.whatIf",
+      buttons: [
+        {
+          id: "tools-goal-seek",
+          labelKey: "ribbon.btn.goalSeek",
+          icon: "🎯",
+          action: editorCommand("tools-goal-seek"),
+          size: "large",
+        },
+        { id: "tools-scenarios", labelKey: "ribbon.btn.scenarios", icon: "🗂", action: editorCommand("tools-scenarios") },
+        {
+          id: "tools-quick-analysis",
+          labelKey: "ribbon.btn.quickAnalysis",
+          icon: "⚡",
+          action: editorCommand("edit-quick-analysis"),
+        },
+      ],
+    },
+    {
+      id: "tools-automation",
+      labelKey: "ribbon.group.automation",
+      buttons: [
+        {
+          id: "tools-macro",
+          labelKey: "ribbon.btn.macro",
+          icon: "▶",
+          action: editorCommand("tools-macro"),
+          size: "large",
+        },
+        {
+          id: "tools-script-editor",
+          labelKey: "ribbon.btn.scriptEditor",
+          icon: "🧩",
+          action: editorCommand("tools-script-editor"),
+        },
+        {
+          id: "tools-custom-lists",
+          labelKey: "ribbon.btn.customLists",
+          icon: "🗒",
+          action: editorCommand("settings-custom-lists"),
+        },
+      ],
+    },
+    {
+      id: "tools-calculation",
+      labelKey: "ribbon.group.calculation",
+      buttons: [
+        { id: "tools-calc-options", labelKey: "ribbon.btn.calcOptions", icon: "⚙", action: editorCommand("calc-options") },
+        { id: "tools-recalc-all", labelKey: "ribbon.btn.recalcAll", icon: "↻", action: editorCommand("calc-recalc-all") },
+        {
+          id: "tools-recalc-sheet",
+          labelKey: "ribbon.btn.recalcSheet",
+          icon: "⟳",
+          action: editorCommand("calc-recalc-sheet"),
+        },
+      ],
+    },
+    {
+      id: "tools-sheet",
+      labelKey: "ribbon.group.sheet",
+      buttons: [
+        {
+          id: "tools-sheet-hide",
+          labelKey: "ribbon.btn.sheetHide",
+          icon: "🙈",
+          action: editorCommand("sheet-hide-active"),
+        },
+        {
+          id: "tools-sheet-unhide",
+          labelKey: "ribbon.btn.sheetUnhide",
+          icon: "👀",
+          action: editorCommand("sheet-unhide"),
+        },
+        {
+          id: "tools-sheet-move-copy",
+          labelKey: "ribbon.btn.sheetMoveCopy",
+          icon: "🗐",
+          action: editorCommand("sheet-move-copy"),
+        },
+      ],
+    },
+    {
+      id: "tools-navigation",
+      labelKey: "ribbon.group.navigation",
+      buttons: [
+        { id: "tools-go-to", labelKey: "ribbon.btn.goTo", icon: "🧭", action: editorCommand("edit-go-to") },
+        {
+          id: "tools-bookmark-add",
+          labelKey: "ribbon.btn.bookmarkAdd",
+          icon: "🔖",
+          action: editorCommand("bookmark-add-current"),
+        },
+        {
+          id: "tools-command-palette",
+          labelKey: "ribbon.btn.commandPalette",
+          icon: "⌘",
+          action: editorCommand("edit-command-palette"),
+        },
+      ],
+    },
+  ],
+};
+
 /** The complete ribbon model, in tab order. */
 export const RIBBON_TABS: RibbonTabDef[] = [
+  fileTab,
   homeTab,
   insertTab,
   formulasTab,
   dataTab,
   reviewTab,
   viewTab,
+  toolsTab,
 ];
 
-/** Flat list of every editor-command id referenced by the ribbon — used by
- *  the integrity test to assert each id is dispatchable by EditorScreen. */
-export function ribbonEditorCommandIds(): string[] {
-  const ids: string[] = [];
+/** Every `RibbonAction` the ribbon can fire — a button's bare action plus, for
+ *  buttons that own a `menu` dropdown, each menu item's action. Palette
+ *  dropdowns fire the button's own `univer` op (covered by the bare action) so
+ *  contribute no extra actions. Used by the integrity helpers below. */
+function allRibbonActions(): RibbonAction[] {
+  const actions: RibbonAction[] = [];
   for (const tab of RIBBON_TABS) {
     for (const group of tab.groups) {
       for (const btn of group.buttons) {
-        if (btn.action.kind === "editorCommand") ids.push(btn.action.commandId);
+        actions.push(btn.action);
+        if (btn.dropdown?.kind === "menu") {
+          for (const item of btn.dropdown.items) actions.push(item.action);
+        }
       }
     }
   }
-  return ids;
+  return actions;
+}
+
+/** Flat list of every editor-command id referenced by the ribbon — used by
+ *  the integrity test to assert each id is dispatchable by EditorScreen.
+ *  #202 Phase 3: also covers ids reachable only via a dropdown menu item. */
+export function ribbonEditorCommandIds(): string[] {
+  return allRibbonActions()
+    .filter((a): a is Extract<RibbonAction, { kind: "editorCommand" }> => a.kind === "editorCommand")
+    .map((a) => a.commandId);
+}
+
+/** Flat list of every native-menu action id referenced by the ribbon (#202) —
+ *  used by the integrity test to assert each is handled by `useMenuActions`. */
+export function ribbonMenuActionIds(): string[] {
+  return allRibbonActions()
+    .filter((a): a is Extract<RibbonAction, { kind: "menuAction" }> => a.kind === "menuAction")
+    .map((a) => a.menuId);
 }

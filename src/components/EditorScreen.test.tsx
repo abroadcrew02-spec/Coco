@@ -15,8 +15,11 @@ const getReadyWorkbookSource =
   editorSource.match(/const getReadyWorkbook = useCallback\(\(label: string\) => \{[\s\S]*?\n  \}, \[\]\);/)?.[0] ?? "";
 const mutationSnapshotSyncSource =
   editorSource.match(/\/\/ Sync snapshot to store on data mutations[\s\S]*?\n  \}, \[markDirty, updateSnapshot\]\);/)?.[0] ?? "";
+// #202: the standalone Coco toolbar row was removed — "← Home" and the file
+// name now live inside the ribbon's tab strip. The region from the ribbon
+// mount to the sheet-picker stands in for the former toolbar source slice.
 const toolbarSource =
-  editorSource.match(/<div className="editor-toolbar">[\s\S]*?\n      \{sheetPicker && \(/)?.[0] ?? "";
+  editorSource.match(/<Ribbon[\s\S]*?\n      \{sheetPicker && \(/)?.[0] ?? "";
 // #189 — the script-trigger useEffect (onOpen / onEdit / timer wiring).
 const triggerEffectSource =
   editorSource.match(/\/\/ #189 — script triggers\.[\s\S]*?\n  \}, \[currentSnapshotJson\]\);/)?.[0] ?? "";
@@ -92,13 +95,13 @@ describe("EditorScreen Univer plugin wiring", () => {
     expect(editorSource).toMatch(/aria-live="polite"/);
   });
 
-  it("keeps the Coco custom toolbar minimal (back-to-home + filename only)", () => {
-    // The 6 quick-action buttons (表示形式 / Σ / 通貨 / % / 書式コピー / 並べ替え)
-    // were moved into the native menu (書式 / データ submenus) to declutter the
-    // top bar. They are still reachable via menu + keyboard shortcuts; the
-    // toolbar-side disabling has nothing to gate now, so the dedicated state
-    // and the "クイック操作" group are gone. `getReadyWorkbook` still guards
-    // each underlying action against premature execution.
+  it("folds back-to-home + filename into the ribbon, no standalone toolbar (#202)", () => {
+    // #202: the standalone Coco toolbar row is gone — the ribbon owns the
+    // "← Home" navigation and file name (passed as props). No quick-action
+    // buttons or per-feature toolbar state remain in this region.
+    expect(editorSource).not.toMatch(/className="editor-toolbar"/);
+    expect(editorSource).toMatch(/onGoHome=\{goHomeAfterConfirm\}/);
+    expect(editorSource).toMatch(/fileLabel=\{fileLabel\}/);
     expect(toolbarSource).not.toMatch(/aria-label="クイック操作"/);
     expect(toolbarSource).not.toMatch(/editorToolDisabled/);
     expect(toolbarSource).not.toMatch(/data-testid="autosum"/);

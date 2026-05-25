@@ -30,6 +30,7 @@ import { UniverSheetsFilterPlugin } from "@univerjs/sheets-filter";
 // four are Apache-2.0 OSS at 0.24.0. The base `@univerjs/drawing` was
 // already pulled in transitively before this PR; we register it explicitly
 // so the load order matches Univer's preset.
+import { UniverDocsDrawingPlugin } from "@univerjs/docs-drawing";
 import { UniverDrawingPlugin } from "@univerjs/drawing";
 import { UniverDrawingUIPlugin } from "@univerjs/drawing-ui";
 import { UniverSheetsDrawingPlugin } from "@univerjs/sheets-drawing";
@@ -607,11 +608,18 @@ export default function EditorScreen() {
   const fUniverRef = useRef<FUniver | null>(null);
   // StrictMode-safe stash for the Univer instance bundle. React 18 StrictMode
   // double-invokes effects in dev (mount → cleanup → mount). Disposing Univer
-  // synchronously in the cleanup tears down its `redi` DI injector while
-  // createUnit's async `_initWorkbookListener` is still pending, producing
-  // "[redi]: Injector cannot be accessed after it was disposed" and a blank
-  // grid. We instead defer disposal onto a setTimeout(0); a StrictMode remount
-  // runs synchronously and cancels that timer, reusing the live instance.
+  // synchronously in the cleanup tears down its `redi` DI injector while a
+  // late async dispatch (in Univer 0.5.x specifically: `_initWorkbookListener`)
+  // is still pending, producing "[redi]: Injector cannot be accessed after it
+  // was disposed" and a blank grid. We instead defer disposal onto a
+  // setTimeout(0); a StrictMode remount runs synchronously and cancels that
+  // timer, reusing the live instance.
+  //
+  // NOTE (post-Univer-0.24): the original 0.5.x async race (the symbol
+  // `_initWorkbookListener` no longer exists in 0.24's core bundle) appears
+  // to have been resolved upstream. This guard may now be dead code. Removing
+  // it is tracked in issue #232 — needs a runtime spike under StrictMode
+  // before we delete ~50 lines of machinery.
   const univerStashRef = useRef<{
     univer: Univer;
     fUniver: FUniver;
@@ -7534,8 +7542,10 @@ export default function EditorScreen() {
     // and scheduled (but not yet fired) its disposal, this effect re-run is the
     // StrictMode remount. Cancel the pending disposal and reuse the existing
     // Univer instead of creating a second one — building a new Univer here
-    // would race the disposed instance's async `_initWorkbookListener` and
-    // surface "[redi]: Injector ... disposed". See univerStashRef.
+    // would, on Univer 0.5.x, race the disposed instance's late async dispatch
+    // (the `_initWorkbookListener` of that era) and surface
+    // "[redi]: Injector ... disposed". See `univerStashRef` and issue #232 for
+    // the post-0.24 status of this guard.
     {
       const stashed = univerStashRef.current;
       if (stashed && stashed.disposeTimer !== null) {
@@ -7639,6 +7649,12 @@ export default function EditorScreen() {
       // if we populate it.
       univer.registerPlugin(UniverDrawingPlugin);
       univer.registerPlugin(UniverDrawingUIPlugin);
+      // #233: UniverSheetsDrawingUIPlugin's `@DependentOn` graph pulls
+      // UniverDocsDrawingPlugin in automatically, but Univer's PluginService
+      // logs a noisy debug line for each unregistered dependent on every
+      // boot. Register explicitly to silence it. The plugin is inert for
+      // sheet-only Coco workbooks (no DOC unit).
+      univer.registerPlugin(UniverDocsDrawingPlugin);
       univer.registerPlugin(UniverSheetsDrawingPlugin);
       univer.registerPlugin(UniverSheetsDrawingUIPlugin);
 
@@ -7737,9 +7753,11 @@ export default function EditorScreen() {
     // Defer disposal onto a timer instead of disposing synchronously. A
     // StrictMode remount runs within the same commit and cancels this timer
     // (see the remount fast path above), reusing the instance; a real unmount
-    // lets the timer fire and disposes for real. Disposing synchronously here
-    // would tear down Univer's `redi` injector while createUnit's async
-    // `_initWorkbookListener` is still pending → "[redi]: Injector disposed".
+    // lets the timer fire and disposes for real. On Univer 0.5.x, disposing
+    // synchronously here would tear down the `redi` injector while
+    // `_initWorkbookListener` was still pending → "[redi]: Injector disposed".
+    // Univer 0.24 no longer exposes that symbol; this guard's continued value
+    // is tracked in issue #232.
     return () => {
       const s = univerStashRef.current;
       if (!s) return;

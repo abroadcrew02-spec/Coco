@@ -30,6 +30,7 @@
     "@univerjs/sheets-filter": "^0.24.0",
     "@univerjs/sheets-find-replace": "^0.24.0",
     "@univerjs/sheets-formula": "^0.24.0",
+    "@univerjs/docs-drawing": "^0.24.0",
     "@univerjs/sheets-drawing": "^0.24.0",
     "@univerjs/sheets-drawing-ui": "^0.24.0",
     "@univerjs/sheets-formula-ui": "^0.24.0",

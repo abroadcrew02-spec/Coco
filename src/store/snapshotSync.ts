@@ -30,7 +30,16 @@ export const flushPendingSnapshot = async () => {
  * must re-graft these keys from the prior snapshot or the user's camera links
  * / scenarios silently vanish on the next cell edit (#184 C-1).
  */
-export const COCO_ROOT_EXTENSION_KEYS = ["_cameraLinks", "_scenarios"] as const;
+export const COCO_ROOT_EXTENSION_KEYS = [
+  "_cameraLinks",
+  "_scenarios",
+  // #233/Phase 4d: image/textbox inserts mutate `_preservedParts` directly
+  // via `applyMutatedSnapshot`. The next Univer mutation triggers a
+  // `syncSnapshot` whose `FWorkbook.save()` drops every non-IWorkbookData key
+  // — without this graft the inserted drawing parts vanish on the next cell
+  // edit, breaking xlsx export round-trip.
+  "_preservedParts",
+] as const;
 
 /**
  * Carry Coco's workbook-root extension keys forward from `prevJson` into

@@ -5962,6 +5962,38 @@ export default function EditorScreen() {
       };
 
       applyMutatedSnapshot(JSON.stringify(snapshot));
+
+      // Phase 4d (#high-image-live): the snapshot mutation alone doesn't
+      // re-mount Univer, so the image wouldn't appear in-grid until the user
+      // saves and reopens (when the xlsx import bridge re-emits
+      // `resources[SHEET_DRAWING_PLUGIN]` from `_preservedParts`). Fire a
+      // facade `insertImage` so the image renders immediately in-session.
+      // Fire-and-forget: if the facade rejects, the export round-trip still
+      // works via `_preservedParts` and the image will appear on next reopen.
+      const ext = value.ext.toLowerCase();
+      const mime =
+        ext === "jpg" || ext === "jpeg" ? "image/jpeg" :
+        ext === "png" ? "image/png" :
+        ext === "gif" ? "image/gif" :
+        ext === "bmp" ? "image/bmp" :
+        ext === "webp" ? "image/webp" :
+        `image/${ext}`;
+      const dataUrl = `data:${mime};base64,${value.base64}`;
+      try {
+        const fSheet = workbook.getActiveSheet();
+        const fSheetWithImage = fSheet as unknown as {
+          insertImage?: (url: string, col: number, row: number) => Promise<boolean>;
+        } | null;
+        if (fSheetWithImage?.insertImage) {
+          void fSheetWithImage
+            .insertImage(dataUrl, pos.col, pos.row)
+            .catch((err: unknown) => {
+              console.warn("[Coco] in-grid image render failed:", err);
+            });
+        }
+      } catch (err) {
+        console.warn("[Coco] facade insertImage threw synchronously:", err);
+      }
       return null;
     },
     [imageDialog, applyMutatedSnapshot],

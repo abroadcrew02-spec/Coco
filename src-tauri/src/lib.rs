@@ -101,6 +101,7 @@ pub fn run() {
             commands::shell::reveal_in_file_manager,
             commands::shell::open_url,
             commands::file_io::read_file_bytes_base64,
+            commands::file_io::read_text_file_utf8,
             commands::file_io::write_file_bytes_base64,
             commands::file_io::existing_csv_export_paths,
             commands::http_fetch::http_fetch,

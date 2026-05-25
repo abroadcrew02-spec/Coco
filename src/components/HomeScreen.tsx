@@ -199,17 +199,59 @@ export default function HomeScreen() {
     const selected = await open({
       multiple: false,
       filters: [
-        { name: "Excel / CSV / TSV", extensions: ["xlsx", "xlsm", "csv", "tsv"] },
+        { name: "Excel / CSV / TSV / JSON", extensions: ["xlsx", "xlsm", "csv", "tsv", "json", "jsonl", "ndjson"] },
         { name: "Excel Files", extensions: ["xlsx", "xlsm"] },
         { name: "CSV / TSV Files", extensions: ["csv", "tsv"] },
+        { name: "JSON / JSONL", extensions: ["json", "jsonl", "ndjson"] },
       ],
     });
     if (!selected) return;
     const path = typeof selected === "string" ? selected : selected[0];
+    const lower = path.toLowerCase();
+    if (lower.endsWith(".json") || lower.endsWith(".jsonl") || lower.endsWith(".ndjson")) {
+      await handleImportJson(path);
+      return;
+    }
     const route = routeOpenPath(path);
     if (route.kind === "coco") await openCoco(route.path);
     else if (route.kind === "csv") await importCsv(route.path);
     else if (route.kind === "xlsx") await importXlsx(route.path);
+  };
+
+  // #248 — JSON / JSONL import. Reads the file via the new Tauri
+  // `read_text_file_utf8` command, parses it with the renderer-side
+  // `parseAuto` (which auto-detects `[...]` JSON-array vs JSONL by first
+  // non-whitespace char), and seeds a new workbook with the resulting table.
+  // Caveats: nested objects/arrays JSON-stringify into the cell; non-array
+  // JSON or per-line malformed JSONL surfaces warnings but doesn't abort.
+  const handleImportJson = async (path: string) => {
+    try {
+      const text = await invoke<string>("read_text_file_utf8", { path });
+      const { parseAuto, buildSnapshotFromJson } = await import("../store/jsonImport");
+      const result = parseAuto(text);
+      if (result.rows.length === 0) {
+        useWorkbookStore.setState({
+          lastError: result.warnings[0] ?? "JSON は0行でした",
+        });
+        return;
+      }
+      await newWorkbook();
+      const snap = buildSnapshotFromJson(result);
+      updateSnapshot(JSON.stringify(snap));
+      if (result.warnings.length > 0) {
+        useWorkbookStore.setState({
+          importWarnings: result.warnings.map((message) => ({
+            severity: "info" as const,
+            code: "JSON_IMPORT_WARNING",
+            message,
+          })),
+        });
+      }
+    } catch (e) {
+      useWorkbookStore.setState({
+        lastError: friendlyError(String(e)),
+      });
+    }
   };
 
   const handleRecentFile = async (file: RecentFile) => {

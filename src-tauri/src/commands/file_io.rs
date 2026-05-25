@@ -11,6 +11,7 @@ use std::path::Path;
 
 const MAX_READ_BYTES: u64 = 32 * 1024 * 1024; // 32 MiB cap, matches preserved-parts aggregate cap.
 const ALLOWED_IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif"];
+const ALLOWED_TEXT_EXTS: &[&str] = &["json", "jsonl", "ndjson", "txt"];
 const MAX_EXISTENCE_CHECK_PATHS: usize = 1000;
 
 fn is_allowed_image_path(path: &Path) -> bool {
@@ -25,6 +26,13 @@ fn has_allowed_image_magic(bytes: &[u8]) -> bool {
         || bytes.starts_with(b"\xff\xd8\xff")
         || bytes.starts_with(b"GIF87a")
         || bytes.starts_with(b"GIF89a")
+}
+
+fn is_allowed_text_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| ALLOWED_TEXT_EXTS.contains(&e.to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
 }
 
 fn is_csv_export_path(path: &Path) -> bool {
@@ -65,6 +73,35 @@ fn b64_encode(input: &[u8]) -> String {
         out.push('=');
     }
     out
+}
+
+/// #248 — Read a user-chosen text file (JSON / JSONL / NDJSON / TXT) and
+/// return its UTF-8 contents as a String. Refuses files with non-allowed
+/// extensions and enforces the same 32 MiB size cap as the binary reader.
+/// The renderer parses the JSON itself (see `src/store/jsonImport.ts`).
+#[tauri::command]
+pub fn read_text_file_utf8(path: String) -> Result<String, String> {
+    let path_ref = Path::new(&path);
+    if !is_allowed_text_path(path_ref) {
+        return Err("UNSUPPORTED_FILE_TYPE".to_string());
+    }
+    let meta = fs::metadata(path_ref).map_err(|e| format!("READ_METADATA_FAILED: {e}"))?;
+    if meta.len() > MAX_READ_BYTES {
+        return Err(format!(
+            "FILE_TOO_LARGE: {} bytes (cap {} bytes)",
+            meta.len(),
+            MAX_READ_BYTES
+        ));
+    }
+    let bytes = fs::read(path_ref).map_err(|e| format!("READ_FAILED: {e}"))?;
+    // Strip UTF-8 BOM if present; otherwise the renderer's JSON.parse trips
+    // on the leading 0xEF 0xBB 0xBF byte sequence.
+    let bytes = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        &bytes[3..]
+    } else {
+        &bytes[..]
+    };
+    String::from_utf8(bytes.to_vec()).map_err(|e| format!("UTF8_DECODE_FAILED: {e}"))
 }
 
 /// Read a user-chosen file from disk and return base64-encoded bytes.

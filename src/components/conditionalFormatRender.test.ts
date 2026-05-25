@@ -11,6 +11,11 @@ import {
   evaluateTop10,
   evaluateDuplicate,
   evaluateUnique,
+  evaluateDataBar,
+  evaluateColorScale,
+  evaluateIconSet,
+  evaluateExpression,
+  computeCfRepaint,
   DEFAULT_CF_STYLE,
 } from "./conditionalFormatRender";
 
@@ -413,5 +418,397 @@ describe("patchCfRenders", () => {
       sheets: { s1: { cellData: Record<string, Record<string, { s?: unknown }>> } };
     };
     expect(out.sheets.s1.cellData["0"]["0"].s).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Audit-requested coverage: the four advanced evaluators previously had no
+// unit-level tests (only behavior verified indirectly through ad-hoc rendering).
+
+describe("evaluateDataBar", () => {
+  it("returns the base color (max lightness drop) at fillRatio=1", () => {
+    // fillRatio 1 → lightness 40. fillRatio 0 → lightness 100 (near-white).
+    const dark = evaluateDataBar("#638EC6", 1);
+    const light = evaluateDataBar("#638EC6", 0);
+    expect(dark).not.toBe(light);
+    // Both must be valid hex.
+    expect(dark).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(light).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+
+  it("clamps out-of-range fillRatios", () => {
+    expect(evaluateDataBar("#638EC6", -5)).toBe(evaluateDataBar("#638EC6", 0));
+    expect(evaluateDataBar("#638EC6", 5)).toBe(evaluateDataBar("#638EC6", 1));
+  });
+
+  it("falls back to a sensible default when the hex is malformed", () => {
+    expect(evaluateDataBar("not-a-color", 0.5)).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+});
+
+describe("evaluateColorScale", () => {
+  it("interpolates 2-color scale endpoints", () => {
+    const lo = evaluateColorScale(0, "2color", 0, 10, 5, "#ff0000", "#ffffff", "#00ff00");
+    const hi = evaluateColorScale(10, "2color", 0, 10, 5, "#ff0000", "#ffffff", "#00ff00");
+    expect(lo?.toLowerCase()).toBe("#ff0000");
+    expect(hi?.toLowerCase()).toBe("#00ff00");
+  });
+
+  it("interpolates 3-color scale at the median", () => {
+    const mid = evaluateColorScale(5, "3color", 0, 10, 5, "#ff0000", "#00ff00", "#0000ff");
+    expect(mid?.toLowerCase()).toBe("#00ff00");
+  });
+
+  it("returns null for non-numeric values", () => {
+    expect(
+      evaluateColorScale("abc", "2color", 0, 10, 5, "#ff0000", "#ffffff", "#00ff00"),
+    ).toBeNull();
+  });
+
+  it("returns minColor when min==max (degenerate range)", () => {
+    expect(
+      evaluateColorScale(5, "2color", 5, 5, 5, "#ff0000", "#ffffff", "#00ff00")?.toLowerCase(),
+    ).toBe("#ff0000");
+  });
+});
+
+describe("evaluateIconSet", () => {
+  it("returns the lowest-bucket glyph for the min value", () => {
+    expect(evaluateIconSet(0, "3arrows", 0, 10)).toBe("↓");
+  });
+
+  it("returns the highest-bucket glyph for the max value", () => {
+    expect(evaluateIconSet(10, "3arrows", 0, 10)).toBe("↑");
+  });
+
+  it("buckets midrange values", () => {
+    // 3arrows: 3 buckets → idx = floor((5-0)/10 * 3) = floor(1.5) = 1 → "→".
+    expect(evaluateIconSet(5, "3arrows", 0, 10)).toBe("→");
+  });
+
+  it("returns '' for non-numeric values", () => {
+    expect(evaluateIconSet("abc", "3arrows", 0, 10)).toBe("");
+  });
+
+  it("falls back to 3arrows for an unknown iconStyle", () => {
+    expect(evaluateIconSet(10, "nonexistent", 0, 10)).toBe("↑");
+  });
+
+  it("uses the 5-glyph bucket count for 5rating", () => {
+    expect(evaluateIconSet(0, "5rating", 0, 10)).toBe("★☆☆☆☆");
+    expect(evaluateIconSet(10, "5rating", 0, 10)).toBe("★★★★★");
+  });
+});
+
+describe("evaluateExpression", () => {
+  const ctx = {
+    cellData: {
+      "0": { "0": { v: 5 }, "1": { v: 10 } },
+    },
+    anchorRow: 0,
+    anchorCol: 0,
+    curRow: 0,
+    curCol: 0,
+  };
+
+  it("evaluates a simple numeric comparison against a relative ref", () => {
+    expect(evaluateExpression("=A1>3", ctx)).toBe(true);
+    expect(evaluateExpression("=A1>10", ctx)).toBe(false);
+  });
+
+  it("supports ISBLANK / ISNUMBER / ISTEXT", () => {
+    const blankCtx = {
+      cellData: { "0": { "0": {} } },
+      anchorRow: 0,
+      anchorCol: 0,
+      curRow: 0,
+      curCol: 0,
+    };
+    expect(evaluateExpression("=ISBLANK(A1)", blankCtx)).toBe(true);
+    expect(evaluateExpression("=ISNUMBER(A1)", ctx)).toBe(true);
+  });
+
+  it("returns false on malformed input (fail-closed)", () => {
+    expect(evaluateExpression("not a formula", ctx)).toBe(false);
+    expect(evaluateExpression(undefined, ctx)).toBe(false);
+    expect(evaluateExpression("", ctx)).toBe(false);
+  });
+
+  it("supports MOD for striped highlighting (=MOD(ROW(),2)=0)", () => {
+    // ROW() is 1-based; on row index 0 → ROW()=1 → MOD=1 → !=0 → false.
+    // On row index 1 → ROW()=2 → MOD=0 → ==0 → true.
+    const ctxR0 = { ...ctx, curRow: 0 };
+    const ctxR1 = { ...ctx, curRow: 1 };
+    expect(evaluateExpression("=MOD(ROW(),2)=0", ctxR0)).toBe(false);
+    expect(evaluateExpression("=MOD(ROW(),2)=0", ctxR1)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// patchCfRenders integration coverage for the advanced rule types.
+
+describe("patchCfRenders — advanced rules", () => {
+  it("dataBar paints a background on numeric cells, skips text", () => {
+    const snap = {
+      sheets: {
+        s1: {
+          cellData: {
+            "0": { "0": { v: 10 } },
+            "1": { "0": { v: 50 } },
+            "2": { "0": { v: "abc" } },
+          },
+          _conditionalFormatting: [
+            { sqref: "A1:A3", type: "dataBar", color: "#638EC6", priority: 1 },
+          ],
+        },
+      },
+    };
+    const out = patchCfRenders(snap) as {
+      sheets: { s1: { cellData: Record<string, Record<string, { s?: Record<string, unknown> }>> } };
+    };
+    const r0 = out.sheets.s1.cellData["0"]["0"].s?.bg as { rgb?: string } | undefined;
+    const r1 = out.sheets.s1.cellData["1"]["0"].s?.bg as { rgb?: string } | undefined;
+    expect(r0?.rgb).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(r1?.rgb).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(out.sheets.s1.cellData["2"]["0"].s).toBeUndefined();
+  });
+
+  it("colorScale paints interpolated backgrounds", () => {
+    const snap = {
+      sheets: {
+        s1: {
+          cellData: {
+            "0": { "0": { v: 0 } },
+            "1": { "0": { v: 10 } },
+          },
+          _conditionalFormatting: [
+            {
+              sqref: "A1:A2",
+              type: "colorScale",
+              colorScaleType: "2color" as const,
+              minColor: "#ff0000",
+              maxColor: "#00ff00",
+              priority: 1,
+            },
+          ],
+        },
+      },
+    };
+    const out = patchCfRenders(snap) as {
+      sheets: { s1: { cellData: Record<string, Record<string, { s?: Record<string, unknown> }>> } };
+    };
+    const r0 = out.sheets.s1.cellData["0"]["0"].s?.bg as { rgb?: string } | undefined;
+    const r1 = out.sheets.s1.cellData["1"]["0"].s?.bg as { rgb?: string } | undefined;
+    expect(r0?.rgb?.toLowerCase()).toBe("#ff0000");
+    expect(r1?.rgb?.toLowerCase()).toBe("#00ff00");
+  });
+
+  it("iconSet prefixes the cell value with the chosen glyph", () => {
+    const snap = {
+      sheets: {
+        s1: {
+          cellData: {
+            "0": { "0": { v: 0 } },
+            "1": { "0": { v: 10 } },
+          },
+          _conditionalFormatting: [
+            { sqref: "A1:A2", type: "iconSet", iconStyle: "3arrows" as const, priority: 1 },
+          ],
+        },
+      },
+    };
+    const out = patchCfRenders(snap) as unknown as {
+      sheets: { s1: { cellData: Record<string, Record<string, { v?: string }>> } };
+    };
+    expect(out.sheets.s1.cellData["0"]["0"].v).toBe("↓ 0");
+    expect(out.sheets.s1.cellData["1"]["0"].v).toBe("↑ 10");
+  });
+
+  it("expression rule styles only cells that satisfy the formula", () => {
+    const snap = {
+      sheets: {
+        s1: {
+          cellData: {
+            "0": { "0": { v: 5 } },
+            "1": { "0": { v: 15 } },
+          },
+          _conditionalFormatting: [
+            {
+              sqref: "A1:A2",
+              type: "expression",
+              formula1: "=A1>10",
+              priority: 1,
+              style: { bgColor: "#ffff00" },
+            },
+          ],
+        },
+      },
+    };
+    const out = patchCfRenders(snap) as {
+      sheets: { s1: { cellData: Record<string, Record<string, { s?: Record<string, unknown> }>> } };
+    };
+    // Row 0 (value 5) fails; Row 1 (value 15) passes.
+    expect(out.sheets.s1.cellData["0"]["0"].s).toBeUndefined();
+    const bg = out.sheets.s1.cellData["1"]["0"].s?.bg as { rgb?: string } | undefined;
+    expect(bg?.rgb?.toLowerCase()).toBe("#ffff00");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeCfRepaint — the new "live in-session re-paint" helper. Verifies the
+// four edge cases the EditorScreen.applyCfRules fix needs to handle: add,
+// modify, remove, range-shrink.
+
+describe("computeCfRepaint", () => {
+  const buildSnap = (rules: unknown[]) =>
+    JSON.stringify({
+      sheets: {
+        s1: {
+          cellData: {
+            "0": { "0": { v: 5 }, "1": { v: 20 } },
+            "1": { "0": { v: 50 }, "1": { v: 100 } },
+          },
+          _conditionalFormatting: rules,
+        },
+      },
+    });
+
+  it("rule added: emits actions for the new sqref's cells", () => {
+    const nextJson = buildSnap([
+      {
+        sqref: "A1:A2",
+        type: "cellIs",
+        operator: "greaterThan",
+        formula1: "10",
+        priority: 1,
+        style: { bgColor: "#ffff00" },
+      },
+    ]);
+    const actions = computeCfRepaint(nextJson, "s1", []);
+    // A2 (50) matches greaterThan 10 → set bg. A1 (5) does not match → no action.
+    const a2 = actions.find((a) => a.row === 1 && a.col === 0);
+    expect(a2?.set.bg?.toLowerCase()).toBe("#ffff00");
+    expect(actions.find((a) => a.row === 0 && a.col === 0)).toBeUndefined();
+  });
+
+  it("rule modified: switches the bg color to the new style", () => {
+    const prevRules = [
+      {
+        sqref: "A1:A2",
+        type: "cellIs",
+        operator: "greaterThan",
+        formula1: "10",
+        priority: 1,
+        style: { bgColor: "#ff0000" },
+      },
+    ];
+    const nextRules = [
+      {
+        sqref: "A1:A2",
+        type: "cellIs",
+        operator: "greaterThan",
+        formula1: "10",
+        priority: 1,
+        style: { bgColor: "#00ff00" },
+      },
+    ];
+    const nextJson = buildSnap(nextRules);
+    const actions = computeCfRepaint(nextJson, "s1", prevRules);
+    const a2 = actions.find((a) => a.row === 1 && a.col === 0);
+    expect(a2?.set.bg?.toLowerCase()).toBe("#00ff00");
+  });
+
+  it("rule removed: emits a clear action for cells that no longer match", () => {
+    const prevRules = [
+      {
+        sqref: "A1:A2",
+        type: "cellIs",
+        operator: "greaterThan",
+        formula1: "10",
+        priority: 1,
+        style: { bgColor: "#ff0000" },
+      },
+    ];
+    const nextJson = buildSnap([]);
+    const actions = computeCfRepaint(nextJson, "s1", prevRules);
+    const a2 = actions.find((a) => a.row === 1 && a.col === 0);
+    // Previously matched; now no rule → must revert.
+    expect(a2).toBeDefined();
+    expect("bg" in (a2?.clear ?? {})).toBe(true);
+  });
+
+  it("range shrunk: reverts cells dropped from the sqref", () => {
+    const prevRules = [
+      {
+        sqref: "A1:B2",
+        type: "cellIs",
+        operator: "greaterThan",
+        formula1: "10",
+        priority: 1,
+        style: { bgColor: "#ff0000" },
+      },
+    ];
+    // Shrink to A1:A2 only — B1 (20) and B2 (100) previously matched and now
+    // must revert.
+    const nextRules = [
+      {
+        sqref: "A1:A2",
+        type: "cellIs",
+        operator: "greaterThan",
+        formula1: "10",
+        priority: 1,
+        style: { bgColor: "#ff0000" },
+      },
+    ];
+    const nextJson = buildSnap(nextRules);
+    const actions = computeCfRepaint(nextJson, "s1", prevRules);
+    // B1 (row 0, col 1): value 20 previously matched → now outside sqref →
+    // must clear. B2 (row 1, col 1): same.
+    const b1 = actions.find((a) => a.row === 0 && a.col === 1);
+    const b2 = actions.find((a) => a.row === 1 && a.col === 1);
+    expect(b1).toBeDefined();
+    expect("bg" in (b1?.clear ?? {})).toBe(true);
+    expect(b2).toBeDefined();
+    expect("bg" in (b2?.clear ?? {})).toBe(true);
+    // A2 (row 1, col 0): still matches → stays painted, no action needed
+    // because the PREV style equals the AFTER style.
+    expect(actions.find((a) => a.row === 1 && a.col === 0)).toBeUndefined();
+  });
+
+  it("emits no actions when prev and next render identically", () => {
+    const rules = [
+      {
+        sqref: "A1:A2",
+        type: "cellIs",
+        operator: "greaterThan",
+        formula1: "10",
+        priority: 1,
+        style: { bgColor: "#ff0000" },
+      },
+    ];
+    const nextJson = buildSnap(rules);
+    expect(computeCfRepaint(nextJson, "s1", rules)).toEqual([]);
+  });
+
+  it("iconSet rule add: emits a value action to prefix the glyph", () => {
+    const nextJson = buildSnap([
+      { sqref: "A1:A2", type: "iconSet", iconStyle: "3arrows", priority: 1 },
+    ]);
+    const actions = computeCfRepaint(nextJson, "s1", []);
+    const a1 = actions.find((a) => a.row === 0 && a.col === 0);
+    const a2 = actions.find((a) => a.row === 1 && a.col === 0);
+    // Both cells gain a glyph prefix (range = A1(5), A2(50)). With min=5 max=50:
+    // - A1 = lowest bucket → "↓ 5"; A2 = highest → "↑ 50".
+    expect(a1?.value).toBe("↓ 5");
+    expect(a2?.value).toBe("↑ 50");
+  });
+
+  it("returns [] when the sheet doesn't exist", () => {
+    const nextJson = buildSnap([]);
+    expect(computeCfRepaint(nextJson, "nonexistent", [])).toEqual([]);
+  });
+
+  it("returns [] on malformed JSON", () => {
+    expect(computeCfRepaint("not json", "s1", [])).toEqual([]);
   });
 });

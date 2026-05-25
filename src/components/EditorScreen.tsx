@@ -53,7 +53,7 @@ import {
   classifyHyperlink,
   chooseHyperlinkRestyle,
 } from "./hyperlinkRender";
-import { patchCfRenders } from "./conditionalFormatRender";
+import { patchCfRenders, computeCfRepaint } from "./conditionalFormatRender";
 import { patchCheckboxRenders } from "./checkboxRender";
 import {
   addCheckbox,
@@ -1314,6 +1314,12 @@ export default function EditorScreen() {
         setEditorOperationError("条件付き書式: 対象シートが見つかりません。");
         return;
       }
+      // Capture the OUTGOING rules so the live-repaint pass below can revert
+      // cells dropped from a shrunk / removed rule. `fresh` still carries the
+      // old set at this point because we haven't written `next` into it yet.
+      const prevRules = Array.isArray(sheetObj._conditionalFormatting)
+        ? ([...(sheetObj._conditionalFormatting as CfRule[])] as CfRule[])
+        : [];
       if (next.length === 0) {
         // Mirror the Rust "omit when empty" convention on the export side so
         // a sheet that loses all its rules doesn't keep a stray empty array.
@@ -1321,7 +1327,86 @@ export default function EditorScreen() {
       } else {
         sheetObj._conditionalFormatting = next;
       }
-      applyMutatedSnapshot(JSON.stringify(fresh));
+      const nextJson = JSON.stringify(fresh);
+      applyMutatedSnapshot(nextJson);
+
+      // Live restyle: `patchCfRenders` only fires at createUnit time, so
+      // updateSnapshot alone wouldn't repaint the grid in-session (the new /
+      // changed / removed rule would surface only after save+reopen). Mirror
+      // the `applyHyperlink` pattern and drive the Univer facade imperatively
+      // after the snapshot push. `computeCfRepaint` walks both the prev and
+      // next sqref ranges so additions, modifications, removals, AND range
+      // shrinks all land correctly.
+      try {
+        const actions = computeCfRepaint(nextJson, sheetId, prevRules);
+        if (actions.length === 0) return;
+        const sheet = workbook.getSheetBySheetId(sheetId);
+        if (!sheet) return;
+        for (const a of actions) {
+          let range: ReturnType<typeof sheet.getRange> | null = null;
+          try {
+            range = sheet.getRange(a.row, a.col);
+          } catch {
+            continue;
+          }
+          if (!range) continue;
+          if (a.value !== undefined) {
+            try {
+              range.setValue(a.value);
+            } catch {
+              // best-effort
+            }
+          }
+          if (a.set.bg !== undefined) {
+            try {
+              range.setBackground(a.set.bg);
+            } catch {
+              /* swallow */
+            }
+          }
+          if (a.set.cl !== undefined) {
+            try {
+              range.setFontColor(a.set.cl);
+            } catch {
+              /* swallow */
+            }
+          }
+          if (a.set.bl !== undefined) {
+            try {
+              range.setFontWeight(a.set.bl === 1 ? "bold" : "normal");
+            } catch {
+              /* swallow */
+            }
+          }
+          if ("bg" in a.clear) {
+            // null = "no base style" → revert to default sheet background
+            // (white). The snapshot is already the source of truth for the
+            // saved style, so this is purely a viewport repaint.
+            try {
+              range.setBackground(a.clear.bg ?? "#ffffff");
+            } catch {
+              /* swallow */
+            }
+          }
+          if ("cl" in a.clear) {
+            try {
+              range.setFontColor(a.clear.cl ?? "#000000");
+            } catch {
+              /* swallow */
+            }
+          }
+          if ("bl" in a.clear) {
+            try {
+              range.setFontWeight(a.clear.bl === 1 ? "bold" : "normal");
+            } catch {
+              /* swallow */
+            }
+          }
+        }
+      } catch {
+        // Facade rejected the call (e.g. sheet was deleted mid-session). The
+        // snapshot path already succeeded, so CF will surface on next mount.
+      }
     },
     [getReadyWorkbook, applyMutatedSnapshot],
   );

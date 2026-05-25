@@ -1199,3 +1199,195 @@ export function patchCfRenders<T>(snapshot: T): T {
 
   return cloned as unknown as T;
 }
+
+// ---------------------------------------------------------------------------
+// Live in-session repaint: turn a (prevSnapshot, nextSnapshot, sheetId) tuple
+// into a per-cell list of facade actions so callers (EditorScreen.applyCfRules)
+// can drive the Univer facade imperatively without remounting the editor.
+//
+// We re-run `patchCfRenders` on a CF-empty copy of `nextSnapshot` to get the
+// BASE style (no CF) per cell, then again on `nextSnapshot` to get the AFTER
+// style. The PREV style is computed by running `patchCfRenders` on a synthetic
+// snapshot whose target sheet carries the OLD rules over the NEW cellData (so
+// any user edits in the cell are respected; only the rule set differs).
+//
+// For each touched cell (cells in any prev OR next sqref), each style key in
+// {bg, cl, bl} is classified:
+//   - present in AFTER → action.set[key] = AFTER[key]
+//   - present in PREV but not AFTER → action.clear includes key (revert to BASE)
+//
+// The `v` field is treated specially for iconSet rules: PREV may have written
+// "↑ 42", AFTER may write "→ 42" or restore "42". We compute the cell value by
+// taking BASE.v and prepending the AFTER iconSet glyph if any.
+
+export interface CfCellRepaint {
+  row: number;
+  col: number;
+  /** Style keys to set (with their AFTER values). */
+  set: { bg?: string; cl?: string; bl?: 0 | 1 };
+  /** Style keys to clear (revert to BASE). null → unset entirely. */
+  clear: { bg?: string | null; cl?: string | null; bl?: 0 | 1 | null };
+  /** Cell display value: provided when PREV had an iconSet prefix that AFTER
+   *  needs to replace or remove. Otherwise undefined (leave value alone). */
+  value?: string;
+}
+
+type StyleSlice = { bg?: string; cl?: string; bl?: 0 | 1; v?: string };
+
+function readStyleSlice(
+  snap: SnapshotShape,
+  sheetId: string,
+  row: number,
+  col: number,
+): StyleSlice {
+  const out: StyleSlice = {};
+  const cellData = snap.sheets?.[sheetId]?.cellData;
+  if (!cellData) return out;
+  const r = cellData[String(row)];
+  if (!r) return out;
+  const cell = r[String(col)] as Record<string, unknown> | undefined;
+  if (!cell) return out;
+  if (typeof cell.v === "string" || typeof cell.v === "number") {
+    out.v = String(cell.v);
+  }
+  const s = cell.s as Record<string, unknown> | undefined;
+  if (!s || typeof s !== "object") return out;
+  const bg = s.bg as { rgb?: string } | undefined;
+  if (bg && typeof bg.rgb === "string") out.bg = bg.rgb;
+  const cl = s.cl as { rgb?: string } | undefined;
+  if (cl && typeof cl.rgb === "string") out.cl = cl.rgb;
+  const bl = s.bl;
+  if (bl === 0 || bl === 1) out.bl = bl;
+  return out;
+}
+
+/**
+ * Compute the per-cell repaint actions needed to transition a sheet's CF
+ * rendering from `prevRules` to `nextRules` against `nextSnapshotJson`.
+ *
+ * `nextSnapshotJson` MUST already contain `nextRules` at
+ * `sheets.<sheetId>._conditionalFormatting` — i.e. the snapshot AFTER
+ * `applyMutatedSnapshot` ran. Callers pass `prevRules` separately because the
+ * fresh snapshot no longer remembers them.
+ *
+ * Returns an empty array when the sheet doesn't exist or has no cells in any
+ * relevant sqref.
+ */
+export function computeCfRepaint(
+  nextSnapshotJson: string,
+  sheetId: string,
+  prevRules: CfRuleEntry[],
+): CfCellRepaint[] {
+  let parsed: SnapshotShape;
+  try {
+    parsed = JSON.parse(nextSnapshotJson) as SnapshotShape;
+  } catch {
+    return [];
+  }
+  const sheet = parsed.sheets?.[sheetId];
+  if (!sheet) return [];
+  const nextRules: CfRuleEntry[] = Array.isArray(sheet._conditionalFormatting)
+    ? sheet._conditionalFormatting
+    : [];
+
+  // Compute the used-range bound the same way patchCfRenders does, so
+  // whole-column / whole-row sqrefs ("A:A") resolve to the same coords.
+  const cellData = sheet.cellData ?? {};
+  let usedMaxRow = 0;
+  let usedMaxCol = 0;
+  for (const rowKey of Object.keys(cellData)) {
+    const r = Number.parseInt(rowKey, 10);
+    if (Number.isFinite(r) && r > usedMaxRow) usedMaxRow = r;
+    const row = cellData[rowKey] as Record<string, unknown> | undefined;
+    if (row && typeof row === "object") {
+      for (const colKey of Object.keys(row)) {
+        const c = Number.parseInt(colKey, 10);
+        if (Number.isFinite(c) && c > usedMaxCol) usedMaxCol = c;
+      }
+    }
+  }
+  const usedRange = { maxRow: usedMaxRow, maxCol: usedMaxCol };
+
+  // Union of cells touched by prev OR next rules (so cells removed from a
+  // shrunk range are visited and reverted).
+  const touched = new Map<string, CellCoord>();
+  const collect = (rules: CfRuleEntry[]) => {
+    for (const r of rules) {
+      if (!r || typeof r.sqref !== "string") continue;
+      for (const c of parseSqrefToCells(r.sqref, usedRange)) {
+        touched.set(`${c.row}:${c.col}`, c);
+      }
+    }
+  };
+  collect(prevRules);
+  collect(nextRules);
+  if (touched.size === 0) return [];
+
+  // BASE = nextSnapshot with CF stripped for the target sheet. PREV = base +
+  // prevRules. AFTER = nextSnapshot as-is (already has nextRules).
+  const baseSnap: SnapshotShape = JSON.parse(nextSnapshotJson);
+  if (baseSnap.sheets?.[sheetId]) {
+    delete baseSnap.sheets[sheetId]._conditionalFormatting;
+  }
+  const prevSnap: SnapshotShape = JSON.parse(nextSnapshotJson);
+  if (prevSnap.sheets?.[sheetId]) {
+    prevSnap.sheets[sheetId]._conditionalFormatting = prevRules;
+  }
+
+  // Run the patcher against each variant. patchCfRenders is pure; calling it
+  // three times on small per-sheet data is cheap relative to the Univer
+  // facade roundtrip we're avoiding by not remounting.
+  const basePatched = patchCfRenders(baseSnap) as SnapshotShape;
+  const prevPatched = patchCfRenders(prevSnap) as SnapshotShape;
+  const afterPatched = patchCfRenders(parsed) as SnapshotShape;
+
+  const actions: CfCellRepaint[] = [];
+  for (const { row, col } of touched.values()) {
+    const base = readStyleSlice(basePatched, sheetId, row, col);
+    const prev = readStyleSlice(prevPatched, sheetId, row, col);
+    const after = readStyleSlice(afterPatched, sheetId, row, col);
+
+    const set: CfCellRepaint["set"] = {};
+    const clear: CfCellRepaint["clear"] = {};
+    let changed = false;
+
+    for (const key of ["bg", "cl", "bl"] as const) {
+      const a = after[key];
+      const p = prev[key];
+      const b = base[key];
+      if (a !== undefined && a !== p) {
+        // CF wants a value, and it's either new or different from before.
+        // (Comparing to PREV would also trigger when nothing changed in CF
+        // but a user edit moved the BASE — we still want to repaint then,
+        // so the comparison key here is "differs from what facade currently
+        // shows", which is approximated by PREV.)
+        (set as Record<string, unknown>)[key] = a as unknown;
+        changed = true;
+      } else if (a === undefined && p !== undefined && p !== b) {
+        // CF wrote this key before but doesn't now → revert to BASE.
+        (clear as Record<string, unknown>)[key] = (b ?? null) as unknown;
+        changed = true;
+      }
+    }
+
+    // iconSet value handling: PREV may have prepended a glyph onto base.v;
+    // AFTER may have a different glyph or none. We emit `value` whenever
+    // PREV.v !== AFTER.v so the facade restores the correct display.
+    if (prev.v !== after.v) {
+      // AFTER.v is undefined only when the cell was empty in BASE too — in
+      // that case writing "" clears the glyph.
+      actions.push({
+        row,
+        col,
+        set,
+        clear,
+        value: after.v ?? "",
+      });
+      continue;
+    }
+
+    if (changed) actions.push({ row, col, set, clear });
+  }
+
+  return actions;
+}

@@ -6988,6 +6988,23 @@ pub(crate) fn build_sheet_drawing_resource<R: Read + Seek>(
         }
         let drawing_rels = parse_rels(&drawing_rels_xml);
 
+        // absoluteAnchor (pixel-positioned anchors) is documented in the
+        // parse-anchor header as out-of-scope: Univer's ISheetOverGridPosition
+        // is cell-relative and there's no clean lossless conversion. Surface a
+        // single warning per sheet so the user knows those drawings are
+        // skipped from the in-grid render (bytes still round-trip via
+        // `_preservedParts`).
+        if drawing_xml.contains("<xdr:absoluteAnchor") || drawing_xml.contains("<absoluteAnchor") {
+            warnings.push(CompatibilityWarning {
+                severity: "warning".to_string(),
+                code: "XLSX_DRAWING_ABSOLUTE_ANCHOR_UNSUPPORTED".to_string(),
+                message: format!(
+                    "Sheet '{sheet_name}' contains drawings with absoluteAnchor positioning; skipped from in-grid render. Bytes preserved on save via _preservedParts."
+                ),
+                affected_sheets: Some(vec![sheet_name.clone()]),
+            });
+        }
+
         let anchors = parse_drawing_anchors(&drawing_xml);
         if anchors.is_empty() {
             continue;
@@ -7045,6 +7062,23 @@ pub(crate) fn build_sheet_drawing_resource<R: Read + Seek>(
                 .unwrap_or("")
                 .to_string();
             let mime = media_ext_to_mime(&ext);
+            // Chromium-based WebView2 can't render TIFF; octet-stream is the
+            // unknown-extension fallback and obviously won't render either.
+            // Skip from the in-grid render channel and emit a warning so the
+            // user knows the image won't be visible (it still round-trips via
+            // `_preservedParts`). Browser-renderable: png / jpeg / gif / bmp
+            // / svg+xml / webp.
+            if mime == "image/tiff" || mime == "application/octet-stream" {
+                warnings.push(CompatibilityWarning {
+                    severity: "warning".to_string(),
+                    code: "XLSX_DRAWING_MEDIA_UNSUPPORTED_MIME".to_string(),
+                    message: format!(
+                        "Embedded image at {media_path} ({mime}) cannot render in-grid (WebView2 doesn't display this format). Bytes preserved on save via _preservedParts."
+                    ),
+                    affected_sheets: Some(vec![sheet_name.clone()]),
+                });
+                continue;
+            }
             let data_url = format!("data:{};base64,{}", mime, b64_encode(&media_bytes));
 
             // Deterministic drawingId derived from (sheet, drawing index, rid)

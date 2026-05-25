@@ -68,6 +68,7 @@ import SheetPickerModal from "./SheetPickerModal";
 import SaveFailureDialog from "./SaveFailureDialog";
 import BusyOverlay from "./BusyOverlay";
 import SnapshotHistoryDialog from "./SnapshotHistoryDialog";
+import WorkbookInquireDialog from "./WorkbookInquireDialog";
 import CompatibilityWarningsDialog from "./CompatibilityWarningsDialog";
 import NamedRangesDialog, { type NamedRangeEntry } from "./NamedRangesDialog";
 import DataValidationDialog, { type DataValidationEntry } from "./DataValidationDialog";
@@ -677,6 +678,9 @@ export default function EditorScreen() {
 
   const [sheetPicker, setSheetPicker] = useState<{ id: string; name: string }[] | null>(null);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  // #245 — Workbook Inquire (read-only diagnostic of cell/formula counts,
+  // top functions, errors, external links, embedded-object tallies).
+  const [inquireOpen, setInquireOpen] = useState(false);
   const [editorInitError, setEditorInitError] = useState<string | null>(null);
   const [editorOperationError, setEditorOperationError] = useState<string | null>(null);
   // Auto-update state machine (Phase 1, Windows-only). Drives a status-bar
@@ -6667,6 +6671,13 @@ export default function EditorScreen() {
       run: () => setScriptEditorOpen(true),
     },
     {
+      id: "tools.inquire",
+      label: "ブック診断 (Inquire)",
+      category: "ツール",
+      keywords: "inquire statistics workbook diagnostic functions errors external links 診断 統計",
+      run: () => setInquireOpen(true),
+    },
+    {
       id: "view.settings",
       label: "設定",
       category: "表示",
@@ -8827,6 +8838,12 @@ export default function EditorScreen() {
         />
       )}
       {snapshotsOpen && <SnapshotHistoryDialog onClose={() => setSnapshotsOpen(false)} />}
+      {inquireOpen && (
+        <WorkbookInquireDialog
+          snapshotJson={currentSnapshotJson ?? ""}
+          onClose={() => setInquireOpen(false)}
+        />
+      )}
       {macroDialogOpen && (
         <MacroDialog
           executor={

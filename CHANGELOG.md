@@ -4,6 +4,26 @@ All notable changes to Coco are documented in this file. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-05-25
+
+Patch release: conditional-formatting improvements (closes #193-adjacent CF gaps).
+
+### Added
+
+- **In-session live re-paint for conditional-formatting rule edits.** Authoring or editing CF rules in the dialog now updates the grid immediately, no save+reopen needed. `applyCfRules` drives the Univer facade imperatively via a new `computeCfRepaint` helper that diffs base/prev/after snapshots and emits per-cell `set` / `clear` actions (plus an optional `value` for iconSet glyph cells). Mirrors the proven `applyHyperlink` re-style pattern. Handles add / modify / remove / range-shrink. (Closes `high-cf-live-render` in `docs/TODOS.md`.)
+
+### Fixed
+
+- **Imported `aboveAverage` / `timePeriod` CF rules no longer silently dropped on re-export.** The export path already read `entry.get("aboveAverage")` / `entry.get("timePeriod")`, but import had never extracted the `cfRule@aboveAverage` / `cfRule@equalAverage` / `cfRule@timePeriod` attributes. Now: `ConditionalFormattingEntry` carries `below`, `equal_average`, `time_period`; parser extracts the attrs; serializer emits the matching `{aboveAverage:{below, equalAverage}}` / `timePeriod` keys. New round-trip tests cover all 4 above/below × strict/equal variants and 2 timePeriod periods.
+
+### Tests
+
+- +29 vitest cases — fills the audit-flagged coverage gap for `evaluateDataBar` / `evaluateColorScale` / `evaluateIconSet` / `evaluateExpression`, adds 1 `patchCfRenders` integration test per advanced rule type, and 8 `computeCfRepaint` edge-case tests (add / modify / remove / shrink / identical / iconSet value / missing sheet / malformed JSON).
+
+### Documentation
+
+- `docs/TODOS.md` brought back into sync with the implementation — `medium-cf-dxf-emit`, `medium-cf-more-rule-types`, `medium-split-panes`, `medium-number-format-richtext-styles`, `high-comment-live`, and `high-cf-live-render` all marked (closed). `high-chart-live` / `high-image-live` rescoped to (partial) with sidebar-shipped state + the remaining `@univerjs/sheets-chart` / `sheets-drawing` plugin blocker called out explicitly. Stale inline TODO comments removed where the feature has landed.
+
 ## [0.4.2] - 2026-05-25
 
 Patch release — security fix for UrlFetch, `tauri dev` blank-grid fix, several bug fixes, and follow-up cleanup. Includes the previously-unreleased `.coco` save-option removal.

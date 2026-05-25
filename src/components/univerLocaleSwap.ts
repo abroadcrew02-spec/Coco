@@ -1,19 +1,16 @@
-// #179 (area E): hot-swap Univer's locale without re-mounting the editor.
+// Hot-swap Univer's locale without re-mounting the editor.
 //
-// Coco serves its locale from Univer's EN_US slot (Univer 0.5.x ships no
-// JA_JP). `buildCocoUniverLocale(locale)` returns the *full* bundle for the
-// target locale, so re-loading it and re-firing the locale-changed signal
-// updates Univer's chrome (ribbon, menus, formula helper) in place.
-//
-// Univer's `LocaleService.load()` deep-merges into its existing locale store.
-// Because `buildCocoUniverLocale` always returns the complete bundle, merging
-// the target bundle over the previous one yields the correct result in both
-// directions: ja→en re-asserts every English string over the JA overrides,
-// and en→ja layers the JA overrides back on.
+// History: under Univer 0.5.x, Coco served its locale from the EN_US slot
+// (Univer 0.5 had no JA_JP) and this helper re-loaded the full override
+// bundle on every flip. After the 0.12.4 bump (Phase 3 of the staged Univer
+// migration in docs/UNIVER_0_6_MIGRATION.md), Univer ships a native ja-JP
+// locale, so the swap is now a one-liner: tell `LocaleService` to switch to
+// the new `LocaleType`. The locales themselves are wired once at mount via
+// `buildCocoUniverLocales()`.
 
-import { LocaleService, LocaleType, type Univer } from "@univerjs/core";
+import { LocaleService, type Univer } from "@univerjs/core";
 import type { Locale } from "../i18n/locale";
-import { buildCocoUniverLocale } from "./cocoUniverLocale";
+import { toUniverLocaleType } from "./cocoUniverLocale";
 
 /**
  * Apply `locale` to a live Univer instance. Returns true on success, false
@@ -30,9 +27,7 @@ export function swapUniverLocale(univer: Univer, locale: Locale): boolean {
   if (!service) return false;
 
   try {
-    service.load({ [LocaleType.EN_US]: buildCocoUniverLocale(locale) });
-    // Re-fire `localeChanged$`; the locale type itself stays EN_US.
-    service.setLocale(LocaleType.EN_US);
+    service.setLocale(toUniverLocaleType(locale));
     return true;
   } catch {
     return false;

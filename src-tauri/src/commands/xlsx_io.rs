@@ -806,7 +806,16 @@ fn parse_workbook_sheets(xml: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     if let Some(block) = extract_block(xml, "<sheets", "</sheets>") {
         for el in extract_self_closing_or_paired(&block, "sheet") {
-            let name = parse_attr(&el, "name").unwrap_or_default();
+            // workbook.xml stores names with XML entities escaped (e.g.
+            // `name="Q&amp;A"`), but calamine surfaces sheet names already
+            // decoded (`Q&A`). Downstream maps (sheet_paths, sheet_drawing_rids)
+            // are keyed by name and looked up using the calamine form, so we
+            // must decode here to keep the keys in sync. Bug: without this
+            // decode, sheets with `& < > " '` in their names silently drop
+            // drawings / preserved parts on import.
+            let name = parse_attr(&el, "name")
+                .map(|s| decode_xml_entities(&s))
+                .unwrap_or_default();
             let rid = parse_attr(&el, "r:id").unwrap_or_default();
             if !name.is_empty() && !rid.is_empty() {
                 out.push((name, rid));
@@ -6751,6 +6760,17 @@ struct DrawingAnchorRange {
     to: DrawingAnchorCell,
 }
 
+/// Which OOXML anchor element produced a parsed range. Drives the
+/// `anchorType` we emit into `SHEET_DRAWING_PLUGIN`: `oneCellAnchor` is
+/// position-only (move with cells, fixed size); `twoCellAnchor` is both
+/// move + resize. Mapped to Univer's `SheetDrawingAnchorType` enum strings
+/// (`"0"` = Position, `"1"` = Both) at emit time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DrawingAnchorKind {
+    OneCell,
+    TwoCell,
+}
+
 /// Read the integer text content of a named child (e.g. `<xdr:col>3</xdr:col>`).
 /// Tolerates absent or non-integer children.
 fn read_anchor_child_int(block: &str, tag_local: &str) -> Option<i64> {
@@ -6798,15 +6818,23 @@ fn parse_anchor_cell(block: &str) -> Option<DrawingAnchorCell> {
 }
 
 /// Walk every twoCellAnchor / oneCellAnchor in the drawing XML and return
-/// a list of (anchor, embed-rid) pairs. `embed-rid` is the `r:embed` of the
-/// inner `<a:blip>`. oneCellAnchor gets its `to` derived from `<xdr:ext>` —
-/// the OOXML schema specifies cx/cy in EMU relative to the from anchor.
-fn parse_drawing_anchors(xml: &str) -> Vec<(DrawingAnchorRange, String)> {
+/// a list of (kind, anchor, embed-rid) tuples. `embed-rid` is the `r:embed`
+/// of the inner `<a:blip>`. oneCellAnchor gets its `to` derived from
+/// `<xdr:ext>` — the OOXML schema specifies cx/cy in EMU relative to the
+/// from anchor. The `kind` is the canonical source-of-truth for which
+/// Excel anchor element this came from, used downstream to map to Univer's
+/// `SheetDrawingAnchorType` ("0" Position vs "1" Both).
+fn parse_drawing_anchors(
+    xml: &str,
+) -> Vec<(DrawingAnchorKind, DrawingAnchorRange, String)> {
     let mut out = Vec::new();
 
     // We accept both prefixed (`xdr:twoCellAnchor`) and bare forms, which
     // some non-Excel writers emit.
-    for anchor_tag in ["twoCellAnchor", "oneCellAnchor"] {
+    for (anchor_tag, kind) in [
+        ("twoCellAnchor", DrawingAnchorKind::TwoCell),
+        ("oneCellAnchor", DrawingAnchorKind::OneCell),
+    ] {
         for (open_str, close_str) in [
             (format!("<xdr:{anchor_tag}"), format!("</xdr:{anchor_tag}>")),
             (format!("<{anchor_tag}"), format!("</{anchor_tag}>")),
@@ -6851,7 +6879,7 @@ fn parse_drawing_anchors(xml: &str) -> Vec<(DrawingAnchorRange, String)> {
                         Some(t) => t,
                         None => continue,
                     }
-                } else if anchor_tag == "oneCellAnchor" {
+                } else if kind == DrawingAnchorKind::OneCell {
                     // Derive `to` from `<xdr:ext cx=".." cy=".."/>`.
                     let ext_open = block
                         .find("<xdr:ext")
@@ -6884,7 +6912,7 @@ fn parse_drawing_anchors(xml: &str) -> Vec<(DrawingAnchorRange, String)> {
                     continue;
                 };
 
-                out.push((DrawingAnchorRange { from, to }, rid));
+                out.push((kind, DrawingAnchorRange { from, to }, rid));
             }
         }
     }
@@ -6966,7 +6994,7 @@ pub(crate) fn build_sheet_drawing_resource<R: Read + Seek>(
         let mut order_ids: Vec<Value> = Vec::new();
         let mut data_map: Map<String, Value> = Map::new();
 
-        for (anchor_idx, (range, embed_rid)) in anchors.iter().enumerate() {
+        for (anchor_idx, (anchor_kind, range, embed_rid)) in anchors.iter().enumerate() {
             let Some(media_target_rel) = drawing_rels.get(embed_rid) else {
                 continue;
             };
@@ -7021,10 +7049,15 @@ pub(crate) fn build_sheet_drawing_resource<R: Read + Seek>(
             //   ISheetDrawingBase: sheetTransform, axisAlignSheetTransform
             //     (both `from`/`to` with column/columnOffset/row/rowOffset)
             //   anchorType (string enum "0"|"1"|"2") — Position(0)=move with
-            //     cells, Both(1)=move+resize. Excel `twoCellAnchor` ≈ Both;
-            //     `oneCellAnchor` ≈ Position. absoluteAnchor isn't reached
-            //     because we skip it earlier.
-            let anchor_type = "1"; // SheetDrawingAnchorType.Both — safe default
+            //     cells (fixed size), Both(1)=move+resize. Excel
+            //     `twoCellAnchor` → Both; `oneCellAnchor` → Position.
+            //     absoluteAnchor isn't reached because we skip it earlier.
+            // The kind threaded out of `parse_drawing_anchors` is the
+            // canonical source for which OOXML element this came from.
+            let anchor_type = match anchor_kind {
+                DrawingAnchorKind::OneCell => "0",
+                DrawingAnchorKind::TwoCell => "1",
+            };
 
             let image_entry = json!({
                 "unitId": workbook_unit_id,

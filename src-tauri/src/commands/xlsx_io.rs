@@ -5047,7 +5047,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     // `resources[SHEET_DRAWING_PLUGIN]`. This is ADDITIVE — `_preservedParts`
     // remains the byte-perfect export channel; this entry only exists so the
     // `@univerjs/sheets-drawing` plugin can draw the images in the grid.
-    let drawing_resource = build_sheet_drawing_resource(
+    let (drawing_resource, drawing_warnings) = build_sheet_drawing_resource(
         &mut archive,
         &sheet_order,
         &sheet_names,
@@ -5102,6 +5102,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
 
     let mut warnings: Vec<CompatibilityWarning> = prepended_warnings;
     warnings.extend(feature_warnings);
+    warnings.extend(drawing_warnings);
     warnings.push(CompatibilityWarning {
         severity: "info".to_string(),
         code: "XLSX_POC_IMPORT".to_string(),
@@ -6935,9 +6936,10 @@ pub(crate) fn build_sheet_drawing_resource<R: Read + Seek>(
     sheet_paths: &HashMap<String, String>,
     sheet_drawing_rids: &HashMap<String, String>,
     workbook_unit_id: &str,
-) -> Option<Value> {
+) -> (Option<Value>, Vec<CompatibilityWarning>) {
+    let mut warnings: Vec<CompatibilityWarning> = Vec::new();
     if sheet_order.len() != sheet_names_in_order.len() {
-        return None;
+        return (None, warnings);
     }
 
     let mut subunit_map: Map<String, Value> = Map::new();
@@ -7004,7 +7006,30 @@ pub(crate) fn build_sheet_drawing_resource<R: Read + Seek>(
             }
 
             // Load media bytes and base64-encode (Univer expects a `data:`
-            // URL when imageSourceType is BASE64).
+            // URL when imageSourceType is BASE64). Enforce the same 16 MiB
+            // per-part cap that `parse_xlsx_preserved_parts` uses so a single
+            // huge embedded asset (e.g. a 100 MiB TIFF) can't blow up the
+            // snapshot string or the Tauri IPC payload. Oversized media stays
+            // in `_preservedParts` (under its own cap there) but is skipped
+            // from the in-grid render channel.
+            let media_size = archive
+                .by_name(&media_path)
+                .ok()
+                .map(|e| e.size() as usize)
+                .unwrap_or(0);
+            if media_size > PRESERVED_PART_SIZE_CAP {
+                let mb = (media_size as f64) / (1024.0 * 1024.0);
+                let cap_mb = (PRESERVED_PART_SIZE_CAP as f64) / (1024.0 * 1024.0);
+                warnings.push(CompatibilityWarning {
+                    severity: "warning".to_string(),
+                    code: "XLSX_DRAWING_MEDIA_TOO_LARGE".to_string(),
+                    message: format!(
+                        "Embedded image at {media_path} is {mb:.1} MB; in-grid render skipped (cap {cap_mb:.0} MB). Bytes preserved on save via _preservedParts."
+                    ),
+                    affected_sheets: Some(vec![sheet_name.clone()]),
+                });
+                continue;
+            }
             let mut media_bytes: Vec<u8> = Vec::new();
             if archive
                 .by_name(&media_path)
@@ -7087,18 +7112,24 @@ pub(crate) fn build_sheet_drawing_resource<R: Read + Seek>(
     }
 
     if subunit_map.is_empty() {
-        return None;
+        return (None, warnings);
     }
 
     // The resource hook's parseJson expects a JSON-stringified
     // IDrawingSubunitMap<ISheetImage>. We stringify here so the snapshot's
     // `resources` array matches the IResources shape:
     //   [{ name: "SHEET_DRAWING_PLUGIN", data: "<json>" }]
-    let inner = serde_json::to_string(&Value::Object(subunit_map)).ok()?;
-    Some(json!({
-        "name": "SHEET_DRAWING_PLUGIN",
-        "data": inner,
-    }))
+    let inner = match serde_json::to_string(&Value::Object(subunit_map)) {
+        Ok(s) => s,
+        Err(_) => return (None, warnings),
+    };
+    (
+        Some(json!({
+            "name": "SHEET_DRAWING_PLUGIN",
+            "data": inner,
+        })),
+        warnings,
+    )
 }
 
 /// Map a worksheet entry path to its sibling `_rels` path.

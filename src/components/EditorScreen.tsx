@@ -9,7 +9,9 @@ import {
   CustomCommandExecutionError,
   type IWorkbookData,
 } from "@univerjs/core";
-import { defaultTheme } from "@univerjs/design";
+// Univer #6XXX (0.13+): `defaultTheme` moved out of `@univerjs/design` into a
+// dedicated `@univerjs/themes` package alongside `greenTheme` etc.
+import { defaultTheme } from "@univerjs/themes";
 import { UniverRenderEnginePlugin } from "@univerjs/engine-render";
 import { UniverFormulaEnginePlugin } from "@univerjs/engine-formula";
 import { UniverUIPlugin } from "@univerjs/ui";
@@ -8116,32 +8118,29 @@ export default function EditorScreen() {
 
   // In-grid hyperlink follow (Phase 2). The render side is handled by
   // `patchHyperlinkRenders` at unit creation; this hook adds the *click*
-  // behavior. We use the sheets-ui `onCellClick` facade event (mixed onto
-  // FWorkbook by `@univerjs/sheets-ui/facade`, auto-imported via
-  // `@univerjs/facade`) — that fires with the (unitId, subUnitId, row, col)
-  // of the clicked cell, which is everything we need to look up an entry
-  // in `_hyperlinks` and route it. External links go through the Rust
-  // `open_url` command (cmd /c start | open | xdg-open, scheme-allowlisted
-  // to http(s) / mailto / file in shell.rs). Internal `#Sheet!A1` targets
-  // route through the facade itself (setActiveSheet + setActiveRange) so
-  // the jump stays in-app.
+  // behavior. Univer 0.6+ deprecated `FWorkbook.onCellClick` in favor of
+  // `univerAPI.addEvent(univerAPI.Event.CellClicked, …)` (FEventRegistry
+  // refactor, #4616 — finalized in 0.24); we subscribe through that path so
+  // we keep working when the deprecated mixin is eventually removed. The
+  // event params carry `{ workbook, worksheet, row, column, location }` —
+  // we read subUnitId off `location` to keep the rest of the handler
+  // unchanged. External links go through the Rust `open_url` command
+  // (cmd /c start | open | xdg-open, scheme-allowlisted to http(s) / mailto
+  // / file in shell.rs). Internal `#Sheet!A1` targets route through the
+  // facade itself (setActiveSheet + setActiveRange) so the jump stays in-app.
   useEffect(() => {
     if (!fUniverRef.current) return;
     const fUniver = fUniverRef.current;
-    const workbook = fUniver.getActiveWorkbook();
-    if (!workbook) return;
 
-    // The mixin signature is on FWorkbookSheetsUIMixin; `getActiveWorkbook`
-    // returns the base FWorkbook type because Univer doesn't auto-narrow.
-    // Defensive cast: if the host build somehow strips the sheets-ui facade
-    // we bail out cleanly instead of throwing on workbook.onCellClick.
-    const onCellClick = (workbook as unknown as {
-      onCellClick?: (cb: (cell: { location: { subUnitId: string; row: number; col: number } }) => void) => { dispose: () => void };
-    }).onCellClick;
-    if (typeof onCellClick !== "function") return;
-
-    const disposable = onCellClick.call(workbook, (cell) => {
-      const { subUnitId, row, col } = cell.location ?? {};
+    // Univer #4616: `addEvent` is the canonical subscription API; the
+    // typed Event registry guarantees CellClicked params shape — but the
+    // typed surface is only `{ workbook, worksheet, row, column }`, so we
+    // derive subUnitId from the worksheet rather than digging into the
+    // spread `location` field that's present at runtime but not typed.
+    const disposable = fUniver.addEvent(fUniver.Event.CellClicked, (params) => {
+      const subUnitId = params.worksheet?.getSheetId();
+      const row = params.row;
+      const col = params.column;
       if (typeof subUnitId !== "string" || typeof row !== "number" || typeof col !== "number") {
         return;
       }
@@ -8202,11 +8201,13 @@ export default function EditorScreen() {
       }
       // Internal link: navigate within the workbook. getSheetByName accepts
       // the visible sheet name (not the internal id); the round-trip stores
-      // the target with the visible name so this lines up.
+      // the target with the visible name so this lines up. We prefer the
+      // event's `workbook` over the captured `getActiveWorkbook()` so a
+      // workbook swap mid-effect still routes to the live instance.
       try {
-        const target = workbook.getSheetByName(classified.sheet);
+        const target = params.workbook.getSheetByName(classified.sheet);
         if (!target) return;
-        workbook.setActiveSheet(target);
+        params.workbook.setActiveSheet(target);
         const range = target.getRange(classified.cell);
         if (range) target.setActiveRange(range);
       } catch (err) {
@@ -8246,26 +8247,18 @@ export default function EditorScreen() {
   useEffect(() => {
     if (!fUniverRef.current) return;
     const fUniver = fUniverRef.current;
-    const workbook = fUniver.getActiveWorkbook();
-    if (!workbook) return;
 
-    const onCellHover = (workbook as unknown as {
-      onCellHover?: (
-        cb: (cell: {
-          subUnitId?: string;
-          row?: number;
-          col?: number;
-          event?: { clientX?: number; clientY?: number };
-        }) => void,
-      ) => { dispose: () => void };
-    }).onCellHover;
-    if (typeof onCellHover !== "function") return;
-
-    const disposable = onCellHover.call(workbook, (cell) => {
-      const subUnitId = typeof cell.subUnitId === "string" ? cell.subUnitId : null;
-      const row = typeof cell.row === "number" ? cell.row : null;
-      const col = typeof cell.col === "number" ? cell.col : null;
-      if (subUnitId === null || row === null || col === null) {
+    // Univer #4616 / #13 (0.24): use `addEvent(Event.CellHover)` instead of
+    // the deprecated `FWorkbook.onCellHover` mixin. The typed
+    // ICellEventParams only exposes `{ workbook, worksheet, row, column }`,
+    // but at runtime params spread the IHoverRichTextPosition source so
+    // `event` (mouse position) is still present — we narrow via a local
+    // shape cast so the dependency stays explicit.
+    const disposable = fUniver.addEvent(fUniver.Event.CellHover, (params) => {
+      const subUnitId = params.worksheet?.getSheetId();
+      const row = typeof params.row === "number" ? params.row : null;
+      const col = typeof params.column === "number" ? params.column : null;
+      if (typeof subUnitId !== "string" || row === null || col === null) {
         setSmartChipState(null);
         return;
       }
@@ -8289,8 +8282,11 @@ export default function EditorScreen() {
         if (chips.length === 0) return null;
         // Anchor coordinates: use the pointer position if Univer surfaced
         // an event, with a small downward offset so the popover doesn't
-        // sit under the cursor. Fall back to top-left of the viewport.
-        const ev = cell.event;
+        // sit under the cursor. Fall back to top-left of the viewport. The
+        // typed ICellEventParams doesn't expose `event` but the runtime
+        // payload spreads IHoverRichTextPosition which does — narrow via
+        // a local shape cast rather than casting the whole params.
+        const ev = (params as unknown as { event?: { clientX?: number; clientY?: number } }).event;
         const x = typeof ev?.clientX === "number" ? ev.clientX + 12 : 24;
         const y = typeof ev?.clientY === "number" ? ev.clientY + 16 : 24;
         return {

@@ -53,10 +53,13 @@ None.
 
 ### high-image-live (partial)
 - **Title**: Image in-grid live rendering for newly authored images
-- **Refs**: `src/components/ImagePreviewPanel.tsx`, `src/components/InsertImageDialog.tsx`, `src/store/imagePreviews.ts`, COVERAGE.md "Image" row
+- **Refs**: `src/components/ImagePreviewPanel.tsx`, `src/components/InsertImageDialog.tsx`, `src/store/imagePreviews.ts`, `src/components/EditorScreen.tsx` (Mount-Univer effect), `src/components/cocoUniverLocale.ts`, COVERAGE.md "Image" row
 - **Effort**: L
-- **Status**: Sidebar preview shipped. `InsertImageDialog` writes images into `_preservedParts`, `imagePreviews.ts` parses drawing rels / blip / one+twoCellAnchor and decodes media bytes to `data:` URLs, and `ImagePreviewPanel` renders thumbnails with anchor-cell labels and click-to-jump-to-anchor-cell. Existing xlsx images survive save / reopen byte-for-byte via `_preservedParts`.
-- **Remaining work**: In-grid pixel-positioned rendering anchored to the source cells. Same two blockers as `high-chart-live` — `@univerjs/sheets-drawing` is not installed, and Univer 0.5.x facade lacks a pixel-position / decoration API. Documented in `ImagePreviewPanel.tsx:18-36` and `src/store/imagePreviews.ts:1-6`.
+- **Status**: Phase 4b — `@univerjs/sheets-drawing` + `@univerjs/sheets-drawing-ui` + their base `@univerjs/drawing` / `@univerjs/drawing-ui` (all Apache-2.0, 0.24.0) are now installed and registered in the Mount-Univer effect, with EN_US / JA_JP locale bundles merged into `buildCocoUniverLocales()` and `./facade` side-effect imports wired so `FWorksheet.newOverGridImage()` / `insertImages()` / `getImages()` are available. Pre-existing sidebar preview path still ships: `InsertImageDialog` writes images into `_preservedParts`, `imagePreviews.ts` parses drawing rels / blip / one+twoCellAnchor and decodes media bytes to `data:` URLs, and `ImagePreviewPanel` renders thumbnails with anchor-cell labels and click-to-jump-to-anchor-cell. Existing xlsx images survive save / reopen byte-for-byte via `_preservedParts`.
+- **Remaining work**: Two independent bridge tasks to make in-grid rendering actually fire:
+  1. **Existing-xlsx path**: `xlsx_io.rs` must convert the parsed drawing XML into a `IWorkbookData.resources[SHEET_DRAWING_PLUGIN]` entry whose JSON value matches `ISheetImage[]` (`drawingId`, `imageSourceType: BASE64`, `source` as a `data:` URL or media id, plus `sheetTransform` pixel coords from the OOXML EMU values). Without this slot the drawing plugin sees zero images at boot even though they're present in `_preservedParts`. Pure-Rust work in `src-tauri/src/commands/xlsx_io.rs`.
+  2. **New-image insert path**: `InsertImageDialog` currently writes into `_preservedParts` directly. To get in-grid render at insert-time it should call `fWorksheet.newOverGridImage().setSource(...).buildAsync()` then `fWorksheet.insertImages([...])` (facade now wired). The `_preservedParts` write can then be dropped on the new-image path while keeping it for round-trip export.
+- The `ImagePreviewPanel` sidebar is kept as a navigation utility (click-to-jump-to-anchor-cell) — it doesn't conflict with the in-grid render path and remains useful even once the bridges land. Retire it once the bridges land if usability testing flags it as redundant.
 
 ---
 

@@ -53,7 +53,7 @@ import {
   classifyHyperlink,
   chooseHyperlinkRestyle,
 } from "./hyperlinkRender";
-import { patchCfRenders, computeCfRepaint } from "./conditionalFormatRender";
+import { patchCfRenders } from "./conditionalFormatRender";
 import { patchCheckboxRenders } from "./checkboxRender";
 import {
   addCheckbox,
@@ -1270,9 +1270,10 @@ export default function EditorScreen() {
 
   // Conditional formatting: rules are authored into the snapshot
   // (xlsx_io.rs preserves _conditionalFormatting per sheet) and `patchCfRenders`
-  // evaluates them at createUnit time. `applyCfRules` below also drives the
-  // Univer facade imperatively so in-session edits repaint immediately
-  // (mirrors the `applyHyperlink` pattern via `computeCfRepaint`).
+  // evaluates them at createUnit time. In-session live re-paint after
+  // `applyCfRules` was attempted in PR #211 and reverted in v0.4.4 — see the
+  // note inside applyCfRules for the runtime bugs that drove the revert and
+  // `high-cf-live-render` in docs/TODOS.md for the redo plan.
   const openCfDialog = useCallback(() => {
     const ready = getReadyWorkbook("条件付き書式");
     if (!ready) return;
@@ -1328,84 +1329,22 @@ export default function EditorScreen() {
       }
       const nextJson = JSON.stringify(fresh);
       applyMutatedSnapshot(nextJson);
-
-      // Live restyle: `patchCfRenders` only fires at createUnit time, so
-      // updateSnapshot alone wouldn't repaint the grid in-session (the new /
-      // changed / removed rule would surface only after save+reopen). Mirror
-      // the `applyHyperlink` pattern and drive the Univer facade imperatively
-      // after the snapshot push. `computeCfRepaint` walks both the prev and
-      // next sqref ranges so additions, modifications, removals, AND range
-      // shrinks all land correctly.
-      try {
-        const actions = computeCfRepaint(nextJson, sheetId, prevRules);
-        if (actions.length === 0) return;
-        const sheet = workbook.getSheetBySheetId(sheetId);
-        if (!sheet) return;
-        for (const a of actions) {
-          let range: ReturnType<typeof sheet.getRange> | null = null;
-          try {
-            range = sheet.getRange(a.row, a.col);
-          } catch {
-            continue;
-          }
-          if (!range) continue;
-          if (a.value !== undefined) {
-            try {
-              range.setValue(a.value);
-            } catch {
-              // best-effort
-            }
-          }
-          if (a.set.bg !== undefined) {
-            try {
-              range.setBackground(a.set.bg);
-            } catch {
-              /* swallow */
-            }
-          }
-          if (a.set.cl !== undefined) {
-            try {
-              range.setFontColor(a.set.cl);
-            } catch {
-              /* swallow */
-            }
-          }
-          if (a.set.bl !== undefined) {
-            try {
-              range.setFontWeight(a.set.bl === 1 ? "bold" : "normal");
-            } catch {
-              /* swallow */
-            }
-          }
-          if ("bg" in a.clear) {
-            // null = "no base style" → revert to default sheet background
-            // (white). The snapshot is already the source of truth for the
-            // saved style, so this is purely a viewport repaint.
-            try {
-              range.setBackground(a.clear.bg ?? "#ffffff");
-            } catch {
-              /* swallow */
-            }
-          }
-          if ("cl" in a.clear) {
-            try {
-              range.setFontColor(a.clear.cl ?? "#000000");
-            } catch {
-              /* swallow */
-            }
-          }
-          if ("bl" in a.clear) {
-            try {
-              range.setFontWeight(a.clear.bl === 1 ? "bold" : "normal");
-            } catch {
-              /* swallow */
-            }
-          }
-        }
-      } catch {
-        // Facade rejected the call (e.g. sheet was deleted mid-session). The
-        // snapshot path already succeeded, so CF will surface on next mount.
-      }
+      // NOTE (v0.4.4 hot-fix): the imperative facade live-repaint that lived
+      // here (computeCfRepaint → setBackground / setFontColor / setFontWeight
+      // / setValue) was reverted because it had two runtime-only bugs:
+      //   1. iconSet rules' `setValue("↑ 42")` write was persisted by the
+      //      300 ms syncSnapshot debounce, turning numeric cells into strings
+      //      and breaking formulas / xlsx export.
+      //   2. After the first facade write, BASE for the next computeCfRepaint
+      //      call already carried the CF-painted bg/cl/bl, so removing a rule
+      //      diffed to "no change" and the painted color stuck forever.
+      // The helper itself (`computeCfRepaint`) and its tests stay as the
+      // foundation for a proper redo that tracks CF-imperative writes in a
+      // sidecar instead of letting them pollute the canonical snapshot. CF
+      // rules continue to render correctly at next createUnit via
+      // `patchCfRenders` in the snapshot patch pipeline — same behavior as
+      // before PR #211. See `high-cf-live-render` in docs/TODOS.md.
+      void prevRules; // referenced for the future re-wiring
     },
     [getReadyWorkbook, applyMutatedSnapshot],
   );

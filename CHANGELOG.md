@@ -4,6 +4,21 @@ All notable changes to Coco are documented in this file. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-05-25
+
+Hot-fix on top of v0.4.3.
+
+### Reverted
+
+- **CF in-session live re-paint (the wiring added in PR #211 / v0.4.3).** A post-merge runtime audit found two show-stopper bugs that only surface in a launched app, not in unit tests:
+  1. **Data corruption on iconSet rules**: `range.setValue("↑ 42")` for the glyph display was persisted by the 300 ms `syncSnapshot` debounce, turning numeric cells into strings — `=A1+1` returned `#VALUE!`, xlsx export baked the glyph into the saved file, and re-open double-prefixed to `↑ ↑ 42`.
+  2. **CF removal stuck**: the first facade write of `bg=yellow` was persisted into `cellData.s.bg`. On rule removal, BASE / PREV / AFTER all read yellow (the snapshot already carried the painted color), the diff produced no action, and the painted color stayed forever.
+  Both bugs share the same root cause: facade writes pollute the canonical snapshot, so the next `computeCfRepaint` sees a polluted BASE. The wiring (the imperative `setBackground` / `setFontColor` / `setFontWeight` / `setValue` loop in `applyCfRules`) is removed; CF rules continue to render correctly at next `createUnit` via `patchCfRenders` — same behavior as before v0.4.3. The `computeCfRepaint` helper itself + its 29 unit tests stay in the codebase as the foundation for a proper redo. See `high-cf-live-render` in `docs/TODOS.md` for the design that needs to land before the wiring can be reinstated (sidecar tracking of CF-imperative writes, non-`setValue` glyph rendering, range batching, live-loop integration tests).
+
+### Note on v0.4.3
+
+v0.4.3 was tagged but **no binary release was published** (artifact build needs `TAURI_SIGNING_PRIVATE_KEY` which is not on the build machine). Anyone who built v0.4.3 from source themselves and exercised iconSet rules should re-pull `main` at v0.4.4 — opened workbooks should not have lost data unless saved + reopened with an iconSet rule active.
+
 ## [0.4.3] - 2026-05-25
 
 Patch release: conditional-formatting improvements (closes #193-adjacent CF gaps).

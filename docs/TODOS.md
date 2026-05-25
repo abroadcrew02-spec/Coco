@@ -20,10 +20,19 @@ None.
 
 ## High — visible UX gaps
 
-### high-cf-live-render (closed)
+### high-cf-live-render (partial — live wiring REVERTED in v0.4.4)
 - **Title**: Conditional formatting in-grid live rendering
-- **Refs**: `src/components/conditionalFormatRender.ts:927` (`patchCfRenders`), `src/components/conditionalFormatRender.ts:1204` (`computeCfRepaint`), `src/components/EditorScreen.tsx` (`applyCfRules`)
-- **Resolution**: `patchCfRenders` evaluates all 8 rule types (cellIs / containsText / top10 / duplicateValues / uniqueValues / dataBar / colorScale / iconSet / expression) at `createUnit` time. For in-session repaint, `applyCfRules` now drives the Univer facade imperatively via `computeCfRepaint` — diffs a per-cell action list (`set`/`clear` plus optional `value` for iconSet glyphs) over base / prev / after snapshots and applies via `setBackground` / `setFontColor` / `setFontWeight` / `setValue`. Handles add / modify / remove / range-shrink correctly (mirrors the `applyHyperlink` re-style pattern). Tests: 29 new vitest cases in `conditionalFormatRender.test.ts` covering each advanced evaluator + `patchCfRenders` integration + `computeCfRepaint` edge cases.
+- **Refs**: `src/components/conditionalFormatRender.ts:927` (`patchCfRenders`), `src/components/conditionalFormatRender.ts:1204` (`computeCfRepaint` — helper kept, unused), `src/components/EditorScreen.tsx` (`applyCfRules`)
+- **Status**: `patchCfRenders` evaluates all 8 rule types (cellIs / containsText / top10 / duplicateValues / uniqueValues / dataBar / colorScale / iconSet / expression) at `createUnit` time — CF rules render correctly on file open / reopen. **In-session live re-paint was attempted in PR #211 and reverted in v0.4.4** after a runtime audit found two show-stopper bugs:
+  1. **Data corruption on iconSet rules.** `range.setValue("↑ 42")` for the glyph display was persisted by the 300 ms `syncSnapshot` debounce → numeric cells became strings → `=A1+1` returned `#VALUE!`, xlsx export baked the glyph into the saved file, re-open double-prefixed to `↑ ↑ 42`.
+  2. **CF removal stuck.** First facade write of `bg=yellow` was persisted into `cellData.s.bg`. On removal, `computeCfRepaint` saw BASE / PREV / AFTER all yellow (the patched snapshot reflected the previous facade write), the diff produced no action, and the painted color stayed forever.
+- **Root cause of both**: facade writes pollute the canonical snapshot, so the next computeCfRepaint sees a polluted BASE.
+- **Remaining work**:
+  1. Track CF-imperative writes in a sidecar map keyed by (sheetId, row, col) so `computeCfRepaint` can use the truly user-authored style as BASE, instead of reading the snapshot that has CF colors already baked into cellData.
+  2. Render iconSet glyphs via a decoration channel that does NOT mutate `cell.v` (e.g. a per-cell overlay element, or a separate `cell.p` rich-text run that the render patch knows how to detect and roll back) — never `setValue` for a render-only glyph.
+  3. Batch per-cell facade calls into rectangular ranges to avoid the synchronous `commandService` storm on whole-column sqrefs.
+  4. Add live-loop integration tests that simulate the facade → syncSnapshot → next computeCfRepaint round-trip — the missing test layer that allowed PR #211 to ship.
+- **Blocker for closing**: design + implement (1)+(2)+(3)+(4) above. The unit-tested `computeCfRepaint` helper remains in the codebase as a starting point but its `value` action and BASE assumptions need to be reworked. Helper tests still pass (they cover the helper's local logic; the bugs were in how it interacted with the rest of the system).
 
 ### high-hyperlink-live (closed)
 - **Title**: Hyperlink in-grid live rendering after authoring (beyond `patchHyperlinkRenders` boot-time patch)

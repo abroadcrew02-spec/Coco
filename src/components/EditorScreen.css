@@ -98,16 +98,6 @@
   cursor: cell !important;
 }
 
-/* Univer のツールバーコンテナは既定で justify-content: center で、内容が
-   コンテナ幅より狭いと左右に余白が発生する (undo / redo の左に隙間ができる
-   原因)。業務用エディタとしては左詰めの方が視線移動が短く自然なので
-   flex-start に差し替える。
-   Univer 0.8.x (Tailwind refactor): semantic `.univer-toolbar-container`
-   selector is gone; the toolbar is now identified by `data-u-comp="ribbon-toolbar"`. */
-[data-u-comp="ribbon-toolbar"] {
-  justify-content: flex-start;
-}
-
 /* Warning banner */
 .warning-banner {
   display: flex;
@@ -300,16 +290,6 @@
   color: rgba(255, 255, 255, 0.5);
   margin-left: auto;
   padding-left: 12px;
-}
-
-/* #198: hide Univer's built-in toolbar — Coco's own ribbon replaces it.
- * We hide only the ribbon-toolbar element (not the whole header) so the
- * grid and other header chrome Univer renders are unaffected; passing
- * `header: false` to UniverUIPlugin would also remove the grid header.
- * Univer 0.8.x (Tailwind refactor) replaced the semantic `.univer-toolbar-container`
- * class with `data-u-comp="ribbon-toolbar"`. */
-[data-u-comp="ribbon-toolbar"] {
-  display: none !important;
 }
 
 /* #198: hide Univer's built-in formula bar — Coco's `ribbon/FormulaBar.tsx`

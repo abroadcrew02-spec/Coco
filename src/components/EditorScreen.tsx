@@ -24,12 +24,27 @@ import { UniverSheetsFormulaUIPlugin } from "@univerjs/sheets-formula-ui";
 import { UniverFindReplacePlugin } from "@univerjs/find-replace";
 import { UniverSheetsFindReplacePlugin } from "@univerjs/sheets-find-replace";
 import { UniverSheetsFilterPlugin } from "@univerjs/sheets-filter";
+// Phase 4b: in-grid image rendering. The drawing chain is base
+// (`@univerjs/drawing` shared data model) + UI (`drawing-ui`) +
+// sheets-specific bindings (`sheets-drawing` + `sheets-drawing-ui`). All
+// four are Apache-2.0 OSS at 0.24.0. The base `@univerjs/drawing` was
+// already pulled in transitively before this PR; we register it explicitly
+// so the load order matches Univer's preset.
+import { UniverDrawingPlugin } from "@univerjs/drawing";
+import { UniverDrawingUIPlugin } from "@univerjs/drawing-ui";
+import { UniverSheetsDrawingPlugin } from "@univerjs/sheets-drawing";
+import { UniverSheetsDrawingUIPlugin } from "@univerjs/sheets-drawing-ui";
 import { FUniver } from "@univerjs/core/facade";
 import "@univerjs/sheets/facade";
 import "@univerjs/sheets-ui/facade";
 import "@univerjs/sheets-formula/facade";
 import "@univerjs/engine-formula/facade";
 import "@univerjs/docs-ui/facade";
+// Phase 4b: surface the drawing facade (newOverGridImage / insertImages /
+// getImages / FOverGridImage etc.) on FWorksheet so future Coco code can
+// drive in-grid images programmatically.
+import "@univerjs/sheets-drawing/facade";
+import "@univerjs/sheets-drawing-ui/facade";
 
 import "@univerjs/design/lib/index.css";
 import "@univerjs/ui/lib/index.css";
@@ -37,6 +52,9 @@ import "@univerjs/docs-ui/lib/index.css";
 import "@univerjs/sheets-ui/lib/index.css";
 import "@univerjs/sheets-formula-ui/lib/index.css";
 import "@univerjs/find-replace/lib/index.css";
+// drawing-ui / sheets-drawing-ui ship their own image-popup / sidebar CSS.
+import "@univerjs/drawing-ui/lib/index.css";
+import "@univerjs/sheets-drawing-ui/lib/index.css";
 
 import { undoRedoOverride } from "./univerUndoRedoOverride";
 import { registerCocoContextMenu } from "./univerContextMenu";
@@ -7597,6 +7615,30 @@ export default function EditorScreen() {
       // package doesn't ship a separate -ui companion or locale bundle in
       // 0.5.x, so there's nothing extra to merge into `locales`.
       univer.registerPlugin(UniverSheetsFilterPlugin);
+      // Phase 4b (UNIVER_0_6_MIGRATION.md §4 / high-image-live): in-grid
+      // image rendering. Order mirrors Univer's own preset — the shared
+      // drawing model first, then the generic drawing UI, then the
+      // sheets-specific bindings. The base `@univerjs/drawing` plugin
+      // is required: `UniverSheetsDrawingPlugin` injects `IDrawingManagerService`
+      // which lives in that package. Registering only the sheets-level
+      // pair throws "service not registered" at boot.
+      //
+      // Snapshot integration: `UniverSheetsDrawingPlugin` registers a
+      // `IResourceManagerService` resource keyed by `SHEET_DRAWING_PLUGIN`,
+      // so its data round-trips inside `IWorkbookData.resources` — NOT
+      // inside Coco's `_preservedParts` (which the Rust xlsx_io.rs writer
+      // owns for byte-for-byte image part preservation). The two paths are
+      // independent: existing-xlsx images keep round-tripping via
+      // `_preservedParts`, but in-grid rendering requires a bridge that
+      // emits a `resources[SHEET_DRAWING_PLUGIN]` entry from the parsed
+      // drawing XML. That bridge is deferred to a follow-up (see
+      // docs/TODOS.md `high-image-live`). Registering the plugins here is
+      // the prerequisite — without them the resource slot is ignored even
+      // if we populate it.
+      univer.registerPlugin(UniverDrawingPlugin);
+      univer.registerPlugin(UniverDrawingUIPlugin);
+      univer.registerPlugin(UniverSheetsDrawingPlugin);
+      univer.registerPlugin(UniverSheetsDrawingUIPlugin);
 
       // Create workbook from snapshot or default empty workbook. We pipe the
       // snapshot through `patchHyperlinkRenders` first so every cell listed in

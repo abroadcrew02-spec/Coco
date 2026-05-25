@@ -22,6 +22,13 @@ import DocsUIEnUS from "@univerjs/docs-ui/locale/en-US";
 import SheetsFormulaUIEnUS from "@univerjs/sheets-formula-ui/locale/en-US";
 import FindReplaceEnUS from "@univerjs/find-replace/locale/en-US";
 import SheetsFindReplaceEnUS from "@univerjs/sheets-find-replace/locale/en-US";
+// Phase 4b: drawing-ui / sheets-drawing-ui contribute the image-popup
+// menu, sidebar panel, and crop / arrange / replace strings. The base
+// `@univerjs/drawing` and `@univerjs/sheets-drawing` packages contribute
+// no UI text and ship no locale bundle (verified via lib/locale/* dir
+// listing and README locale column).
+import DrawingUIEnUS from "@univerjs/drawing-ui/locale/en-US";
+import SheetsDrawingUIEnUS from "@univerjs/sheets-drawing-ui/locale/en-US";
 
 import SheetsJaJP from "@univerjs/sheets/locale/ja-JP";
 import SheetsUIJaJP from "@univerjs/sheets-ui/locale/ja-JP";
@@ -30,6 +37,8 @@ import DocsUIJaJP from "@univerjs/docs-ui/locale/ja-JP";
 import SheetsFormulaUIJaJP from "@univerjs/sheets-formula-ui/locale/ja-JP";
 import FindReplaceJaJP from "@univerjs/find-replace/locale/ja-JP";
 import SheetsFindReplaceJaJP from "@univerjs/sheets-find-replace/locale/ja-JP";
+import DrawingUIJaJP from "@univerjs/drawing-ui/locale/ja-JP";
+import SheetsDrawingUIJaJP from "@univerjs/sheets-drawing-ui/locale/ja-JP";
 
 import type { Locale } from "../i18n/locale";
 import { FUNCTION_LIST_JA_ABSTRACT } from "./univerFunctionListJa";
@@ -61,6 +70,8 @@ export function buildCocoUniverLocales(): ILocales {
       SheetsFormulaUIEnUS,
       FindReplaceEnUS,
       SheetsFindReplaceEnUS,
+      DrawingUIEnUS,
+      SheetsDrawingUIEnUS,
     ),
     [LocaleType.JA_JP]: mergeLocales(
       SheetsJaJP,
@@ -70,6 +81,8 @@ export function buildCocoUniverLocales(): ILocales {
       SheetsFormulaUIJaJP,
       FindReplaceJaJP,
       SheetsFindReplaceJaJP,
+      DrawingUIJaJP,
+      SheetsDrawingUIJaJP,
       // Coco's JA `abstract` overrides for the most common formula functions.
       buildFunctionListJaPatch(),
     ),

@@ -15,7 +15,7 @@
 // 永続化は `onChange(updatedScripts)` で親に伝える。
 
 import { useEffect, useMemo, useState } from "react";
-import type { FUniver } from "@univerjs/facade";
+import type { FUniver } from "@univerjs/core/facade";
 import {
   type ScriptEntry,
   type ScriptRunResult,

@@ -22,7 +22,12 @@ import { UniverSheetsFormulaUIPlugin } from "@univerjs/sheets-formula-ui";
 import { UniverFindReplacePlugin } from "@univerjs/find-replace";
 import { UniverSheetsFindReplacePlugin } from "@univerjs/sheets-find-replace";
 import { UniverSheetsFilterPlugin } from "@univerjs/sheets-filter";
-import { FUniver } from "@univerjs/facade";
+import { FUniver } from "@univerjs/core/facade";
+import "@univerjs/sheets/facade";
+import "@univerjs/sheets-ui/facade";
+import "@univerjs/sheets-formula/facade";
+import "@univerjs/engine-formula/facade";
+import "@univerjs/docs-ui/facade";
 
 import "@univerjs/design/lib/index.css";
 import "@univerjs/ui/lib/index.css";

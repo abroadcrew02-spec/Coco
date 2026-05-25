@@ -16,7 +16,7 @@
 // スクリプトは untrusted code として扱う。iframe 実行下では window /
 // document / fetch / localStorage / Tauri invoke は到達不能。
 
-import type { FUniver } from "@univerjs/facade";
+import type { FUniver } from "@univerjs/core/facade";
 import { isSheetProtectedInSnapshot } from "./sheetProtection";
 
 /** スクリプトのデフォルト最大実行時間 (ms)。watchdog がこれを超えたら

@@ -108,6 +108,38 @@ export const TEMPLATE_CATALOG: readonly TemplateInfo[] = [
     descriptionEn: "Name, email, phone, and company table.",
     thumbnailEmoji: "📇",
   },
+  {
+    id: "invoice",
+    nameJa: "請求書",
+    nameEn: "Invoice",
+    descriptionJa: "請求先 / 品目 / 数量 / 単価 / 小計 + 合計",
+    descriptionEn: "Bill-to, items, quantity, unit price, subtotal, and total.",
+    thumbnailEmoji: "🧾",
+  },
+  {
+    id: "weight-log",
+    nameJa: "体重・健康記録",
+    nameEn: "Weight & Health Log",
+    descriptionJa: "日付 / 体重 / 体脂肪率 / 歩数 / メモ",
+    descriptionEn: "Date, weight, body fat, steps, and notes.",
+    thumbnailEmoji: "⚖️",
+  },
+  {
+    id: "study-schedule",
+    nameJa: "学習スケジュール",
+    nameEn: "Study Schedule",
+    descriptionJa: "曜日×時間割 + 科目色分け",
+    descriptionEn: "Weekday × period grid with color-coded subjects.",
+    thumbnailEmoji: "📚",
+  },
+  {
+    id: "attendance",
+    nameJa: "出席簿",
+    nameEn: "Attendance",
+    descriptionJa: "氏名 × 日付の出欠表 + 出席率",
+    descriptionEn: "Name × date attendance grid with attendance rate.",
+    thumbnailEmoji: "📋",
+  },
 ] as const;
 
 // ── Snapshot helpers ─────────────────────────────────────────────────────────
@@ -401,6 +433,139 @@ function buildContacts(): SnapshotJson {
   return baseSnapshot(sheet);
 }
 
+function buildInvoice(): SnapshotJson {
+  const sheet = newSheet("sheet-1", "請求書");
+  const cd = sheet.cellData;
+  setRow(cd, 0, [{ v: "請求書", s: { bl: 1, fs: 18 } }]);
+  setRow(cd, 2, [styledHeader("請求先"), { v: "株式会社 サンプル" }]);
+  setRow(cd, 3, [styledHeader("請求日"), { v: "2026-05-25" }]);
+  setRow(cd, 4, [styledHeader("請求番号"), { v: "INV-0001" }]);
+  setRow(cd, 6, [
+    styledHeader("品目"),
+    styledHeader("数量"),
+    styledHeader("単価"),
+    styledHeader("小計"),
+  ]);
+  const items: Array<[string, number, number]> = [
+    ["コンサルティング", 10, 15000],
+    ["デザイン作業", 5, 12000],
+    ["導入支援", 2, 30000],
+  ];
+  items.forEach(([name, qty, price], i) => {
+    const row = i + 7;
+    setRow(cd, row, [
+      { v: name },
+      { v: qty },
+      { v: price, _fmt: "¥#,##0" },
+      { f: `=B${row + 1}*C${row + 1}`, _fmt: "¥#,##0" },
+    ]);
+  });
+  setRow(cd, 11, [
+    { v: "小計", s: TOTAL_STYLE },
+    null,
+    null,
+    { f: "=SUM(D8:D10)", _fmt: "¥#,##0", s: TOTAL_STYLE },
+  ]);
+  setRow(cd, 12, [
+    { v: "消費税 (10%)", s: TOTAL_STYLE },
+    null,
+    null,
+    { f: "=D12*0.1", _fmt: "¥#,##0", s: TOTAL_STYLE },
+  ]);
+  setRow(cd, 13, [
+    { v: "合計", s: TOTAL_STYLE },
+    null,
+    null,
+    { f: "=D12+D13", _fmt: "¥#,##0", s: TOTAL_STYLE },
+  ]);
+  return baseSnapshot(sheet);
+}
+
+function buildWeightLog(): SnapshotJson {
+  const sheet = newSheet("sheet-1", "健康記録");
+  const cd = sheet.cellData;
+  setRow(cd, 0, [
+    styledHeader("日付"),
+    styledHeader("体重 (kg)"),
+    styledHeader("体脂肪率 (%)"),
+    styledHeader("歩数"),
+    styledHeader("メモ"),
+  ]);
+  const days = ["2026-05-19", "2026-05-20", "2026-05-21", "2026-05-22", "2026-05-23", "2026-05-24", "2026-05-25"];
+  const weights = [70.2, 70.0, 69.8, 70.1, 69.9, 69.7, 69.5];
+  const fat = [22.5, 22.4, 22.3, 22.4, 22.2, 22.1, 22.0];
+  const steps = [8200, 12400, 6500, 9800, 11200, 7800, 14500];
+  days.forEach((d, i) => {
+    setRow(cd, i + 1, [
+      { v: d },
+      { v: weights[i] },
+      { v: fat[i] },
+      { v: steps[i] },
+      { v: "" },
+    ]);
+  });
+  return baseSnapshot(sheet);
+}
+
+function buildStudySchedule(): SnapshotJson {
+  const sheet = newSheet("sheet-1", "学習スケジュール");
+  const cd = sheet.cellData;
+  setRow(cd, 0, [
+    styledHeader("時限"),
+    styledHeader("月"),
+    styledHeader("火"),
+    styledHeader("水"),
+    styledHeader("木"),
+    styledHeader("金"),
+  ]);
+  const subj = (name: string, color: string): Cell => ({
+    v: name,
+    s: { bg: { rgb: color }, ht: 2 },
+  });
+  const blue = "#DAEDFA";
+  const green = "#E7F4EC";
+  const peach = "#FCE9D8";
+  const lilac = "#EAE0F4";
+  const grey = "#EFEFEF";
+  setRow(cd, 1, [styledHeader("1限"), subj("数学", blue), subj("英語", green), subj("国語", peach), subj("理科", lilac), subj("社会", grey)]);
+  setRow(cd, 2, [styledHeader("2限"), subj("英語", green), subj("数学", blue), subj("理科", lilac), subj("国語", peach), subj("体育", grey)]);
+  setRow(cd, 3, [styledHeader("3限"), subj("国語", peach), subj("理科", lilac), subj("数学", blue), subj("英語", green), subj("音楽", grey)]);
+  setRow(cd, 4, [styledHeader("4限"), subj("社会", grey), subj("国語", peach), subj("英語", green), subj("数学", blue), subj("美術", grey)]);
+  setRow(cd, 5, [styledHeader("5限"), subj("体育", grey), subj("社会", grey), subj("音楽", grey), subj("理科", lilac), subj("数学", blue)]);
+  return baseSnapshot(sheet);
+}
+
+function buildAttendance(): SnapshotJson {
+  const sheet = newSheet("sheet-1", "出席簿");
+  const cd = sheet.cellData;
+  const days = ["5/19", "5/20", "5/21", "5/22", "5/23", "5/24", "5/25"];
+  setRow(cd, 0, [
+    styledHeader("氏名"),
+    ...days.map((d) => styledHeader(d)),
+    styledHeader("出席率"),
+  ]);
+  const students: Array<[string, ReadonlyArray<string>]> = [
+    ["山田 太郎", ["○", "○", "○", "×", "○", "○", "○"]],
+    ["佐藤 花子", ["○", "○", "○", "○", "○", "○", "○"]],
+    ["鈴木 一郎", ["○", "×", "○", "○", "○", "△", "○"]],
+    ["田中 美咲", ["○", "○", "○", "○", "○", "○", "×"]],
+    ["高橋 健", ["○", "○", "×", "○", "○", "○", "○"]],
+  ];
+  students.forEach((entry, i) => {
+    const row = i + 1;
+    const [name, marks] = entry;
+    setRow(cd, row, [
+      { v: name },
+      ...marks.map((m) => ({ v: m, s: { ht: 2 } })),
+      {
+        f: `=COUNTIF(B${row + 1}:H${row + 1},"○")/COUNTA(B${row + 1}:H${row + 1})`,
+        _fmt: "0.0%",
+      },
+    ]);
+  });
+  return baseSnapshot(sheet);
+}
+
 /**
  * Build a snapshot JSON string for the given template id. Returns `null` for
  * the blank template (caller should fall through to the default newWorkbook
@@ -424,6 +589,14 @@ export function buildTemplateSnapshot(id: string): string | null {
       return JSON.stringify(buildInventory());
     case "contacts":
       return JSON.stringify(buildContacts());
+    case "invoice":
+      return JSON.stringify(buildInvoice());
+    case "weight-log":
+      return JSON.stringify(buildWeightLog());
+    case "study-schedule":
+      return JSON.stringify(buildStudySchedule());
+    case "attendance":
+      return JSON.stringify(buildAttendance());
     default:
       return null;
   }

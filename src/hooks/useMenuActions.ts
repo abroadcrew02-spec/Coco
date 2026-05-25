@@ -32,6 +32,7 @@ export const EDITOR_COMMAND_IDS = new Set([
   "data-outline-groups",
   "tools-sheet-protection",
   "tools-goal-seek",
+  "tools-solver",
   "tools-error-checking",
   "file-page-setup",
   "view-tables-panel",

@@ -4,6 +4,46 @@ All notable changes to Coco are documented in this file. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-25
+
+Minor release. Univer 0.12.4 → 0.24.0 in three phases (4a / 4b / 4c) — Coco is now on Univer's latest OSS version with the in-grid drawing/image foundation in place.
+
+### Changed
+
+- **Univer 0.12.4 → 0.24.0** (the OSS `latest` tag on npm). 12 minor versions of breaking changes absorbed:
+  - **Phase 4a** (PR #220): event-API refactor — `(workbook as unknown as { onCellClick? })` / `onCellHover` ad-hoc → `univerAPI.addEvent(univerAPI.Event.CellClicked|CellHover, …)`. Two effects migrated (hyperlink-click + smart-chip hover). New `@univerjs/themes` package added (`defaultTheme` moved out of `@univerjs/design` in 0.24).
+  - Documented breakages verified across 0.13–0.23 (history refactor, context-menu refactor, `IGlobalZoneService` removal, `getLastColumns` rename, style interning constraints) — all either no-op for Coco or compile-time clean against the new API surface.
+
+### Added
+
+- **In-grid image render foundation** (towards `high-image-live`):
+  - **Phase 4b** (PR #221): `@univerjs/sheets-drawing` + `@univerjs/sheets-drawing-ui` (Apache-2.0 OSS) + their base `@univerjs/drawing` / `@univerjs/drawing-ui` registered in the Mount-Univer effect. EN_US + JA_JP locale bundles merged. `./facade` side-effect imports wired so `FWorksheet.newOverGridImage()` / `insertImages()` / `getImages()` are available.
+  - **Phase 4c** (PR #222): Rust-side bridge in `xlsx_io.rs` emits `IWorkbookData.resources[SHEET_DRAWING_PLUGIN]` per sheet — an `IDrawingSubunitMap<ISheetImage>` payload with `drawingId`, `imageSourceType: BASE64`, `source` as `data:image/<mime>;base64,...`, and `sheetTransform` pixel coords converted from OOXML EMU at 96 DPI (`px = emu / 9525`, half-up). Twocell and onecell anchors handled. Pure additive — `_preservedParts` byte-perfect round-trip channel untouched.
+
+### Honest gap (call out)
+
+- **Visual smoke test of the in-grid image render was not run** for this release. A WebView2 `--remote-debugging-port` env-var conflict in the build environment prevents CDP-driven automation; manual confirmation that opened-xlsx images actually render in the grid is still pending. The Rust bridge has a dedicated unit test (`drawing_bridge_emits_sheet_drawing_plugin_resource`) that locks the resource shape, but end-to-end rendering verification is deferred. If a regression surfaces, expect a v0.6.1 hot-fix.
+
+### Stays unchanged
+
+- `_preservedParts` byte-perfect xlsx round-trip — fully preserved.
+- `InsertImageDialog` still writes to `_preservedParts`; migrating it to the facade builder for in-grid render at insert-time is a separate follow-up.
+- `univerStashRef` StrictMode deferred-dispose guard kept as a guard rail.
+- Dark mode + ja-JP locale wiring (from v0.5.0) untouched.
+
+### Verification
+
+- `npm run typecheck` clean.
+- `npm test` — 1589 / 1589 frontend tests pass.
+- `cargo test` — full Rust suite green across 30+ test binaries; critical round-trip suites (`xlsx_p0_compat`, `xlsx_image_*`, `xlsx_roundtrip*`) all pass — no regression.
+- `cargo check` clean.
+
+### Up next
+
+- Phase 4d: `InsertImageDialog` → facade builder migration (in-grid render at new-image insert).
+- `high-chart-live` remains blocked on `@univerjs-pro/sheets-chart` (commercial license); sidebar `ChartPreviewPanel` is the local-first answer.
+- StrictMode-guard removal: verify on 0.24, delete the deferred-dispose if no longer needed.
+
 ## [0.5.0] - 2026-05-25
 
 Minor release. Univer 0.5.5 → 0.12.4 in three staged phases delivers native grid dark mode (closes #193), native ja-JP locale (drops a ~700-line workaround), and resolves the long-standing `@univerjs/facade` deprecation.

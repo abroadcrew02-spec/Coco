@@ -1268,12 +1268,11 @@ export default function EditorScreen() {
     [dvDialog, getSnapshotForTool, applyMutatedSnapshot],
   );
 
-  // TODO(cf): live in-grid CF highlighting (see docs/TODOS.md#high-cf-live-render)
-  // Conditional formatting is currently round-tripped at the snapshot level
-  // (xlsx_io.rs preserves _conditionalFormatting per sheet). The Univer CF
-  // plugin uses a different rule model (IRange + dxf-style IStyleBase), so for
-  // this PoC we author into the snapshot directly: read → edit → write back via
-  // updateSnapshot. Live highlighting is therefore deferred until save+reopen.
+  // Conditional formatting: rules are authored into the snapshot
+  // (xlsx_io.rs preserves _conditionalFormatting per sheet) and `patchCfRenders`
+  // evaluates them at createUnit time. `applyCfRules` below also drives the
+  // Univer facade imperatively so in-session edits repaint immediately
+  // (mirrors the `applyHyperlink` pattern via `computeCfRepaint`).
   const openCfDialog = useCallback(() => {
     const ready = getReadyWorkbook("条件付き書式");
     if (!ready) return;

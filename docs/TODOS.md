@@ -20,15 +20,10 @@ None.
 
 ## High — visible UX gaps
 
-### high-cf-live-render (partial)
+### high-cf-live-render (closed)
 - **Title**: Conditional formatting in-grid live rendering
-- **Refs**: `src/components/conditionalFormatRender.ts:927` (`patchCfRenders`), `src/components/EditorScreen.tsx:1271` (inline TODO), `src/components/EditorScreen.tsx:7566` (patch chain)
-- **Effort**: M (was L — most of the work is done)
-- **Status**: `patchCfRenders` evaluates all 8 rule types (cellIs / containsText / top10 / duplicateValues / uniqueValues / dataBar / colorScale / iconSet / expression) at `createUnit` time and merges highlights into the inline `s` field with rule-priority precedence preserved. So CF rules render correctly on file open/reopen. The remaining gap is **session-live re-render**: after the user authors rules in-session via `applyCfRules`, `updateSnapshot` only updates Zustand state; the Mount Univer `useEffect` has `[]` deps so no remount occurs and `patchCfRenders` does not re-fire until the next file open.
-- **Remaining work**:
-  1. Drive the Univer facade imperatively after `applyCfRules` (re-paint the affected cells via the facade), mirroring how `applyHyperlink` re-styles via `getRange().setFontColor(...).setFontLine(...)` after its snapshot patch.
-  2. Add vitest coverage for `evaluateDataBar`, `evaluateColorScale`, `evaluateIconSet`, `evaluateExpression`, and their `patchCfRenders` integration paths.
-- **Blocker for closing**: ~~dxf table parsing~~ resolved (`medium-cf-dxf-emit` closed). No external blockers.
+- **Refs**: `src/components/conditionalFormatRender.ts:927` (`patchCfRenders`), `src/components/conditionalFormatRender.ts:1204` (`computeCfRepaint`), `src/components/EditorScreen.tsx` (`applyCfRules`)
+- **Resolution**: `patchCfRenders` evaluates all 8 rule types (cellIs / containsText / top10 / duplicateValues / uniqueValues / dataBar / colorScale / iconSet / expression) at `createUnit` time. For in-session repaint, `applyCfRules` now drives the Univer facade imperatively via `computeCfRepaint` — diffs a per-cell action list (`set`/`clear` plus optional `value` for iconSet glyphs) over base / prev / after snapshots and applies via `setBackground` / `setFontColor` / `setFontWeight` / `setValue`. Handles add / modify / remove / range-shrink correctly (mirrors the `applyHyperlink` re-style pattern). Tests: 29 new vitest cases in `conditionalFormatRender.test.ts` covering each advanced evaluator + `patchCfRenders` integration + `computeCfRepaint` edge cases.
 
 ### high-hyperlink-live (closed)
 - **Title**: Hyperlink in-grid live rendering after authoring (beyond `patchHyperlinkRenders` boot-time patch)

@@ -5,6 +5,7 @@ import {
   FUNCTION_CATEGORY_ORDER,
   buildInsertTemplate,
   filterFunctions,
+  resolveAlias,
   type FunctionCategory,
   type FunctionInfo,
 } from "../store/functionCatalog";
@@ -32,6 +33,29 @@ export default function InsertFunctionDialog({ onInsert, onClose }: Props) {
   );
 
   const selected: FunctionInfo | null = filtered[activeIndex] ?? null;
+
+  // #247 — Alias hint: if the user typed CONCATENATE / FLOOR / NORMDIST etc.
+  // and we have a modern replacement, surface it as a hint above the list.
+  const aliasHint = useMemo(() => {
+    const q = query.trim().toUpperCase();
+    if (q.length < 3) return null;
+    const target = resolveAlias(q);
+    if (!target) return null;
+    const replacement = FUNCTION_CATALOG.find((f) => f.name === target);
+    if (!replacement) return null;
+    return { from: q, to: target, info: replacement };
+  }, [query]);
+
+  const selectFnByName = (name: string) => {
+    const idx = filtered.findIndex((f) => f.name === name);
+    if (idx >= 0) {
+      setActiveIndex(idx);
+      return;
+    }
+    // Function isn't in the current filtered list — clear the search so it shows up.
+    setQuery(name);
+    setCategory("all");
+  };
 
   // Clamp the highlighted row whenever the filter shrinks the list.
   useEffect(() => {
@@ -178,6 +202,19 @@ export default function InsertFunctionDialog({ onInsert, onClose }: Props) {
           )}
 
           <aside className="ifd-detail" aria-live="polite">
+            {aliasHint && (
+              <div className="ifd-alias-hint" role="status">
+                <code>{aliasHint.from}</code> は {" "}
+                <button
+                  type="button"
+                  className="ifd-related-chip"
+                  onClick={() => selectFnByName(aliasHint.to)}
+                >
+                  {aliasHint.to}
+                </button>
+                {" "} に置き換わりました
+              </div>
+            )}
             {selected ? (
               <>
                 <div className="ifd-detail-signature">{selected.signature}</div>
@@ -186,6 +223,21 @@ export default function InsertFunctionDialog({ onInsert, onClose }: Props) {
                   <span className="ifd-detail-example-label">例:</span>
                   <code>{selected.example}</code>
                 </p>
+                {selected.related && selected.related.length > 0 && (
+                  <p className="ifd-detail-related">
+                    <span className="ifd-detail-example-label">関連:</span>
+                    {selected.related.map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        className="ifd-related-chip"
+                        onClick={() => selectFnByName(name)}
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </p>
+                )}
               </>
             ) : (
               <p className="ifd-detail-placeholder">

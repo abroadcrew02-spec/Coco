@@ -77,5 +77,20 @@ describe("carryForwardRootExtensions", () => {
   it("exports the extension key list for the xlsx round-trip to mirror", () => {
     expect(COCO_ROOT_EXTENSION_KEYS).toContain("_cameraLinks");
     expect(COCO_ROOT_EXTENSION_KEYS).toContain("_scenarios");
+    // Phase 4d: image/textbox inserts write into _preservedParts and must
+    // survive the next syncSnapshot or the drawing parts vanish on the next
+    // cell edit.
+    expect(COCO_ROOT_EXTENSION_KEYS).toContain("_preservedParts");
+  });
+
+  it("re-grafts _preservedParts dropped by workbook.save() (Phase 4d)", () => {
+    const preserved = {
+      parts: { "xl/media/image1.png": "AAAA" },
+      sheetRefs: [{ drawingRid: "rId1", drawingTarget: "../drawings/drawing1.xml" }],
+    };
+    const prev = JSON.stringify({ sheets: {}, _preservedParts: preserved });
+    const fresh = JSON.stringify({ sheets: { s1: { cellData: {} } } });
+    const merged = JSON.parse(carryForwardRootExtensions(fresh, prev));
+    expect(merged._preservedParts).toEqual(preserved);
   });
 });

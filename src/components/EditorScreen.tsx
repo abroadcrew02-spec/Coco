@@ -68,6 +68,7 @@ import SheetPickerModal from "./SheetPickerModal";
 import SaveFailureDialog from "./SaveFailureDialog";
 import BusyOverlay from "./BusyOverlay";
 import SnapshotHistoryDialog from "./SnapshotHistoryDialog";
+import WorkbookInquireDialog from "./WorkbookInquireDialog";
 import CompatibilityWarningsDialog from "./CompatibilityWarningsDialog";
 import NamedRangesDialog, { type NamedRangeEntry } from "./NamedRangesDialog";
 import DataValidationDialog, { type DataValidationEntry } from "./DataValidationDialog";
@@ -138,6 +139,7 @@ import {
 } from "../store/cellStyles";
 import GoalSeekDialog from "./GoalSeekDialog";
 import { type GoalSeekAdapter } from "../store/goalSeek";
+import SolverDialog from "./SolverDialog";
 import { patchShowFormulasView } from "./showFormulasRender";
 import { patchErrorIndicators } from "./errorIndicatorRender";
 import { collectAuditIssues } from "../store/formulaAudit";
@@ -677,6 +679,9 @@ export default function EditorScreen() {
 
   const [sheetPicker, setSheetPicker] = useState<{ id: string; name: string }[] | null>(null);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  // #245 — Workbook Inquire (read-only diagnostic of cell/formula counts,
+  // top functions, errors, external links, embedded-object tallies).
+  const [inquireOpen, setInquireOpen] = useState(false);
   const [editorInitError, setEditorInitError] = useState<string | null>(null);
   const [editorOperationError, setEditorOperationError] = useState<string | null>(null);
   // Auto-update state machine (Phase 1, Windows-only). Drives a status-bar
@@ -809,6 +814,12 @@ export default function EditorScreen() {
   // Goal Seek dialog state. Adapter wraps Univer FUniver to read/write values.
   const [goalSeekState, setGoalSeekState] = useState<{
     targetCell: string;
+    changingCell: string;
+    adapter: GoalSeekAdapter;
+  } | null>(null);
+  // Solver (#239 MVP, single-variable) — reuses the GoalSeekAdapter.
+  const [solverState, setSolverState] = useState<{
+    objectiveCell: string;
     changingCell: string;
     adapter: GoalSeekAdapter;
   } | null>(null);
@@ -2210,6 +2221,39 @@ export default function EditorScreen() {
       },
     };
     setGoalSeekState({ targetCell: activeRef, changingCell: "A1", adapter });
+  }, []);
+
+  // --- Solver (#239 MVP, single-variable) -----------------------------------
+  const openSolverDialog = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    const sheet = workbook?.getActiveSheet();
+    if (!workbook || !sheet) return;
+    let activeRef = "B5";
+    try {
+      const sel = sheet.getSelection();
+      const r = sel?.getActiveRange();
+      if (r) activeRef = r.getA1Notation();
+    } catch {
+      // best-effort
+    }
+    const adapter: GoalSeekAdapter = {
+      readNumeric(cellRef: string) {
+        const r = sheet.getRange(cellRef);
+        const v = r?.getValue();
+        if (typeof v === "number" && Number.isFinite(v)) return v;
+        if (typeof v === "string" && v.trim() !== "") {
+          const n = Number(v);
+          return Number.isFinite(n) ? n : null;
+        }
+        return null;
+      },
+      writeNumeric(cellRef: string, value: number) {
+        sheet.getRange(cellRef)?.setValue(value);
+      },
+    };
+    setSolverState({ objectiveCell: activeRef, changingCell: "A1", adapter });
   }, []);
 
   // --- Subtotals -------------------------------------------------------------
@@ -5962,6 +6006,38 @@ export default function EditorScreen() {
       };
 
       applyMutatedSnapshot(JSON.stringify(snapshot));
+
+      // Phase 4d (#high-image-live): the snapshot mutation alone doesn't
+      // re-mount Univer, so the image wouldn't appear in-grid until the user
+      // saves and reopens (when the xlsx import bridge re-emits
+      // `resources[SHEET_DRAWING_PLUGIN]` from `_preservedParts`). Fire a
+      // facade `insertImage` so the image renders immediately in-session.
+      // Fire-and-forget: if the facade rejects, the export round-trip still
+      // works via `_preservedParts` and the image will appear on next reopen.
+      const ext = value.ext.toLowerCase();
+      const mime =
+        ext === "jpg" || ext === "jpeg" ? "image/jpeg" :
+        ext === "png" ? "image/png" :
+        ext === "gif" ? "image/gif" :
+        ext === "bmp" ? "image/bmp" :
+        ext === "webp" ? "image/webp" :
+        `image/${ext}`;
+      const dataUrl = `data:${mime};base64,${value.base64}`;
+      try {
+        const fSheet = workbook.getActiveSheet();
+        const fSheetWithImage = fSheet as unknown as {
+          insertImage?: (url: string, col: number, row: number) => Promise<boolean>;
+        } | null;
+        if (fSheetWithImage?.insertImage) {
+          void fSheetWithImage
+            .insertImage(dataUrl, pos.col, pos.row)
+            .catch((err: unknown) => {
+              console.warn("[Coco] in-grid image render failed:", err);
+            });
+        }
+      } catch (err) {
+        console.warn("[Coco] facade insertImage threw synchronously:", err);
+      }
       return null;
     },
     [imageDialog, applyMutatedSnapshot],
@@ -6635,6 +6711,13 @@ export default function EditorScreen() {
       run: () => setScriptEditorOpen(true),
     },
     {
+      id: "tools.inquire",
+      label: "ブック診断 (Inquire)",
+      category: "ツール",
+      keywords: "inquire statistics workbook diagnostic functions errors external links 診断 統計",
+      run: () => setInquireOpen(true),
+    },
+    {
       id: "view.settings",
       label: "設定",
       category: "表示",
@@ -6842,6 +6925,9 @@ export default function EditorScreen() {
         break;
       case "tools-goal-seek":
         openGoalSeekDialog();
+        break;
+      case "tools-solver":
+        openSolverDialog();
         break;
       case "tools-error-checking":
         setErrorCheckingOpen(true);
@@ -7110,6 +7196,7 @@ export default function EditorScreen() {
     openPageSetupDialog,
     openCellStylesDialog,
     openGoalSeekDialog,
+    openSolverDialog,
     openSubtotalDialog,
     openRemoveDuplicatesDialog,
     openTextToColumnsDialog,
@@ -8795,6 +8882,12 @@ export default function EditorScreen() {
         />
       )}
       {snapshotsOpen && <SnapshotHistoryDialog onClose={() => setSnapshotsOpen(false)} />}
+      {inquireOpen && (
+        <WorkbookInquireDialog
+          snapshotJson={currentSnapshotJson ?? ""}
+          onClose={() => setInquireOpen(false)}
+        />
+      )}
       {macroDialogOpen && (
         <MacroDialog
           executor={
@@ -8976,6 +9069,22 @@ export default function EditorScreen() {
             setGoalSeekState(null);
           }}
           onClose={() => setGoalSeekState(null)}
+        />
+      )}
+      {solverState && (
+        <SolverDialog
+          initialObjectiveCell={solverState.objectiveCell}
+          initialChangingCell={solverState.changingCell}
+          runAdapter={solverState.adapter}
+          onCommit={() => {
+            const fUniver = fUniverRef.current;
+            const wb = fUniver?.getActiveWorkbook();
+            if (wb) {
+              applyMutatedSnapshot(JSON.stringify(wb.save()));
+            }
+            setSolverState(null);
+          }}
+          onClose={() => setSolverState(null)}
         />
       )}
       {errorCheckingOpen && currentSnapshotJson && (

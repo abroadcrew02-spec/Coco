@@ -173,8 +173,9 @@ describe("HomeScreen", () => {
     it("renders a tile per catalog template inline on the home view", () => {
       const { container } = render(<HomeScreen />);
       const tiles = container.querySelectorAll(".home-template-tile");
-      // 8 catalog templates (blank + 7 prebuilt).
-      expect(tiles).toHaveLength(8);
+      // 12 catalog templates (blank + 11 prebuilt; PR #246 added invoice,
+      // weight-log, study-schedule, attendance on top of the original 7).
+      expect(tiles).toHaveLength(12);
     });
 
     it("renders the blank workbook tile first with the blank modifier", () => {

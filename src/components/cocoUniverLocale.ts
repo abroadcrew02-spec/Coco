@@ -9,9 +9,12 @@
 // EN_US-slot workaround was dropped — the native bundles are used directly
 // for both languages.
 //
-// What we still need: a thin override on `formula.functionList` to put JA
-// `abstract` text on the ~200 most-used Excel functions Univer's stock
-// locales don't translate. See univerFunctionListJa.ts.
+// What we still apply: a thin override on `formula.functionList` covering 245
+// Excel functions where Coco prefers shorter / more literal JA strings than
+// Univer's native `ja-JP` Microsoft-style phrasing. NOTE: at Univer 0.12+
+// `sheets-formula-ui` ships JA `abstract` for every function in our overlay,
+// so this is a translation-quality preference, not a gap fill — see the
+// header comment in univerFunctionListJa.ts for the team-decision context.
 
 import { mergeLocales, LocaleType, type ILanguagePack, type ILocales } from "@univerjs/core";
 

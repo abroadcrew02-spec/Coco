@@ -1,14 +1,19 @@
-// #179 (area D): Japanese descriptions for Univer's formula function list.
+// #179 (area D): Japanese `abstract` strings for Univer's formula functions.
 //
-// Univer's @univerjs/sheets-formula-ui locale ships ~527 functions, each with
-// an English `abstract` (one-line summary) and `description`. Coco serves its
-// JA UI from the EN_US locale slot (Univer 0.5.x has no JA_JP), so without an
-// override every function in the formula helper / autocomplete shows English.
+// HISTORY: at Univer 0.5.x, Coco had to serve JA UI from the EN_US locale slot
+// because Univer didn't ship `LocaleType.JA_JP`. Every function's `abstract`
+// in the formula helper / autocomplete was English, so this file shipped JA
+// translations to fill the gap.
 //
-// This file supplies a JA `abstract` for the ~200 most-used functions. It is
-// deep-merged into `formula.functionList` by cocoUniverLocale.ts, so only the
-// `abstract` is replaced — `description` / `functionParameter` keep Univer's
-// English copy (acceptable: the abstract is the prominent label).
+// CURRENT (post-PR #218, Univer 0.12+): Univer ships native `LocaleType.JA_JP`
+// and `@univerjs/sheets-formula-ui` includes JA `abstract` text for ALL 245
+// functions in this map (and many more). The overlay still applies via the
+// last-wins `mergeLocales` in cocoUniverLocale.ts, so **Coco's strings now
+// override Univer's native JA** (shorter / more literal vs. Univer's longer
+// Microsoft-style phrasing). This is a translation-quality preference, not a
+// gap fill. A future cleanup may drop this file entirely if the team decides
+// Univer's native JA is fine; for now it stays so the formula picker keeps
+// the wording users are familiar with.
 //
 // To add a function, append `NAME: { abstract: "..." }`. Names must match
 // Univer's `formula.functionList` keys exactly (Excel upper-case).

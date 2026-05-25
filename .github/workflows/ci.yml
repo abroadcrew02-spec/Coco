@@ -87,16 +87,23 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
-      - name: Perf gate (req 5.1 budgets)
+      - name: Perf smoke (catastrophic-regression gate)
+        # tests/perf_smoke.rs asserts hard 10–15 s ceilings (well above the
+        # §5.1 p95 targets) so a catastrophic O(n^2) regression in the import
+        # / export / SQLite-save pipelines fails CI. Generous ceilings absorb
+        # slow Windows CI runners; the tight §5.1 numbers are checked by the
+        # signal-only perf step below.
+        working-directory: src-tauri
+        run: cargo test --release --test perf_smoke -- --include-ignored --nocapture
+
+      - name: Perf gate (req 5.1 budgets — signal only)
         # #41: opt-in via COCO_PERF_GATE=1 — print_results() in tests/perf.rs
-        # panics on budget violation when this is set. The standard `cargo
-        # test` step above skips the #[ignore]-tagged perf tests; this step
-        # runs them in --release with the gate on so a regression past the
-        # spec budgets fails CI.
+        # panics on §5.1 p95 budget violation when this is set. Kept as
+        # signal-only (continue-on-error) because the §5.1 budgets are tight
+        # and a loaded shared runner can transiently exceed them; the strict
+        # gate above catches the regressions that actually matter.
         working-directory: src-tauri
         env:
           COCO_PERF_GATE: "1"
         run: cargo test --release --test perf -- --ignored --nocapture
         continue-on-error: true
-        # continue-on-error: signal-only for now. Flip to false to make the
-        # gate strict once we've collected baseline runs from the runner.

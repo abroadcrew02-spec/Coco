@@ -569,6 +569,206 @@ fn inject_raw_cfrule(xlsx_path: &PathBuf, sqref: &str, cf_rule_xml: &str) {
     std::fs::write(xlsx_path, &out_buf).expect("write xlsx");
 }
 
+/// `aboveAverage` rules use four `{below, equalAverage}` combinations on the
+/// same rule type. The import path must capture both attributes so re-export
+/// hits the right ConditionalFormatAverageRule variant. (#XXX cf-rule-types-import)
+#[test]
+fn above_average_round_trip_with_below_and_equal_average() {
+    let tmp = TempDir::new().expect("tempdir");
+    let fixture = tmp.path().join("cf_above_avg.xlsx");
+    let exported = tmp.path().join("cf_above_avg_out.xlsx");
+
+    // Seed a minimal sheet, then splice in the 4 combinations. We hand-craft
+    // these because rust_xlsxwriter's ConditionalFormatAverage emits the rule
+    // body but we want all four variants on the same fixture for a single
+    // round-trip pass.
+    {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name("Sheet1").unwrap();
+        for r in 0..10u32 {
+            ws.write_number(r, 0, (r + 1) as f64).unwrap();
+        }
+        wb.save(&fixture).expect("save");
+    }
+    // Variant 1: above-average, strict.
+    inject_raw_cfrule(
+        &fixture,
+        "A1:A10",
+        r#"<cfRule type="aboveAverage" priority="1"/>"#,
+    );
+    // Variant 2: above-average, include equal.
+    inject_raw_cfrule(
+        &fixture,
+        "A1:A10",
+        r#"<cfRule type="aboveAverage" priority="2" equalAverage="1"/>"#,
+    );
+    // Variant 3: below-average, strict.
+    inject_raw_cfrule(
+        &fixture,
+        "A1:A10",
+        r#"<cfRule type="aboveAverage" priority="3" aboveAverage="0"/>"#,
+    );
+    // Variant 4: below-average, include equal.
+    inject_raw_cfrule(
+        &fixture,
+        "A1:A10",
+        r#"<cfRule type="aboveAverage" priority="4" aboveAverage="0" equalAverage="1"/>"#,
+    );
+
+    let imported = import_xlsx_core(path_str(&fixture)).expect("import");
+    let snapshot_json = imported.handle.snapshot_json.clone().expect("snapshot");
+    let snap: Value = serde_json::from_str(&snapshot_json).expect("parse");
+    let cfs = snap["sheets"]["sheet-1"]["_conditionalFormatting"]
+        .as_array()
+        .expect("_conditionalFormatting present");
+    assert_eq!(cfs.len(), 4, "expected 4 aboveAverage rules, got: {cfs:?}");
+
+    // Index by priority for stable assertions.
+    let by_pri: std::collections::HashMap<u64, &Value> = cfs
+        .iter()
+        .map(|r| (r["priority"].as_u64().unwrap(), r))
+        .collect();
+    let assert_aa = |pri: u64, below: bool, equal: bool| {
+        let r = by_pri.get(&pri).unwrap_or_else(|| panic!("priority {pri}"));
+        assert_eq!(r["type"].as_str(), Some("aboveAverage"));
+        let aa = r["aboveAverage"]
+            .as_object()
+            .unwrap_or_else(|| panic!("aboveAverage object for pri {pri}: {r:?}"));
+        assert_eq!(
+            aa.get("below").and_then(|v| v.as_bool()),
+            Some(below),
+            "below for pri {pri}"
+        );
+        assert_eq!(
+            aa.get("equalAverage").and_then(|v| v.as_bool()),
+            Some(equal),
+            "equalAverage for pri {pri}"
+        );
+    };
+    assert_aa(1, false, false);
+    assert_aa(2, false, true);
+    assert_aa(3, true, false);
+    assert_aa(4, true, true);
+
+    let export = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
+    assert!(export.success, "export ok: {:?}", export.error);
+
+    let re = import_xlsx_core(path_str(&exported)).expect("re-import");
+    let re_snap: Value = serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_cfs = re_snap["sheets"]["sheet-1"]["_conditionalFormatting"]
+        .as_array()
+        .expect("CF survives round-trip");
+    assert_eq!(
+        re_cfs.len(),
+        4,
+        "all 4 variants must survive round-trip, got: {re_cfs:?}"
+    );
+    // Collect the {below, equalAverage} pairs and assert the set matches.
+    let mut pairs: Vec<(bool, bool)> = re_cfs
+        .iter()
+        .map(|r| {
+            let aa = r["aboveAverage"]
+                .as_object()
+                .unwrap_or_else(|| panic!("re-imported rule missing aboveAverage: {r:?}"));
+            (
+                aa.get("below").and_then(|v| v.as_bool()).unwrap_or(false),
+                aa.get("equalAverage")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+            )
+        })
+        .collect();
+    pairs.sort();
+    assert_eq!(
+        pairs,
+        vec![(false, false), (false, true), (true, false), (true, true)],
+        "all 4 variants present after round-trip"
+    );
+}
+
+/// `timePeriod` rules carry the named relative range on cfRule@timePeriod
+/// (e.g. "today", "last7Days"). Import must capture the literal and snapshot
+/// must surface it so the export side can map it back to the right
+/// ConditionalFormatDateRule. (#XXX cf-rule-types-import)
+#[test]
+fn time_period_round_trip_preserves_period_string() {
+    let tmp = TempDir::new().expect("tempdir");
+    let fixture = tmp.path().join("cf_time_period.xlsx");
+    let exported = tmp.path().join("cf_time_period_out.xlsx");
+
+    {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name("Sheet1").unwrap();
+        ws.write_string(0, 0, "x").unwrap();
+        wb.save(&fixture).expect("save");
+    }
+    // Two different timePeriod values, on different ranges to keep them
+    // visually distinct in the splice.
+    inject_raw_cfrule(
+        &fixture,
+        "A1:A10",
+        r#"<cfRule type="timePeriod" priority="1" timePeriod="today"><formula>FLOOR(A1,1)=TODAY()</formula></cfRule>"#,
+    );
+    inject_raw_cfrule(
+        &fixture,
+        "B1:B10",
+        r#"<cfRule type="timePeriod" priority="2" timePeriod="last7Days"><formula>AND(TODAY()-FLOOR(B1,1)&lt;=6,FLOOR(B1,1)&lt;=TODAY())</formula></cfRule>"#,
+    );
+
+    let imported = import_xlsx_core(path_str(&fixture)).expect("import");
+    let snapshot_json = imported.handle.snapshot_json.clone().expect("snapshot");
+    let snap: Value = serde_json::from_str(&snapshot_json).expect("parse");
+    let cfs = snap["sheets"]["sheet-1"]["_conditionalFormatting"]
+        .as_array()
+        .expect("_conditionalFormatting present");
+    assert_eq!(cfs.len(), 2, "expected 2 timePeriod rules, got: {cfs:?}");
+
+    let periods: std::collections::HashSet<String> = cfs
+        .iter()
+        .map(|r| {
+            assert_eq!(r["type"].as_str(), Some("timePeriod"));
+            r["timePeriod"]
+                .as_str()
+                .expect("timePeriod key on snapshot")
+                .to_string()
+        })
+        .collect();
+    assert!(
+        periods.contains("today") && periods.contains("last7Days"),
+        "both period strings present in snapshot, got: {periods:?}"
+    );
+
+    let export = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
+    assert!(export.success, "export ok: {:?}", export.error);
+
+    let re = import_xlsx_core(path_str(&exported)).expect("re-import");
+    let re_snap: Value = serde_json::from_str(re.handle.snapshot_json.as_ref().unwrap()).unwrap();
+    let re_cfs = re_snap["sheets"]["sheet-1"]["_conditionalFormatting"]
+        .as_array()
+        .expect("CF survives round-trip");
+    assert_eq!(
+        re_cfs.len(),
+        2,
+        "both timePeriod rules must survive round-trip, got: {re_cfs:?}"
+    );
+    let re_periods: std::collections::HashSet<String> = re_cfs
+        .iter()
+        .map(|r| {
+            assert_eq!(r["type"].as_str(), Some("timePeriod"));
+            r["timePeriod"]
+                .as_str()
+                .expect("timePeriod preserved after round-trip")
+                .to_string()
+        })
+        .collect();
+    assert!(
+        re_periods.contains("today") && re_periods.contains("last7Days"),
+        "both period strings preserved after round-trip, got: {re_periods:?}"
+    );
+}
+
 /// Style is only emitted as a dxf when the bag has at least one populated
 /// field. A rule with no style (the imported-from-source common case) must
 /// not balloon `<dxfs>`.

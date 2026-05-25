@@ -7783,6 +7783,13 @@ export default function EditorScreen() {
     // explicit light / dark.
     const unsubChanged = onThemeChanged(reapply);
     const unsubSystem = subscribeSystemTheme(reapply);
+    // Belt-and-suspenders: also reapply once right after subscribing. The
+    // `new Univer({ darkMode })` constructor seed should already match
+    // getEffectiveTheme(), but if a future Univer version changes the
+    // semantics of that flag (e.g. ignores it, or defaults to `true`),
+    // this self-heals on first paint instead of waiting for the user to
+    // flip the theme. No-cost: setUniverDarkMode is idempotent.
+    reapply();
     return () => {
       unsubChanged();
       unsubSystem();

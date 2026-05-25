@@ -6319,27 +6319,29 @@ export default function EditorScreen() {
   }, [formatPainterMode, activateFormatPainter, deactivateFormatPainter]);
 
   // Wire the format-painter "apply on next selection" listener. Subscribes to
-  // FWorkbook.onSelectionChange once the workbook is mounted; the listener
-  // pulls the pending style + active sheet + new selection ranges and writes
-  // through updateSnapshot. Single mode deactivates after the first apply;
-  // sticky mode keeps going until ESC.
+  // the sheets-ui SelectionChanged event once the workbook is mounted; the
+  // listener pulls the pending style + active sheet + new selection ranges
+  // and writes through updateSnapshot. Single mode deactivates after the
+  // first apply; sticky mode keeps going until ESC.
   useEffect(() => {
     if (formatPainterMode === "idle") return;
     const fUniver = fUniverRef.current;
     if (!fUniver) return;
     const workbook = fUniver.getActiveWorkbook();
     if (!workbook) return;
-    const onSelectionChange = (workbook as unknown as {
-      onSelectionChange?: (cb: (ranges: Array<{ startRow: number; endRow: number; startColumn: number; endColumn: number }>) => void) => { dispose: () => void };
-    }).onSelectionChange;
-    if (typeof onSelectionChange !== "function") return;
 
-    const disposable = onSelectionChange.call(workbook, (ranges) => {
+    // Univer 0.24 (#13): migrated from `FWorkbook.onSelectionChange(...)` to
+    // `addEvent(Event.SelectionChanged, ...)`. The typed payload exposes
+    // `{ workbook, worksheet, selections }` where `selections: IRange[]` —
+    // same `startRow / endRow / startColumn / endColumn` shape the legacy
+    // callback delivered, so the rest of the handler is unchanged.
+    const disposable = fUniver.addEvent(fUniver.Event.SelectionChanged, (params) => {
       // Ignore the synchronous initial fire that some Univer versions emit
       // when a listener is attached — debounce ~50ms against arm time.
       if (Date.now() - formatPainterArmedAtRef.current < 50) return;
       const style = pendingFormatRef.current;
       if (!style) return;
+      const ranges = params.selections;
       if (!Array.isArray(ranges) || ranges.length === 0) return;
       const sheet = workbook.getActiveSheet();
       if (!sheet) return;
@@ -7859,7 +7861,11 @@ export default function EditorScreen() {
       syncSnapshot();
     });
 
-    const disposable = fUniver.onCommandExecuted((info) => {
+    // Univer 0.24 (#13): migrated from `fUniver.onCommandExecuted(...)` to
+    // `addEvent(Event.CommandExecuted, ...)`. The typed `ICommandEvent`
+    // payload carries `{ id, type, params, options }` — same fields the
+    // legacy callback's `info` argument exposed.
+    const disposable = fUniver.addEvent(fUniver.Event.CommandExecuted, (info) => {
       if (info.type !== CommandType.MUTATION) return;
       markDirty();
       cancelPendingSnapshotSync();
@@ -7883,10 +7889,14 @@ export default function EditorScreen() {
   useEffect(() => {
     if (!fUniverRef.current) return;
     const fUniver = fUniverRef.current;
-    const disposable = fUniver.onCommandExecuted((info, options) => {
+    // Univer 0.24 (#13): migrated from `fUniver.onCommandExecuted(...)` to
+    // `addEvent(Event.CommandExecuted, ...)`. The legacy callback received
+    // `(info, options)` as separate args; the typed `ICommandEvent` payload
+    // folds `options` onto the same event object, so we read it from `info`.
+    const disposable = fUniver.addEvent(fUniver.Event.CommandExecuted, (info) => {
       if (info.type !== CommandType.COMMAND) return;
       observeMacroCommand(info.id, info.params, {
-        fromCollab: options?.fromCollab === true,
+        fromCollab: info.options?.fromCollab === true,
       });
     });
     return () => disposable.dispose();
@@ -8017,7 +8027,10 @@ export default function EditorScreen() {
     }, 400);
 
     // onEdit: hook MUTATION writes.
-    const editDisposable = fUniver.onCommandExecuted((info) => {
+    // Univer 0.24 (#13): migrated from `fUniver.onCommandExecuted(...)` to
+    // `addEvent(Event.CommandExecuted, ...)`. Payload fields match the
+    // legacy `info` arg (`id`, `type`, `params`).
+    const editDisposable = fUniver.addEvent(fUniver.Event.CommandExecuted, (info) => {
       // C1 — re-entry guard. onEdit handlers that write cells produce
       // MUTATIONs; without this early return they would re-trigger onEdit
       // forever. Skip MUTATIONs that occur while an onEdit dispatch runs.
@@ -8105,7 +8118,13 @@ export default function EditorScreen() {
     const fUniver = fUniverRef.current;
     let lastWarnAt = 0;
 
-    const disposable = fUniver.onBeforeCommandExecute((info) => {
+    // Univer 0.24 (#13): migrated from `fUniver.onBeforeCommandExecute(...)`
+    // to `addEvent(Event.BeforeCommandExecute, ...)`. The typed
+    // `ICommandEvent` payload exposes the same `{ id, type, params, options }`
+    // fields the legacy `info` argument carried, and throwing
+    // `CustomCommandExecutionError` from the handler still politely cancels
+    // the mutation via Univer's CommandService.
+    const disposable = fUniver.addEvent(fUniver.Event.BeforeCommandExecute, (info) => {
       if (info.type !== CommandType.MUTATION) return;
       const params = info.params as { subUnitId?: unknown } | undefined;
       const subUnitId = typeof params?.subUnitId === "string" ? params.subUnitId : null;
@@ -8137,7 +8156,10 @@ export default function EditorScreen() {
     const fUniver = fUniverRef.current;
     let lastWarnAt = 0;
 
-    const disposable = fUniver.onBeforeCommandExecute((info) => {
+    // Univer 0.24 (#13): migrated from `fUniver.onBeforeCommandExecute(...)`
+    // to `addEvent(Event.BeforeCommandExecute, ...)`. Same `ICommandEvent`
+    // payload as the sheet-protection hook above.
+    const disposable = fUniver.addEvent(fUniver.Event.BeforeCommandExecute, (info) => {
       if (info.type !== CommandType.MUTATION) return;
       const { subUnitId, writes } = extractCellWrites(info.params);
       if (!subUnitId || writes.length === 0) return;

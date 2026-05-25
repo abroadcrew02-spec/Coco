@@ -4,6 +4,48 @@ All notable changes to Coco are documented in this file. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-05-25
+
+Patch release. Seven audit-driven follow-ups since v0.6.0 — two real user-facing bug fixes plus safety improvements around the drawing bridge and event-API migration.
+
+### Fixed
+
+- **`oneCellAnchor` images were tagged as resize-with-cells**. In-grid images from one-cell-anchored OOXML drawings would stretch when the user resized a column — Excel semantics are position-only (fixed size). Threaded a `DrawingAnchorKind` enum through `parse_drawing_anchors` and emit `anchorType: "0"` (Position) for `oneCellAnchor`, `"1"` (Both) for `twoCellAnchor`. (#224)
+- **XML-escaped sheet names silently dropped drawings**. A sheet named `Q&A` (workbook.xml writes `Q&amp;A`) silently lost both drawings AND preserved parts on import because `parse_workbook_sheets` left XML entities raw while calamine surfaced sheet names already decoded. Fixed by calling `decode_xml_entities` at the parse site — repairs both the new drawing bridge and the pre-existing `_preservedParts` pipeline. (#224)
+- **Smart-chip hover popover anchored to (24, 24) instead of following the cell** (pre-existing bug, latent since the original `onCellHover` mixin). Univer's `currentRichText$` source strips `event` before dispatch, so the runtime payload never carried `event.clientX/Y` — anchor coords always fell to the (24, 24) fallback. Switched to anchoring on the cell's bounding rect (`params.rect.endX / endY`), which is delivered as typed payload. UX actually improved over cursor-following — stable position, no jitter. (#227)
+
+### Added
+
+- **16 MiB per-image media size cap** in the drawing bridge. A workbook with a 100 MiB embedded TIFF previously would still read the full media into memory and base64 it into the snapshot (~133 MiB string). Now the bridge checks `archive.by_name(media_path).size()` before reading and skips oversized media with an `XLSX_DRAWING_MEDIA_TOO_LARGE` warning. Bytes still round-trip via `_preservedParts` (under its own caps). (#225)
+- **Compatibility warnings for unsupported drawing media types**: `XLSX_DRAWING_MEDIA_UNSUPPORTED_MIME` for TIFF / unknown extensions (Chromium-based WebView2 can't render those, would surface as broken-image icons in-grid) and `XLSX_DRAWING_ABSOLUTE_ANCHOR_UNSUPPORTED` for `<absoluteAnchor>` drawings (out-of-scope for the cell-relative bridge). Bytes still round-trip via `_preservedParts`. (#226)
+
+### Changed
+
+- **Univer migration debt fully cleared**: the 6 remaining deprecated event-mixin call sites (`onSelectionChange`, `onCommandExecuted` ×3, `onBeforeCommandExecute` ×2) migrated to the typed `univerAPI.addEvent(univerAPI.Event.*)` pattern that PR #220 / #227 established. `EditorScreen.tsx` is now free of the legacy mixin API; the last `as unknown as { onSelectionChange? }` cast in production code is gone. (#228)
+- **Dropped vestigial `[currentHandle]` deps** from the CellClicked + CellHover effects. They were load-bearing pre-0.24 because the legacy mixin closed over `getActiveWorkbook()` at register time; post-migration `addEvent` is on FUniver and `params.workbook` is event-bound, so the dep just churned dispose+re-register on every handle change. (#227)
+- **Defensive `reapply()` after subscribing** in the dark-mode effect so the wiring self-heals on first paint if a future Univer version changes `darkMode` config semantics. No-cost (`setUniverDarkMode` is idempotent). (#229)
+
+### Removed
+
+- **Dead CSS**: the two `[data-u-comp="ribbon-toolbar"]` rules in `EditorScreen.css` (left-align + `display: none !important`) targeted an element that no longer renders since PR #217 added `header: false, toolbar: false` to `UniverUIPlugin`. The formula-bar rule stays. (#229)
+
+### Documentation
+
+- Clarified the `FUNCTION_LIST_JA_ABSTRACT` overlay's role: at Univer 0.5.x it filled a gap, but at 0.12+ Univer ships JA `abstract` for every function in our overlay (245/245). Coco's strings still win via `mergeLocales` last-wins, so the overlay is now an OVERRIDE (shorter / more literal vs. Univer's longer Microsoft-style phrasing), not a gap fill. Team-decision item documented in the header comments. (#230)
+
+### Tests
+
+- **+1 Rust integration test** (`oversized_image_is_skipped_with_warning`) — 17 MiB zero-byte fixture, locks the size-cap warning pipeline.
+- **+2 Rust integration tests** for the audit-found `oneCellAnchor` BUG and XML-escaped sheet-name BUG.
+- Frontend test count unchanged at 1589 (no behavior changes; refactors only).
+- Full Rust suite green across 30+ binaries.
+
+### Up next
+
+- Visual smoke test of v0.6.x in `tauri dev` (open xlsx with images, verify in-grid render of the Phase 4c drawing bridge + the bug fixes in this release).
+- `InsertImageDialog` facade migration (Phase 4d) — completes `high-image-live`.
+- WebView2 `--remote-debugging-port` env-var conflict trace (CDP automation blocker).
+
 ## [0.6.0] - 2026-05-25
 
 Minor release. Univer 0.12.4 → 0.24.0 in three phases (4a / 4b / 4c) — Coco is now on Univer's latest OSS version with the in-grid drawing/image foundation in place.

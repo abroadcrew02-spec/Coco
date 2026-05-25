@@ -39,7 +39,7 @@ import "@univerjs/find-replace/lib/index.css";
 import { undoRedoOverride } from "./univerUndoRedoOverride";
 import { registerCocoContextMenu } from "./univerContextMenu";
 import { registerFormulaNormalizer } from "./univerFormulaNormalizer";
-import { buildCocoUniverLocale } from "./cocoUniverLocale";
+import { buildCocoUniverLocales, toUniverLocaleType } from "./cocoUniverLocale";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { useAutoSave } from "../hooks/useAutoSave";
 import type { CompatibilityWarning } from "../types/workbook";
@@ -7543,22 +7543,21 @@ export default function EditorScreen() {
     let formulaNormalizerReg: ReturnType<typeof registerFormulaNormalizer> | null = null;
 
     try {
-      // #95 note: Univer 0.5.x does not ship a `JA_JP` LocaleType, so the
-      // app locale is always served from the EN_US slot — `buildCocoUniverLocale`
-      // returns the JA override when getLocale() is "ja-JP". When Univer adds
-      // JA_JP natively, switch this to `LocaleType.JA_JP` and split the
-      // locales bundle accordingly. See cocoUniverLocale.ts for the
-      // override list.
+      // Univer 0.12 ships a native `LocaleType.JA_JP`, so we wire both EN_US
+      // and JA_JP slots from the stock per-package locale bundles (plus a
+      // small Coco override for ~200 formula `abstract` strings) and pick the
+      // initial slot via Coco's app-side `getLocale()`. The 0.5.x EN_US-slot-
+      // with-JA-override workaround that lived in cocoUniverLocale.ts was
+      // removed as part of the 0.12.4 bump (docs/UNIVER_0_6_MIGRATION.md
+      // change #9).
       univer = new Univer({
         theme: defaultTheme,
         // #193 (Univer 0.8 dark mode): seed the initial dark-mode flag from
         // Coco's effective theme so the grid renders correctly on first paint.
         // The live-update effect below handles subsequent theme flips.
         darkMode: getEffectiveTheme() === "dark",
-        locale: LocaleType.EN_US,
-        locales: {
-          [LocaleType.EN_US]: buildCocoUniverLocale(getLocale()),
-        },
+        locale: toUniverLocaleType(getLocale()),
+        locales: buildCocoUniverLocales(),
         // FR-011: bump the per-unit undo stack from Univer's default 20 to 100.
         override: undoRedoOverride,
       });

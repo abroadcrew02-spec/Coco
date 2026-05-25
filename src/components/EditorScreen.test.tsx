@@ -55,10 +55,13 @@ describe("EditorScreen Univer plugin wiring", () => {
     );
   });
 
-  it("uses Coco's Univer locale bundle so standard UI labels can be overridden", () => {
-    expect(editorSource).toMatch(/import \{ buildCocoUniverLocale \} from "\.\/cocoUniverLocale"/);
+  it("wires Univer's native ja-JP / en-US locales via Coco's bundle (Univer 0.12)", () => {
+    expect(editorSource).toMatch(
+      /import \{ buildCocoUniverLocales, toUniverLocaleType \} from "\.\/cocoUniverLocale"/,
+    );
     expect(editorSource).toMatch(/import \{ getLocale, subscribeLocale, t \} from "\.\.\/i18n\/locale"/);
-    expect(editorSource).toMatch(/\[LocaleType\.EN_US\]: buildCocoUniverLocale\(getLocale\(\)\)/);
+    expect(editorSource).toMatch(/locale: toUniverLocaleType\(getLocale\(\)\)/);
+    expect(editorSource).toMatch(/locales: buildCocoUniverLocales\(\)/);
   });
 
   it("catches editor init errors and renders a recovery panel", () => {

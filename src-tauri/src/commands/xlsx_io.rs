@@ -3290,14 +3290,8 @@ fn build_data_validation_from_snapshot(
 /// One parsed `<conditionalFormatting>` block + `<cfRule>` from a worksheet's
 /// XML. Each entry represents a single rule (a block can carry multiple
 /// `cfRule` children — we flatten to one entry per rule, sharing the parent's
-/// sqref).
-///
-/// TODO(cf): emit dxf-referenced visual format on export (see docs/TODOS.md#medium-cf-dxf-emit)
-///
-/// PoC scope: preserve the rule shape so it survives a round-trip; we
-/// do NOT preserve the dxf-referenced visual format (dxfId → styles.xml dxfs)
-/// because rust_xlsxwriter expects a fresh `Format` per rule and we don't yet
-/// parse the dxf table.
+/// sqref). Round-trips rule shape + visual format (dxf-referenced bold / font
+/// color / fill color) through the snapshot for re-export.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ConditionalFormattingEntry {
     pub sqref: String,
@@ -3327,6 +3321,15 @@ pub(crate) struct ConditionalFormattingEntry {
     pub percent: bool,
     /// `cfRule@bottom="1"` flag for `top10` rules — switches Top to Bottom.
     pub bottom: bool,
+    /// `aboveAverage` rules: `cfRule@aboveAverage="0"` means below-average.
+    /// OOXML default (absent or `="1"`) is above-average → `below=false`.
+    pub below: bool,
+    /// `aboveAverage` rules: `cfRule@equalAverage="1"` switches the rule to
+    /// include the average itself (At-Or-Above / At-Or-Below variants).
+    pub equal_average: bool,
+    /// `timePeriod` rules: `cfRule@timePeriod` literal ("today", "yesterday",
+    /// "last7Days", etc). Empty for non-`timePeriod` rules.
+    pub time_period: String,
     /// Verbatim `<cfRule>...</cfRule>` source for rule types that can't be
     /// reconstructed through rust_xlsxwriter's typed CF API (currently
     /// `colorScale`, `dataBar`, `iconSet`). Empty for rules that round-trip
@@ -3478,6 +3481,36 @@ fn parse_sheet_conditional_formatting(
             let bottom = parse_attr(rule_head, "bottom")
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false);
+            // `aboveAverage` rules: OOXML semantics are
+            //   aboveAverage attr absent OR "1" → above (below = false)
+            //   aboveAverage attr "0"           → below (below = true)
+            // `equalAverage` similarly: absent or "0" → strict; "1" → include
+            // the average. Other rule types don't carry these attributes so
+            // the defaults (false / false) are harmless.
+            let below = if rule_type == "aboveAverage" {
+                parse_attr(rule_head, "aboveAverage")
+                    .map(|v| v == "0" || v.eq_ignore_ascii_case("false"))
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            let equal_average = if rule_type == "aboveAverage" {
+                parse_attr(rule_head, "equalAverage")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            // `timePeriod` rules carry the named relative range
+            // ("today" / "yesterday" / "last7Days" / etc) on cfRule@timePeriod.
+            // Preserve verbatim so the export side can map it back.
+            let time_period = if rule_type == "timePeriod" {
+                parse_attr(rule_head, "timePeriod")
+                    .map(|s| decode_xml_entities(&s))
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
 
             // For rule types we don't reconstruct via rust_xlsxwriter
             // (colorScale / dataBar / iconSet — all gradient/visual rules),
@@ -3498,6 +3531,9 @@ fn parse_sheet_conditional_formatting(
                     rank: 0,
                     percent: false,
                     bottom: false,
+                    below: false,
+                    equal_average: false,
+                    time_period: String::new(),
                     raw: rule_el.clone(),
                     // colorScale / dataBar / iconSet carry their own gradient
                     // colors inside the raw block, so we don't lift a dxf
@@ -3556,6 +3592,9 @@ fn parse_sheet_conditional_formatting(
                 rank,
                 percent,
                 bottom,
+                below,
+                equal_average,
+                time_period,
                 raw: String::new(),
                 dxf_style,
             });
@@ -4781,6 +4820,27 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                         }
                         if e.bottom {
                             obj.insert("bottom".into(), Value::Bool(true));
+                        }
+                        // #38: aboveAverage variants — emit the {below,
+                        // equalAverage} pair only for that rule type so the
+                        // export side picks up the right
+                        // ConditionalFormatAverageRule variant.
+                        if e.rule_type == "aboveAverage" {
+                            let mut aa = Map::new();
+                            aa.insert("below".into(), Value::Bool(e.below));
+                            aa.insert(
+                                "equalAverage".into(),
+                                Value::Bool(e.equal_average),
+                            );
+                            obj.insert("aboveAverage".into(), Value::Object(aa));
+                        }
+                        // #38: timePeriod literal — emit only when populated
+                        // so other rule types don't get a stray key.
+                        if e.rule_type == "timePeriod" && !e.time_period.is_empty() {
+                            obj.insert(
+                                "timePeriod".into(),
+                                Value::String(e.time_period.clone()),
+                            );
                         }
                         // Verbatim cfRule XML for colorScale / dataBar /
                         // iconSet — the export side will re-emit this inside

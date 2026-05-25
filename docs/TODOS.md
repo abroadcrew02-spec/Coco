@@ -54,17 +54,15 @@ None.
 
 ## Medium — round-trip / power-user features
 
-### medium-cf-dxf-emit
+### medium-cf-dxf-emit (closed)
 - **Title**: Emit dxf-referenced visual format on CF export
-- **Refs**: `src-tauri/src/commands/xlsx_io.rs:2764`, `src-tauri/src/commands/xlsx_io.rs:3090-3093`
-- **Effort**: M
-- **Why deferred**: PoC scope: rules round-trip their shape (sqref, type, operator, formulas), but the dxf-referenced visual format (`dxfId` → `styles.xml` `dxfs`) is dropped because `rust_xlsxwriter` expects a fresh `Format` per rule and we don't yet parse the dxf table on import.
+- **Refs**: `src-tauri/src/commands/xlsx_io.rs:3361` (parse), `src-tauri/src/commands/xlsx_io.rs:3595` (build_cf_rule_format), `src-tauri/src/commands/xlsx_io.rs:3697` (apply)
+- **Resolution**: Fully implemented in v0.1.0. Import parses `xl/styles.xml <dxfs>` via `parse_dxfs_from_styles`, resolves `dxfId` per rule, and stores bold/italic/fontColor/bgColor in the snapshot `style` bag. Export converts the bag to a `rust_xlsxwriter::Format` via `build_cf_rule_format`, which serializes it as a `<dxf>` entry in styles.xml with a `dxfId` back-reference. Tests: `cf_rule_style_emits_dxf_on_export` and `cf_rule_without_style_keeps_dxfs_empty` in `src-tauri/tests/xlsx_conditional_formatting.rs`. (Stale doc comment on `ConditionalFormattingEntry` removed in the same commit as `medium-cf-more-rule-types`.)
 
-### medium-cf-more-rule-types
+### medium-cf-more-rule-types (closed)
 - **Title**: Reconstruct colorScale / dataBar / iconSet / aboveAverage / timePeriod CF rules on export
-- **Refs**: `src-tauri/src/commands/xlsx_io.rs:3090-3093`
-- **Effort**: M
-- **Why deferred**: Need typed values we don't reconstruct yet; currently dropped silently. Authoring side only emits cellIs / containsText / top10 / duplicateValues / uniqueValues.
+- **Refs**: `src-tauri/src/commands/xlsx_io.rs:3488` (raw rules), `src-tauri/src/commands/xlsx_io.rs:3500-3530` (aboveAverage / timePeriod import), `src-tauri/src/commands/xlsx_io.rs:3811`/`:3843` (typed export)
+- **Resolution**: colorScale / dataBar / iconSet round-trip via raw-XML post-save splice (`rewrite_extra_cf_in_zip`) — tests `color_scale_round_trips` / `data_bar_round_trips` / `icon_set_round_trips` in `xlsx_conditional_formatting.rs`. aboveAverage / timePeriod previously dropped silently on import (export side was ready, import side never captured the attributes); now fixed: `ConditionalFormattingEntry` carries `below`, `equal_average`, `time_period`, `parse_sheet_conditional_formatting` extracts `cfRule@aboveAverage` / `cfRule@equalAverage` / `cfRule@timePeriod`, and the snapshot serializer emits the matching `{aboveAverage:{below, equalAverage}}` / `timePeriod` keys the export path already expected. Tests: `above_average_round_trip_with_below_and_equal_average` (4 variants) and `time_period_round_trip_preserves_period_string` (`today` + `last7Days`).
 
 ### medium-cf-comment-falsepositive (closed)
 - **Title**: Strip XML comments before CF / DV substring scan
@@ -76,17 +74,15 @@ None.
 - **Refs**: `.claude/audit-findings.md` CRITICAL-1, `src-tauri/src/commands/xlsx_io.rs:~1437`
 - **Resolution**: Per-sheet body scan was already streamed via `worksheet_contains_marker` (64 KiB chunks, 16 MiB cap). The remaining slurp — `std::fs::read` into a `Vec<u8>` before `ZipArchive::new` — is now replaced with `BufReader<File>` in the public `detect_unsupported_features` wrapper. `detect_unsupported_features_in` is generalized to `R: Read + Seek` so both the BufReader and the in-memory `Cursor` call-site from `import_xlsx_core` continue to work.
 
-### medium-split-panes
+### medium-split-panes (closed)
 - **Title**: Round-trip split panes (live-drag variant), not just frozen
-- **Refs**: `src-tauri/src/commands/xlsx_io.rs:800`
-- **Effort**: S
-- **Why deferred**: Only `state="frozen"` is parsed today; `state="split"` panes are intentionally out of scope.
+- **Refs**: `src-tauri/src/commands/xlsx_io.rs:861` (parse), `src-tauri/src/commands/xlsx_io.rs:2731` (rewrite), `src-tauri/tests/xlsx_panes_visibility.rs:219`
+- **Resolution**: `parse_sheet_freeze_pane` handles both `state="frozen"` and `state="split"`. On export, `rewrite_split_panes_in_zip` does a post-save zip rewrite to emit `state="split"` with xSplit / ySplit pixel offsets + topLeftCell verbatim (rust_xlsxwriter 0.77 only natively emits frozen). Tests: `split_panes_round_trip` and `mixed_frozen_and_split_round_trip` in `xlsx_panes_visibility.rs`.
 
-### medium-number-format-richtext-styles
+### medium-number-format-richtext-styles (closed)
 - **Title**: Promote number formats + rich text into the normalized `CellStyle` extractor
-- **Refs**: `src-tauri/src/commands/xlsx_io.rs:25`
-- **Effort**: M
-- **Why deferred**: `CellStyle` scope is font / fill / alignment / borders. Number formats and rich text round-trip via separate paths (`_fmt`, rich-text runs B1) but are not deduplicated through the same style hash.
+- **Refs**: `src-tauri/src/commands/xlsx_io.rs:37-49`
+- **Resolution**: `num_format: Option<String>` added to `CellStyle`; because the struct derives `Hash + Eq`, number formats now participate in the workbook-level `styles_dedup` hash automatically. `resolve_xf` populates the field; `build_format` uses it as a fallback behind the per-cell `_fmt` override. Rich-text runs (`_richRuns`) remain on the per-cell path **by design** — run text and run formatting are inseparable, so cross-cell dedup is not meaningful (documented in the comment at `xlsx_io.rs:32-35`). Number-format coverage: 5 tests in `src-tauri/tests/xlsx_num_formats.rs`; rich text covered separately by `src-tauri/tests/xlsx_rich_text.rs`.
 
 ### medium-security-row-col-formula-caps (closed)
 - **Title**: §5.3.2 row / column / formula limit checks in `security_scan_xlsx`

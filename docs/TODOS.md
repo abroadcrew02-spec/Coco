@@ -20,35 +20,39 @@ None.
 
 ## High — visible UX gaps
 
-### high-cf-live-render
+### high-cf-live-render (partial)
 - **Title**: Conditional formatting in-grid live rendering
-- **Refs**: `src/components/EditorScreen.tsx:342`, `src/components/ConditionalFormattingDialog.tsx:20`
-- **Effort**: L
-- **Why deferred**: Univer's CF plugin uses an IRange + dxf-style IStyleBase model that differs from the OOXML shape we round-trip through `_conditionalFormatting`. Authoring writes into the snapshot and survives save/reopen, but live highlight needs a bidirectional dxf adapter.
-- **Blocker for closing**: dxf table parsing in `src-tauri/src/commands/xlsx_io.rs` (see `medium-cf-dxf-emit`).
+- **Refs**: `src/components/conditionalFormatRender.ts:927` (`patchCfRenders`), `src/components/EditorScreen.tsx:1271` (inline TODO), `src/components/EditorScreen.tsx:7566` (patch chain)
+- **Effort**: M (was L — most of the work is done)
+- **Status**: `patchCfRenders` evaluates all 8 rule types (cellIs / containsText / top10 / duplicateValues / uniqueValues / dataBar / colorScale / iconSet / expression) at `createUnit` time and merges highlights into the inline `s` field with rule-priority precedence preserved. So CF rules render correctly on file open/reopen. The remaining gap is **session-live re-render**: after the user authors rules in-session via `applyCfRules`, `updateSnapshot` only updates Zustand state; the Mount Univer `useEffect` has `[]` deps so no remount occurs and `patchCfRenders` does not re-fire until the next file open.
+- **Remaining work**:
+  1. Drive the Univer facade imperatively after `applyCfRules` (re-paint the affected cells via the facade), mirroring how `applyHyperlink` re-styles via `getRange().setFontColor(...).setFontLine(...)` after its snapshot patch.
+  2. Add vitest coverage for `evaluateDataBar`, `evaluateColorScale`, `evaluateIconSet`, `evaluateExpression`, and their `patchCfRenders` integration paths.
+- **Blocker for closing**: ~~dxf table parsing~~ resolved (`medium-cf-dxf-emit` closed). No external blockers.
 
 ### high-hyperlink-live (closed)
 - **Title**: Hyperlink in-grid live rendering after authoring (beyond `patchHyperlinkRenders` boot-time patch)
 - **Refs**: `src/components/EditorScreen.tsx` (applyHyperlink), `src/components/hyperlinkRender.ts` (chooseHyperlinkRestyle)
 - **Resolution**: `applyHyperlink` now drives the Univer facade imperatively after the snapshot patch — `getRange(cell).setFontColor("#1155cc").setFontLine("underline")` plus `setValue(label)` when the cell is empty. The decision of value/color/underline is centralized in `chooseHyperlinkRestyle` so it stays in lock step with the boot-time `patchHyperlinkRenders` patch.
 
-### high-comment-live
+### high-comment-live (closed)
 - **Title**: Comment indicator + popover in-grid
-- **Refs**: COVERAGE.md "Comment" row (PARTIAL snapshot-only)
-- **Effort**: M
-- **Why deferred**: Author + text stored in `_comments` and round-tripped, but no in-grid red triangle indicator or hover popover. Univer 0.5.x has no first-party comment renderer in this build.
+- **Refs**: `src/store/commentIndicators.ts`, `src/components/CommentIndicatorsPanel.tsx`, `src/components/showAllCommentsRender.ts`, `src/components/CommentsAllOverlay.tsx`, `src/components/ThreadedCommentDialog.tsx`
+- **Resolution**: `computeCommentIndicators` extracts `_comments` from the snapshot and drives `CommentIndicatorsPanel` — a DOM-overlay side panel showing a CSS red-triangle glyph, cell ref, and hover tooltip (author + text) for every commented cell, with click-to-jump to the source cell. Shift+F2 opens `ThreadedCommentDialog` (reply threads, resolve / reopen, inline edit, delete). A "Show All Comments" view toggle drives `patchShowAllCommentsView` (💬 prefix on the cell display value) + `CommentsAllOverlay` card stack. True per-cell canvas triangles remain infeasible in Univer 0.5.x (no pixel-position facade API), but the side-panel approach meets the stated user-visible goal. `commentIndicators` is covered by 8 unit tests in `src/store/commentIndicators.test.ts`. (Tests for `patchShowAllCommentsView`, `CommentsAllOverlay`, `ThreadedCommentDialog` are not yet added — file a separate issue if coverage is desired.)
 
-### high-chart-live
+### high-chart-live (partial)
 - **Title**: Chart in-grid live rendering for newly authored charts
-- **Refs**: `src/components/EditorScreen.tsx:734-739`, COVERAGE.md "Chart" row
+- **Refs**: `src/components/ChartPreviewPanel.tsx`, `src/components/ChartCanvasPanel.tsx`, `src/components/chartPreviewData.ts`, `src/components/EditorScreen.tsx:5437` (inline TODO)
 - **Effort**: L
-- **Why deferred**: `@univerjs/sheets-chart` plugin not in this build. Existing chart blobs round-trip byte-for-byte, but newly authored entries via `InsertChartDialog` are data-only — re-emitting chart OOXML and rendering them live is out of scope.
+- **Status**: Two floating sidebar panels shipped — `ChartPreviewPanel` (always-visible 220×120 list of inline SVG bar / line / pie thumbnails) and `ChartCanvasPanel` (ribbon-toggled 480×300 single-chart preview with a dropdown selector), both rendering directly from the `_charts` snapshot data without `@univerjs/sheets-chart`. Click-to-jump-to-source-range is wired. Existing chart blobs continue to round-trip byte-for-byte.
+- **Remaining work**: True in-grid rendering — chart anchored to its source cell inside the Univer canvas. Blocked by (a) `@univerjs/sheets-chart` not in `package.json` (architectural decision: add the plugin or wait), and (b) Univer 0.5.x facade exposes no pixel coordinates for an A1 range. Inline `TODO(chart)` remains at `EditorScreen.tsx:5437`.
 
-### high-image-live
+### high-image-live (partial)
 - **Title**: Image in-grid live rendering for newly authored images
-- **Refs**: COVERAGE.md "Image" row (PARTIAL snapshot-only)
+- **Refs**: `src/components/ImagePreviewPanel.tsx`, `src/components/InsertImageDialog.tsx`, `src/store/imagePreviews.ts`, COVERAGE.md "Image" row
 - **Effort**: L
-- **Why deferred**: Media bytes round-trip via `_preservedParts`, but newly inserted images don't render in the active workbook — same Univer plugin gap as charts.
+- **Status**: Sidebar preview shipped. `InsertImageDialog` writes images into `_preservedParts`, `imagePreviews.ts` parses drawing rels / blip / one+twoCellAnchor and decodes media bytes to `data:` URLs, and `ImagePreviewPanel` renders thumbnails with anchor-cell labels and click-to-jump-to-anchor-cell. Existing xlsx images survive save / reopen byte-for-byte via `_preservedParts`.
+- **Remaining work**: In-grid pixel-positioned rendering anchored to the source cells. Same two blockers as `high-chart-live` — `@univerjs/sheets-drawing` is not installed, and Univer 0.5.x facade lacks a pixel-position / decoration API. Documented in `ImagePreviewPanel.tsx:18-36` and `src/store/imagePreviews.ts:1-6`.
 
 ---
 

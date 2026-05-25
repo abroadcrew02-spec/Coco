@@ -115,25 +115,25 @@ None.
 - **Effort**: M
 - **Why deferred**: `src-tauri/tests/perf.rs` exists but no harness ties numbers to a gate.
 
-### low-autosave-error-status
+### low-autosave-error-status (closed)
 - **Title**: `autoSave` swallows invoke rejection without flipping `saveStatus`
 - **Refs**: `.claude/audit-findings.md` item 15
-- **Effort**: S
+- **Resolution**: Already implemented at `src/store/useWorkbookStore.ts:624-631` — failed autosaves flip `saveStatus` to `"error"` for both the `.coco` and the temp/xlsx-route paths. Regression coverage at `src/store/useWorkbookStore.test.ts:1395-1427`.
 
-### low-autosave-interval-validation
+### low-autosave-interval-validation (closed)
 - **Title**: `setAutoSaveInterval` ignores NaN / Infinity
 - **Refs**: `.claude/audit-findings.md` item 16
-- **Effort**: S
+- **Resolution**: Already implemented at `src/store/useWorkbookStore.ts:1080-1092` — `Number.isFinite` guard + `MIN_AUTOSAVE_MS` floor + range cap. Added 2 supplementary regression tests for the sub-floor and good-then-bad-call cases.
 
-### low-pinned-paths-array-guard
+### low-pinned-paths-array-guard (closed)
 - **Title**: `loadPinnedPaths` handles non-array JSON safely
 - **Refs**: `.claude/audit-findings.md` item 17
-- **Effort**: S
+- **Resolution**: Array validation already present; added a single `console.warn` per malformed payload at `src/store/useWorkbookStore.ts:1152-1162` so the silent discard is observable. Regression tests in `useWorkbookStore.test.ts` cover `null`, plain objects, and the single-warn contract.
 
-### low-path-router-edge-cases
+### low-path-router-edge-cases (closed)
 - **Title**: Path router handles multi-dot filenames and CJK / emoji names without mangling
 - **Refs**: `.claude/audit-findings.md` items 18-19
-- **Effort**: S
+- **Resolution**: Implementation in `src/store/pathRouter.ts` already handles both correctly — `lastIndexOf(".")` for extension extraction (multi-dot safe) and `toLowerCase()` only on the ASCII suffix comparison (no-op on CJK / emoji; surrogate pairs unaffected since `.` is BMP). Regression suite expanded to 7 new cases in `pathRouter.test.ts` including emoji-then-known-ext, non-ASCII extensions, multi-dot + CJK + emoji, and a Windows-path round-trip.
 
 ### low-csv-import-edge-cases (closed)
 - **Title**: Missing CSV import edge-case tests (full-width digits, Excel 1900 leap bug, mixed line endings, RFC4180 quoting…)

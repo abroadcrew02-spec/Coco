@@ -38,6 +38,65 @@ export interface FunctionInfo {
   description: string;
   /** Concrete example invocation, e.g. "=SUM(A1:A10)". */
   example: string;
+  /**
+   * #247 — Related function names that the user might want to look at next.
+   * Rendered as clickable chips that re-target the picker. Optional.
+   */
+  related?: readonly string[];
+}
+
+/**
+ * #247 — Aliases / legacy names. Some Excel functions were renamed; if the
+ * user types the legacy name, the picker should suggest the modern one
+ * (e.g. CONCATENATE → CONCAT). Map key is the legacy name (uppercase),
+ * value is the modern replacement.
+ */
+export const FUNCTION_ALIASES: Readonly<Record<string, string>> = {
+  CONCATENATE: "CONCAT",
+  FLOOR: "FLOOR.MATH",
+  CEILING: "CEILING.MATH",
+  BETADIST: "BETA.DIST",
+  BINOMDIST: "BINOM.DIST",
+  CHIDIST: "CHISQ.DIST",
+  CHIINV: "CHISQ.INV",
+  CHITEST: "CHISQ.TEST",
+  EXPONDIST: "EXPON.DIST",
+  FDIST: "F.DIST",
+  FINV: "F.INV",
+  FTEST: "F.TEST",
+  GAMMADIST: "GAMMA.DIST",
+  GAMMAINV: "GAMMA.INV",
+  HYPGEOMDIST: "HYPGEOM.DIST",
+  LOGINV: "LOGNORM.INV",
+  LOGNORMDIST: "LOGNORM.DIST",
+  NEGBINOMDIST: "NEGBINOM.DIST",
+  NORMDIST: "NORM.DIST",
+  NORMINV: "NORM.INV",
+  NORMSDIST: "NORM.S.DIST",
+  NORMSINV: "NORM.S.INV",
+  PERCENTILE: "PERCENTILE.INC",
+  PERCENTRANK: "PERCENTRANK.INC",
+  POISSON: "POISSON.DIST",
+  QUARTILE: "QUARTILE.INC",
+  RANK: "RANK.EQ",
+  STDEV: "STDEV.S",
+  STDEVP: "STDEV.P",
+  TDIST: "T.DIST",
+  TINV: "T.INV",
+  TTEST: "T.TEST",
+  VAR: "VAR.S",
+  VARP: "VAR.P",
+  WEIBULL: "WEIBULL.DIST",
+  ZTEST: "Z.TEST",
+};
+
+/**
+ * Returns the modern replacement for a legacy function name, or null if
+ * the input is not a known alias.
+ */
+export function resolveAlias(name: string): string | null {
+  const up = name.trim().toUpperCase();
+  return FUNCTION_ALIASES[up] ?? null;
 }
 
 // Labels for the category dropdown. Exposed so the dialog can render the
@@ -68,9 +127,9 @@ export const FUNCTION_CATEGORY_ORDER: readonly FunctionCategory[] = [
 
 export const FUNCTION_CATALOG: readonly FunctionInfo[] = [
   // ---------- Math & Trig ----------
-  { name: "SUM", category: "math", signature: "SUM(number1, [number2], ...)", description: "引数の合計を返します。", example: "=SUM(A1:A10)" },
-  { name: "SUMIF", category: "math", signature: "SUMIF(range, criteria, [sum_range])", description: "条件に一致するセルの合計を返します。", example: "=SUMIF(A1:A10, \">0\")" },
-  { name: "SUMIFS", category: "math", signature: "SUMIFS(sum_range, criteria_range1, criteria1, ...)", description: "複数条件に一致するセルの合計を返します。", example: "=SUMIFS(C:C, A:A, \"東京\", B:B, \">100\")" },
+  { name: "SUM", category: "math", signature: "SUM(number1, [number2], ...)", description: "引数の合計を返します。", example: "=SUM(A1:A10)", related: ["SUMIF", "SUMIFS", "SUMPRODUCT", "AVERAGE"] },
+  { name: "SUMIF", category: "math", signature: "SUMIF(range, criteria, [sum_range])", description: "条件に一致するセルの合計を返します。", example: "=SUMIF(A1:A10, \">0\")", related: ["SUMIFS", "COUNTIF", "AVERAGEIF", "SUM"] },
+  { name: "SUMIFS", category: "math", signature: "SUMIFS(sum_range, criteria_range1, criteria1, ...)", description: "複数条件に一致するセルの合計を返します。", example: "=SUMIFS(C:C, A:A, \"東京\", B:B, \">100\")", related: ["SUMIF", "COUNTIFS", "AVERAGEIFS"] },
   { name: "PRODUCT", category: "math", signature: "PRODUCT(number1, [number2], ...)", description: "引数の積を返します。", example: "=PRODUCT(A1:A5)" },
   { name: "ROUND", category: "math", signature: "ROUND(number, num_digits)", description: "指定した桁数で四捨五入します。", example: "=ROUND(3.14159, 2)" },
   { name: "ROUNDUP", category: "math", signature: "ROUNDUP(number, num_digits)", description: "数値を切り上げます。", example: "=ROUNDUP(3.14, 1)" },
@@ -89,12 +148,12 @@ export const FUNCTION_CATALOG: readonly FunctionInfo[] = [
   { name: "LOG", category: "math", signature: "LOG(number, [base])", description: "指定底の対数を返します(既定は 10)。", example: "=LOG(100, 10)" },
 
   // ---------- Statistical ----------
-  { name: "AVERAGE", category: "stat", signature: "AVERAGE(number1, [number2], ...)", description: "算術平均を返します。", example: "=AVERAGE(A1:A10)" },
+  { name: "AVERAGE", category: "stat", signature: "AVERAGE(number1, [number2], ...)", description: "算術平均を返します。", example: "=AVERAGE(A1:A10)", related: ["AVERAGEIF", "AVERAGEIFS", "MEDIAN", "SUM"] },
   { name: "AVERAGEIF", category: "stat", signature: "AVERAGEIF(range, criteria, [average_range])", description: "条件に一致するセルの平均を返します。", example: "=AVERAGEIF(A1:A10, \">0\")" },
   { name: "AVERAGEIFS", category: "stat", signature: "AVERAGEIFS(average_range, criteria_range1, criteria1, ...)", description: "複数条件に一致するセルの平均を返します。", example: "=AVERAGEIFS(C:C, A:A, \"東京\", B:B, \">100\")" },
   { name: "COUNT", category: "stat", signature: "COUNT(value1, [value2], ...)", description: "数値が含まれるセルの個数を返します。", example: "=COUNT(A1:A10)" },
   { name: "COUNTA", category: "stat", signature: "COUNTA(value1, [value2], ...)", description: "空白でないセルの個数を返します。", example: "=COUNTA(A1:A10)" },
-  { name: "COUNTIF", category: "stat", signature: "COUNTIF(range, criteria)", description: "条件に一致するセルの個数を返します。", example: "=COUNTIF(A1:A10, \">0\")" },
+  { name: "COUNTIF", category: "stat", signature: "COUNTIF(range, criteria)", description: "条件に一致するセルの個数を返します。", example: "=COUNTIF(A1:A10, \">0\")", related: ["COUNTIFS", "SUMIF", "COUNTA", "COUNT"] },
   { name: "COUNTIFS", category: "stat", signature: "COUNTIFS(criteria_range1, criteria1, ...)", description: "複数条件に一致するセルの個数を返します。", example: "=COUNTIFS(A:A, \"東京\", B:B, \">100\")" },
   { name: "COUNTBLANK", category: "stat", signature: "COUNTBLANK(range)", description: "空白セルの個数を返します。", example: "=COUNTBLANK(A1:A10)" },
   { name: "MAX", category: "stat", signature: "MAX(number1, [number2], ...)", description: "最大値を返します。", example: "=MAX(A1:A10)" },
@@ -111,11 +170,11 @@ export const FUNCTION_CATALOG: readonly FunctionInfo[] = [
   { name: "QUARTILE", category: "stat", signature: "QUARTILE(array, quart)", description: "四分位数を返します。", example: "=QUARTILE(A1:A10, 1)" },
 
   // ---------- Lookup & Reference ----------
-  { name: "VLOOKUP", category: "lookup", signature: "VLOOKUP(lookup_value, table_array, col_index_num, [range_lookup])", description: "テーブルから縦方向に値を検索します。", example: "=VLOOKUP(\"A001\", A:C, 3, FALSE)" },
+  { name: "VLOOKUP", category: "lookup", signature: "VLOOKUP(lookup_value, table_array, col_index_num, [range_lookup])", description: "テーブルから縦方向に値を検索します。", example: "=VLOOKUP(\"A001\", A:C, 3, FALSE)", related: ["XLOOKUP", "HLOOKUP", "INDEX", "MATCH"] },
   { name: "HLOOKUP", category: "lookup", signature: "HLOOKUP(lookup_value, table_array, row_index_num, [range_lookup])", description: "テーブルから横方向に値を検索します。", example: "=HLOOKUP(\"4月\", 1:5, 3, FALSE)" },
   { name: "INDEX", category: "lookup", signature: "INDEX(array, row_num, [column_num])", description: "配列から行/列番号で値を取得します。", example: "=INDEX(A1:C10, 5, 2)" },
   { name: "MATCH", category: "lookup", signature: "MATCH(lookup_value, lookup_array, [match_type])", description: "値の位置(行/列番号)を返します。", example: "=MATCH(\"東京\", A1:A10, 0)" },
-  { name: "XLOOKUP", category: "lookup", signature: "XLOOKUP(lookup_value, lookup_array, return_array, [if_not_found], [match_mode], [search_mode])", description: "新しい検索関数。完全/近似/逆順に対応。", example: "=XLOOKUP(\"A001\", A:A, C:C)" },
+  { name: "XLOOKUP", category: "lookup", signature: "XLOOKUP(lookup_value, lookup_array, return_array, [if_not_found], [match_mode], [search_mode])", description: "新しい検索関数。完全/近似/逆順に対応。", example: "=XLOOKUP(\"A001\", A:A, C:C)", related: ["VLOOKUP", "XMATCH", "FILTER", "INDEX"] },
   { name: "INDIRECT", category: "lookup", signature: "INDIRECT(ref_text, [a1])", description: "文字列で表されたセル参照を返します。", example: "=INDIRECT(\"A\" & B1)" },
   { name: "OFFSET", category: "lookup", signature: "OFFSET(reference, rows, cols, [height], [width])", description: "基準セルからオフセットした範囲を返します。", example: "=OFFSET(A1, 2, 3)" },
   { name: "CHOOSE", category: "lookup", signature: "CHOOSE(index_num, value1, [value2], ...)", description: "インデックスに応じて値を選択します。", example: "=CHOOSE(2, \"A\", \"B\", \"C\")" },
@@ -125,7 +184,7 @@ export const FUNCTION_CATALOG: readonly FunctionInfo[] = [
   { name: "COLUMNS", category: "lookup", signature: "COLUMNS(array)", description: "配列/範囲の列数を返します。", example: "=COLUMNS(A1:E1)" },
 
   // ---------- Logical ----------
-  { name: "IF", category: "logical", signature: "IF(logical_test, [value_if_true], [value_if_false])", description: "条件に応じて値を返します。", example: "=IF(A1>0, \"正\", \"負\")" },
+  { name: "IF", category: "logical", signature: "IF(logical_test, [value_if_true], [value_if_false])", description: "条件に応じて値を返します。", example: "=IF(A1>0, \"正\", \"負\")", related: ["IFS", "AND", "OR", "IFERROR"] },
   { name: "IFS", category: "logical", signature: "IFS(test1, value1, [test2, value2], ...)", description: "複数条件を順番に評価します。", example: "=IFS(A1>=90,\"A\",A1>=70,\"B\",TRUE,\"C\")" },
   { name: "AND", category: "logical", signature: "AND(logical1, [logical2], ...)", description: "すべての引数が TRUE のとき TRUE を返します。", example: "=AND(A1>0, A1<100)" },
   { name: "OR", category: "logical", signature: "OR(logical1, [logical2], ...)", description: "いずれかが TRUE のとき TRUE を返します。", example: "=OR(A1=\"Y\", A1=\"N\")" },
@@ -138,7 +197,7 @@ export const FUNCTION_CATALOG: readonly FunctionInfo[] = [
   { name: "FALSE", category: "logical", signature: "FALSE()", description: "論理値 FALSE を返します。", example: "=FALSE()" },
 
   // ---------- Text ----------
-  { name: "CONCAT", category: "text", signature: "CONCAT(text1, [text2], ...)", description: "文字列を連結します(範囲対応)。", example: "=CONCAT(A1:A5)" },
+  { name: "CONCAT", category: "text", signature: "CONCAT(text1, [text2], ...)", description: "文字列を連結します(範囲対応)。", example: "=CONCAT(A1:A5)", related: ["TEXTJOIN", "CONCATENATE"] },
   { name: "CONCATENATE", category: "text", signature: "CONCATENATE(text1, [text2], ...)", description: "文字列を連結します(レガシー)。", example: "=CONCATENATE(A1, \"-\", B1)" },
   { name: "TEXT", category: "text", signature: "TEXT(value, format_text)", description: "数値を書式付きの文字列に変換します。", example: "=TEXT(A1, \"yyyy/mm/dd\")" },
   { name: "LEN", category: "text", signature: "LEN(text)", description: "文字列の文字数を返します。", example: "=LEN(A1)" },

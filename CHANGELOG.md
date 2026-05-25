@@ -4,6 +4,43 @@ All notable changes to Coco are documented in this file. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-25
+
+Minor release. Univer 0.5.5 → 0.12.4 in three staged phases delivers native grid dark mode (closes #193), native ja-JP locale (drops a ~700-line workaround), and resolves the long-standing `@univerjs/facade` deprecation.
+
+### Added
+
+- **Native grid dark mode** (closes [#193](https://github.com/abroadcrew02-spec/Coco/issues/193)). Univer 0.8 ships native `core.darkMode` config + `ThemeService` switcher; Coco wires it to the existing app theme toggle via a new `setUniverDarkMode(univer, theme)` helper. In dark mode, the entire grid — cells, gridlines, row+column headers, the select-all corner — renders dark. Live-flips on Settings change or OS color-scheme change. Replaces the v0.4.3 attempt that tried to hand-roll this through the unworkable 0.5.x `customizeColumnHeader` facade and had to be reverted (v0.4.4).
+- **Univer's built-in toolbar / header / header-menu hidden.** Coco's custom ribbon already covers these surfaces; the duplicated Univer toolbar with the "数式" pulldown and the empty 32 px strip directly above the column-header row are gone. The formula bar (separate element) sits flush with the column headers now.
+
+### Changed
+
+- **Univer upgraded from 0.5.5 to 0.12.4** in three phases:
+  - Phase 1 (PR #216): 0.5.5 → 0.6.10. `@univerjs/facade` package was deleted in 0.6.0; `FUniver` now imported from `@univerjs/core/facade`. Per-plugin facade extensions wired via side-effect imports (`@univerjs/sheets/facade`, `@univerjs/sheets-ui/facade`, etc.).
+  - Phase 2 (PR #217): 0.6.10 → 0.8.3. Tailwind refactor (0.7.0) — 3 CSS selectors moved from `.univer-*` class names to `[data-u-comp="..."]` attribute selectors. Native dark mode (0.7.0–0.8.0) wired.
+  - Phase 3 (PR #218): 0.8.3 → 0.12.4. Native `LocaleType.JA_JP` (0.12.0) replaces the cocoUniverLocale ja-JP override workaround. `mergeLocales` from `@univerjs/core` (0.10) used for the locale-bundle merge. Net **−1242 lines** of locale-workaround code deleted.
+- `@univerjs/facade` deprecation warning gone from console.
+
+### Documentation
+
+- New `docs/UNIVER_0_6_MIGRATION.md` (PR #215) — full feasibility report covering the per-version breaking-change map, the OSS/Pro plugin situation, effort estimates, and recommendations. The doc drives the staged upgrade plan that this release executes Phases 1-3 of.
+
+### Tests
+
+- Frontend test count net **−3** (the deleted `cocoUniverLocale.test.ts` tested the now-removed hand-rolled override). +4 new tests for the `univerDarkMode` helper. 1589 / 1589 pass.
+
+### Verification
+
+Every phase verified in-app via `tauri dev` + CDP smoke test (StrictMode enabled, OS dark):
+- Grid renders fully dark, formula bar directly above column headers, no `[redi] Injector disposed` exceptions.
+- The StrictMode×Univer disposal race we worked around in v0.4.2 (`univerStashRef` deferred-dispose) is now calm on 0.12.4 even with the guard rail in place. Removing the guard is a separate verification pass deferred to a later phase.
+
+### Up next
+
+- Phase 4 (→ 0.24): event-API refactor + adopt `@univerjs/sheets-drawing` for `high-image-live`.
+- `high-chart-live` remains blocked — `@univerjs/sheets-chart` is `@univerjs-pro` (commercial license required). The sidebar `ChartPreviewPanel` is the local-first answer for now.
+- `#194` (form control OOXML native round-trip) remains open — VML emission is xlsx-corruption risky without a real Excel validator in the loop.
+
 ## [0.4.4] - 2026-05-25
 
 Hot-fix on top of v0.4.3.

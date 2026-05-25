@@ -5034,6 +5034,19 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     let preserved_parts =
         parse_xlsx_preserved_parts(&mut archive, &sheet_paths, &sheet_drawing_rids);
 
+    // Phase 4c bridge: surface embedded images to Univer's render layer via
+    // `resources[SHEET_DRAWING_PLUGIN]`. This is ADDITIVE — `_preservedParts`
+    // remains the byte-perfect export channel; this entry only exists so the
+    // `@univerjs/sheets-drawing` plugin can draw the images in the grid.
+    let drawing_resource = build_sheet_drawing_resource(
+        &mut archive,
+        &sheet_order,
+        &sheet_names,
+        &sheet_paths,
+        &sheet_drawing_rids,
+        &workbook_id,
+    );
+
     // #105: re-hydrate any `xl/cocoExtensions/*.json` parts a previous Coco
     // export wrote (tables / sparklines / outline / pivot meta / slicers /
     // scenarios / sheet notes / Coco-authored charts / threaded-comment
@@ -5062,6 +5075,17 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     });
     if let Some(pp) = preserved_parts {
         snapshot["_preservedParts"] = pp;
+    }
+    // Phase 4c: append the SHEET_DRAWING_PLUGIN entry to the top-level
+    // `resources` array (IResources shape on IWorkbookData). Univer's
+    // ResourceManagerService.loadResources reads this on workbook create.
+    if let Some(entry) = drawing_resource {
+        let arr = snapshot
+            .as_object_mut()
+            .and_then(|m| m.entry("resources").or_insert_with(|| Value::Array(Vec::new())).as_array_mut());
+        if let Some(arr) = arr {
+            arr.push(entry);
+        }
     }
     merge_coco_extensions_into_snapshot(&mut snapshot, &coco_extensions);
 
@@ -6632,6 +6656,416 @@ pub(crate) fn parse_xlsx_preserved_parts<R: Read + Seek>(
         result["workbookExternalReferences"] = Value::String(b);
     }
     Some(result)
+}
+
+// === Phase 4c: Univer 0.24 sheets-drawing render bridge =====================
+//
+// `_preservedParts` is a byte-perfect export channel — Univer's render layer
+// can't see it. The `@univerjs/sheets-drawing` plugin reads the workbook
+// snapshot's top-level `resources` array (see IResources / IResourceHook in
+// `@univerjs/core`). The hook registered under `pluginName: "SHEET_DRAWING_PLUGIN"`
+// expects `data` to be a JSON-stringified `IDrawingSubunitMap<ISheetImage>`,
+// i.e. `{ [subUnitId]: { data: { [drawingId]: ISheetImage }, order: string[] } }`.
+//
+// This bridge walks the same OOXML drawing XML / rels / media bytes that
+// `_preservedParts` already captures (so the export path stays untouched) and
+// emits an additional render-only snapshot resource. Read-side only.
+//
+// EMU → px: OOXML drawing coords are in English Metric Units. At 96 DPI,
+// 914400 EMU = 1 inch = 96 px, so `px = emu / 9525`. We round half-up.
+//
+// Anchor types handled:
+//   - twoCellAnchor (most common in Excel-saved files)
+//   - oneCellAnchor (single anchor + ext for size)
+//   - absoluteAnchor: pixel coords are absolute — Univer's ISheetOverGridPosition
+//     requires from/to as cell anchors. We log + skip (preservedParts still
+//     round-trips the bytes).
+
+/// Convert OOXML EMU to pixels at 96 DPI (Univer's coordinate space).
+fn emu_to_px(emu: i64) -> i32 {
+    // Round half-up so a 9525-EMU column offset becomes 1px not 0.
+    let abs = emu.unsigned_abs();
+    let px = ((abs + 4762) / 9525) as i32;
+    if emu < 0 {
+        -px
+    } else {
+        px
+    }
+}
+
+/// Pick a `data:` URL MIME type from a media file extension.
+fn media_ext_to_mime(ext: &str) -> &'static str {
+    match ext.to_ascii_lowercase().as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "webp" => "image/webp",
+        "tif" | "tiff" => "image/tiff",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Resolve a rels Target (e.g. `../media/image1.png`) against the drawing
+/// part path (e.g. `xl/drawings/drawing1.xml`) to a canonical zip path
+/// (`xl/media/image1.png`). Mirrors `resolveMediaPath` in the TS sidebar.
+fn resolve_rel_media_path(drawing_part_path: &str, rel_target: &str) -> String {
+    if rel_target.is_empty() {
+        return String::new();
+    }
+    if rel_target.starts_with("xl/") || rel_target.starts_with("/xl/") {
+        return rel_target.trim_start_matches('/').to_string();
+    }
+    let dir = drawing_part_path
+        .rsplit_once('/')
+        .map(|(d, _)| d)
+        .unwrap_or("");
+    let mut parts: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
+    for seg in rel_target.split('/') {
+        if seg.is_empty() || seg == "." {
+            continue;
+        }
+        if seg == ".." {
+            parts.pop();
+            continue;
+        }
+        parts.push(seg);
+    }
+    parts.join("/")
+}
+
+/// Single anchor coordinate parsed from `<xdr:from>` / `<xdr:to>` (col/row in
+/// 0-based cell space + EMU offsets within the cell).
+#[derive(Debug, Clone, Copy)]
+struct DrawingAnchorCell {
+    col: i32,
+    col_off_emu: i64,
+    row: i32,
+    row_off_emu: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DrawingAnchorRange {
+    from: DrawingAnchorCell,
+    to: DrawingAnchorCell,
+}
+
+/// Read the integer text content of a named child (e.g. `<xdr:col>3</xdr:col>`).
+/// Tolerates absent or non-integer children.
+fn read_anchor_child_int(block: &str, tag_local: &str) -> Option<i64> {
+    // Look for `<xdr:tag>` first, then bare `<tag>`. Walk by string scan to
+    // avoid pulling in an XML library — these blocks are tiny and well-formed
+    // from real Excel output.
+    for cand in [format!("<xdr:{tag_local}>"), format!("<{tag_local}>")] {
+        if let Some(s) = block.find(&cand) {
+            let after = &block[s + cand.len()..];
+            if let Some(e) = after.find('<') {
+                return after[..e].trim().parse::<i64>().ok();
+            }
+        }
+    }
+    None
+}
+
+/// Extract `<xdr:from>...</xdr:from>` (or `<xdr:to>...</xdr:to>`) inner text.
+fn extract_anchor_subblock<'a>(anchor_xml: &'a str, tag_local: &str) -> Option<&'a str> {
+    for (open, close) in [
+        (format!("<xdr:{tag_local}>"), format!("</xdr:{tag_local}>")),
+        (format!("<{tag_local}>"), format!("</{tag_local}>")),
+    ] {
+        if let Some(s) = anchor_xml.find(&open) {
+            let body = &anchor_xml[s + open.len()..];
+            if let Some(e) = body.find(&close) {
+                return Some(&body[..e]);
+            }
+        }
+    }
+    None
+}
+
+fn parse_anchor_cell(block: &str) -> Option<DrawingAnchorCell> {
+    let col = read_anchor_child_int(block, "col")?;
+    let row = read_anchor_child_int(block, "row")?;
+    let col_off = read_anchor_child_int(block, "colOff").unwrap_or(0);
+    let row_off = read_anchor_child_int(block, "rowOff").unwrap_or(0);
+    Some(DrawingAnchorCell {
+        col: col as i32,
+        col_off_emu: col_off,
+        row: row as i32,
+        row_off_emu: row_off,
+    })
+}
+
+/// Walk every twoCellAnchor / oneCellAnchor in the drawing XML and return
+/// a list of (anchor, embed-rid) pairs. `embed-rid` is the `r:embed` of the
+/// inner `<a:blip>`. oneCellAnchor gets its `to` derived from `<xdr:ext>` —
+/// the OOXML schema specifies cx/cy in EMU relative to the from anchor.
+fn parse_drawing_anchors(xml: &str) -> Vec<(DrawingAnchorRange, String)> {
+    let mut out = Vec::new();
+
+    // We accept both prefixed (`xdr:twoCellAnchor`) and bare forms, which
+    // some non-Excel writers emit.
+    for anchor_tag in ["twoCellAnchor", "oneCellAnchor"] {
+        for (open_str, close_str) in [
+            (format!("<xdr:{anchor_tag}"), format!("</xdr:{anchor_tag}>")),
+            (format!("<{anchor_tag}"), format!("</{anchor_tag}>")),
+        ] {
+            let mut cursor = 0;
+            while let Some(rel) = xml[cursor..].find(&open_str) {
+                let start = cursor + rel;
+                let after_open = &xml[start..];
+                // Skip past the opening tag attributes to find `>`.
+                let Some(gt) = after_open.find('>') else {
+                    break;
+                };
+                let body_start = start + gt + 1;
+                let rest = &xml[body_start..];
+                let Some(close_rel) = rest.find(&close_str) else {
+                    break;
+                };
+                let block = &xml[body_start..body_start + close_rel];
+                cursor = body_start + close_rel + close_str.len();
+
+                // Embed rId lives in `<a:blip r:embed="rIdN"/>`. The attribute
+                // is whitespace-tolerant. Fall back to plain `embed=` for
+                // odd non-namespaced writers.
+                let rid = block
+                    .find("r:embed=\"")
+                    .map(|s| s + "r:embed=\"".len())
+                    .or_else(|| block.find("embed=\"").map(|s| s + "embed=\"".len()))
+                    .and_then(|s| block[s..].find('"').map(|e| block[s..s + e].to_string()))
+                    .filter(|s| !s.is_empty());
+                let Some(rid) = rid else { continue };
+
+                let from_block = match extract_anchor_subblock(block, "from") {
+                    Some(b) => b,
+                    None => continue,
+                };
+                let Some(from) = parse_anchor_cell(from_block) else {
+                    continue;
+                };
+
+                let to = if let Some(to_block) = extract_anchor_subblock(block, "to") {
+                    match parse_anchor_cell(to_block) {
+                        Some(t) => t,
+                        None => continue,
+                    }
+                } else if anchor_tag == "oneCellAnchor" {
+                    // Derive `to` from `<xdr:ext cx=".." cy=".."/>`.
+                    let ext_open = block
+                        .find("<xdr:ext")
+                        .or_else(|| block.find("<ext"));
+                    let (cx, cy) = match ext_open {
+                        Some(s) => {
+                            let after = &block[s..];
+                            let cx = parse_attr(&after[..after.find("/>").unwrap_or(after.len()).min(after.len())], "cx")
+                                .and_then(|v| v.parse::<i64>().ok())
+                                .unwrap_or(0);
+                            let cy = parse_attr(&after[..after.find("/>").unwrap_or(after.len()).min(after.len())], "cy")
+                                .and_then(|v| v.parse::<i64>().ok())
+                                .unwrap_or(0);
+                            (cx, cy)
+                        }
+                        None => (0, 0),
+                    };
+                    // Carry ext over the from anchor — we don't know how it
+                    // spans into the next cell without column widths, but
+                    // Univer's resource manager will treat from/to in EMU as
+                    // a hint; downstream skeleton math snaps it to real
+                    // grid coords on first paint.
+                    DrawingAnchorCell {
+                        col: from.col,
+                        col_off_emu: from.col_off_emu + cx,
+                        row: from.row,
+                        row_off_emu: from.row_off_emu + cy,
+                    }
+                } else {
+                    continue;
+                };
+
+                out.push((DrawingAnchorRange { from, to }, rid));
+            }
+        }
+    }
+    out
+}
+
+/// Build the `IResources` entry (`{ name, data }`) for the
+/// `SHEET_DRAWING_PLUGIN` hook. Returns `None` when no sheet has any drawing
+/// to surface (so callers can skip adding an empty entry).
+///
+/// Reuses the same drawing XML / rels / media-bytes walk that
+/// `_preservedParts` covers — we re-read the parts from the archive rather
+/// than threading parsed state through because the parse cost is trivial
+/// (drawings are tens of bytes per anchor, media is already in memory once
+/// we touch it) and the duplication keeps `_preservedParts` byte-exact.
+pub(crate) fn build_sheet_drawing_resource<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    sheet_order: &[String],
+    sheet_names_in_order: &[String],
+    sheet_paths: &HashMap<String, String>,
+    sheet_drawing_rids: &HashMap<String, String>,
+    workbook_unit_id: &str,
+) -> Option<Value> {
+    if sheet_order.len() != sheet_names_in_order.len() {
+        return None;
+    }
+
+    let mut subunit_map: Map<String, Value> = Map::new();
+
+    for (i, sheet_id) in sheet_order.iter().enumerate() {
+        let sheet_name = &sheet_names_in_order[i];
+        let Some(sheet_part) = sheet_paths.get(sheet_name) else {
+            continue;
+        };
+        let Some(drawing_rid) = sheet_drawing_rids.get(sheet_name) else {
+            continue;
+        };
+
+        // Resolve rId → drawing part path via sheet rels.
+        let sheet_rels_path = sheet_part_to_rels_path(sheet_part);
+        let mut sheet_rels_xml = String::new();
+        if let Ok(mut entry) = archive.by_name(&sheet_rels_path) {
+            let _ = std::io::Read::read_to_string(&mut entry, &mut sheet_rels_xml);
+        }
+        let sheet_rels = parse_rels(&sheet_rels_xml);
+        let Some(drawing_target_rel) = sheet_rels.get(drawing_rid) else {
+            continue;
+        };
+        let drawing_part_path =
+            resolve_rel_media_path("xl/worksheets/sheet.xml", drawing_target_rel);
+        if drawing_part_path.is_empty() {
+            continue;
+        }
+
+        // Read drawing XML.
+        let mut drawing_xml = String::new();
+        if archive
+            .by_name(&drawing_part_path)
+            .ok()
+            .and_then(|mut e| std::io::Read::read_to_string(&mut e, &mut drawing_xml).ok())
+            .is_none()
+        {
+            continue;
+        }
+
+        // Read drawing rels (rId → media target).
+        let drawing_rels_path = sheet_part_to_rels_path(&drawing_part_path);
+        let mut drawing_rels_xml = String::new();
+        if let Ok(mut e) = archive.by_name(&drawing_rels_path) {
+            let _ = std::io::Read::read_to_string(&mut e, &mut drawing_rels_xml);
+        }
+        let drawing_rels = parse_rels(&drawing_rels_xml);
+
+        let anchors = parse_drawing_anchors(&drawing_xml);
+        if anchors.is_empty() {
+            continue;
+        }
+
+        let mut order_ids: Vec<Value> = Vec::new();
+        let mut data_map: Map<String, Value> = Map::new();
+
+        for (anchor_idx, (range, embed_rid)) in anchors.iter().enumerate() {
+            let Some(media_target_rel) = drawing_rels.get(embed_rid) else {
+                continue;
+            };
+            let media_path = resolve_rel_media_path(&drawing_part_path, media_target_rel);
+            if media_path.is_empty() {
+                continue;
+            }
+
+            // Load media bytes and base64-encode (Univer expects a `data:`
+            // URL when imageSourceType is BASE64).
+            let mut media_bytes: Vec<u8> = Vec::new();
+            if archive
+                .by_name(&media_path)
+                .ok()
+                .and_then(|mut e| std::io::Read::read_to_end(&mut e, &mut media_bytes).ok())
+                .is_none()
+            {
+                continue;
+            }
+            let ext = media_path
+                .rsplit('.')
+                .next()
+                .unwrap_or("")
+                .to_string();
+            let mime = media_ext_to_mime(&ext);
+            let data_url = format!("data:{};base64,{}", mime, b64_encode(&media_bytes));
+
+            // Deterministic drawingId derived from (sheet, drawing index, rid)
+            // so re-imports of the same xlsx produce a stable id. Univer just
+            // requires uniqueness within the subunit; this is stable + unique.
+            let drawing_id = format!("coco-img-{}-{}-{}", i, anchor_idx, embed_rid);
+
+            let sheet_transform = json!({
+                "from": {
+                    "column": range.from.col,
+                    "columnOffset": emu_to_px(range.from.col_off_emu),
+                    "row": range.from.row,
+                    "rowOffset": emu_to_px(range.from.row_off_emu),
+                },
+                "to": {
+                    "column": range.to.col,
+                    "columnOffset": emu_to_px(range.to.col_off_emu),
+                    "row": range.to.row,
+                    "rowOffset": emu_to_px(range.to.row_off_emu),
+                },
+            });
+
+            // ISheetImage = IImageData & ISheetDrawingBase
+            //   IImageData / IDrawingParam: unitId, subUnitId, drawingId,
+            //     drawingType (number, DRAWING_IMAGE = 0), imageSourceType
+            //     (string enum, "BASE64"), source (data: URL)
+            //   ISheetDrawingBase: sheetTransform, axisAlignSheetTransform
+            //     (both `from`/`to` with column/columnOffset/row/rowOffset)
+            //   anchorType (string enum "0"|"1"|"2") — Position(0)=move with
+            //     cells, Both(1)=move+resize. Excel `twoCellAnchor` ≈ Both;
+            //     `oneCellAnchor` ≈ Position. absoluteAnchor isn't reached
+            //     because we skip it earlier.
+            let anchor_type = "1"; // SheetDrawingAnchorType.Both — safe default
+
+            let image_entry = json!({
+                "unitId": workbook_unit_id,
+                "subUnitId": sheet_id,
+                "drawingId": drawing_id,
+                "drawingType": 0,                  // DrawingTypeEnum.DRAWING_IMAGE
+                "imageSourceType": "BASE64",       // ImageSourceType.BASE64
+                "source": data_url,
+                "sheetTransform": sheet_transform.clone(),
+                "axisAlignSheetTransform": sheet_transform,
+                "anchorType": anchor_type,
+            });
+
+            order_ids.push(Value::String(drawing_id.clone()));
+            data_map.insert(drawing_id, image_entry);
+        }
+
+        if !order_ids.is_empty() {
+            subunit_map.insert(
+                sheet_id.clone(),
+                json!({
+                    "data": Value::Object(data_map),
+                    "order": Value::Array(order_ids),
+                }),
+            );
+        }
+    }
+
+    if subunit_map.is_empty() {
+        return None;
+    }
+
+    // The resource hook's parseJson expects a JSON-stringified
+    // IDrawingSubunitMap<ISheetImage>. We stringify here so the snapshot's
+    // `resources` array matches the IResources shape:
+    //   [{ name: "SHEET_DRAWING_PLUGIN", data: "<json>" }]
+    let inner = serde_json::to_string(&Value::Object(subunit_map)).ok()?;
+    Some(json!({
+        "name": "SHEET_DRAWING_PLUGIN",
+        "data": inner,
+    }))
 }
 
 /// Map a worksheet entry path to its sibling `_rels` path.

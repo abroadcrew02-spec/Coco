@@ -1447,6 +1447,30 @@ describe("audit item 16: setAutoSaveInterval rejects non-finite values", () => {
     expect(useWorkbookStore.getState().autoSaveIntervalMs).toBe(before);
     expect(invokeMock).not.toHaveBeenCalled();
   });
+
+  it("ignores a positive value below MIN_AUTOSAVE_MS (5s floor)", async () => {
+    // 1ms would peg the main thread + disk I/O on every tick (#89). Any
+    // positive interval below the 5000ms floor is rejected silently so the
+    // previously valid value survives.
+    const before = useWorkbookStore.getState().autoSaveIntervalMs;
+    await useWorkbookStore.getState().setAutoSaveInterval(1);
+    expect(useWorkbookStore.getState().autoSaveIntervalMs).toBe(before);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves the previous valid value when a bad call follows a good one", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    // Establish a known-good value first.
+    await useWorkbookStore.getState().setAutoSaveInterval(30_000);
+    expect(useWorkbookStore.getState().autoSaveIntervalMs).toBe(30_000);
+    invokeMock.mockClear();
+    // Bad calls must NOT clobber the good value, and must NOT touch persistence.
+    await useWorkbookStore.getState().setAutoSaveInterval(Number.NaN);
+    await useWorkbookStore.getState().setAutoSaveInterval(Number.POSITIVE_INFINITY);
+    await useWorkbookStore.getState().setAutoSaveInterval(-100);
+    expect(useWorkbookStore.getState().autoSaveIntervalMs).toBe(30_000);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("setSaveStatus", () => {
@@ -1550,6 +1574,34 @@ describe("audit item 17: loadPinnedPaths handles non-array JSON", () => {
     invokeMock.mockResolvedValue("42");
     await useWorkbookStore.getState().loadPinnedPaths();
     expect(useWorkbookStore.getState().pinnedPaths).toEqual([]);
+  });
+
+  it("ignores JSON null ('null') without throwing and leaves pinnedPaths as []", async () => {
+    // Passing the literal string "null" (parses to JS null) — the previous
+    // implementation could treat it as truthy / pass it to .every() and
+    // crash. Contract: fall back to [] and emit a single warn.
+    invokeMock.mockResolvedValue("null");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(useWorkbookStore.getState().loadPinnedPaths()).resolves.not.toThrow();
+      expect(useWorkbookStore.getState().pinnedPaths).toEqual([]);
+      // Exactly one warning per malformed payload — no spam.
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("emits a single console.warn per malformed payload (non-array JSON)", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify({ not: "an array" }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await useWorkbookStore.getState().loadPinnedPaths();
+      expect(useWorkbookStore.getState().pinnedPaths).toEqual([]);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 

@@ -1154,7 +1154,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       } else {
         // Non-array / non-string-array JSON (null, object, mixed types) →
         // reject and reset to a clean empty list so subsequent writes don't
-        // round-trip corrupted state.
+        // round-trip corrupted state. One warn so the user / log shows the
+        // payload was discarded; do NOT throw.
+        // eslint-disable-next-line no-console
+        console.warn("pinned paths: discarded non-array JSON payload:", parsed);
         set({ pinnedPaths: [] });
       }
     } catch {

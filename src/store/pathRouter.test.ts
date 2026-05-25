@@ -173,5 +173,60 @@ describe("routeOpenPath", () => {
       const r = routeOpenPath("/tmp/写真.png");
       expect(r).toEqual({ kind: "unsupported", path: "/tmp/写真.png", extension: ".png" });
     });
+
+    it("routes a filename ending in emoji-then-known-ext (surrogate boundary)", () => {
+      // The dot lives immediately after a 4-byte (UTF-16 surrogate-pair) emoji.
+      // lastIndexOf(".") must find the ASCII dot at the correct code-unit
+      // offset without splitting the surrogate pair.
+      const r = routeOpenPath("/tmp/📊.xlsx");
+      expect(r).toEqual({ kind: "xlsx", path: "/tmp/📊.xlsx" });
+    });
+
+    it("returns a non-ASCII extension intact when it's the unsupported suffix", () => {
+      // The 'extension' on an unsupported path slices the lowercased basename;
+      // CJK has no case, so the returned suffix preserves the original CJK.
+      const r = routeOpenPath("/tmp/wb.写真");
+      expect(r).toEqual({ kind: "unsupported", path: "/tmp/wb.写真", extension: ".写真" });
+    });
+
+    it("returns an emoji extension intact when it's the unsupported suffix", () => {
+      // Same as above but for an extension that's a surrogate-pair emoji —
+      // confirms slice() doesn't split the pair.
+      const r = routeOpenPath("/tmp/wb.📊");
+      expect(r).toEqual({ kind: "unsupported", path: "/tmp/wb.📊", extension: ".📊" });
+    });
+  });
+
+  // --- Audit findings (T2) — items 18 + 19 combined ------------------------
+
+  describe("audit items 18+19 combined: multi-dot CJK / emoji", () => {
+    it("routes 予算..2026.xlsx (CJK basename with consecutive inner dots)", () => {
+      const r = routeOpenPath("/tmp/予算..2026.xlsx");
+      expect(r).toEqual({ kind: "xlsx", path: "/tmp/予算..2026.xlsx" });
+    });
+
+    it("routes 📊報告.v2.final.xlsx (emoji + CJK + multi-dot)", () => {
+      const r = routeOpenPath("/tmp/📊報告.v2.final.xlsx");
+      expect(r).toEqual({ kind: "xlsx", path: "/tmp/📊報告.v2.final.xlsx" });
+    });
+
+    it("preserves CJK + emoji basename exactly across the route payload", () => {
+      // Regression: ensure no normalization / stripping mutates the path
+      // string we hand off to the import command.
+      const input = "C:\\Users\\テスト\\📊予算..2026.05.xlsx";
+      const r = routeOpenPath(input);
+      expect(r).toEqual({ kind: "xlsx", path: input });
+    });
+
+    it("does not falsely collide two distinct CJK paths via lower-casing", () => {
+      // Defense-in-depth: the router doesn't expose a comparison key, but if
+      // any caller compares the returned 'path' field, distinct CJK names
+      // must remain distinct (toLowerCase is a no-op for these scripts).
+      const a = routeOpenPath("/tmp/予算.xlsx");
+      const b = routeOpenPath("/tmp/工作簿.xlsx");
+      expect(a.kind).toBe("xlsx");
+      expect(b.kind).toBe("xlsx");
+      expect(a.path).not.toBe(b.path);
+    });
   });
 });

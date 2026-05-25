@@ -8261,11 +8261,14 @@ export default function EditorScreen() {
     });
 
     return () => disposable.dispose();
-    // #88: re-register the listener whenever the underlying workbook
-    // identity changes (open/import/restore replace currentHandle). Without
-    // this dep, the listener stays bound to the first workbook for the
-    // lifetime of the component and later workbooks' clicks never fire.
-  }, [currentHandle]);
+    // The post-0.24 `addEvent` registers on the FUniver (not a specific
+    // workbook), and `params.workbook` inside the handler resolves to the
+    // event-bound live workbook, so the listener is workbook-swap-safe
+    // without re-binding on currentHandle. The pre-0.24 `onCellClick`
+    // mixin closed over `getActiveWorkbook()` at register-time, which IS
+    // why this dep array used to read `[currentHandle]`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Smart chips (#158 MVP + #185 user-extensible rules). Lazy hover-driven
   // detection: we wire the sheets-ui `onCellHover` facade event, look up
@@ -8291,11 +8294,15 @@ export default function EditorScreen() {
     const fUniver = fUniverRef.current;
 
     // Univer #4616 / #13 (0.24): use `addEvent(Event.CellHover)` instead of
-    // the deprecated `FWorkbook.onCellHover` mixin. The typed
-    // ICellEventParams only exposes `{ workbook, worksheet, row, column }`,
-    // but at runtime params spread the IHoverRichTextPosition source so
-    // `event` (mouse position) is still present — we narrow via a local
-    // shape cast so the dependency stays explicit.
+    // the deprecated `FWorkbook.onCellHover` mixin. Univer 0.24's
+    // `currentRichText$` source strips `event` before dispatch (only
+    // `currentCellPosWithEvent$` for `CellPointerMove` carries it), so the
+    // runtime payload here exposes `{ workbook, worksheet, row, column,
+    // rect, ... }` — no cursor position. We anchor to the cell's bounding
+    // rect (`rect.endX` / `rect.endY` in viewport pixels) so the popover
+    // sits at the cell's bottom-right, which is also a more stable UX than
+    // a cursor-tracking popover that jumps with every pixel of mouse
+    // movement.
     const disposable = fUniver.addEvent(fUniver.Event.CellHover, (params) => {
       const subUnitId = params.worksheet?.getSheetId();
       const row = typeof params.row === "number" ? params.row : null;
@@ -8322,15 +8329,17 @@ export default function EditorScreen() {
           col,
         );
         if (chips.length === 0) return null;
-        // Anchor coordinates: use the pointer position if Univer surfaced
-        // an event, with a small downward offset so the popover doesn't
-        // sit under the cursor. Fall back to top-left of the viewport. The
-        // typed ICellEventParams doesn't expose `event` but the runtime
-        // payload spreads IHoverRichTextPosition which does — narrow via
-        // a local shape cast rather than casting the whole params.
-        const ev = (params as unknown as { event?: { clientX?: number; clientY?: number } }).event;
-        const x = typeof ev?.clientX === "number" ? ev.clientX + 12 : 24;
-        const y = typeof ev?.clientY === "number" ? ev.clientY + 16 : 24;
+        // Anchor to the cell's bounding rect carried in params (typed as
+        // `IHoverRichTextPosition.rect: { startX, startY, endX, endY }` in
+        // viewport pixels). Sit the popover at the cell's bottom-right
+        // corner with a small gap so it doesn't overlap the cell content
+        // and stays stable as the cursor moves within the cell. Falls
+        // back to (24, 24) only if Univer doesn't surface a rect.
+        const rect = (params as unknown as {
+          rect?: { endX?: number; endY?: number };
+        }).rect;
+        const x = typeof rect?.endX === "number" ? rect.endX + 4 : 24;
+        const y = typeof rect?.endY === "number" ? rect.endY + 4 : 24;
         return {
           chips,
           anchor: { x, y },
@@ -8342,7 +8351,12 @@ export default function EditorScreen() {
     });
 
     return () => disposable.dispose();
-  }, [currentHandle]);
+    // Same workbook-swap-safety rationale as the CellClicked effect above:
+    // addEvent is on FUniver and the handler reads `params.workbook`
+    // implicitly via `snapshotRef.current`, so re-binding on currentHandle
+    // is just churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Action handler for a chip pick. URLs / emails / custom-rule URLs go
   // through the existing `open_url` Tauri command (which enforces a scheme

@@ -4,9 +4,42 @@ All notable changes to Coco are documented in this file. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-05-25
+
+Patch release — security fix for UrlFetch, `tauri dev` blank-grid fix, several bug fixes, and follow-up cleanup. Includes the previously-unreleased `.coco` save-option removal.
+
+### Security
+
+- DNS-rebinding TOCTOU SSRF closed in `http_fetch` / `http_fetch_stream` / `ws_connect` / `sse_connect`. New `is_blocked_ip` + `resolve_and_screen` pre-resolve the host and screen every A/AAAA record (fail-closed if any resolved IP is internal — loopback, private, link-local incl. metadata `169.254.169.254`, CGNAT, IPv6 ULA/link-local, IPv4-mapped). Reqwest is pinned via `resolve_to_addrs` so the actual connection cannot re-resolve to a different IP; the WebSocket connect is done manually through a screened `TcpStream` with TLS SNI / `Host` header preserved. Allow-listed domains under attacker DNS control can no longer pivot to internal services. (#195)
+
+### Fixed
+
+- `tauri dev` blank spreadsheet grid: React StrictMode's dev-only double-invoke of the Univer mount effect disposed the `redi` DI injector, then the disposed instance's async `_initWorkbookListener` threw `[redi]: Injector cannot be accessed after it was disposed` — the grid renderer was never created. Now the effect uses a deferred-dispose pattern (`setTimeout(0)` stashed in a `univerStashRef`); a synchronous StrictMode remount cancels the pending disposal and reuses the live instance, while a genuine unmount still disposes. Dev-only; production builds were unaffected. (PR #206)
+- Power Query: data-connection refreshes serialize through a promise queue, eliminating the last-write-wins race that silently dropped one connection's sheet update when two `onOpen` connections fired in parallel. (#196 item 1)
+- Rust `check_sqlite_query` now strips a leading `--` / `/* */` SQL comment before the prefix check, matching the frontend `validateSqliteQuery`. Queries with a leading comment no longer fail backend validation after passing the dialog. (#196 item 2)
+- Literal-aware `;` scanner in both Rust and TS: a `;` inside a single-quoted string literal (e.g. `SELECT ';' AS x`) no longer trips the multi-statement guard. Real multi-statement queries are still rejected. (#196 item 3)
+- Date-only `cast` strings (`YYYY-MM-DD` / `YYYY/MM/DD`) are parsed via `Date.UTC` so the resulting Excel serial no longer drifts ±1 day by the local timezone. (#196 item 5)
+
+### Added
+
+- Import-side detection warning for Excel-authored form controls. When an xlsx contains `xl/ctrlProps/` parts, a `XLSX_FORM_CONTROLS_NOT_RENDERED` compatibility warning surfaces on import so the decoration loss is observable to the user (linked cell values still import). (#194 partial)
+- Draw-pipeline glyph-collision fix: the checkbox / form-control glyphs (`☑ ☐ ◉ ○ ▲▼ ◀▮▶`) are now in the known-decoration set so the conditional-formatting iconSet branch skips a cell that already hosts a form control. (#194 partial)
+
 ### Changed
 
-- Removed user-visible `.coco` save option; `.xlsx` is now the only user-selectable format (AD-02 / 2026-05-15). The Save As dialog, Open dialog filters, HelpDialog format list, SettingsDialog hint, EditorScreen toolbar tooltips, and DropOverlay hint no longer advertise `.coco`. Crash-recovery snapshots still use SQLite internally, and existing `.coco` files already in the recents list remain openable so no prior work is lost.
+- CI: `actions/checkout`, `actions/setup-node`, `actions/cache` bumped to `@v5` (Node 24 runtime) in `ci.yml` and `release.yml`. `release.yml` build job pinned explicitly to `windows-2025` ahead of the 2026-06-15 `windows-latest` redirect. (#201)
+
+### Removed
+
+- User-visible `.coco` save option; `.xlsx` is now the only user-selectable format (AD-02 / 2026-05-15). The Save As dialog, Open dialog filters, HelpDialog format list, SettingsDialog hint, EditorScreen toolbar tooltips, and DropOverlay hint no longer advertise `.coco`. Crash-recovery snapshots still use SQLite internally, and existing `.coco` files already in the recents list remain openable so no prior work is lost. (Previously listed under Unreleased.)
+
+### Reverted
+
+- #193 Univer grid-canvas dark theme — runtime verification showed the row/column header gutter (and the top-left select-all corner) cannot be recolored via the Univer 0.5.x facade (`customizeColumnHeader` / `customizeRowHeader` have no observable effect, even after the `LifecycleStages.Rendered` gate). The half-applied result — dark cells + light headers — looks worse than no dark grid. Removed `univerDarkTheme.ts` and the #193 theme effect from `EditorScreen.tsx`. Shell dark mode (#191) is unaffected. Issue #193 has been re-opened with the findings. (PR #206)
+
+### Tests
+
+- +11 regression tests across `loadPinnedPaths` non-array JSON guard, `setAutoSaveInterval` finite-value validation, and `pathRouter` multi-dot / CJK / emoji / surrogate-pair filename handling. Four stale `docs/TODOS.md` Low items were audited and confirmed already implemented in code — entries closed with resolution notes. (PR #207)
 
 ## [0.1.0] - 2026-05-14
 

@@ -139,6 +139,7 @@ import {
 } from "../store/cellStyles";
 import GoalSeekDialog from "./GoalSeekDialog";
 import { type GoalSeekAdapter } from "../store/goalSeek";
+import SolverDialog from "./SolverDialog";
 import { patchShowFormulasView } from "./showFormulasRender";
 import { patchErrorIndicators } from "./errorIndicatorRender";
 import { collectAuditIssues } from "../store/formulaAudit";
@@ -813,6 +814,12 @@ export default function EditorScreen() {
   // Goal Seek dialog state. Adapter wraps Univer FUniver to read/write values.
   const [goalSeekState, setGoalSeekState] = useState<{
     targetCell: string;
+    changingCell: string;
+    adapter: GoalSeekAdapter;
+  } | null>(null);
+  // Solver (#239 MVP, single-variable) — reuses the GoalSeekAdapter.
+  const [solverState, setSolverState] = useState<{
+    objectiveCell: string;
     changingCell: string;
     adapter: GoalSeekAdapter;
   } | null>(null);
@@ -2214,6 +2221,39 @@ export default function EditorScreen() {
       },
     };
     setGoalSeekState({ targetCell: activeRef, changingCell: "A1", adapter });
+  }, []);
+
+  // --- Solver (#239 MVP, single-variable) -----------------------------------
+  const openSolverDialog = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    if (!fUniver) return;
+    const workbook = fUniver.getActiveWorkbook();
+    const sheet = workbook?.getActiveSheet();
+    if (!workbook || !sheet) return;
+    let activeRef = "B5";
+    try {
+      const sel = sheet.getSelection();
+      const r = sel?.getActiveRange();
+      if (r) activeRef = r.getA1Notation();
+    } catch {
+      // best-effort
+    }
+    const adapter: GoalSeekAdapter = {
+      readNumeric(cellRef: string) {
+        const r = sheet.getRange(cellRef);
+        const v = r?.getValue();
+        if (typeof v === "number" && Number.isFinite(v)) return v;
+        if (typeof v === "string" && v.trim() !== "") {
+          const n = Number(v);
+          return Number.isFinite(n) ? n : null;
+        }
+        return null;
+      },
+      writeNumeric(cellRef: string, value: number) {
+        sheet.getRange(cellRef)?.setValue(value);
+      },
+    };
+    setSolverState({ objectiveCell: activeRef, changingCell: "A1", adapter });
   }, []);
 
   // --- Subtotals -------------------------------------------------------------
@@ -6886,6 +6926,9 @@ export default function EditorScreen() {
       case "tools-goal-seek":
         openGoalSeekDialog();
         break;
+      case "tools-solver":
+        openSolverDialog();
+        break;
       case "tools-error-checking":
         setErrorCheckingOpen(true);
         break;
@@ -7153,6 +7196,7 @@ export default function EditorScreen() {
     openPageSetupDialog,
     openCellStylesDialog,
     openGoalSeekDialog,
+    openSolverDialog,
     openSubtotalDialog,
     openRemoveDuplicatesDialog,
     openTextToColumnsDialog,
@@ -9025,6 +9069,22 @@ export default function EditorScreen() {
             setGoalSeekState(null);
           }}
           onClose={() => setGoalSeekState(null)}
+        />
+      )}
+      {solverState && (
+        <SolverDialog
+          initialObjectiveCell={solverState.objectiveCell}
+          initialChangingCell={solverState.changingCell}
+          runAdapter={solverState.adapter}
+          onCommit={() => {
+            const fUniver = fUniverRef.current;
+            const wb = fUniver?.getActiveWorkbook();
+            if (wb) {
+              applyMutatedSnapshot(JSON.stringify(wb.save()));
+            }
+            setSolverState(null);
+          }}
+          onClose={() => setSolverState(null)}
         />
       )}
       {errorCheckingOpen && currentSnapshotJson && (

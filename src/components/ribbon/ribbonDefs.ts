@@ -1045,6 +1045,7 @@ const toolsTab: RibbonTabDef = {
           size: "large",
         },
         { id: "tools-scenarios", labelKey: "ribbon.btn.scenarios", icon: "🗂", action: editorCommand("tools-scenarios") },
+        { id: "tools-solver", labelKey: "ribbon.btn.solver", icon: "🧮", action: editorCommand("tools-solver") },
         {
           id: "tools-quick-analysis",
           labelKey: "ribbon.btn.quickAnalysis",

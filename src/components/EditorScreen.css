@@ -101,8 +101,10 @@
 /* Univer のツールバーコンテナは既定で justify-content: center で、内容が
    コンテナ幅より狭いと左右に余白が発生する (undo / redo の左に隙間ができる
    原因)。業務用エディタとしては左詰めの方が視線移動が短く自然なので
-   flex-start に差し替える。 */
-.univer-toolbar-container {
+   flex-start に差し替える。
+   Univer 0.8.x (Tailwind refactor): semantic `.univer-toolbar-container`
+   selector is gone; the toolbar is now identified by `data-u-comp="ribbon-toolbar"`. */
+[data-u-comp="ribbon-toolbar"] {
   justify-content: flex-start;
 }
 
@@ -301,20 +303,21 @@
 }
 
 /* #198: hide Univer's built-in toolbar — Coco's own ribbon replaces it.
- * We hide only `.univer-toolbar-container` (not the whole header) so the
+ * We hide only the ribbon-toolbar element (not the whole header) so the
  * grid and other header chrome Univer renders are unaffected; passing
- * `header: false` to UniverUIPlugin would also remove the grid header. */
-.univer-toolbar-container {
+ * `header: false` to UniverUIPlugin would also remove the grid header.
+ * Univer 0.8.x (Tailwind refactor) replaced the semantic `.univer-toolbar-container`
+ * class with `data-u-comp="ribbon-toolbar"`. */
+[data-u-comp="ribbon-toolbar"] {
   display: none !important;
 }
 
 /* #198: hide Univer's built-in formula bar — Coco's `ribbon/FormulaBar.tsx`
  * replaces it, so leaving Univer's would double-render the bar.
- * `.univer-formula-box` is the outermost wrapper rendered by @univerjs/sheets-ui
- * (contains `.univer-name-ranges` + `.univer-formula-bar`). Hiding it does NOT
- * affect inline cell editing: that editor is mounted separately by
- * `cellEditorManagerService` into `.univer-editor-container` /
- * `.univer-sheet-embedding-formula-editor-wrap`, not inside `.univer-formula-box`. */
-.univer-formula-box {
+ * Univer 0.8.x (Tailwind refactor) replaced the semantic `.univer-formula-box`
+ * wrapper with `data-u-comp="formula-bar"` (rendered by @univerjs/sheets-ui).
+ * Hiding it does NOT affect inline cell editing: that editor is mounted
+ * separately by `cellEditorManagerService` outside the formula-bar wrapper. */
+[data-u-comp="formula-bar"] {
   display: none !important;
 }

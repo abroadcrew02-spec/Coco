@@ -509,6 +509,12 @@ import { rectToA1 } from "../store/cameraRender";
 import { validateMutation, extractCellWrites } from "../store/dataValidation";
 import { getLocale, subscribeLocale, t } from "../i18n/locale";
 import { swapUniverLocale } from "./univerLocaleSwap";
+import {
+  getEffectiveTheme,
+  onThemeChanged,
+  subscribeSystemTheme,
+} from "../store/theme";
+import { setUniverDarkMode } from "./univerDarkMode";
 import ScriptEditorDialog from "./ScriptEditorDialog";
 import {
   type ScriptEntry,
@@ -7545,6 +7551,10 @@ export default function EditorScreen() {
       // override list.
       univer = new Univer({
         theme: defaultTheme,
+        // #193 (Univer 0.8 dark mode): seed the initial dark-mode flag from
+        // Coco's effective theme so the grid renders correctly on first paint.
+        // The live-update effect below handles subsequent theme flips.
+        darkMode: getEffectiveTheme() === "dark",
         locale: LocaleType.EN_US,
         locales: {
           [LocaleType.EN_US]: buildCocoUniverLocale(getLocale()),
@@ -7557,7 +7567,14 @@ export default function EditorScreen() {
       univer.registerPlugin(UniverFormulaEnginePlugin);
       univer.registerPlugin(UniverUIPlugin, {
         container: "univer-container",
-        header: true,
+        // Coco's own custom ribbon covers the toolbar / header-menu surface.
+        // Hide Univer's native header-bar AND ribbon-toolbar to avoid
+        // duplicate UI directly above the column-header row. The formula
+        // bar lives outside `data-u-comp="headerbar"` so disabling header
+        // here does not hide it.
+        header: false,
+        toolbar: false,
+        headerMenu: false,
         footer: true,
       });
       univer.registerPlugin(UniverDocsPlugin, { hasScroll: false });
@@ -7701,6 +7718,30 @@ export default function EditorScreen() {
       const univer = univerRef.current;
       if (univer) swapUniverLocale(univer, locale);
     });
+  }, []);
+
+  // #193 (Univer 0.8 dark mode): keep Univer's native dark-mode flag in sync
+  // with Coco's effective theme. Initial value is seeded in the Univer ctor
+  // above; this effect handles live flips (Settings dialog, OS color-scheme
+  // change). Modeled on the locale hot-swap above so the editor never has to
+  // be re-mounted on a theme change. ThemeService recolors the grid canvas
+  // (row/col headers, gridlines, empty cells) and the surrounding chrome.
+  useEffect(() => {
+    const reapply = () => {
+      const univer = univerRef.current;
+      if (univer) setUniverDarkMode(univer, getEffectiveTheme());
+    };
+    // Re-apply on an explicit mode change (Settings dialog), and also follow
+    // the OS color-scheme as it flips. `getEffectiveTheme()` resolves the
+    // persisted mode against `prefers-color-scheme` on each call, so the
+    // system subscription is a harmless no-op re-apply while the mode is an
+    // explicit light / dark.
+    const unsubChanged = onThemeChanged(reapply);
+    const unsubSystem = subscribeSystemTheme(reapply);
+    return () => {
+      unsubChanged();
+      unsubSystem();
+    };
   }, []);
 
   // Sync snapshot to store on data mutations (skip selection/scroll operations).

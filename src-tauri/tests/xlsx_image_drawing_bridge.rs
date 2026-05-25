@@ -65,6 +65,12 @@ const DRAWING_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="y
 </Relationships>"#;
 
 fn build_image_fixture(tmp: &TempDir) -> PathBuf {
+    build_image_fixture_with(tmp, PNG_BYTES)
+}
+
+/// Variant that lets the caller swap the image bytes — used by the
+/// size-cap regression test below.
+fn build_image_fixture_with(tmp: &TempDir, image_bytes: &[u8]) -> PathBuf {
     let plain_path = tmp.path().join("plain.xlsx");
     let fixture_path = tmp.path().join("with_image.xlsx");
 
@@ -134,7 +140,7 @@ fn build_image_fixture(tmp: &TempDir) -> PathBuf {
 
     // Media + drawing + drawing rels + sheet rels patch.
     out.start_file("xl/media/image1.png", opts).unwrap();
-    out.write_all(PNG_BYTES).unwrap();
+    out.write_all(image_bytes).unwrap();
 
     out.start_file("xl/drawings/drawing1.xml", opts).unwrap();
     out.write_all(DRAWING_XML.as_bytes()).unwrap();
@@ -692,5 +698,50 @@ fn xml_escaped_sheet_name_drawing_is_preserved_and_emitted() {
             .map(|t| t.contains("drawing1.xml"))
             .unwrap_or(false),
         "drawingTarget should point at drawing1.xml"
+    );
+}
+
+/// CONCERN fix: media bytes over the 16 MiB cap must be skipped from the
+/// in-grid render channel (no `SHEET_DRAWING_PLUGIN` entry) and an
+/// `XLSX_DRAWING_MEDIA_TOO_LARGE` warning must be emitted. The bytes still
+/// land in `_preservedParts` (under its own caps there) — bridge skip is
+/// purely for the DoS-prone snapshot/IPC payload, not the round-trip.
+#[test]
+fn oversized_image_is_skipped_with_warning() {
+    // 17 MiB of zero bytes — fake-image payload that exceeds the 16 MiB
+    // per-part cap. Not valid PNG (the cap fires before decode), but the
+    // zip entry size is what the bridge checks.
+    let big: Vec<u8> = vec![0u8; 17 * 1024 * 1024];
+    let tmp = TempDir::new().unwrap();
+    let fixture = build_image_fixture_with(&tmp, &big);
+
+    let import = import_xlsx_core(path_str(&fixture)).expect("import ok");
+    let snapshot_json = import.handle.snapshot_json.expect("snapshot present");
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&snapshot_json).expect("parse snapshot");
+
+    // No SHEET_DRAWING_PLUGIN entry (bridge skipped — image too large).
+    let resources = snapshot.get("resources").and_then(|v| v.as_array());
+    let has_drawing_resource = resources
+        .map(|arr| {
+            arr.iter()
+                .any(|e| e.get("name").and_then(|n| n.as_str()) == Some("SHEET_DRAWING_PLUGIN"))
+        })
+        .unwrap_or(false);
+    assert!(
+        !has_drawing_resource,
+        "SHEET_DRAWING_PLUGIN entry must be absent when the only image exceeds the size cap"
+    );
+
+    // Warning surfaced so the user knows the image won't render in-grid.
+    let warn_code = "XLSX_DRAWING_MEDIA_TOO_LARGE";
+    let has_warn = import
+        .warnings
+        .iter()
+        .any(|w| w.code == warn_code);
+    assert!(
+        has_warn,
+        "expected {warn_code} warning; got codes: {:?}",
+        import.warnings.iter().map(|w| &w.code).collect::<Vec<_>>()
     );
 }

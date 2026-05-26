@@ -191,6 +191,7 @@ import {
   cellToA1 as pivotCellToA1,
 } from "../store/pivots";
 import ChartCanvasPanel from "./ChartCanvasPanel";
+import InGridChartLayer from "./InGridChartLayer";
 import InsertSlicerDialog from "./InsertSlicerDialog";
 import SlicerPanel from "./SlicerPanel";
 import {
@@ -8844,6 +8845,10 @@ export default function EditorScreen() {
         }
       >
         <div id="univer-container" ref={containerRef} className="univer-container" />
+        <InGridChartLayer
+          workbookSnapshotJson={currentSnapshotJson}
+          activeSheetId={activeSheetId}
+        />
         <CommentIndicatorsPanel
           indicators={commentIndicators}
           onSelect={jumpToCommentCell}

@@ -1,0 +1,3 @@
+.ingrid-chart-layer { position: absolute; inset: 0; pointer-events: none; z-index: 15; overflow: hidden; }
+.ingrid-chart-frame { position: absolute; pointer-events: auto; background: var(--coco-bg-elevated); border: 1px solid var(--coco-border); box-shadow: 0 2px 6px var(--coco-shadow); overflow: hidden; }
+.ingrid-chart-frame > svg { width: 100%; height: 100%; display: block; }

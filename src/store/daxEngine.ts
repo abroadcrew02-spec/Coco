@@ -927,7 +927,7 @@ export function evaluateMeasure(
   return _evaluateMeasureInternal(model, measures, measureName, filterContext, new Set());
 }
 
-function _evaluateMeasureInternal(
+export function _evaluateMeasureInternal(
   model: DataModel,
   measures: MeasureDef[],
   measureName: string,

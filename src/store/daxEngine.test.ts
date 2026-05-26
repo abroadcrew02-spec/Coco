@@ -5,6 +5,7 @@ import {
   evaluateCalculatedColumns,
   evaluateMeasure,
   evaluateAllMeasures,
+  _evaluateMeasureInternal,
   IMPLEMENTED_FUNCTIONS,
   CALC_COLUMN_ERROR,
   MEASURE_ERROR,
@@ -1013,10 +1014,7 @@ describe("evaluateMeasure — filter context", () => {
       filterCtx,
     );
     // Intersection: East rows ∩ Amount>120 → only row {East,150}
-    // Note: CALCULATE completely replaces the override (engine replaces per table)
-    // so this returns 150+250=400 (rows with Amount>120).
-    // This matches the DAX engine's CALCULATE semantic: FILTER args replace context.
-    expect(typeof result).toBe("number");
+    expect(result).toBe(150);
   });
 });
 
@@ -1046,19 +1044,17 @@ describe("evaluateMeasure — error handling", () => {
   });
 
   it("returns MEASURE_ERROR for circular reference (self-referential measure)", () => {
-    // A measure that would call itself — detected immediately by the evaluating set.
-    // The engine doesn't support cross-measure refs yet so this effectively returns
-    // MEASURE_ERROR because the second lookup hits the guard.
-    const result = evaluateMeasure(
+    // Directly invoke the internal function with "Self" already in the evaluating set
+    // to simulate a re-entrant call — this is the exact scenario the guard protects against.
+    const evaluating = new Set(["Self"]);
+    const result = _evaluateMeasureInternal(
       measureModel(),
-      // We can't actually call a measure from within a DAX expr yet (deferred),
-      // but the circular-ref guard should prevent infinite loops if it were possible.
-      // Simulate: evaluate a measure that causes circular detection via direct call.
       defs([{ name: "Self", expression: "SUM(Sales[Amount])" }]),
       "Self",
+      undefined,
+      evaluating,
     );
-    // No circular ref in this case — ensure normal result passes through.
-    expect(result).toBe(700);
+    expect(result).toBe(MEASURE_ERROR);
   });
 
   it("MEASURE_ERROR sentinel matches CALC_COLUMN_ERROR sentinel value", () => {

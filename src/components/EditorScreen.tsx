@@ -198,8 +198,11 @@ import {
   type WorkbookSlicerPivotSnapshot,
   type WorkbookSlicerSnapshot,
   applySlicerFiltersToPivots,
+  clearSlicerSelection as clearSlicerSelectionHelper,
   generateSlicerName,
+  invertSlicerSelection as invertSlicerSelectionHelper,
   removeSlicer as removeSlicerHelper,
+  setSlicerSelection as setSlicerSelectionHelper,
   toggleSlicerValue as toggleSlicerValueHelper,
 } from "../store/slicers";
 import { patchSlicerFilters } from "./slicerRender";
@@ -2767,6 +2770,51 @@ export default function EditorScreen() {
       // The helper mutates the snapshot in place, including writing the
       // updated pivot output cells.
       applySlicerFiltersToPivots(next as unknown as WorkbookSlicerPivotSnapshot);
+      applyMutatedSnapshot(JSON.stringify(next));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  // Bulk-op handlers (Slicer panel toolbar). Same shape as toggleSlicer:
+  // mutate the cloned snapshot via the pure helper, re-render pivots if any,
+  // commit via applyMutatedSnapshot (Coco-undo aware).
+  const clearSlicer = useCallback(
+    (name: string) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as WorkbookSlicerSnapshot;
+      const next = clearSlicerSelectionHelper(fresh, name);
+      if (!next) return;
+      applySlicerFiltersToPivots(next as unknown as WorkbookSlicerPivotSnapshot);
+      applyMutatedSnapshot(JSON.stringify(next));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  const selectAllSlicer = useCallback(
+    (name: string, values: string[]) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as WorkbookSlicerSnapshot;
+      const next = setSlicerSelectionHelper(fresh, name, values);
+      if (!next) return;
+      applySlicerFiltersToPivots(next as unknown as WorkbookSlicerPivotSnapshot);
+      applyMutatedSnapshot(JSON.stringify(next));
+    },
+    [applyMutatedSnapshot],
+  );
+
+  const invertSlicer = useCallback(
+    (name: string) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const fresh = workbook.save() as unknown as WorkbookSlicerPivotSnapshot;
+      const next = invertSlicerSelectionHelper(fresh, name);
+      if (!next) return;
+      applySlicerFiltersToPivots(next);
       applyMutatedSnapshot(JSON.stringify(next));
     },
     [applyMutatedSnapshot],
@@ -8813,6 +8861,9 @@ export default function EditorScreen() {
             workbookSnapshotJson={currentSnapshotJson}
             onToggleValue={toggleSlicer}
             onDelete={deleteSlicer}
+            onClearSelection={clearSlicer}
+            onSelectAll={selectAllSlicer}
+            onInvertSelection={invertSlicer}
           />
         )}
         {tracePanelOpen && currentSnapshotJson && (

@@ -724,6 +724,12 @@ const dataTab: RibbonTabDef = {
           action: editorCommand("data-manage-queries"),
         },
         {
+          id: "datamodel-manage-measures",
+          labelKey: "ribbon.btn.manageMeasures",
+          icon: "Σ",
+          action: editorCommand("datamodel-manage-measures"),
+        },
+        {
           id: "data-connections",
           labelKey: "ribbon.btn.dataConnections",
           icon: "🔌",

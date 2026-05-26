@@ -110,6 +110,7 @@ export const EDITOR_COMMAND_IDS = new Set([
   "data-data-connections",
   "data-get-transform",
   "data-manage-queries",
+  "datamodel-manage-measures",
 ]);
 
 // req 7.2: native menu bar emits "menu-action" events with the item id. Route

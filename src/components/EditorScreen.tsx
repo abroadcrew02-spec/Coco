@@ -357,6 +357,13 @@ import DataConnectionsDialog, {
 } from "./DataConnectionsDialog";
 import GetTransformDialog from "./GetTransformDialog";
 import SavedQueriesPanel from "./SavedQueriesPanel";
+import MeasureListPanel from "./MeasureListPanel";
+import {
+  readDataModel,
+  writeDataModel,
+  removeMeasure,
+  removeCalculatedColumn,
+} from "../store/cocoDataModel";
 import {
   findQuery,
   removeQueryOnSnapshot,
@@ -992,6 +999,8 @@ export default function EditorScreen() {
   const [getTransformOpen, setGetTransformOpen] = useState(false);
   // #238 Step 6: Saved queries panel.
   const [savedQueriesPanelOpen, setSavedQueriesPanelOpen] = useState(false);
+  // #239 Step 7: Measure list panel.
+  const [measuresPanelOpen, setMeasuresPanelOpen] = useState(false);
   // #140 / #190: external data connections (Power Query) — modal dialog.
   const [dataConnectionsOpen, setDataConnectionsOpen] = useState(false);
   const [bookmarksPanelOpen, setBookmarksPanelOpen] = useState(false);
@@ -2786,6 +2795,24 @@ export default function EditorScreen() {
   );
 
   // jumpToOutputSheet is declared after jumpToA1OnSheet to avoid TDZ error.
+
+  // --- #239 Measures ---------------------------------------------------------
+
+  const deleteMeasure = useCallback(
+    (id: string, kind: "measure" | "calculatedColumn") => {
+      const label = kind === "measure" ? "メジャー削除" : "計算列削除";
+      const snap = getSnapshotForTool(label);
+      if (!snap) return;
+      const model = readDataModel(snap);
+      const updated =
+        kind === "measure"
+          ? removeMeasure(model, id)
+          : removeCalculatedColumn(model, id);
+      const newSnap = writeDataModel(snap, updated);
+      applyMutatedSnapshot(JSON.stringify(newSnap));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
 
   // --- Slicers ---------------------------------------------------------------
   const openSlicerDialog = useCallback(() => {
@@ -7451,6 +7478,9 @@ export default function EditorScreen() {
       case "data-manage-queries":
         setSavedQueriesPanelOpen((v) => !v);
         break;
+      case "datamodel-manage-measures":
+        setMeasuresPanelOpen((v) => !v);
+        break;
       case "data-data-connections":
         setDataConnectionsOpen(true);
         break;
@@ -9158,6 +9188,12 @@ export default function EditorScreen() {
             onRefresh={refreshSavedQuery}
             onDelete={deleteSavedQuery}
             onJumpTo={jumpToOutputSheet}
+          />
+        )}
+        {measuresPanelOpen && currentSnapshotJson && (
+          <MeasureListPanel
+            workbookSnapshotJson={currentSnapshotJson}
+            onDelete={deleteMeasure}
           />
         )}
         {chartsCanvasPanelOpen && currentSnapshotJson && (

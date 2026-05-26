@@ -359,14 +359,16 @@ import GetTransformDialog from "./GetTransformDialog";
 import SavedQueriesPanel from "./SavedQueriesPanel";
 import MeasureListPanel from "./MeasureListPanel";
 import MeasureEditorDialog from "./MeasureEditorDialog";
+import CalculatedColumnEditorDialog from "./CalculatedColumnEditorDialog";
 import {
   readDataModel,
   writeDataModel,
   addMeasure,
   removeMeasure,
   removeCalculatedColumn,
+  addCalculatedColumn,
 } from "../store/cocoDataModel";
-import type { StoredMeasure } from "../store/cocoDataModel";
+import type { StoredMeasure, StoredCalculatedColumn } from "../store/cocoDataModel";
 import {
   findQuery,
   removeQueryOnSnapshot,
@@ -2813,6 +2815,26 @@ export default function EditorScreen() {
       if (!snap) return;
       const model = readDataModel(snap);
       const updated = addMeasure(model, measure);
+      const newSnap = writeDataModel(snap, updated);
+      applyMutatedSnapshot(JSON.stringify(newSnap));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
+  // --- #239 Calculated Columns -----------------------------------------------
+
+  const [calcColEditor, setCalcColEditor] = useState<{ initial?: StoredCalculatedColumn } | null>(null);
+
+  const openCalcColEditor = useCallback((initial?: StoredCalculatedColumn) => {
+    setCalcColEditor({ initial });
+  }, []);
+
+  const applyCalculatedColumn = useCallback(
+    (col: StoredCalculatedColumn) => {
+      const snap = getSnapshotForTool("計算列保存");
+      if (!snap) return;
+      const model = readDataModel(snap);
+      const updated = addCalculatedColumn(model, col);
       const newSnap = writeDataModel(snap, updated);
       applyMutatedSnapshot(JSON.stringify(newSnap));
     },
@@ -9217,6 +9239,8 @@ export default function EditorScreen() {
             onDelete={deleteMeasure}
             onAdd={() => openMeasureEditor()}
             onEdit={(m) => openMeasureEditor(m)}
+            onAddCalculatedColumn={() => openCalcColEditor()}
+            onEditCalculatedColumn={(c) => openCalcColEditor(c)}
           />
         )}
         {chartsCanvasPanelOpen && currentSnapshotJson && (
@@ -9442,6 +9466,26 @@ export default function EditorScreen() {
             existingNames={existingNames}
             onApply={applyMeasure}
             onClose={() => setMeasureEditor(null)}
+          />
+        );
+      })()}
+      {calcColEditor && (() => {
+        const dmSnap = currentSnapshotJson ? (() => {
+          try { return JSON.parse(currentSnapshotJson) as unknown; } catch { return null; }
+        })() : null;
+        const dm = readDataModel(dmSnap);
+        const dmTables = dm.tables.map((t) => ({ id: t.name, name: t.name }));
+        const existingPairs = dm.calculatedColumns.map((c) => ({
+          tableId: c.tableId,
+          columnName: c.columnName,
+        }));
+        return (
+          <CalculatedColumnEditorDialog
+            initialColumn={calcColEditor.initial}
+            tables={dmTables}
+            existingPairs={existingPairs}
+            onApply={applyCalculatedColumn}
+            onClose={() => setCalcColEditor(null)}
           />
         );
       })()}

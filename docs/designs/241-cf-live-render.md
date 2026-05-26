@@ -1,6 +1,19 @@
-# #242 CF live re-paint 再設計 — MVP 設計
+# #241 CF live re-paint 再設計 — MVP 設計
 
-Status: **Design only**. Implementation deferred (L, 4-6週).
+Status: **Step 1 shipped** — CfSidecar pure store + 27 unit tests (PR #262).
+Remaining steps deferred (L, 残り 3-4週).
+
+## Progress
+
+| Step | Status | Notes |
+| --- | --- | --- |
+| 1. CfSidecar 実装 (trackWrite / getBaseStyle / clearRule + composeStyle) | ✅ shipped | `src/store/cfSidecar.ts` |
+| 2. computeCfRepaint 改造 — sidecar の baseStyle を BASE として使用 | ⏳ next | 現状 `conditionalFormatRender.ts:1276` を改造 |
+| 3. range batching — per-cell facade call を矩形単位 setRangeValues に | ⏳ | — |
+| 4. iconSet glyph — DOM overlay (cellData は touch しない) | ⏳ | data-corruption bug の根本対策 |
+| 5. dataBar overlay — 背景色グラデーション DOM | ⏳ | — |
+| 6. live-loop integration test (5 round-trip stability) | ⏳ | — |
+| 7. CF dialog 連動 (add/edit/remove → sidecar update) | ⏳ | — |
 
 ## 背景: 過去2回の失敗
 

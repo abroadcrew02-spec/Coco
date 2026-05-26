@@ -19,8 +19,11 @@
 
 import {
   evaluateCalculatedColumns,
+  evaluateMeasure,
+  evaluateAllMeasures,
   type CalculatedColumnDef,
   type DataModel,
+  type MeasureDef,
   type ModelTable,
   type ModelRelationship,
 } from "./daxEngine";
@@ -243,3 +246,60 @@ export function applyCalculatedColumns(
   }));
   return evaluateCalculatedColumns(base, defs);
 }
+
+// ---------------------------------------------------------------------------
+// Step 6: convenience bridges — measure evaluation
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert `CocoDataModel.measures` into the engine-facing `MeasureDef[]`
+ * and evaluate a single named measure via `evaluateMeasure`.
+ *
+ * `base` should normally be the result of `applyCalculatedColumns(toDataModel(cocoModel), cocoModel)`
+ * so that calculated columns are visible to measure expressions.
+ *
+ * `filterContext` maps table names to pre-filtered row arrays. Pass `undefined`
+ * to evaluate against the full dataset (no filter context).
+ *
+ * Returns MEASURE_ERROR ("#ERROR!") when:
+ *   - The measure name is not found in `cocoModel.measures`.
+ *   - The DAX expression fails to parse.
+ *   - Runtime evaluation throws.
+ *   - A circular reference is detected.
+ */
+export function evaluateStoredMeasure(
+  base: DataModel,
+  cocoModel: CocoDataModel,
+  measureName: string,
+  filterContext?: Map<string, Array<Record<string, unknown>>>,
+): unknown {
+  const defs: MeasureDef[] = cocoModel.measures.map((m) => ({
+    name: m.name,
+    expression: m.expression,
+  }));
+  return evaluateMeasure(base, defs, measureName, filterContext);
+}
+
+/**
+ * Evaluate ALL measures in `cocoModel` and return a map of name → value.
+ *
+ * Typical call-site (e.g., Pivot Table refresh):
+ * ```ts
+ * const rt = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+ * const vals = evaluateAllStoredMeasures(rt, cocoModel);
+ * ```
+ */
+export function evaluateAllStoredMeasures(
+  base: DataModel,
+  cocoModel: CocoDataModel,
+  filterContext?: Map<string, Array<Record<string, unknown>>>,
+): Map<string, unknown> {
+  const defs: MeasureDef[] = cocoModel.measures.map((m) => ({
+    name: m.name,
+    expression: m.expression,
+  }));
+  return evaluateAllMeasures(base, defs, filterContext);
+}
+
+// Re-export engine types that callers need when working with measure evaluation.
+export type { MeasureDef };

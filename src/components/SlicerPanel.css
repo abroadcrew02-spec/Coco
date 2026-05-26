@@ -235,3 +235,23 @@
   border-radius: 8px;
   vertical-align: middle;
 }
+
+.slp-header-btn {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 8px;
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border);
+  border-radius: 3px;
+  color: var(--coco-text);
+  cursor: pointer;
+}
+
+.slp-header-btn:hover:not(:disabled) {
+  background-color: var(--coco-surface-hover);
+}
+
+.slp-header-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

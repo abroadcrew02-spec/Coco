@@ -356,6 +356,16 @@ import DataConnectionsDialog, {
   type AddConnectionInput,
 } from "./DataConnectionsDialog";
 import GetTransformDialog from "./GetTransformDialog";
+import SavedQueriesPanel from "./SavedQueriesPanel";
+import {
+  findQuery,
+  removeQueryOnSnapshot,
+} from "../store/cocoQueries";
+import {
+  runQuery,
+  applyQueryResultToSnapshot,
+  createTauriSourceFetcher,
+} from "../store/queryExecutor";
 import {
   type DataConnection,
   type EtlStep,
@@ -980,6 +990,8 @@ export default function EditorScreen() {
   const [sheetImportOpen, setSheetImportOpen] = useState(false);
   // #238 Step 2: Get & Transform dialog.
   const [getTransformOpen, setGetTransformOpen] = useState(false);
+  // #238 Step 6: Saved queries panel.
+  const [savedQueriesPanelOpen, setSavedQueriesPanelOpen] = useState(false);
   // #140 / #190: external data connections (Power Query) — modal dialog.
   const [dataConnectionsOpen, setDataConnectionsOpen] = useState(false);
   const [bookmarksPanelOpen, setBookmarksPanelOpen] = useState(false);
@@ -2734,6 +2746,46 @@ export default function EditorScreen() {
     },
     [applyMutatedSnapshot],
   );
+
+  // --- #238 Saved Queries ---------------------------------------------------
+
+  const refreshSavedQuery = useCallback(
+    async (queryId: string) => {
+      const snap = getSnapshotForTool("クエリ更新");
+      if (!snap) return;
+      const query = findQuery(snap, queryId);
+      if (!query) {
+        setEditorOperationError("クエリ更新: クエリが見つかりません");
+        return;
+      }
+      try {
+        const fetcher = createTauriSourceFetcher(
+          <T,>(cmd: string, args?: Record<string, unknown>) =>
+            invoke<T>(cmd, args),
+        );
+        const result = await runQuery(query, { fetcher });
+        const updated = applyQueryResultToSnapshot(snap, query, result);
+        applyMutatedSnapshot(JSON.stringify(updated));
+      } catch (e) {
+        setEditorOperationError(
+          `クエリ更新: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
+  const deleteSavedQuery = useCallback(
+    (queryId: string) => {
+      const snap = getSnapshotForTool("クエリ削除");
+      if (!snap) return;
+      const updated = removeQueryOnSnapshot(snap, queryId);
+      applyMutatedSnapshot(JSON.stringify(updated));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
+  // jumpToOutputSheet is declared after jumpToA1OnSheet to avoid TDZ error.
 
   // --- Slicers ---------------------------------------------------------------
   const openSlicerDialog = useCallback(() => {
@@ -5542,6 +5594,27 @@ export default function EditorScreen() {
     }
   }, []);
 
+  // #238: jump to the output sheet of a saved query by sheet name.
+  const jumpToOutputSheet = useCallback(
+    (outputSheet: string) => {
+      if (!currentSnapshotJson) return;
+      try {
+        const snap = JSON.parse(currentSnapshotJson) as {
+          sheets?: Record<string, { name?: string }>;
+        };
+        for (const [id, s] of Object.entries(snap.sheets ?? {})) {
+          if ((s?.name ?? id) === outputSheet) {
+            jumpToA1OnSheet(id, "A1");
+            return;
+          }
+        }
+      } catch {
+        // best-effort silent
+      }
+    },
+    [currentSnapshotJson, jumpToA1OnSheet],
+  );
+
   // Reactive flag: is the active sheet currently protected per the snapshot?
   // Derived from `currentSnapshotJson` so the button label flips immediately
   // when toggleSheetProtection updates the store.
@@ -7375,6 +7448,9 @@ export default function EditorScreen() {
       case "data-get-transform":
         setGetTransformOpen(true);
         break;
+      case "data-manage-queries":
+        setSavedQueriesPanelOpen((v) => !v);
+        break;
       case "data-data-connections":
         setDataConnectionsOpen(true);
         break;
@@ -9074,6 +9150,14 @@ export default function EditorScreen() {
             onRefresh={refreshPivotByName}
             onDelete={deletePivot}
             onJumpTo={jumpToA1OnSheet}
+          />
+        )}
+        {savedQueriesPanelOpen && currentSnapshotJson && (
+          <SavedQueriesPanel
+            workbookSnapshotJson={currentSnapshotJson}
+            onRefresh={refreshSavedQuery}
+            onDelete={deleteSavedQuery}
+            onJumpTo={jumpToOutputSheet}
           />
         )}
         {chartsCanvasPanelOpen && currentSnapshotJson && (

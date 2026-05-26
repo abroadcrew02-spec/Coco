@@ -1,0 +1,118 @@
+.sqp-root {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.sqp-header {
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--coco-accent);
+  background-color: var(--coco-accent-subtle);
+  border-bottom: 1px solid var(--coco-border);
+}
+
+.sqp-empty {
+  margin: 0;
+  padding: 14px;
+  font-size: 12px;
+  color: var(--coco-text-muted);
+}
+
+.sqp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.sqp-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--coco-border);
+}
+
+.sqp-row:last-child {
+  border-bottom: none;
+}
+
+.sqp-jump {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 12px;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  color: var(--coco-text);
+}
+
+.sqp-jump:hover {
+  background-color: var(--coco-accent-subtle);
+}
+
+.sqp-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--coco-accent);
+}
+
+.sqp-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--coco-text-muted);
+}
+
+.sqp-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background-color: var(--coco-accent-subtle);
+  color: var(--coco-accent);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: "Consolas", "Courier New", monospace;
+  text-transform: uppercase;
+}
+
+.sqp-output {
+  color: var(--coco-text);
+  font-family: "Consolas", "Courier New", monospace;
+}
+
+.sqp-updated {
+  font-size: 10px;
+  color: var(--coco-text-faint);
+}
+
+.sqp-refresh,
+.sqp-delete {
+  background: none;
+  border: none;
+  color: var(--coco-text-faint);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 12px;
+  border-left: 1px solid var(--coco-border);
+}
+
+.sqp-refresh:hover {
+  color: var(--coco-accent);
+  background-color: var(--coco-accent-subtle);
+}
+
+.sqp-delete:hover {
+  color: var(--coco-danger);
+  background-color: var(--coco-danger-bg);
+}

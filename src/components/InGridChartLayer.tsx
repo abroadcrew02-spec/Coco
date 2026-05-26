@@ -98,6 +98,10 @@ interface Props {
     chartIndex: number,
     entry: ChartEntry,
   ) => void;
+  /**
+   * Called when the user presses Delete or Backspace on a focused chart frame.
+   */
+  onChartDelete?: (sheetId: string, chartIndex: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,6 +113,7 @@ export default function InGridChartLayer({
   pixelOpts,
   onChartChange,
   onChartEdit,
+  onChartDelete,
 }: Props) {
   const drag = useRef<DragState | null>(null);
   // Tracks live (uncommitted) box positions during a drag so we can preview
@@ -267,6 +272,22 @@ export default function InGridChartLayer({
     [],
   );
 
+  // Delete / Backspace on a focused chart frame removes the chart.
+  // stopPropagation prevents Univer's cell-delete shortcut from firing.
+  const onFrameKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>, index: number) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      // Only act when not dragging (guard against edge cases).
+      if (drag.current !== null) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (onChartDelete && activeSheetId) {
+        onChartDelete(activeSheetId, index);
+      }
+    },
+    [onChartDelete, activeSheetId],
+  );
+
   const onPointerUp = useCallback(
     (_e: React.PointerEvent<HTMLDivElement>, index: number, entry: ChartEntry) => {
       const d = drag.current;
@@ -318,6 +339,9 @@ export default function InGridChartLayer({
             key={placement.key}
             data-chart-index={index}
             className="ingrid-chart-frame"
+            // tabIndex makes the frame focusable so Delete/Backspace can target it.
+            tabIndex={0}
+            onKeyDown={(e) => onFrameKeyDown(e, index)}
             style={
               {
                 "--cf-left": `${box.left}px`,

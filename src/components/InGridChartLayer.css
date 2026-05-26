@@ -23,6 +23,12 @@
   overflow: visible;
 }
 
+/* Focus outline: keyboard users see a blue ring when the frame is focused */
+.ingrid-chart-frame:focus {
+  outline: 2px solid #1a73e8;
+  outline-offset: 1px;
+}
+
 /* ── Chart body (drag to move) ──────────────────────────────────────────── */
 .ingrid-chart-body {
   width: 100%;

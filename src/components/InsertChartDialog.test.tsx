@@ -152,6 +152,82 @@ describe("InsertChartDialog", () => {
     expect(value.hasHeaderCol).toBe(true);
   });
 
+  it("edit mode: pre-populates all fields from initialValue", () => {
+    const initialValue: ChartFormValue = {
+      range: "B2:D8",
+      chartType: "line",
+      title: "Revenue",
+      xAxisLabel: "Month",
+      yAxisLabel: "Amount",
+      showLegend: false,
+      showDataLabels: true,
+      stacked: true,
+      hasHeaderRow: false,
+      hasHeaderCol: true,
+    };
+    render(
+      <InsertChartDialog
+        initialRange="A1:A1"
+        initialValue={initialValue}
+        onApply={onApply}
+        onClose={onClose}
+      />,
+    );
+
+    // Open details panel to access optional fields.
+    fireEvent.click(screen.getByText("詳細オプション"));
+
+    const rangeInput = screen.getByLabelText("データ範囲") as HTMLInputElement;
+    expect(rangeInput.value).toBe("B2:D8");
+
+    const lineRadio = screen.getByLabelText("折れ線 (line)") as HTMLInputElement;
+    expect(lineRadio.checked).toBe(true);
+
+    const titleInput = screen.getByLabelText("タイトル") as HTMLInputElement;
+    expect(titleInput.value).toBe("Revenue");
+
+    const xInput = screen.getByTitle("X軸タイトル") as HTMLInputElement;
+    expect(xInput.value).toBe("Month");
+
+    const yInput = screen.getByTitle("Y軸タイトル") as HTMLInputElement;
+    expect(yInput.value).toBe("Amount");
+
+    const legendCheckbox = screen.getByTitle("凡例を表示") as HTMLInputElement;
+    expect(legendCheckbox.checked).toBe(false);
+
+    const dataLabelsCheckbox = screen.getByTitle("データラベルを表示") as HTMLInputElement;
+    expect(dataLabelsCheckbox.checked).toBe(true);
+
+    const stackedCheckbox = screen.getByTitle("積み上げ") as HTMLInputElement;
+    expect(stackedCheckbox.checked).toBe(true);
+
+    const headerRowCheckbox = screen.getByTitle("ヘッダ行を含む") as HTMLInputElement;
+    expect(headerRowCheckbox.checked).toBe(false);
+
+    const headerColCheckbox = screen.getByTitle("ヘッダ列を含む") as HTMLInputElement;
+    expect(headerColCheckbox.checked).toBe(true);
+  });
+
+  it("edit mode: shows グラフの編集 title and 更新 button", () => {
+    const initialValue: ChartFormValue = {
+      range: "A1:C5",
+      chartType: "bar",
+      title: "Test",
+    };
+    render(
+      <InsertChartDialog
+        initialRange="A1:A1"
+        initialValue={initialValue}
+        onApply={onApply}
+        onClose={onClose}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "グラフの編集" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "更新" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "挿入" })).toBeNull();
+  });
+
   it("shows stacked checkbox only for bar and line chart types", () => {
     render(
       <InsertChartDialog

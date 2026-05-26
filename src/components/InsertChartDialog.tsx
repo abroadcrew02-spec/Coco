@@ -20,6 +20,11 @@ export interface ChartFormValue {
 interface Props {
   /** Default A1 range for the new chart (typically the active selection). */
   initialRange: string;
+  /**
+   * When provided, the dialog runs in edit mode: pre-populates all fields
+   * from this entry, shows "グラフの編集" title and "更新" submit button.
+   */
+  initialValue?: ChartFormValue;
   onApply: (value: ChartFormValue) => void;
   onClose: () => void;
 }
@@ -50,19 +55,21 @@ const STACKED_TYPES = new Set<ChartType>(["bar", "line"]);
 
 export default function InsertChartDialog({
   initialRange,
+  initialValue,
   onApply,
   onClose,
 }: Props) {
-  const [range, setRange] = useState(initialRange);
-  const [chartType, setChartType] = useState<ChartType>("bar");
-  const [title, setTitle] = useState("");
-  const [xAxisLabel, setXAxisLabel] = useState("");
-  const [yAxisLabel, setYAxisLabel] = useState("");
-  const [showLegend, setShowLegend] = useState(true);
-  const [showDataLabels, setShowDataLabels] = useState(false);
-  const [stacked, setStacked] = useState(false);
-  const [hasHeaderRow, setHasHeaderRow] = useState(true);
-  const [hasHeaderCol, setHasHeaderCol] = useState(false);
+  const isEditMode = initialValue !== undefined;
+  const [range, setRange] = useState(initialValue?.range || initialRange);
+  const [chartType, setChartType] = useState<ChartType>(initialValue?.chartType ?? "bar");
+  const [title, setTitle] = useState(initialValue?.title ?? "");
+  const [xAxisLabel, setXAxisLabel] = useState(initialValue?.xAxisLabel ?? "");
+  const [yAxisLabel, setYAxisLabel] = useState(initialValue?.yAxisLabel ?? "");
+  const [showLegend, setShowLegend] = useState(initialValue?.showLegend ?? true);
+  const [showDataLabels, setShowDataLabels] = useState(initialValue?.showDataLabels ?? false);
+  const [stacked, setStacked] = useState(initialValue?.stacked ?? false);
+  const [hasHeaderRow, setHasHeaderRow] = useState(initialValue?.hasHeaderRow ?? true);
+  const [hasHeaderCol, setHasHeaderCol] = useState(initialValue?.hasHeaderCol ?? false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -109,7 +116,7 @@ export default function InsertChartDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <header className="ic-header">
-          <h2 id="ic-title" className="ic-title">グラフの挿入</h2>
+          <h2 id="ic-title" className="ic-title">{isEditMode ? "グラフの編集" : "グラフの挿入"}</h2>
           <button type="button" className="ic-close" onClick={onClose} aria-label="閉じる">
             ×
           </button>
@@ -240,7 +247,7 @@ export default function InsertChartDialog({
               className="ic-btn ic-btn--primary"
               onClick={submit}
             >
-              挿入
+              {isEditMode ? "更新" : "挿入"}
             </button>
           </div>
         </footer>

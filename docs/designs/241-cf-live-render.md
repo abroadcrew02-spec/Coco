@@ -7,8 +7,8 @@ Remaining steps deferred (L, 残り 3-4週).
 
 | Step | Status | Notes |
 | --- | --- | --- |
-| 1. CfSidecar 実装 (trackWrite / getBaseStyle / clearRule + composeStyle) | ✅ shipped | `src/store/cfSidecar.ts` |
-| 2. computeCfRepaint 改造 — sidecar の baseStyle を BASE として使用 | ⏳ next | 現状 `conditionalFormatRender.ts:1276` を改造 |
+| 1. CfSidecar 実装 (trackWrite / getBaseStyle / clearRule + composeStyle) | ✅ shipped | PR #262, `src/store/cfSidecar.ts` |
+| 2. computeCfApplyPlan orchestrator (sidecar 経由で paint/clear/noop 判定) | ✅ shipped | PR #268, `src/store/cfApplyPlan.ts` — PR #211 bug 1/2 直接ガード |
 | 3. range batching — per-cell facade call を矩形単位 setRangeValues に | ⏳ | — |
 | 4. iconSet glyph — DOM overlay (cellData は touch しない) | ⏳ | data-corruption bug の根本対策 |
 | 5. dataBar overlay — 背景色グラデーション DOM | ⏳ | — |

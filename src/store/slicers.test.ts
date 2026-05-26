@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   addSlicer,
   applySlicerFilters,
+  applySlicerFiltersToPivots,
   collectAllSlicerNames,
   generateSlicerName,
   listAllSlicers,
@@ -9,8 +10,10 @@ import {
   removeSlicer,
   toggleSlicerValue,
   type SlicerEntry,
+  type WorkbookSlicerPivotSnapshot,
   type WorkbookSlicerSnapshot,
 } from "./slicers";
+import type { PivotEntry } from "./pivots";
 
 // #235 — Regression suite for the pre-existing slicer engine. The
 // `src/store/slicers.ts` module shipped without tests; locking the public
@@ -248,6 +251,214 @@ describe("applySlicerFilters", () => {
       selectedValues: ["East"],
     });
     expect(() => applySlicerFilters(wb)).not.toThrow();
+  });
+});
+
+describe("applySlicerFiltersToPivots", () => {
+  // Source data 4 rows on sheet s1; pivot on the same sheet at row 10.
+  function pivotFixture(): WorkbookSlicerPivotSnapshot {
+    const pivotEntry: PivotEntry = {
+      name: "Pivot1",
+      source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
+      destination: { row: 10, col: 0 },
+      rows: ["Region"],
+      cols: [],
+      values: [{ field: "Sales", agg: "SUM" }],
+      filters: [],
+      hasHeader: true,
+    };
+    return {
+      sheetOrder: ["s1"],
+      sheets: {
+        s1: {
+          name: "Data",
+          cellData: {
+            "0": { "0": { v: "Region" }, "1": { v: "Sales" }, "2": { v: "Year" } },
+            "1": { "0": { v: "East" }, "1": { v: 100 }, "2": { v: 2024 } },
+            "2": { "0": { v: "West" }, "1": { v: 200 }, "2": { v: 2024 } },
+            "3": { "0": { v: "East" }, "1": { v: 150 }, "2": { v: 2025 } },
+            "4": { "0": { v: "West" }, "1": { v: 250 }, "2": { v: 2025 } },
+          },
+          _pivots: [pivotEntry],
+        },
+      },
+    };
+  }
+
+  it("re-renders a pivot when its slicer-driven filter changes", () => {
+    const wb = pivotFixture();
+    // Initial pivot output (no filter): East = 250, West = 450, Total = 700
+    wb.sheets!.s1!._slicers = [
+      {
+        name: "Slicer1",
+        targetTable: "Pivot1",
+        targetKind: "pivot",
+        field: "Region",
+        selectedValues: ["East"],
+      },
+    ];
+    const result = applySlicerFiltersToPivots(wb);
+    expect(result.refreshedPivots).toEqual(["Pivot1"]);
+    expect(result.skippedSlicers).toEqual([]);
+    // Pivot filters were augmented with the slicer's selection.
+    const entry = wb.sheets!.s1!._pivots![0] as PivotEntry;
+    expect(entry.filters).toEqual([{ field: "Region", values: ["East"] }]);
+    // Destination cells (row 10+) include the East total = 250; West=450 absent.
+    const dest = wb.sheets!.s1!.cellData!;
+    const pivotCells: unknown[] = [];
+    for (let r = 10; r < 25; r++) {
+      const row = dest[String(r)];
+      if (!row) continue;
+      for (const cell of Object.values(row)) {
+        if (cell && typeof cell === "object") pivotCells.push((cell as { v?: unknown }).v);
+      }
+    }
+    expect(pivotCells).toContain(250); // East total
+    expect(pivotCells).not.toContain(450); // West total absent (filtered out)
+  });
+
+  it("replaces (not appends) a pre-existing filter on the same field", () => {
+    const wb = pivotFixture();
+    // Seed with a stale slicer filter from a previous run.
+    const entry = wb.sheets!.s1!._pivots![0] as PivotEntry;
+    entry.filters = [{ field: "Region", values: ["West"] }];
+    wb.sheets!.s1!._slicers = [
+      {
+        name: "Slicer1",
+        targetTable: "Pivot1",
+        targetKind: "pivot",
+        field: "Region",
+        selectedValues: ["East"],
+      },
+    ];
+    applySlicerFiltersToPivots(wb);
+    // Should be replaced with the East filter, not appended.
+    expect(entry.filters).toHaveLength(1);
+    expect(entry.filters?.[0]).toEqual({ field: "Region", values: ["East"] });
+  });
+
+  it("preserves user-authored filters on fields the slicer doesn't touch", () => {
+    const wb = pivotFixture();
+    const entry = wb.sheets!.s1!._pivots![0] as PivotEntry;
+    entry.filters = [{ field: "Year", values: ["2024"] }]; // user authored
+    wb.sheets!.s1!._slicers = [
+      {
+        name: "Slicer1",
+        targetTable: "Pivot1",
+        targetKind: "pivot",
+        field: "Region",
+        selectedValues: ["East"],
+      },
+    ];
+    applySlicerFiltersToPivots(wb);
+    // Both filters should be present (Year preserved, Region from slicer).
+    expect(entry.filters).toEqual(expect.arrayContaining([
+      { field: "Year", values: ["2024"] },
+      { field: "Region", values: ["East"] },
+    ]));
+  });
+
+  it("removes the filter when selectedValues is empty (Clear Filter semantic)", () => {
+    const wb = pivotFixture();
+    const entry = wb.sheets!.s1!._pivots![0] as PivotEntry;
+    entry.filters = [{ field: "Region", values: ["West"] }];
+    wb.sheets!.s1!._slicers = [
+      {
+        name: "Slicer1",
+        targetTable: "Pivot1",
+        targetKind: "pivot",
+        field: "Region",
+        selectedValues: [], // clear
+      },
+    ];
+    applySlicerFiltersToPivots(wb);
+    // No filters left after clearing.
+    expect(entry.filters).toEqual([]);
+  });
+
+  it("skips slicers whose target pivot doesn't exist", () => {
+    const wb = pivotFixture();
+    wb.sheets!.s1!._slicers = [
+      {
+        name: "Slicer1",
+        targetTable: "NonExistentPivot",
+        targetKind: "pivot",
+        field: "Region",
+        selectedValues: ["East"],
+      },
+    ];
+    const result = applySlicerFiltersToPivots(wb);
+    expect(result.refreshedPivots).toEqual([]);
+    expect(result.skippedSlicers).toContain("NonExistentPivot");
+  });
+
+  it("ignores slicers with targetKind != 'pivot' (table slicers handled separately)", () => {
+    const wb = pivotFixture();
+    wb.sheets!.s1!._slicers = [
+      {
+        name: "TableSlicer",
+        targetTable: "Pivot1", // same name happens to match a pivot
+        field: "Region",
+        selectedValues: ["East"],
+        // targetKind omitted → defaults to "table"
+      },
+    ];
+    const result = applySlicerFiltersToPivots(wb);
+    // No pivot was refreshed because the slicer is table-scoped.
+    expect(result.refreshedPivots).toEqual([]);
+    const entry = wb.sheets!.s1!._pivots![0] as PivotEntry;
+    expect(entry.filters).toEqual([]); // pivot's filters untouched
+  });
+
+  it("handles multiple slicers on the same pivot (AND across fields)", () => {
+    const wb = pivotFixture();
+    wb.sheets!.s1!._slicers = [
+      {
+        name: "RegionSlicer",
+        targetTable: "Pivot1",
+        targetKind: "pivot",
+        field: "Region",
+        selectedValues: ["East"],
+      },
+      {
+        name: "YearSlicer",
+        targetTable: "Pivot1",
+        targetKind: "pivot",
+        field: "Year",
+        selectedValues: ["2025"],
+      },
+    ];
+    applySlicerFiltersToPivots(wb);
+    const entry = wb.sheets!.s1!._pivots![0] as PivotEntry;
+    expect(entry.filters).toHaveLength(2);
+    expect(entry.filters).toEqual(expect.arrayContaining([
+      { field: "Region", values: ["East"] },
+      { field: "Year", values: ["2025"] },
+    ]));
+    // Only East+2025 row passes (Sales=150). Check only the destination
+    // rows (row 10+) to avoid the source data noise at rows 1-4.
+    const dest = wb.sheets!.s1!.cellData!;
+    const pivotCells: unknown[] = [];
+    for (let r = 10; r < 25; r++) {
+      const row = dest[String(r)];
+      if (!row) continue;
+      for (const cell of Object.values(row)) {
+        if (cell && typeof cell === "object") pivotCells.push((cell as { v?: unknown }).v);
+      }
+    }
+    expect(pivotCells).toContain(150);
+    expect(pivotCells).not.toContain(100); // East+2024 filtered
+    expect(pivotCells).not.toContain(450); // West* filtered
+  });
+
+  it("tolerates malformed / empty input", () => {
+    expect(applySlicerFiltersToPivots({})).toEqual({
+      refreshedPivots: [],
+      skippedSlicers: [],
+    });
+    expect(
+      applySlicerFiltersToPivots(null as unknown as WorkbookSlicerPivotSnapshot),
+    ).toEqual({ refreshedPivots: [], skippedSlicers: [] });
   });
 });
 

@@ -159,3 +159,18 @@
   background-color: var(--coco-accent-hover);
   border-color: var(--coco-accent-hover);
 }
+
+/* slicer-pivot integration */
+.isd-radio-row {
+  display: flex;
+  gap: 16px;
+}
+
+.isd-radio {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--coco-text);
+  cursor: pointer;
+}

@@ -17,7 +17,13 @@
 //
 // Pure / framework-free.
 
-import type { DataModel, ModelTable, ModelRelationship } from "./daxEngine";
+import {
+  evaluateCalculatedColumns,
+  type CalculatedColumnDef,
+  type DataModel,
+  type ModelTable,
+  type ModelRelationship,
+} from "./daxEngine";
 
 /**
  * Stored measure definition. Distinct from DataModel internal types because
@@ -207,4 +213,33 @@ export function removeCalculatedColumn(
     ...model,
     calculatedColumns: model.calculatedColumns.filter((c) => c.id !== id),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Step 4: convenience bridge — storage model → evaluated runtime model
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert `CocoDataModel.calculatedColumns` into the engine-facing
+ * `CalculatedColumnDef[]` shape and apply them to `base` via
+ * `evaluateCalculatedColumns`.
+ *
+ * Returns a *new* DataModel with calculated-column values injected into
+ * each table's rows. The stored `CocoDataModel` is not mutated.
+ *
+ * Typical call-site:
+ * ```ts
+ * const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+ * ```
+ */
+export function applyCalculatedColumns(
+  base: DataModel,
+  cocoModel: CocoDataModel,
+): DataModel {
+  const defs: CalculatedColumnDef[] = cocoModel.calculatedColumns.map((cc) => ({
+    tableId: cc.tableId,
+    columnName: cc.columnName,
+    expression: cc.expression,
+  }));
+  return evaluateCalculatedColumns(base, defs);
 }

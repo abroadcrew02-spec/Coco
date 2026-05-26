@@ -339,4 +339,390 @@ describe("describeStep", () => {
     };
     expect(describeStep(g)).toContain("sum(Sales)");
   });
+
+  it("returns a JA label for Step 3 step kinds", () => {
+    expect(describeStep({ kind: "changeType", column: "A", targetType: "number" })).toContain("number");
+    expect(describeStep({ kind: "fillMissing", column: "A", direction: "forward" })).toContain("前方");
+    expect(describeStep({ kind: "fillMissing", column: "A", direction: "backward" })).toContain("後方");
+    expect(describeStep({ kind: "fillMissing", column: "A", direction: "fixed", fixedValue: "0" })).toContain("0");
+    expect(describeStep({ kind: "conditionalColumn", newColumn: "Cat", column: "Score", op: ">", value: "80", thenValue: "High", elseValue: "Low" })).toContain("Cat");
+    expect(describeStep({ kind: "replaceValue", column: "A", find: "x", replace: "y" })).toContain("x");
+    expect(describeStep({ kind: "replaceValue", column: "A", find: "x", replace: "y", useRegex: true })).toContain("regex");
+    expect(describeStep({ kind: "splitColumn", column: "A", delimiter: "," })).toContain(",");
+    expect(describeStep({ kind: "mergeColumns", columns: ["A", "B"], newColumn: "C" })).toContain("C");
+    expect(describeStep({ kind: "addIndexColumn" })).toContain("Index");
+  });
+});
+
+// =============================================================================
+// Step 3 — additional transform step tests
+// =============================================================================
+
+const typed: PipelineRow[] = [
+  { id: 1, score: "85", active: "true", date: "2024-01-15" },
+  { id: 2, score: "not-a-number", active: "false", date: "bad-date" },
+  { id: 3, score: "42", active: "1", date: "2024-03-01" },
+];
+
+describe("changeType", () => {
+  it("converts string column to number", () => {
+    const r = runPipeline(
+      [{ v: "123" }, { v: "456" }],
+      [{ kind: "changeType", column: "v", targetType: "number" }],
+    );
+    expect(r.rows[0].v).toBe(123);
+    expect(r.rows[1].v).toBe(456);
+  });
+
+  it("converts to boolean", () => {
+    const r = runPipeline(
+      [{ v: "true" }, { v: "false" }, { v: "1" }, { v: "0" }],
+      [{ kind: "changeType", column: "v", targetType: "boolean" }],
+    );
+    expect(r.rows[0].v).toBe(true);
+    expect(r.rows[1].v).toBe(false);
+    expect(r.rows[2].v).toBe(true);
+    expect(r.rows[3].v).toBe(false);
+  });
+
+  it("converts number to string", () => {
+    const r = runPipeline(
+      [{ v: 42 }],
+      [{ kind: "changeType", column: "v", targetType: "string" }],
+    );
+    expect(r.rows[0].v).toBe("42");
+  });
+
+  it("onError=null replaces failed conversions with null", () => {
+    const r = runPipeline(
+      typed,
+      [{ kind: "changeType", column: "score", targetType: "number", onError: "null" }],
+    );
+    expect(r.rows[0].score).toBe(85);
+    expect(r.rows[1].score).toBeNull();
+    expect(r.rows[2].score).toBe(42);
+    expect(r.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("onError=keep (default) leaves original value intact on failure", () => {
+    const r = runPipeline(
+      typed,
+      [{ kind: "changeType", column: "score", targetType: "number" }],
+    );
+    expect(r.rows[1].score).toBe("not-a-number");
+  });
+
+  it("warns when column doesn't exist", () => {
+    const r = runPipeline(typed, [{ kind: "changeType", column: "ghost", targetType: "number" }]);
+    expect(r.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("converts ISO string to date (returns ISO string)", () => {
+    const r = runPipeline(
+      [{ d: "2024-01-15" }],
+      [{ kind: "changeType", column: "d", targetType: "date" }],
+    );
+    expect(typeof r.rows[0].d).toBe("string");
+    expect(r.rows[0].d).toContain("2024");
+  });
+});
+
+describe("fillMissing", () => {
+  const data: PipelineRow[] = [
+    { x: 1 },
+    { x: null },
+    { x: null },
+    { x: 4 },
+    { x: null },
+  ];
+
+  it("forward fill propagates last non-null value", () => {
+    const r = runPipeline(data, [{ kind: "fillMissing", column: "x", direction: "forward" }]);
+    expect(r.rows.map((row) => row.x)).toEqual([1, 1, 1, 4, 4]);
+  });
+
+  it("backward fill propagates next non-null value", () => {
+    const r = runPipeline(data, [{ kind: "fillMissing", column: "x", direction: "backward" }]);
+    expect(r.rows.map((row) => row.x)).toEqual([1, 4, 4, 4, null]);
+  });
+
+  it("fixed fill replaces blanks with the given value", () => {
+    const r = runPipeline(data, [{ kind: "fillMissing", column: "x", direction: "fixed", fixedValue: "0" }]);
+    expect(r.rows.map((row) => row.x)).toEqual([1, "0", "0", 4, "0"]);
+  });
+
+  it("does not affect non-blank values", () => {
+    const r = runPipeline(
+      [{ x: "hello" }, { x: "" }],
+      [{ kind: "fillMissing", column: "x", direction: "fixed", fixedValue: "N/A" }],
+    );
+    expect(r.rows[0].x).toBe("hello");
+    expect(r.rows[1].x).toBe("N/A");
+  });
+
+  it("warns when column doesn't exist", () => {
+    const r = runPipeline(data, [{ kind: "fillMissing", column: "ghost", direction: "forward" }]);
+    expect(r.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe("conditionalColumn", () => {
+  const scores: PipelineRow[] = [
+    { name: "Alice", score: 90 },
+    { name: "Bob", score: 60 },
+    { name: "Carol", score: 80 },
+  ];
+
+  it("adds a new column based on numeric comparison", () => {
+    const r = runPipeline(scores, [
+      {
+        kind: "conditionalColumn",
+        newColumn: "Grade",
+        column: "score",
+        op: ">=",
+        value: "80",
+        thenValue: "Pass",
+        elseValue: "Fail",
+      },
+    ]);
+    expect(r.columns).toContain("Grade");
+    expect(r.rows[0].Grade).toBe("Pass"); // 90 >= 80
+    expect(r.rows[1].Grade).toBe("Fail"); // 60 < 80
+    expect(r.rows[2].Grade).toBe("Pass"); // 80 >= 80
+  });
+
+  it("supports isEmpty condition", () => {
+    const data: PipelineRow[] = [{ v: "" }, { v: "hello" }];
+    const r = runPipeline(data, [
+      { kind: "conditionalColumn", newColumn: "HasValue", column: "v", op: "isEmpty", thenValue: "No", elseValue: "Yes" },
+    ]);
+    expect(r.rows[0].HasValue).toBe("No");
+    expect(r.rows[1].HasValue).toBe("Yes");
+  });
+
+  it("supports contains condition", () => {
+    const data: PipelineRow[] = [{ city: "New York" }, { city: "Los Angeles" }];
+    const r = runPipeline(data, [
+      { kind: "conditionalColumn", newColumn: "IsNY", column: "city", op: "contains", value: "York", thenValue: "Yes", elseValue: "No" },
+    ]);
+    expect(r.rows[0].IsNY).toBe("Yes");
+    expect(r.rows[1].IsNY).toBe("No");
+  });
+
+  it("warns when source column doesn't exist", () => {
+    const r = runPipeline(scores, [
+      { kind: "conditionalColumn", newColumn: "X", column: "ghost", op: "==", value: "0", thenValue: "A", elseValue: "B" },
+    ]);
+    expect(r.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("warns when newColumn already exists", () => {
+    const r = runPipeline(scores, [
+      { kind: "conditionalColumn", newColumn: "name", column: "score", op: ">=", value: "80", thenValue: "A", elseValue: "B" },
+    ]);
+    expect(r.warnings.length).toBeGreaterThan(0);
+    expect(r.columns).toEqual(["name", "score"]); // unchanged
+  });
+});
+
+describe("replaceValue", () => {
+  const data: PipelineRow[] = [
+    { code: "A001", label: "foo bar" },
+    { code: "B002", label: "foo baz" },
+    { code: "A003", label: "qux" },
+  ];
+
+  it("replaces exact string in a column", () => {
+    const r = runPipeline(data, [{ kind: "replaceValue", column: "code", find: "A", replace: "X" }]);
+    expect(r.rows[0].code).toBe("X001");
+    expect(r.rows[1].code).toBe("B002"); // no match
+    expect(r.rows[2].code).toBe("X003");
+  });
+
+  it("replaces using regex", () => {
+    const r = runPipeline(data, [
+      { kind: "replaceValue", column: "label", find: "foo\\s+", replace: "", useRegex: true },
+    ]);
+    expect(r.rows[0].label).toBe("bar");
+    expect(r.rows[1].label).toBe("baz");
+    expect(r.rows[2].label).toBe("qux"); // no match
+  });
+
+  it("emits a warning and skips when regex is invalid", () => {
+    const r = runPipeline(data, [
+      { kind: "replaceValue", column: "label", find: "(invalid", replace: "x", useRegex: true },
+    ]);
+    expect(r.warnings.length).toBeGreaterThan(0);
+    // rows unchanged
+    expect(r.rows[0].label).toBe("foo bar");
+  });
+
+  it("replaces multiple occurrences in a cell", () => {
+    const r = runPipeline(
+      [{ v: "aaa" }],
+      [{ kind: "replaceValue", column: "v", find: "a", replace: "b" }],
+    );
+    expect(r.rows[0].v).toBe("bbb");
+  });
+
+  it("warns when column doesn't exist", () => {
+    const r = runPipeline(data, [{ kind: "replaceValue", column: "ghost", find: "x", replace: "y" }]);
+    expect(r.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe("splitColumn", () => {
+  const csv: PipelineRow[] = [
+    { tags: "apple,banana,cherry" },
+    { tags: "dog,cat" },
+    { tags: "solo" },
+  ];
+
+  it("splits into new columns (default expand=columns)", () => {
+    const r = runPipeline(csv, [{ kind: "splitColumn", column: "tags", delimiter: "," }]);
+    expect(r.columns).toEqual(["tags_1", "tags_2", "tags_3"]);
+    expect(r.rows[0]).toEqual({ tags_1: "apple", tags_2: "banana", tags_3: "cherry" });
+    expect(r.rows[1]).toEqual({ tags_1: "dog", tags_2: "cat", tags_3: null });
+    expect(r.rows[2]).toEqual({ tags_1: "solo", tags_2: null, tags_3: null });
+  });
+
+  it("splits into rows (expand=rows)", () => {
+    const r = runPipeline(csv, [{ kind: "splitColumn", column: "tags", delimiter: ",", expand: "rows" }]);
+    expect(r.rows).toHaveLength(6); // 3 + 2 + 1
+    expect(r.rows[0].tags).toBe("apple");
+    expect(r.rows[1].tags).toBe("banana");
+  });
+
+  it("respects maxParts", () => {
+    const r = runPipeline(csv, [{ kind: "splitColumn", column: "tags", delimiter: ",", maxParts: 2 }]);
+    expect(r.columns).toEqual(["tags_1", "tags_2"]);
+    expect(r.rows[0]).toEqual({ tags_1: "apple", tags_2: "banana" });
+  });
+
+  it("preserves other columns in column order", () => {
+    const data: PipelineRow[] = [{ name: "Alice", csv: "a,b" }];
+    const r = runPipeline(data, [{ kind: "splitColumn", column: "csv", delimiter: "," }]);
+    expect(r.columns).toEqual(["name", "csv_1", "csv_2"]);
+  });
+
+  it("warns when column doesn't exist", () => {
+    const r = runPipeline(csv, [{ kind: "splitColumn", column: "ghost", delimiter: "," }]);
+    expect(r.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe("mergeColumns", () => {
+  const people: PipelineRow[] = [
+    { first: "Alice", last: "Smith", age: 30 },
+    { first: "Bob", last: "Jones", age: 25 },
+  ];
+
+  it("merges columns with default space delimiter", () => {
+    const r = runPipeline(people, [
+      { kind: "mergeColumns", columns: ["first", "last"], newColumn: "fullName" },
+    ]);
+    expect(r.rows[0].fullName).toBe("Alice Smith");
+    expect(r.rows[1].fullName).toBe("Bob Jones");
+  });
+
+  it("uses custom delimiter", () => {
+    const r = runPipeline(people, [
+      { kind: "mergeColumns", columns: ["first", "last"], newColumn: "name", delimiter: "_" },
+    ]);
+    expect(r.rows[0].name).toBe("Alice_Smith");
+  });
+
+  it("drops source columns by default", () => {
+    const r = runPipeline(people, [
+      { kind: "mergeColumns", columns: ["first", "last"], newColumn: "fullName" },
+    ]);
+    expect(r.columns).toEqual(["fullName", "age"]);
+  });
+
+  it("keeps source columns when dropSources=false", () => {
+    const r = runPipeline(people, [
+      { kind: "mergeColumns", columns: ["first", "last"], newColumn: "fullName", dropSources: false },
+    ]);
+    expect(r.columns).toContain("first");
+    expect(r.columns).toContain("last");
+    expect(r.columns).toContain("fullName");
+  });
+
+  it("warns when a source column doesn't exist", () => {
+    const r = runPipeline(people, [
+      { kind: "mergeColumns", columns: ["first", "ghost"], newColumn: "x" },
+    ]);
+    expect(r.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("warns when newColumn already exists", () => {
+    const r = runPipeline(people, [
+      { kind: "mergeColumns", columns: ["first", "last"], newColumn: "age" },
+    ]);
+    expect(r.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe("addIndexColumn", () => {
+  const data: PipelineRow[] = [
+    { name: "Alice" },
+    { name: "Bob" },
+    { name: "Carol" },
+  ];
+
+  it("adds a zero-based index column by default", () => {
+    const r = runPipeline(data, [{ kind: "addIndexColumn" }]);
+    expect(r.columns).toContain("Index");
+    expect(r.rows.map((row) => row.Index)).toEqual([0, 1, 2]);
+  });
+
+  it("uses custom column name", () => {
+    const r = runPipeline(data, [{ kind: "addIndexColumn", columnName: "No" }]);
+    expect(r.columns).toContain("No");
+    expect(r.rows[0].No).toBe(0);
+  });
+
+  it("respects startAt and increment", () => {
+    const r = runPipeline(data, [{ kind: "addIndexColumn", startAt: 1, increment: 2 }]);
+    expect(r.rows.map((row) => row.Index)).toEqual([1, 3, 5]);
+  });
+
+  it("appends after existing columns", () => {
+    const r = runPipeline(data, [{ kind: "addIndexColumn" }]);
+    expect(r.columns[r.columns.length - 1]).toBe("Index");
+  });
+
+  it("warns when column name already exists", () => {
+    const r = runPipeline(
+      [{ Index: "existing" }],
+      [{ kind: "addIndexColumn" }],
+    );
+    expect(r.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe("Step 3 pipeline composition", () => {
+  it("changeType → conditionalColumn chain works", () => {
+    const data: PipelineRow[] = [
+      { val: "120" },
+      { val: "80" },
+    ];
+    const r = runPipeline(data, [
+      { kind: "changeType", column: "val", targetType: "number" },
+      { kind: "conditionalColumn", newColumn: "cat", column: "val", op: ">", value: "100", thenValue: "High", elseValue: "Low" },
+    ]);
+    expect(r.rows[0].cat).toBe("High");
+    expect(r.rows[1].cat).toBe("Low");
+  });
+
+  it("splitColumn → addIndexColumn chain", () => {
+    const data: PipelineRow[] = [{ tags: "a,b" }];
+    const r = runPipeline(data, [
+      { kind: "splitColumn", column: "tags", delimiter: ",", expand: "rows" },
+      { kind: "addIndexColumn", startAt: 1 },
+    ]);
+    expect(r.rows).toHaveLength(2);
+    expect(r.rows[0].Index).toBe(1);
+    expect(r.rows[1].Index).toBe(2);
+  });
 });

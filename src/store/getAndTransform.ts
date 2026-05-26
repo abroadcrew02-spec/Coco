@@ -4,8 +4,9 @@
 // Coco の MVP では下記スコープに絞る:
 //   - データソース: csv / json / jsonl / sqlite (本ファイルは pipeline 専用なので
 //     ソース読み込みは別レイヤー — call site で受け取った rows[] から開始)
-//   - 変換ステップ 6 種: selectColumns / dropColumns / filterRows / sort /
-//     rename / groupBy
+//   - 変換ステップ 13 種: selectColumns / dropColumns / filterRows / sort /
+//     rename / groupBy / changeType / fillMissing / conditionalColumn /
+//     replaceValue / splitColumn / mergeColumns / addIndexColumn
 //   - 結果は Array<Record<string, unknown>> + 列名配列 + warnings[]
 //
 // 設計: docs/designs/238-power-query.md の "Step 1 (foundation)" 部分。
@@ -23,7 +24,14 @@ export type TransformStep =
   | FilterRowsStep
   | SortStep
   | RenameStep
-  | GroupByStep;
+  | GroupByStep
+  | ChangeTypeStep
+  | FillMissingStep
+  | ConditionalColumnStep
+  | ReplaceValueStep
+  | SplitColumnStep
+  | MergeColumnsStep
+  | AddIndexColumnStep;
 
 export interface SelectColumnsStep {
   kind: "selectColumns";
@@ -83,6 +91,102 @@ export interface GroupByStep {
     /** Optional output column name; defaults to `${fn}_${column}`. */
     as?: string;
   }>;
+}
+
+// ---------------------------------------------------------------------------
+// Step 3 — additional transform step types
+// ---------------------------------------------------------------------------
+
+/** How to handle conversion failures in changeType. */
+export type ChangeTypeErrorHandling = "error" | "null" | "keep";
+
+export interface ChangeTypeStep {
+  kind: "changeType";
+  column: string;
+  targetType: "string" | "number" | "boolean" | "date";
+  /**
+   * What to do when conversion fails:
+   * - "error": emit a warning and leave value as-is (same as "keep")
+   * - "null":  replace with null
+   * - "keep":  leave the original value (default)
+   */
+  onError?: ChangeTypeErrorHandling;
+}
+
+export type FillDirection = "forward" | "backward" | "fixed";
+
+export interface FillMissingStep {
+  kind: "fillMissing";
+  column: string;
+  direction: FillDirection;
+  /** Required when direction === "fixed". */
+  fixedValue?: string;
+}
+
+export type ConditionalOp = ">" | "<" | ">=" | "<=" | "==" | "!=" | "contains" | "isEmpty" | "isNotEmpty";
+
+export interface ConditionalColumnStep {
+  kind: "conditionalColumn";
+  /** Name of the new column to add. */
+  newColumn: string;
+  /** Source column to test. */
+  column: string;
+  op: ConditionalOp;
+  /** Comparison value (not needed for isEmpty / isNotEmpty). */
+  value?: string;
+  /** Output when condition is true. */
+  thenValue: string;
+  /** Output when condition is false. */
+  elseValue: string;
+}
+
+export interface ReplaceValueStep {
+  kind: "replaceValue";
+  column: string;
+  /** Value / pattern to find. */
+  find: string;
+  /** Replacement string. */
+  replace: string;
+  /** When true, `find` is treated as a regular expression. Default false. */
+  useRegex?: boolean;
+}
+
+export type SplitColumnExpand = "columns" | "rows";
+
+export interface SplitColumnStep {
+  kind: "splitColumn";
+  column: string;
+  delimiter: string;
+  /**
+   * - "columns": spread parts into new columns (col_1, col_2, …)
+   * - "rows":    each part becomes a separate row
+   * Default: "columns".
+   */
+  expand?: SplitColumnExpand;
+  /** Maximum number of parts (for "columns" expand only). Default: unlimited. */
+  maxParts?: number;
+}
+
+export interface MergeColumnsStep {
+  kind: "mergeColumns";
+  /** Columns to combine, in order. */
+  columns: string[];
+  /** Delimiter placed between values. Default: " ". */
+  delimiter?: string;
+  /** Name of the merged output column. */
+  newColumn: string;
+  /** When true, drop the source columns after merging. Default true. */
+  dropSources?: boolean;
+}
+
+export interface AddIndexColumnStep {
+  kind: "addIndexColumn";
+  /** Name of the new index column. Default: "Index". */
+  columnName?: string;
+  /** Starting value. Default: 0. */
+  startAt?: number;
+  /** Increment per row. Default: 1. */
+  increment?: number;
 }
 
 export interface PipelineResult {
@@ -402,6 +506,356 @@ function applyGroupBy(state: PipelineResult, step: GroupByStep): PipelineResult 
 }
 
 // ---------------------------------------------------------------------------
+// Step 3 — implementations
+// ---------------------------------------------------------------------------
+
+function convertValue(
+  v: unknown,
+  targetType: ChangeTypeStep["targetType"],
+): { value: unknown; ok: boolean } {
+  switch (targetType) {
+    case "string":
+      return { value: asString(v), ok: true };
+    case "number": {
+      const n = toNumberOrNaN(v);
+      return Number.isFinite(n) ? { value: n, ok: true } : { value: v, ok: false };
+    }
+    case "boolean": {
+      if (typeof v === "boolean") return { value: v, ok: true };
+      const s = asString(v).toLowerCase().trim();
+      if (s === "true" || s === "1" || s === "yes") return { value: true, ok: true };
+      if (s === "false" || s === "0" || s === "no") return { value: false, ok: true };
+      return { value: v, ok: false };
+    }
+    case "date": {
+      if (v instanceof Date) return { value: v, ok: true };
+      const s = asString(v);
+      const d = new Date(s);
+      return !isNaN(d.getTime()) ? { value: d.toISOString(), ok: true } : { value: v, ok: false };
+    }
+  }
+}
+
+function applyChangeType(
+  state: PipelineResult,
+  step: ChangeTypeStep,
+): PipelineResult {
+  if (!state.columns.includes(step.column)) {
+    return {
+      ...state,
+      warnings: [
+        ...state.warnings,
+        `changeType: 列 '${step.column}' は存在しないため step を無視しました`,
+      ],
+    };
+  }
+  const onError = step.onError ?? "keep";
+  const warnings = [...state.warnings];
+  let errCount = 0;
+  const rows = state.rows.map((row) => {
+    const { value, ok } = convertValue(row[step.column], step.targetType);
+    if (!ok) {
+      errCount++;
+      if (onError === "null") return { ...row, [step.column]: null };
+      // "keep" or "error" — keep original value
+      return row;
+    }
+    return { ...row, [step.column]: value };
+  });
+  if (errCount > 0) {
+    warnings.push(
+      `changeType: 列 '${step.column}' の ${errCount} 行が ${step.targetType} に変換できませんでした (onError="${onError}")`,
+    );
+  }
+  return { ...state, rows, warnings };
+}
+
+function applyFillMissing(
+  state: PipelineResult,
+  step: FillMissingStep,
+): PipelineResult {
+  if (!state.columns.includes(step.column)) {
+    return {
+      ...state,
+      warnings: [
+        ...state.warnings,
+        `fillMissing: 列 '${step.column}' は存在しないため step を無視しました`,
+      ],
+    };
+  }
+  const rows = state.rows.slice();
+  if (step.direction === "fixed") {
+    const fill = step.fixedValue ?? "";
+    return {
+      ...state,
+      rows: rows.map((row) =>
+        isBlank(row[step.column]) ? { ...row, [step.column]: fill } : row,
+      ),
+    };
+  }
+  if (step.direction === "forward") {
+    let last: unknown = null;
+    return {
+      ...state,
+      rows: rows.map((row) => {
+        if (isBlank(row[step.column])) {
+          return last !== null ? { ...row, [step.column]: last } : row;
+        }
+        last = row[step.column];
+        return row;
+      }),
+    };
+  }
+  // backward
+  let last: unknown = null;
+  const filled = new Array(rows.length);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (isBlank(rows[i][step.column])) {
+      filled[i] = last !== null ? { ...rows[i], [step.column]: last } : rows[i];
+    } else {
+      last = rows[i][step.column];
+      filled[i] = rows[i];
+    }
+  }
+  return { ...state, rows: filled };
+}
+
+function evalConditional(cellValue: unknown, step: ConditionalColumnStep): boolean {
+  if (step.op === "isEmpty") return isBlank(cellValue);
+  if (step.op === "isNotEmpty") return !isBlank(cellValue);
+  const expected = step.value ?? "";
+  if (step.op === "contains") return asString(cellValue).includes(expected);
+  const lvNum = toNumberOrNaN(cellValue);
+  const rvNum = toNumberOrNaN(expected);
+  const numericCompare = Number.isFinite(lvNum) && Number.isFinite(rvNum);
+  const ls = asString(cellValue);
+  const rs = expected;
+  switch (step.op) {
+    case "==": return numericCompare ? lvNum === rvNum : ls === rs;
+    case "!=": return numericCompare ? lvNum !== rvNum : ls !== rs;
+    case ">":  return numericCompare ? lvNum > rvNum : ls > rs;
+    case "<":  return numericCompare ? lvNum < rvNum : ls < rs;
+    case ">=": return numericCompare ? lvNum >= rvNum : ls >= rs;
+    case "<=": return numericCompare ? lvNum <= rvNum : ls <= rs;
+  }
+}
+
+function applyConditionalColumn(
+  state: PipelineResult,
+  step: ConditionalColumnStep,
+): PipelineResult {
+  if (!state.columns.includes(step.column)) {
+    return {
+      ...state,
+      warnings: [
+        ...state.warnings,
+        `conditionalColumn: 列 '${step.column}' は存在しないため step を無視しました`,
+      ],
+    };
+  }
+  if (state.columns.includes(step.newColumn)) {
+    return {
+      ...state,
+      warnings: [
+        ...state.warnings,
+        `conditionalColumn: 新列 '${step.newColumn}' は既に存在するため step を無視しました`,
+      ],
+    };
+  }
+  const newCols = [...state.columns, step.newColumn];
+  const rows = state.rows.map((row) => {
+    const result = evalConditional(row[step.column], step);
+    return { ...row, [step.newColumn]: result ? step.thenValue : step.elseValue };
+  });
+  return { ...state, columns: newCols, rows };
+}
+
+function applyReplaceValue(
+  state: PipelineResult,
+  step: ReplaceValueStep,
+): PipelineResult {
+  if (!state.columns.includes(step.column)) {
+    return {
+      ...state,
+      warnings: [
+        ...state.warnings,
+        `replaceValue: 列 '${step.column}' は存在しないため step を無視しました`,
+      ],
+    };
+  }
+  const warnings = [...state.warnings];
+  let re: RegExp | null = null;
+  if (step.useRegex) {
+    try {
+      re = new RegExp(step.find, "g");
+    } catch {
+      warnings.push(
+        `replaceValue: 正規表現 '${step.find}' が無効なため step を無視しました`,
+      );
+      return { ...state, warnings };
+    }
+  }
+  const rows = state.rows.map((row) => {
+    const s = asString(row[step.column]);
+    const replaced = re
+      ? s.replace(re, step.replace)
+      : s.split(step.find).join(step.replace);
+    return { ...row, [step.column]: replaced };
+  });
+  return { ...state, rows, warnings };
+}
+
+function applySplitColumn(
+  state: PipelineResult,
+  step: SplitColumnStep,
+): PipelineResult {
+  if (!state.columns.includes(step.column)) {
+    return {
+      ...state,
+      warnings: [
+        ...state.warnings,
+        `splitColumn: 列 '${step.column}' は存在しないため step を無視しました`,
+      ],
+    };
+  }
+  const expand = step.expand ?? "columns";
+  const maxParts = step.maxParts && step.maxParts > 0 ? step.maxParts : undefined;
+
+  if (expand === "rows") {
+    // Each part → a new row; original column is replaced with the part value.
+    const newRows: PipelineRow[] = [];
+    for (const row of state.rows) {
+      const s = asString(row[step.column]);
+      const parts = s.split(step.delimiter);
+      const limited = maxParts ? parts.slice(0, maxParts) : parts;
+      for (const part of limited) {
+        newRows.push({ ...row, [step.column]: part });
+      }
+    }
+    return { ...state, rows: newRows };
+  }
+
+  // "columns": find the max number of parts across all rows first
+  const allParts: string[][] = state.rows.map((row) => {
+    const s = asString(row[step.column]);
+    const parts = s.split(step.delimiter);
+    return maxParts ? parts.slice(0, maxParts) : parts;
+  });
+  const maxCount = allParts.reduce((m, p) => Math.max(m, p.length), 0);
+  // New column names: {column}_1, {column}_2, …
+  const newColNames = Array.from({ length: maxCount }, (_, i) => `${step.column}_${i + 1}`);
+  // Drop original column; insert new columns in its place
+  const colIdx = state.columns.indexOf(step.column);
+  const newCols = [
+    ...state.columns.slice(0, colIdx),
+    ...newColNames,
+    ...state.columns.slice(colIdx + 1),
+  ];
+  const rows = state.rows.map((row, ri) => {
+    const parts = allParts[ri];
+    const out: PipelineRow = {};
+    for (const c of state.columns) {
+      if (c === step.column) continue;
+      out[c] = row[c];
+    }
+    for (let i = 0; i < maxCount; i++) {
+      out[newColNames[i]] = i < parts.length ? parts[i] : null;
+    }
+    return out;
+  });
+  // Re-order to respect newCols ordering
+  const orderedRows = rows.map((row) => {
+    const out: PipelineRow = {};
+    for (const c of newCols) out[c] = row[c];
+    return out;
+  });
+  return { ...state, columns: newCols, rows: orderedRows };
+}
+
+function applyMergeColumns(
+  state: PipelineResult,
+  step: MergeColumnsStep,
+): PipelineResult {
+  const missing = step.columns.filter((c) => !state.columns.includes(c));
+  if (missing.length > 0) {
+    return {
+      ...state,
+      warnings: [
+        ...state.warnings,
+        `mergeColumns: 列 ${missing.map((c) => `'${c}'`).join(", ")} は存在しないため step を無視しました`,
+      ],
+    };
+  }
+  if (state.columns.includes(step.newColumn)) {
+    return {
+      ...state,
+      warnings: [
+        ...state.warnings,
+        `mergeColumns: 新列 '${step.newColumn}' は既に存在するため step を無視しました`,
+      ],
+    };
+  }
+  const delim = step.delimiter ?? " ";
+  const dropSources = step.dropSources !== false; // default true
+  const srcSet = new Set(step.columns);
+  // New column order: insert newColumn where the first source column was.
+  // When dropSources=true: remove all source columns.
+  // When dropSources=false: keep all source columns and also add newColumn.
+  const firstIdx = state.columns.findIndex((c) => srcSet.has(c));
+  const newCols: string[] = [];
+  for (let i = 0; i < state.columns.length; i++) {
+    const col = state.columns[i];
+    if (i === firstIdx) {
+      // Insert newColumn at this position
+      newCols.push(step.newColumn);
+      if (!dropSources) {
+        // Keep original source column too
+        newCols.push(col);
+      }
+      // If dropSources, skip the source column (don't push it)
+    } else if (dropSources && srcSet.has(col)) {
+      // Drop this source column
+    } else {
+      newCols.push(col);
+    }
+  }
+  const rows = state.rows.map((row) => {
+    const merged = step.columns.map((c) => asString(row[c])).join(delim);
+    const out: PipelineRow = {};
+    for (const c of newCols) {
+      if (c === step.newColumn) out[c] = merged;
+      else out[c] = row[c];
+    }
+    return out;
+  });
+  return { ...state, columns: newCols, rows };
+}
+
+function applyAddIndexColumn(
+  state: PipelineResult,
+  step: AddIndexColumnStep,
+): PipelineResult {
+  const colName = step.columnName ?? "Index";
+  if (state.columns.includes(colName)) {
+    return {
+      ...state,
+      warnings: [
+        ...state.warnings,
+        `addIndexColumn: 列 '${colName}' は既に存在するため step を無視しました`,
+      ],
+    };
+  }
+  const startAt = step.startAt ?? 0;
+  const increment = step.increment ?? 1;
+  const newCols = [...state.columns, colName];
+  const rows = state.rows.map((row, i) => ({
+    ...row,
+    [colName]: startAt + i * increment,
+  }));
+  return { ...state, columns: newCols, rows };
+}
+
+// ---------------------------------------------------------------------------
 // Public entry
 // ---------------------------------------------------------------------------
 
@@ -448,6 +902,27 @@ export function runPipeline(
       case "groupBy":
         state = applyGroupBy(state, step);
         break;
+      case "changeType":
+        state = applyChangeType(state, step);
+        break;
+      case "fillMissing":
+        state = applyFillMissing(state, step);
+        break;
+      case "conditionalColumn":
+        state = applyConditionalColumn(state, step);
+        break;
+      case "replaceValue":
+        state = applyReplaceValue(state, step);
+        break;
+      case "splitColumn":
+        state = applySplitColumn(state, step);
+        break;
+      case "mergeColumns":
+        state = applyMergeColumns(state, step);
+        break;
+      case "addIndexColumn":
+        state = applyAddIndexColumn(state, step);
+        break;
     }
   }
   return state;
@@ -474,5 +949,22 @@ export function describeStep(step: TransformStep): string {
       const aggs = step.agg.map((a) => `${a.fn}(${a.column})`).join(", ");
       return `${step.key} でグループ化: ${aggs}`;
     }
+    case "changeType":
+      return `${step.column} を ${step.targetType} に変換`;
+    case "fillMissing":
+      if (step.direction === "fixed") return `${step.column} の空白を '${step.fixedValue ?? ""}' で補完`;
+      return `${step.column} の空白を ${step.direction === "forward" ? "前方" : "後方"}補完`;
+    case "conditionalColumn": {
+      const opLabel = step.op === "isEmpty" ? "が空" : step.op === "isNotEmpty" ? "が空でない" : `${step.op} '${step.value ?? ""}'`;
+      return `条件列 ${step.newColumn}: ${step.column} ${opLabel}`;
+    }
+    case "replaceValue":
+      return `${step.column}: '${step.find}' → '${step.replace}'${step.useRegex ? " (regex)" : ""}`;
+    case "splitColumn":
+      return `${step.column} を '${step.delimiter}' で分割 (${step.expand ?? "columns"})`;
+    case "mergeColumns":
+      return `${step.columns.join(" + ")} → ${step.newColumn}`;
+    case "addIndexColumn":
+      return `インデックス列 '${step.columnName ?? "Index"}' を追加 (${step.startAt ?? 0}~)`;
   }
 }

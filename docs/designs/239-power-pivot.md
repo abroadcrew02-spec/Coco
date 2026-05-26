@@ -1,6 +1,20 @@
-# #240 Power Pivot / Data Model — MVP 設計
+# #239 Power Pivot / Data Model — MVP 設計
 
-Status: **Design only**. Implementation deferred (XL, 6-8週 MVP / 3-4ヶ月 full).
+Status: **Step 1 shipped** — DAX engine foundation (9 functions) + 33 tests (PR #265).
+Remaining steps deferred (XL, 残り 5-7週 MVP).
+
+## Progress
+
+| Step | Status | Notes |
+| --- | --- | --- |
+| 1. DAX engine: parser + evaluator (SUM/AVG/MIN/MAX/COUNT/COUNTROWS/DISTINCTCOUNT/IF/ALL) | ✅ shipped | `src/store/daxEngine.ts` |
+| 2. RELATED + relationship traversal | ⏳ next | M:1 lookup |
+| 3. FILTER / CALCULATE — filter context propagation | ⏳ | |
+| 4. SUMX / AVERAGEX — row-context iteration | ⏳ | |
+| 5. xlsx round-trip: `xl/model/item.data` 経路の preserve (Coco は触らない) | ⏳ | |
+| 6. `_cocoDataModel` 保存 + Coco-native measure 定義 | ⏳ | |
+| 7. DataModelDialog UI (テーブル一覧 + measure 編集) | ⏳ | |
+| 8. Pivot 統合 (PR #237 と連動) | ⏳ | |
 
 ## ゴール (再掲)
 

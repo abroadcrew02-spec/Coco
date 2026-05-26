@@ -12,6 +12,7 @@ Remaining steps deferred (XL, 残り 3-5週).
 | 3. CSV ソース → rows[] | ✅ shipped | 既存 `workbook_import_csv` (Rust) |
 | 4. SQLite ソース → rows[] | ✅ 既存 shipped | `data_connection_load_sqlite` (Rust + `rusqlite`) |
 | 4b. xlsx round-trip: queryTables byte-preserve | ✅ shipped | PR #270 — PRESERVED_PREFIXES に追加 |
+| 5. `_cocoQueries` 保存 + CRUD helpers | ✅ shipped | PR #272 — pure helpers + 24 tests |
 | 5. GetAndTransformDialog UI (ソース選択 + ステップ追加 + プレビュー) | ⏳ | |
 | 6. `_cocoQueries` 保存 + COCO_ROOT_EXTENSION_KEYS | ⏳ | |
 | 7. xlsx round-trip via cocoExtensions/queries.json | ⏳ | |

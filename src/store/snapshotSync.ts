@@ -44,6 +44,11 @@ export const COCO_ROOT_EXTENSION_KEYS = [
   // we byte-preserve via _preservedParts). The Coco model is JSON and can be
   // edited from the DataModelDialog (planned). Both layers can coexist.
   "_cocoDataModel",
+  // #238 Step 5 — Coco-native Get & Transform queries (data source + step
+  // pipeline). Saved so the user can refresh a query after a reload. Excel
+  // stores connection metadata in xl/queryTables/ (byte-preserved); Coco's
+  // queries are a separate JSON-typed layer.
+  "_cocoQueries",
 ] as const;
 
 /**

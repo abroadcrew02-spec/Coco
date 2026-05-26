@@ -616,6 +616,46 @@ export function clearSlicerSelection(
 }
 
 /**
+ * Reset EVERY slicer in the workbook to "show all" (selectedValues=[]).
+ * Useful when an analyst has stacked multiple slicers and wants to start
+ * over without clicking each one individually. Returns:
+ *   - cloned workbook + the number of slicers that were actually reset
+ *     (slicers that were already cleared are reported as 0, so the UI can
+ *     show a meaningful toast)
+ *   - null when the input is malformed
+ */
+export function clearAllSlicers(
+  workbook: WorkbookSlicerSnapshot,
+): { snapshotMutated: WorkbookSlicerSnapshot; clearedCount: number } | null {
+  if (!workbook || typeof workbook !== "object") return null;
+  let cloned: WorkbookSlicerSnapshot;
+  try {
+    cloned = JSON.parse(JSON.stringify(workbook)) as WorkbookSlicerSnapshot;
+  } catch {
+    return null;
+  }
+  const sheets = cloned.sheets;
+  if (!sheets || typeof sheets !== "object") {
+    return { snapshotMutated: cloned, clearedCount: 0 };
+  }
+  let clearedCount = 0;
+  for (const sid of Object.keys(sheets)) {
+    const sh = sheets[sid];
+    const list = sh?._slicers;
+    if (!Array.isArray(list)) continue;
+    for (const slicer of list) {
+      if (!slicer) continue;
+      const prev = Array.isArray(slicer.selectedValues) ? slicer.selectedValues : [];
+      if (prev.length > 0) {
+        slicer.selectedValues = [];
+        clearedCount++;
+      }
+    }
+  }
+  return { snapshotMutated: cloned, clearedCount };
+}
+
+/**
  * Invert the named slicer's selection: every distinct value present in the
  * target column that is NOT currently selected becomes selected, and vice
  * versa. When the previous selection was empty (= show all), invert means

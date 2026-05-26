@@ -3,6 +3,7 @@ import {
   addSlicer,
   applySlicerFilters,
   applySlicerFiltersToPivots,
+  clearAllSlicers,
   clearSlicerSelection,
   collectAllSlicerNames,
   generateSlicerName,
@@ -554,6 +555,66 @@ describe("setSlicerSelection / clearSlicerSelection", () => {
     const wb = fx();
     const before = JSON.stringify(wb);
     setSlicerSelection(wb, "Slicer1", ["X"]);
+    expect(JSON.stringify(wb)).toBe(before);
+  });
+});
+
+describe("clearAllSlicers", () => {
+  it("clears every slicer in the workbook and reports the count", () => {
+    let wb = addSlicer(fixture(), "s1", {
+      name: "Slicer1",
+      targetTable: "T1",
+      field: "Region",
+      selectedValues: ["East"],
+    });
+    wb = addSlicer(wb, "s1", {
+      name: "Slicer2",
+      targetTable: "T1",
+      field: "Sales",
+      selectedValues: ["100", "200"],
+    });
+    const result = clearAllSlicers(wb);
+    expect(result?.clearedCount).toBe(2);
+    const sl = result!.snapshotMutated.sheets!.s1!._slicers!;
+    expect(sl[0].selectedValues).toEqual([]);
+    expect(sl[1].selectedValues).toEqual([]);
+  });
+
+  it("counts only slicers that were actually non-empty", () => {
+    let wb = addSlicer(fixture(), "s1", {
+      name: "Slicer1",
+      targetTable: "T1",
+      field: "Region",
+      selectedValues: [], // already cleared
+    });
+    wb = addSlicer(wb, "s1", {
+      name: "Slicer2",
+      targetTable: "T1",
+      field: "Sales",
+      selectedValues: ["X"],
+    });
+    const result = clearAllSlicers(wb);
+    expect(result?.clearedCount).toBe(1);
+  });
+
+  it("returns clearedCount=0 when no slicers exist", () => {
+    const result = clearAllSlicers(fixture());
+    expect(result?.clearedCount).toBe(0);
+  });
+
+  it("returns null on malformed input", () => {
+    expect(clearAllSlicers(null as unknown as WorkbookSlicerSnapshot)).toBeNull();
+  });
+
+  it("does not mutate the original workbook", () => {
+    const wb = addSlicer(fixture(), "s1", {
+      name: "Slicer1",
+      targetTable: "T1",
+      field: "Region",
+      selectedValues: ["East"],
+    });
+    const before = JSON.stringify(wb);
+    clearAllSlicers(wb);
     expect(JSON.stringify(wb)).toBe(before);
   });
 });

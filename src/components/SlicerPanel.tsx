@@ -20,6 +20,8 @@ interface Props {
   onSelectAll?: (name: string, values: string[]) => void;
   /** Invert the named slicer's selection. Optional. */
   onInvertSelection?: (name: string) => void;
+  /** Reset every slicer in the workbook to "show all" in one batch. Optional. */
+  onClearAllSlicers?: () => void;
 }
 
 /** Render an empty-value pill as "(空白)" so users can see it's clickable. */
@@ -32,6 +34,7 @@ export default function SlicerPanel({
   onClearSelection,
   onSelectAll,
   onInvertSelection,
+  onClearAllSlicers,
 }: Props) {
   // Parse once per snapshot change. Mirrors TableInfoPanel — the snapshot
   // JSON only updates on commit so this stays cheap.
@@ -48,11 +51,25 @@ export default function SlicerPanel({
     return { listings: listAllSlicers(p), parsed: p };
   }, [workbookSnapshotJson]);
 
+  // Any slicer with a non-empty selection — enables the "reset all" button.
+  const anyActive = listings.some((l) => (l.slicer.selectedValues ?? []).length > 0);
+
   return (
     <aside className="slp-root" aria-label="スライサー一覧">
       <header className="slp-header">
         <h3 className="slp-title">スライサー</h3>
         <span className="slp-count">{listings.length}</span>
+        {onClearAllSlicers && listings.length > 1 && (
+          <button
+            type="button"
+            className="slp-header-btn"
+            onClick={onClearAllSlicers}
+            disabled={!anyActive}
+            title="すべてのスライサーの選択をクリア"
+          >
+            すべてリセット
+          </button>
+        )}
       </header>
       {listings.length === 0 ? (
         <p className="slp-empty">

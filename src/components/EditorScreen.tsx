@@ -198,6 +198,7 @@ import {
   type WorkbookSlicerPivotSnapshot,
   type WorkbookSlicerSnapshot,
   applySlicerFiltersToPivots,
+  clearAllSlicers as clearAllSlicersHelper,
   clearSlicerSelection as clearSlicerSelectionHelper,
   generateSlicerName,
   invertSlicerSelection as invertSlicerSelectionHelper,
@@ -2819,6 +2820,49 @@ export default function EditorScreen() {
     },
     [applyMutatedSnapshot],
   );
+
+  const clearAllSlicersHandler = useCallback(() => {
+    const fUniver = fUniverRef.current;
+    const workbook = fUniver?.getActiveWorkbook();
+    if (!workbook) return;
+    const fresh = workbook.save() as unknown as WorkbookSlicerSnapshot;
+    const result = clearAllSlicersHelper(fresh);
+    if (!result || result.clearedCount === 0) return;
+    applySlicerFiltersToPivots(result.snapshotMutated as unknown as WorkbookSlicerPivotSnapshot);
+    applyMutatedSnapshot(JSON.stringify(result.snapshotMutated));
+  }, [applyMutatedSnapshot]);
+
+  // Excel-parity: Ctrl+; inserts today's date, Ctrl+Shift+; inserts current
+  // time. We write a VALUE (not a formula) so the cell freezes at insertion
+  // — Excel's =TODAY() / =NOW() variants are NOT what this shortcut does in
+  // Excel either. Uses the user's locale for display via toLocale*String.
+  const insertDateTimeNow = useCallback((mode: "date" | "time") => {
+    const fUniver = fUniverRef.current;
+    const workbook = fUniver?.getActiveWorkbook();
+    const sheet = workbook?.getActiveSheet();
+    if (!sheet) return;
+    const sel = sheet.getSelection?.();
+    const range = sel?.getActiveRange();
+    if (!range) return;
+    const now = new Date();
+    let payload: string;
+    if (mode === "date") {
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, "0");
+      const d = String(now.getDate()).padStart(2, "0");
+      payload = `${y}-${m}-${d}`;
+    } else {
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mm = String(now.getMinutes()).padStart(2, "0");
+      const ss = String(now.getSeconds()).padStart(2, "0");
+      payload = `${hh}:${mm}:${ss}`;
+    }
+    try {
+      range.setValue(payload);
+    } catch (err) {
+      console.warn("[Coco] insertDateTimeNow failed:", err);
+    }
+  }, []);
 
   // --- Camera (#184) ---------------------------------------------------------
   // Snapshot the active selection into a "live" camera image: the source
@@ -6886,6 +6930,16 @@ export default function EditorScreen() {
         // cell, inferring the range from numeric neighbours.
         e.preventDefault();
         applyAutoSum();
+      } else if (mod && !e.altKey && (e.key === ";" || e.key === ":")) {
+        // Ctrl+; — insert today's date (YYYY-MM-DD) into the active cell.
+        // Ctrl+Shift+; (a.k.a. Ctrl+:) — insert current time (HH:MM:SS).
+        // Excel parity shortcuts that write a VALUE (not a formula) so the
+        // cell freezes at the instant of insertion, the way Excel does it.
+        // Key detection: many JIS / 60% layouts send ":" for Ctrl+Shift+;,
+        // others send ";" with shiftKey set — accept both.
+        const wantsTime = e.shiftKey || e.key === ":";
+        e.preventDefault();
+        insertDateTimeNow(wantsTime ? "time" : "date");
       }
     },
     [
@@ -6900,6 +6954,7 @@ export default function EditorScreen() {
       formatPainterMode,
       deactivateFormatPainter,
       applyAutoSum,
+      insertDateTimeNow,
     ]
   );
 
@@ -8864,6 +8919,7 @@ export default function EditorScreen() {
             onClearSelection={clearSlicer}
             onSelectAll={selectAllSlicer}
             onInvertSelection={invertSlicer}
+            onClearAllSlicers={clearAllSlicersHandler}
           />
         )}
         {tracePanelOpen && currentSnapshotJson && (

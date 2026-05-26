@@ -718,6 +718,12 @@ const dataTab: RibbonTabDef = {
           size: "large",
         },
         {
+          id: "data-manage-queries",
+          labelKey: "ribbon.btn.manageQueries",
+          icon: "📋",
+          action: editorCommand("data-manage-queries"),
+        },
+        {
           id: "data-connections",
           labelKey: "ribbon.btn.dataConnections",
           icon: "🔌",

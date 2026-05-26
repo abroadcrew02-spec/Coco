@@ -181,21 +181,30 @@ function valueToKey(v: unknown): string {
 }
 
 /**
- * Return the sorted unique values found in the target table's `field` column,
- * skipping the header row. Returns [] when:
- *   - the table doesn't exist
- *   - the field doesn't match any of the table's columns
+ * Return the sorted unique values found in the target table OR pivot source's
+ * `field` column, skipping the header row.
  *
- * Result order: locale-naive lexical sort with blanks first. Numbers are
- * compared as strings here — sufficient for the MVP filter UI (Excel does
- * the same in its slicer popovers, sorting on the display string).
+ * When `targetKind` is "pivot", `targetName` is looked up in `_pivots` and the
+ * distinct values come from the pivot's source range (which is the set of
+ * rows the pivot aggregates from — what the slicer actually filters).
+ *
+ * Returns [] when:
+ *   - the target doesn't exist
+ *   - the field doesn't match any column
+ *
+ * Result order: locale-naive lexical sort. Numbers are compared as strings —
+ * matches Excel's slicer popover behaviour (sort on display string).
  */
 export function listDistinctValues(
-  snapshot: WorkbookSlicerSnapshot,
-  tableName: string,
+  snapshot: WorkbookSlicerSnapshot | WorkbookSlicerPivotSnapshot,
+  targetName: string,
   field: string,
+  targetKind: "table" | "pivot" = "table",
 ): string[] {
-  const hit = findTable(snapshot, tableName);
+  if (targetKind === "pivot") {
+    return listDistinctValuesForPivot(snapshot as WorkbookSlicerPivotSnapshot, targetName, field);
+  }
+  const hit = findTable(snapshot, targetName);
   if (!hit) return [];
   const { sheet, table } = hit;
   const fieldOffset = fieldIndexInTable(table, field);
@@ -212,6 +221,72 @@ export function listDistinctValues(
       const cell = row?.[String(col)];
       v = cell?.v;
     }
+    seen.add(valueToKey(v));
+  }
+  const out = Array.from(seen);
+  out.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return out;
+}
+
+/**
+ * Distinct values from a pivot's source range, projected onto the named field.
+ * The pivot's source is `(sheetId, {r1,c1,r2,c2})` and the field is one of the
+ * column headers (read from the header row when `pivot.hasHeader === true`).
+ *
+ * Returns [] when the pivot is missing, the source sheet is gone, or the
+ * field isn't a header in the source range.
+ */
+function listDistinctValuesForPivot(
+  snapshot: WorkbookSlicerPivotSnapshot,
+  pivotName: string,
+  field: string,
+): string[] {
+  const sheets = snapshot?.sheets;
+  if (!sheets || typeof sheets !== "object") return [];
+  let pivot: PivotEntry | null = null;
+  for (const sid of Object.keys(sheets)) {
+    const list = (sheets[sid] as SheetWithPivots | undefined)?._pivots;
+    if (!Array.isArray(list)) continue;
+    for (const p of list) {
+      if (p && p.name === pivotName) {
+        pivot = p;
+        break;
+      }
+    }
+    if (pivot) break;
+  }
+  if (!pivot) return [];
+
+  const srcSheet = sheets[pivot.source.sheetId];
+  const cellData = srcSheet?.cellData;
+  const { r1, r2, c1, c2 } = pivot.source.range;
+  // Locate the column for `field` by scanning the header row when present;
+  // fall back to ColumnN naming when hasHeader is false.
+  let fieldCol = -1;
+  if (pivot.hasHeader && cellData) {
+    const headerRow = cellData[String(r1)];
+    for (let c = c1; c <= c2; c++) {
+      const v = headerRow?.[String(c)]?.v;
+      const name = v === undefined || v === null ? "" : String(v).trim();
+      if (name === field) {
+        fieldCol = c;
+        break;
+      }
+    }
+  } else {
+    // ColumnN naming: "Column1" → c1, "Column2" → c1+1, ...
+    const m = /^Column(\d+)$/.exec(field);
+    if (m) {
+      const idx = Number.parseInt(m[1], 10) - 1;
+      if (idx >= 0 && c1 + idx <= c2) fieldCol = c1 + idx;
+    }
+  }
+  if (fieldCol < 0) return [];
+
+  const startRow = pivot.hasHeader ? r1 + 1 : r1;
+  const seen = new Set<string>();
+  for (let r = startRow; r <= r2; r++) {
+    const v = cellData?.[String(r)]?.[String(fieldCol)]?.v;
     seen.add(valueToKey(v));
   }
   const out = Array.from(seen);
@@ -491,6 +566,100 @@ export function listAllSlicers(workbook: WorkbookSlicerSnapshot): SlicerListing[
 /** Workbook-wide collection of existing slicer names (for `generateSlicerName`). */
 export function collectAllSlicerNames(workbook: WorkbookSlicerSnapshot): string[] {
   return listAllSlicers(workbook).map((e) => e.slicer.name);
+}
+
+// ===========================================================================
+// Bulk-selection helpers (slicer panel toolbar)
+// ===========================================================================
+
+/**
+ * Replace the named slicer's selection with `values`. Pass `[]` to clear
+ * (Excel "Clear Filter"). Returns a deep-cloned snapshot or `null` when the
+ * slicer doesn't exist.
+ */
+export function setSlicerSelection(
+  workbook: WorkbookSlicerSnapshot,
+  name: string,
+  values: string[],
+): WorkbookSlicerSnapshot | null {
+  if (!workbook || typeof workbook !== "object") return null;
+  let cloned: WorkbookSlicerSnapshot;
+  try {
+    cloned = JSON.parse(JSON.stringify(workbook)) as WorkbookSlicerSnapshot;
+  } catch {
+    return null;
+  }
+  const sheets = cloned.sheets;
+  if (!sheets || typeof sheets !== "object") return null;
+  for (const sid of Object.keys(sheets)) {
+    const sh = sheets[sid];
+    const list = sh?._slicers;
+    if (!Array.isArray(list)) continue;
+    for (const slicer of list) {
+      if (!slicer || slicer.name !== name) continue;
+      slicer.selectedValues = Array.isArray(values) ? values.slice() : [];
+      return cloned;
+    }
+  }
+  return null;
+}
+
+/**
+ * Clear the named slicer's selection (Excel "Clear Filter"). Convenience
+ * wrapper over `setSlicerSelection(workbook, name, [])`.
+ */
+export function clearSlicerSelection(
+  workbook: WorkbookSlicerSnapshot,
+  name: string,
+): WorkbookSlicerSnapshot | null {
+  return setSlicerSelection(workbook, name, []);
+}
+
+/**
+ * Invert the named slicer's selection: every distinct value present in the
+ * target column that is NOT currently selected becomes selected, and vice
+ * versa. When the previous selection was empty (= show all), invert means
+ * "select nothing" — matches Excel's "Invert" behaviour on slicer filters.
+ *
+ * Walks the target (table or pivot source) to enumerate distinct values, then
+ * computes the symmetric-difference style flip. Returns null when the slicer
+ * doesn't exist.
+ */
+export function invertSlicerSelection(
+  workbook: WorkbookSlicerPivotSnapshot,
+  name: string,
+): WorkbookSlicerPivotSnapshot | null {
+  if (!workbook || typeof workbook !== "object") return null;
+  let cloned: WorkbookSlicerPivotSnapshot;
+  try {
+    cloned = JSON.parse(JSON.stringify(workbook)) as WorkbookSlicerPivotSnapshot;
+  } catch {
+    return null;
+  }
+  const sheets = cloned.sheets;
+  if (!sheets || typeof sheets !== "object") return null;
+  for (const sid of Object.keys(sheets)) {
+    const sh = sheets[sid];
+    const list = sh?._slicers;
+    if (!Array.isArray(list)) continue;
+    for (const slicer of list) {
+      if (!slicer || slicer.name !== name) continue;
+      const kind = slicer.targetKind ?? "table";
+      const all = listDistinctValues(cloned, slicer.targetTable, slicer.field, kind);
+      const currentSel = new Set(
+        Array.isArray(slicer.selectedValues) ? slicer.selectedValues : [],
+      );
+      // "Select all" baseline (empty selection) → invert means "select none".
+      // Otherwise: invert means "keep the ones NOT in current selection".
+      const next: string[] =
+        currentSel.size === 0
+          ? []
+          : all.filter((v) => !currentSel.has(v));
+      slicer.selectedValues = next;
+      return cloned;
+    }
+  }
+  return null;
 }
 
 // ===========================================================================

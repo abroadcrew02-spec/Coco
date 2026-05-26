@@ -195,3 +195,43 @@
   color: var(--coco-warning);
   font-style: italic;
 }
+
+/* bulk-op row */
+.slp-bulk-row {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 6px;
+}
+
+.slp-bulk-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border);
+  border-radius: 3px;
+  color: var(--coco-text);
+  cursor: pointer;
+}
+
+.slp-bulk-btn:hover:not(:disabled) {
+  background-color: var(--coco-surface-hover);
+  border-color: var(--coco-border-strong);
+}
+
+.slp-bulk-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* pivot badge */
+.slp-kind-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  background-color: var(--coco-accent-subtle);
+  color: var(--coco-accent);
+  border: 1px solid var(--coco-border);
+  border-radius: 8px;
+  vertical-align: middle;
+}

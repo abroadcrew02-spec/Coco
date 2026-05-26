@@ -3,11 +3,14 @@ import {
   addSlicer,
   applySlicerFilters,
   applySlicerFiltersToPivots,
+  clearSlicerSelection,
   collectAllSlicerNames,
   generateSlicerName,
+  invertSlicerSelection,
   listAllSlicers,
   listDistinctValues,
   removeSlicer,
+  setSlicerSelection,
   toggleSlicerValue,
   type SlicerEntry,
   type WorkbookSlicerPivotSnapshot,
@@ -459,6 +462,162 @@ describe("applySlicerFiltersToPivots", () => {
     expect(
       applySlicerFiltersToPivots(null as unknown as WorkbookSlicerPivotSnapshot),
     ).toEqual({ refreshedPivots: [], skippedSlicers: [] });
+  });
+});
+
+describe("listDistinctValues (pivot kind)", () => {
+  it("returns sorted unique values from the pivot's source range", () => {
+    const wb: WorkbookSlicerPivotSnapshot = {
+      sheetOrder: ["s1"],
+      sheets: {
+        s1: {
+          name: "Data",
+          cellData: {
+            "0": { "0": { v: "Region" }, "1": { v: "Sales" } },
+            "1": { "0": { v: "East" }, "1": { v: 100 } },
+            "2": { "0": { v: "West" }, "1": { v: 200 } },
+            "3": { "0": { v: "East" }, "1": { v: 150 } },
+          },
+          _pivots: [
+            {
+              name: "Pivot1",
+              source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 3, c2: 1 } },
+              destination: { row: 10, col: 0 },
+              rows: ["Region"],
+              cols: [],
+              values: [{ field: "Sales", agg: "SUM" }],
+              filters: [],
+              hasHeader: true,
+            },
+          ],
+        },
+      },
+    };
+    expect(listDistinctValues(wb, "Pivot1", "Region", "pivot")).toEqual(["East", "West"]);
+  });
+
+  it("returns [] when the pivot is missing", () => {
+    expect(listDistinctValues({}, "NoSuchPivot", "Region", "pivot")).toEqual([]);
+  });
+
+  it("returns [] when the field is not in the source header", () => {
+    const wb: WorkbookSlicerPivotSnapshot = {
+      sheetOrder: ["s1"],
+      sheets: {
+        s1: {
+          name: "Data",
+          cellData: { "0": { "0": { v: "A" } }, "1": { "0": { v: 1 } } },
+          _pivots: [
+            {
+              name: "Pivot1",
+              source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 1, c2: 0 } },
+              destination: { row: 5, col: 0 },
+              rows: [], cols: [],
+              values: [{ field: "A", agg: "SUM" }],
+              filters: [],
+              hasHeader: true,
+            },
+          ],
+        },
+      },
+    };
+    expect(listDistinctValues(wb, "Pivot1", "Missing", "pivot")).toEqual([]);
+  });
+});
+
+describe("setSlicerSelection / clearSlicerSelection", () => {
+  function fx() {
+    return addSlicer(fixture(), "s1", {
+      name: "Slicer1",
+      targetTable: "T1",
+      field: "Region",
+      selectedValues: ["East"],
+    });
+  }
+
+  it("setSlicerSelection replaces the selection wholesale", () => {
+    const next = setSlicerSelection(fx(), "Slicer1", ["West", "North"]);
+    expect(next?.sheets?.s1?._slicers?.[0].selectedValues).toEqual(["West", "North"]);
+  });
+
+  it("clearSlicerSelection empties the array", () => {
+    const next = clearSlicerSelection(fx(), "Slicer1");
+    expect(next?.sheets?.s1?._slicers?.[0].selectedValues).toEqual([]);
+  });
+
+  it("returns null when the slicer doesn't exist", () => {
+    expect(setSlicerSelection(fx(), "Nope", ["x"])).toBeNull();
+    expect(clearSlicerSelection(fx(), "Nope")).toBeNull();
+  });
+
+  it("does not mutate the input workbook", () => {
+    const wb = fx();
+    const before = JSON.stringify(wb);
+    setSlicerSelection(wb, "Slicer1", ["X"]);
+    expect(JSON.stringify(wb)).toBe(before);
+  });
+});
+
+describe("invertSlicerSelection", () => {
+  it("inverts a non-empty selection (keeps the complement of selected)", () => {
+    // fixture() has rows East, West, East. distinct = [East, West].
+    const wb = addSlicer(fixture(), "s1", {
+      name: "Slicer1",
+      targetTable: "T1",
+      field: "Region",
+      selectedValues: ["East"],
+    });
+    const next = invertSlicerSelection(wb, "Slicer1");
+    expect(next?.sheets?.s1?._slicers?.[0].selectedValues).toEqual(["West"]);
+  });
+
+  it("inverts an empty selection to empty (show-all → show-none)", () => {
+    const wb = addSlicer(fixture(), "s1", {
+      name: "Slicer1",
+      targetTable: "T1",
+      field: "Region",
+      selectedValues: [],
+    });
+    const next = invertSlicerSelection(wb, "Slicer1");
+    expect(next?.sheets?.s1?._slicers?.[0].selectedValues).toEqual([]);
+  });
+
+  it("works for pivot-targeting slicers", () => {
+    const wb: WorkbookSlicerPivotSnapshot = {
+      sheetOrder: ["s1"],
+      sheets: {
+        s1: {
+          name: "Data",
+          cellData: {
+            "0": { "0": { v: "Region" } },
+            "1": { "0": { v: "East" } },
+            "2": { "0": { v: "West" } },
+          },
+          _pivots: [{
+            name: "Pivot1",
+            source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 2, c2: 0 } },
+            destination: { row: 5, col: 0 },
+            rows: [], cols: [],
+            values: [{ field: "Region", agg: "COUNT" }],
+            filters: [],
+            hasHeader: true,
+          }],
+          _slicers: [{
+            name: "S1",
+            targetTable: "Pivot1",
+            targetKind: "pivot",
+            field: "Region",
+            selectedValues: ["East"],
+          }],
+        },
+      },
+    };
+    const next = invertSlicerSelection(wb, "S1");
+    expect(next?.sheets?.s1?._slicers?.[0].selectedValues).toEqual(["West"]);
+  });
+
+  it("returns null when the slicer doesn't exist", () => {
+    expect(invertSlicerSelection(fixture(), "Nope")).toBeNull();
   });
 });
 

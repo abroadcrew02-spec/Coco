@@ -1,6 +1,19 @@
-# #237 In-grid Chart 自前描画 — MVP 設計
+# #236 In-grid Chart 自前描画 — MVP 設計
 
-Status: **Design only**. Implementation deferred (L-XL, 8-12週).
+Status: **Step 1 shipped** — cellPixelBounds pixel-bounds helper + 17 tests (PR #263).
+Remaining steps deferred (L-XL, 残り 7-11週).
+
+## Progress
+
+| Step | Status | Notes |
+| --- | --- | --- |
+| 1. cellPixelBounds: range → 絶対 px (col widths / row heights from snapshot) | ✅ shipped | `src/store/cellPixelBounds.ts` |
+| 2. CanvasChartOverlay component (absolute positioned canvas over Univer grid) | ⏳ next | DOM zindex + scroll 連動が課題 |
+| 3. Chart drawing engine (8 chart types: bar/line/pie/area/...) | ⏳ | 既存 ChartPreviewPanel SVG renderer を流用 |
+| 4. ドラッグ/リサイズ ハンドル | ⏳ | mousedown 連携 |
+| 5. Source range → 自動再描画 (300ms debounce) | ⏳ | CommandExecuted フック |
+| 6. `_cocoCharts` 保存 + COCO_ROOT_EXTENSION_KEYS 追加 | ⏳ | |
+| 7. xlsx round-trip via cocoExtensions/charts.json | ⏳ | |
 
 ## ゴール (再掲)
 

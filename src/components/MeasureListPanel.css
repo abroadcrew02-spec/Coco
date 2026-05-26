@@ -8,12 +8,30 @@
 }
 
 .mlp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 10px 14px;
   font-size: 13px;
   font-weight: 600;
   color: var(--coco-accent);
   background-color: var(--coco-accent-subtle);
   border-bottom: 1px solid var(--coco-border);
+}
+
+.mlp-add {
+  background: none;
+  border: 1px solid var(--coco-border-strong);
+  border-radius: 3px;
+  color: var(--coco-accent);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 6px;
+}
+
+.mlp-add:hover {
+  background-color: var(--coco-accent-subtle);
 }
 
 .mlp-empty {
@@ -59,6 +77,25 @@
   gap: 3px;
   padding: 8px 12px;
   min-width: 0;
+}
+
+.mlp-info--editable {
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mlp-info--editable:hover {
+  background-color: var(--coco-surface-hover);
+}
+
+.mlp-info-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  width: 100%;
 }
 
 .mlp-name {

@@ -9,7 +9,7 @@ Remaining steps deferred (XL, 残り 5-7週 MVP).
 | --- | --- | --- |
 | 1. DAX engine: parser + evaluator (SUM/AVG/MIN/MAX/COUNT/COUNTROWS/DISTINCTCOUNT/IF/ALL) | ✅ shipped | PR #265, `src/store/daxEngine.ts` |
 | 2. RELATED + SUMX/AVERAGEX/MINX/MAXX/COUNTX (row context + M:1 lookup) | ✅ shipped | PR #266 — 6 関数追加 |
-| 3. FILTER / CALCULATE — filter context propagation | ⏳ next | |
+| 3. FILTER / CALCULATE — filter context propagation | ✅ shipped | PR #267 — フィルター context 完成 |
 | 4. xlsx round-trip: `xl/model/item.data` 経路の preserve (Coco は触らない) | ⏳ | |
 | 5. `_cocoDataModel` 保存 + Coco-native measure 定義 | ⏳ | |
 | 6. DataModelDialog UI (テーブル一覧 + measure 編集) | ⏳ | |

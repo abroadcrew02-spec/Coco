@@ -283,6 +283,23 @@ export interface EvalContext {
   model: DataModel;
   /** Optional "current row" for column refs without a row context wrapper. */
   currentRow?: { table: string; row: Record<string, unknown> };
+  /**
+   * Step 3: filter context. When a table appears in this map, column refs
+   * for that table use the override rows instead of `model.tables[t].rows`.
+   * CALCULATE pushes onto this, FILTER produces an override. Nested
+   * CALCULATEs INTERSECT with the existing override (Excel semantic).
+   */
+  tableOverrides?: Map<string, Array<Record<string, unknown>>>;
+}
+
+/** Active rows for a table — filter-context-aware. Pure helper. */
+function activeRows(
+  ctx: EvalContext,
+  tableName: string,
+): Array<Record<string, unknown>> {
+  const override = ctx.tableOverrides?.get(tableName);
+  if (override) return override;
+  return findTable(ctx.model, tableName)?.rows ?? [];
 }
 
 function toNumberOrNaN(v: unknown): number {
@@ -301,11 +318,15 @@ function findTable(model: DataModel, name: string): ModelTable | null {
   return model.tables.find((t) => t.name === name) ?? null;
 }
 
-function columnValues(model: DataModel, table: string, column: string): unknown[] {
-  const t = findTable(model, table);
-  if (!t) return [];
-  if (!t.columns.some((c) => c.name === column)) return [];
-  return t.rows.map((r) => r[column]);
+/** Column values from the filter-context-aware row set. */
+function activeColumnValues(
+  ctx: EvalContext,
+  table: string,
+  column: string,
+): unknown[] {
+  const t = findTable(ctx.model, table);
+  if (!t || !t.columns.some((c) => c.name === column)) return [];
+  return activeRows(ctx, table).map((r) => r[column]);
 }
 
 /**
@@ -322,15 +343,15 @@ export function evaluate(ast: DaxAst, ctx: EvalContext): unknown {
       return ast.value;
     case "columnRef": {
       // When we're inside a row context (SUMX / IF row-by-row), return the
-      // single cell value. Otherwise return the full column array — caller
-      // (e.g. SUM, AVERAGE) will reduce it.
+      // single cell value. Otherwise return the filter-context-aware
+      // column array — caller (e.g. SUM, AVERAGE) will reduce it.
       if (ctx.currentRow && ctx.currentRow.table === ast.table) {
         return ctx.currentRow.row[ast.column];
       }
-      return columnValues(ctx.model, ast.table, ast.column);
+      return activeColumnValues(ctx, ast.table, ast.column);
     }
     case "tableRef":
-      return findTable(ctx.model, ast.table)?.rows ?? [];
+      return activeRows(ctx, ast.table);
     case "binaryOp": {
       const lv = evaluate(ast.left, ctx);
       const rv = evaluate(ast.right, ctx);
@@ -395,6 +416,9 @@ export const IMPLEMENTED_FUNCTIONS = new Set([
   "MINX",
   "MAXX",
   "COUNTX",
+  // Step 3 (PR #267):
+  "FILTER",
+  "CALCULATE",
 ]);
 
 /**
@@ -453,12 +477,24 @@ function evalFuncCall(name: string, args: DaxAst[], ctx: EvalContext): unknown {
       return 0;
     }
     case "ALL": {
-      // MVP: ALL(table) returns every row; ALL(table[col]) returns every
-      // distinct value in that column. Used to bypass filter context — but
-      // since CALCULATE isn't implemented, this is currently equivalent to
-      // the bare table / column reference.
+      // ALL(table) returns every row; ALL(table[col]) returns every
+      // value in that column — bypassing filter context entirely.
+      // Implementation: drop the override for the target table before
+      // evaluating the inner expression.
       if (args.length !== 1) throw new ParseError("ALL expects 1 argument");
-      return evaluate(args[0], ctx);
+      const arg = args[0];
+      let targetTable: string | null = null;
+      if (arg.kind === "tableRef") targetTable = arg.table;
+      else if (arg.kind === "columnRef") targetTable = arg.table;
+      if (!targetTable) return evaluate(arg, ctx);
+      const overrides = new Map(ctx.tableOverrides ?? []);
+      overrides.delete(targetTable);
+      const cleanCtx: EvalContext = {
+        model: ctx.model,
+        currentRow: ctx.currentRow,
+        tableOverrides: overrides,
+      };
+      return evaluate(arg, cleanCtx);
     }
     case "IF": {
       if (args.length < 2 || args.length > 3) {
@@ -502,13 +538,15 @@ function evalFuncCall(name: string, args: DaxAst[], ctx: EvalContext): unknown {
       let rows: Array<Record<string, unknown>> = [];
       if (tableArg.kind === "tableRef") {
         tableName = tableArg.table;
-        rows = findTable(ctx.model, tableArg.table)?.rows ?? [];
-      } else if (tableArg.kind === "funcCall" && tableArg.name === "ALL") {
-        // ALL(table) inside SUMX — degrades to plain table in MVP.
-        const inner = tableArg.args[0];
-        if (inner?.kind === "tableRef") {
-          tableName = inner.table;
-          rows = findTable(ctx.model, inner.table)?.rows ?? [];
+        rows = activeRows(ctx, tableArg.table);
+      } else if (tableArg.kind === "funcCall") {
+        // ALL(table) or FILTER(table, ...) inside SUMX.
+        const subResult = evaluate(tableArg, ctx);
+        if (Array.isArray(subResult)) {
+          rows = subResult as Array<Record<string, unknown>>;
+          // Inner table name: best-effort from ALL/FILTER's first arg.
+          const inner = tableArg.args[0];
+          if (inner?.kind === "tableRef") tableName = inner.table;
         }
       }
       if (!tableName) {
@@ -519,6 +557,7 @@ function evalFuncCall(name: string, args: DaxAst[], ctx: EvalContext): unknown {
         const rowCtx: EvalContext = {
           model: ctx.model,
           currentRow: { table: tableName, row },
+          tableOverrides: ctx.tableOverrides,
         };
         results.push(evaluate(exprArg, rowCtx));
       }
@@ -535,6 +574,93 @@ function evalFuncCall(name: string, args: DaxAst[], ctx: EvalContext): unknown {
           return reduceColumn("COUNT", results);
       }
       return null;
+    }
+    // Step 3: FILTER(table, condition) — returns rows passing the
+    // predicate. The condition is evaluated per row with `currentRow` set,
+    // so it can reference table[col] and RELATED.
+    //
+    // Excel returns a "filter expression" lazy object internally, but for
+    // MVP we eagerly materialise to an array — CALCULATE / SUMX accept
+    // arrays directly.
+    case "FILTER": {
+      if (args.length !== 2) throw new ParseError("FILTER expects 2 arguments");
+      const tableArg = args[0];
+      const condArg = args[1];
+      if (tableArg.kind !== "tableRef") {
+        // ALL(table) etc. also accepted — flatten to the underlying rows.
+        const r = evaluate(tableArg, ctx);
+        if (!Array.isArray(r)) {
+          throw new ParseError("FILTER's 1st argument must be a table");
+        }
+        return (r as Array<Record<string, unknown>>).filter((row) => {
+          // Best-effort row context — use the first inner tableRef's name.
+          let tName: string | null = null;
+          if (tableArg.kind === "funcCall") {
+            const inner = tableArg.args[0];
+            if (inner?.kind === "tableRef") tName = inner.table;
+          }
+          if (!tName) return false;
+          const rowCtx: EvalContext = {
+            model: ctx.model,
+            currentRow: { table: tName, row },
+            tableOverrides: ctx.tableOverrides,
+          };
+          return Boolean(evaluate(condArg, rowCtx));
+        });
+      }
+      const tableName = tableArg.table;
+      return activeRows(ctx, tableName).filter((row) => {
+        const rowCtx: EvalContext = {
+          model: ctx.model,
+          currentRow: { table: tableName, row },
+          tableOverrides: ctx.tableOverrides,
+        };
+        return Boolean(evaluate(condArg, rowCtx));
+      });
+    }
+    // Step 3: CALCULATE(expression, filter1, filter2, ...) —
+    // evaluate `expression` with `filterN` results overriding the filter
+    // context for their target tables. Filters can be FILTER() calls
+    // (which return filtered row arrays) or boolean predicates over a
+    // single table (Excel's "filter sugar", e.g. `Sales[Region] = "East"`
+    // — converted to FILTER(Sales, Sales[Region] = "East") at parse time
+    // by Excel; MVP requires the explicit FILTER form).
+    //
+    // Multiple filters on the SAME table are INTERSECTED (Excel semantic).
+    case "CALCULATE": {
+      if (args.length < 1) throw new ParseError("CALCULATE expects ≥1 argument");
+      const exprArg = args[0];
+      const filterArgs = args.slice(1);
+      const overrides = new Map<string, Array<Record<string, unknown>>>(
+        ctx.tableOverrides ?? [],
+      );
+      for (const fArg of filterArgs) {
+        if (fArg.kind !== "funcCall" || fArg.name !== "FILTER") {
+          throw new ParseError(
+            "CALCULATE's filter args must be FILTER(table, ...) calls",
+          );
+        }
+        const inner = fArg.args[0];
+        if (inner?.kind !== "tableRef") {
+          throw new ParseError(
+            "CALCULATE: FILTER must target a bare table reference",
+          );
+        }
+        const newRows = evaluate(fArg, ctx) as Array<Record<string, unknown>>;
+        // Intersect with any existing override for this table (rows that
+        // pass both filters).
+        const existing = overrides.get(inner.table);
+        const merged = existing
+          ? newRows.filter((row) => existing.includes(row))
+          : newRows;
+        overrides.set(inner.table, merged);
+      }
+      const innerCtx: EvalContext = {
+        model: ctx.model,
+        currentRow: ctx.currentRow,
+        tableOverrides: overrides,
+      };
+      return evaluate(exprArg, innerCtx);
     }
     default:
       throw new ParseError(`unsupported function: ${fn}`);

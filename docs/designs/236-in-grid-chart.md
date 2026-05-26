@@ -7,8 +7,9 @@ Remaining steps deferred (L-XL, 残り 7-11週).
 
 | Step | Status | Notes |
 | --- | --- | --- |
-| 1. cellPixelBounds: range → 絶対 px (col widths / row heights from snapshot) | ✅ shipped | `src/store/cellPixelBounds.ts` |
-| 2. CanvasChartOverlay component (absolute positioned canvas over Univer grid) | ⏳ next | DOM zindex + scroll 連動が課題 |
+| 1. cellPixelBounds: range → 絶対 px (col widths / row heights from snapshot) | ✅ shipped | PR #263 — `src/store/cellPixelBounds.ts` |
+| 2. inGridChart anchor + box resolution (move/resize/bake helpers) | ✅ shipped | PR #273 — `src/store/inGridChart.ts` |
+| 3. CanvasChartOverlay component (absolute positioned canvas) | ⏳ next | DOM zindex + scroll 連動が課題 |
 | 3. Chart drawing engine (8 chart types: bar/line/pie/area/...) | ⏳ | 既存 ChartPreviewPanel SVG renderer を流用 |
 | 4. ドラッグ/リサイズ ハンドル | ⏳ | mousedown 連携 |
 | 5. Source range → 自動再描画 (300ms debounce) | ⏳ | CommandExecuted フック |

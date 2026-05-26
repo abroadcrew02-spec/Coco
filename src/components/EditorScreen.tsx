@@ -5868,6 +5868,27 @@ export default function EditorScreen() {
     [getSnapshotForTool, applyMutatedSnapshot],
   );
 
+  // Remove a chart from the active sheet. Wired to InGridChartLayer's
+  // onChartDelete prop (Delete / Backspace key on a focused chart frame).
+  const deleteInGridChart = useCallback(
+    (sheetId: string, chartIndex: number) => {
+      const snapshot = getSnapshotForTool("グラフ削除");
+      if (!snapshot) return;
+      const sheets = (snapshot.sheets as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const sheetObj = sheets[sheetId];
+      if (!sheetObj) return;
+      const existing = Array.isArray(sheetObj._charts)
+        ? (sheetObj._charts as Array<Record<string, unknown>>)
+        : [];
+      if (chartIndex < 0 || chartIndex >= existing.length) return;
+      const next = [...existing];
+      next.splice(chartIndex, 1);
+      sheetObj._charts = next;
+      applyMutatedSnapshot(JSON.stringify(snapshot));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
   // Number-format dialog plumbing. Captures the active selection's bounding
   // rows/cols + the anchor cell's existing `_fmt` (so the dialog can pre-select
   // a preset) and stashes them in state. We pin coords at open time so the
@@ -8989,6 +9010,7 @@ export default function EditorScreen() {
           activeSheetId={activeSheetId}
           onChartChange={handleChartAnchorChange}
           onChartEdit={openChartEditor}
+          onChartDelete={deleteInGridChart}
         />
         <CommentIndicatorsPanel
           indicators={commentIndicators}

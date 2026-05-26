@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   cellBoundsPx,
   defaultChartAnchorPx,
+  pixelToCell,
   rangeBoundsPx,
   type SheetPixelLayout,
 } from "./cellPixelBounds";
@@ -131,6 +132,49 @@ describe("rangeBoundsPx", () => {
     // width = 200 + 50 = 250, height = 50
     expect(b.width).toBe(250);
     expect(b.height).toBe(50);
+  });
+});
+
+describe("pixelToCell", () => {
+  it("returns row 0, col 0 for a point inside the header region", () => {
+    // x < headerLeft (46), y < headerTop (20) → clamp to (0,0)
+    const c = pixelToCell({}, 10, 5);
+    expect(c.row).toBe(0);
+    expect(c.col).toBe(0);
+  });
+
+  it("round-trips with cellBoundsPx for A1 top-left", () => {
+    const b = cellBoundsPx({}, 0, 0);
+    const c = pixelToCell({}, b.left, b.top);
+    expect(c.row).toBe(0);
+    expect(c.col).toBe(0);
+  });
+
+  it("round-trips with cellBoundsPx for B2 (row=1, col=1)", () => {
+    const b = cellBoundsPx({}, 1, 1);
+    const c = pixelToCell({}, b.left + 1, b.top + 1);
+    expect(c.row).toBe(1);
+    expect(c.col).toBe(1);
+  });
+
+  it("round-trips with cellBoundsPx for a larger cell (row=3, col=4)", () => {
+    const b = cellBoundsPx({}, 3, 4);
+    const c = pixelToCell({}, b.left + 1, b.top + 1);
+    expect(c.row).toBe(3);
+    expect(c.col).toBe(4);
+  });
+
+  it("respects per-column overrides in round-trip", () => {
+    const layout: SheetPixelLayout = { columnData: { "0": { w: 200 } } };
+    const b = cellBoundsPx(layout, 0, 1); // B1 starts after 200px col A
+    const c = pixelToCell(layout, b.left + 1, b.top + 1);
+    expect(c.col).toBe(1);
+  });
+
+  it("clamps to maxRow-1 / maxCol-1 for out-of-bounds point", () => {
+    const c = pixelToCell({}, 999999, 999999, {}, 10, 10);
+    expect(c.row).toBe(9);
+    expect(c.col).toBe(9);
   });
 });
 

@@ -5,6 +5,8 @@ import {
   resizeChartAnchor,
   resolveChartBox,
   snapAnchorToPixel,
+  CHART_MIN_WIDTH_PX,
+  CHART_MIN_HEIGHT_PX,
   type BoxableEntry,
 } from "./inGridChart";
 
@@ -202,5 +204,165 @@ describe("resizeChartAnchor", () => {
     const resized = resizeChartAnchor(entry, 123.7, 99.2);
     expect(resized.widthPx).toBe(123);
     expect(resized.heightPx).toBe(99);
+  });
+});
+
+describe("CHART_MIN_WIDTH_PX / CHART_MIN_HEIGHT_PX constants", () => {
+  it("exports CHART_MIN_WIDTH_PX as 60", () => {
+    expect(CHART_MIN_WIDTH_PX).toBe(60);
+  });
+
+  it("exports CHART_MIN_HEIGHT_PX as 40", () => {
+    expect(CHART_MIN_HEIGHT_PX).toBe(40);
+  });
+
+  it("resizeChartAnchor uses the exported constants as floor", () => {
+    const entry: BoxableEntry = { widthPx: 200, heightPx: 200 };
+    const resized = resizeChartAnchor(entry, 0, 0);
+    expect(resized.widthPx).toBe(CHART_MIN_WIDTH_PX);
+    expect(resized.heightPx).toBe(CHART_MIN_HEIGHT_PX);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Snapshot persistence logic (Step 5) — unit tests for the pure transform
+// that handleChartAnchorChange performs inside EditorScreen.
+// We test the logic directly rather than mounting the full component.
+// ---------------------------------------------------------------------------
+describe("chart anchor snapshot persistence (Step 5)", () => {
+  function makeSnapshotWithChart(
+    sheetId: string,
+    charts: Array<Record<string, unknown>>,
+  ): Record<string, unknown> {
+    return {
+      sheetOrder: [sheetId],
+      sheets: {
+        [sheetId]: {
+          name: "Sheet1",
+          cellData: {
+            "0": { "0": { v: "Q1" }, "1": { v: "Q2" } },
+            "1": { "0": { v: 10 }, "1": { v: 20 } },
+          },
+          _charts: charts,
+        },
+      },
+    };
+  }
+
+  /**
+   * Replicates the pure snapshot-mutation logic from handleChartAnchorChange
+   * without any React / Zustand dependency.
+   */
+  function applyAnchorChange(
+    snapshot: Record<string, unknown>,
+    sheetId: string,
+    chartIndex: number,
+    updated: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const sheets = (snapshot.sheets as Record<string, Record<string, unknown>> | undefined) ?? {};
+    const sheetObj = sheets[sheetId];
+    if (!sheetObj) return snapshot;
+    const existing = Array.isArray(sheetObj._charts)
+      ? (sheetObj._charts as Array<Record<string, unknown>>)
+      : [];
+    if (chartIndex < 0 || chartIndex >= existing.length) return snapshot;
+    const next = existing.map((c, i) => (i === chartIndex ? { ...c, ...updated } : c));
+    return {
+      ...snapshot,
+      sheets: {
+        ...sheets,
+        [sheetId]: { ...sheetObj, _charts: next },
+      },
+    };
+  }
+
+  it("updates anchorRow/anchorCol/widthPx/heightPx for the target chart", () => {
+    const snap = makeSnapshotWithChart("s1", [
+      { range: "A1:B2", type: "bar", anchorRow: 0, anchorCol: 0, widthPx: 480, heightPx: 300 },
+    ]);
+    const updated = { anchorRow: 3, anchorCol: 2, widthPx: 480, heightPx: 300 };
+    const next = applyAnchorChange(snap, "s1", 0, updated);
+    const charts = (next.sheets as Record<string, Record<string, unknown>>)["s1"]
+      ._charts as Array<Record<string, unknown>>;
+    expect(charts[0].anchorRow).toBe(3);
+    expect(charts[0].anchorCol).toBe(2);
+    expect(charts[0].widthPx).toBe(480);
+    expect(charts[0].heightPx).toBe(300);
+  });
+
+  it("does not mutate other charts in the array", () => {
+    const snap = makeSnapshotWithChart("s1", [
+      { range: "A1:B2", type: "bar", anchorRow: 0, anchorCol: 0, widthPx: 200, heightPx: 150 },
+      { range: "C1:D2", type: "line", anchorRow: 0, anchorCol: 4, widthPx: 200, heightPx: 150 },
+    ]);
+    const updated = { anchorRow: 5, anchorCol: 1, widthPx: 200, heightPx: 150 };
+    const next = applyAnchorChange(snap, "s1", 0, updated);
+    const charts = (next.sheets as Record<string, Record<string, unknown>>)["s1"]
+      ._charts as Array<Record<string, unknown>>;
+    // chart[0] updated
+    expect(charts[0].anchorRow).toBe(5);
+    // chart[1] untouched
+    expect(charts[1].anchorCol).toBe(4);
+  });
+
+  it("preserves existing chart fields not in the updated payload", () => {
+    const snap = makeSnapshotWithChart("s1", [
+      { range: "A1:B2", type: "pie", title: "Revenue", anchorRow: 0, anchorCol: 0, widthPx: 300, heightPx: 200 },
+    ]);
+    const updated = { anchorRow: 1, anchorCol: 1, widthPx: 300, heightPx: 200 };
+    const next = applyAnchorChange(snap, "s1", 0, updated);
+    const charts = (next.sheets as Record<string, Record<string, unknown>>)["s1"]
+      ._charts as Array<Record<string, unknown>>;
+    expect(charts[0].type).toBe("pie");
+    expect(charts[0].title).toBe("Revenue");
+    expect(charts[0].range).toBe("A1:B2");
+  });
+
+  it("does not mutate the original snapshot object", () => {
+    const snap = makeSnapshotWithChart("s1", [
+      { range: "A1:B2", type: "bar", anchorRow: 0, anchorCol: 0, widthPx: 480, heightPx: 300 },
+    ]);
+    const origChart = ((snap.sheets as Record<string, Record<string, unknown>>)["s1"]
+      ._charts as Array<Record<string, unknown>>)[0];
+    applyAnchorChange(snap, "s1", 0, { anchorRow: 99, anchorCol: 99, widthPx: 480, heightPx: 300 });
+    // original should be unchanged
+    expect(origChart.anchorRow).toBe(0);
+  });
+
+  it("returns snapshot unchanged when chartIndex is out of bounds", () => {
+    const snap = makeSnapshotWithChart("s1", [
+      { range: "A1:B2", type: "bar", anchorRow: 0, anchorCol: 0, widthPx: 480, heightPx: 300 },
+    ]);
+    const result = applyAnchorChange(snap, "s1", 5, { anchorRow: 99, anchorCol: 99, widthPx: 100, heightPx: 100 });
+    const charts = (result.sheets as Record<string, Record<string, unknown>>)["s1"]
+      ._charts as Array<Record<string, unknown>>;
+    expect(charts[0].anchorRow).toBe(0);
+  });
+
+  it("returns snapshot unchanged when sheetId does not exist", () => {
+    const snap = makeSnapshotWithChart("s1", [
+      { range: "A1:B2", type: "bar", anchorRow: 0, anchorCol: 0, widthPx: 480, heightPx: 300 },
+    ]);
+    const result = applyAnchorChange(snap, "s99", 0, { anchorRow: 5, anchorCol: 5, widthPx: 200, heightPx: 100 });
+    // s1 charts should be untouched
+    const charts = (result.sheets as Record<string, Record<string, unknown>>)["s1"]
+      ._charts as Array<Record<string, unknown>>;
+    expect(charts[0].anchorRow).toBe(0);
+  });
+
+  it("round-trip: serialize → deserialize → anchor fields are preserved", () => {
+    const snap = makeSnapshotWithChart("s1", [
+      { range: "A1:B2", type: "bar", anchorRow: 0, anchorCol: 0, widthPx: 480, heightPx: 300 },
+    ]);
+    const updated = { anchorRow: 7, anchorCol: 3, widthPx: 320, heightPx: 180 };
+    const next = applyAnchorChange(snap, "s1", 0, updated);
+    // Simulate xlsx round-trip by JSON serializing and re-parsing.
+    const roundTripped = JSON.parse(JSON.stringify(next)) as typeof next;
+    const charts = (roundTripped.sheets as Record<string, Record<string, unknown>>)["s1"]
+      ._charts as Array<Record<string, unknown>>;
+    expect(charts[0].anchorRow).toBe(7);
+    expect(charts[0].anchorCol).toBe(3);
+    expect(charts[0].widthPx).toBe(320);
+    expect(charts[0].heightPx).toBe(180);
   });
 });

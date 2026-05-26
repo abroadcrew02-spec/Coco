@@ -80,7 +80,11 @@ import {
   classifyHyperlink,
   chooseHyperlinkRestyle,
 } from "./hyperlinkRender";
-import { patchCfRenders } from "./conditionalFormatRender";
+import { patchCfRenders, type CfRuleEntry as CfRuleEntryType } from "./conditionalFormatRender";
+import { CfSidecar } from "../store/cfSidecar";
+import { computeCfApplyPlan } from "../store/cfApplyPlan";
+import { batchCfPlan } from "../store/cfRangeBatch";
+import type { ChartEntry } from "../store/chartRender";
 import { patchCheckboxRenders } from "./checkboxRender";
 import {
   addCheckbox,
@@ -645,6 +649,13 @@ export default function EditorScreen() {
   const openHyperlinkDialogRef = useRef<() => void>(() => {});
   const openNumberFormatDialogRef = useRef<() => void>(() => {});
 
+  // CF live re-paint sidecar: one instance per editor session. Tracks the
+  // user-authored base style for every cell touched by a CF rule, so facade
+  // writes never pollute the canonical BASE (the PR #211 revert bug).
+  // Reset in clearEditor / on workbook close so stale state doesn't carry
+  // across file-open operations.
+  const cfSidecarRef = useRef<CfSidecar>(new CfSidecar());
+
   const {
     saveStatus,
     importWarnings,
@@ -976,6 +987,11 @@ export default function EditorScreen() {
   );
   useEffect(() => {
     setWorkbookSessionId(generateWorkbookSessionId());
+  }, [currentHandle?.path]);
+  // Reset CF sidecar on file-open so stale base-style state doesn't carry
+  // across workbook switches (promised in the cfSidecarRef comment above).
+  useEffect(() => {
+    cfSidecarRef.current.clearAll();
   }, [currentHandle?.path]);
   const bookmarkWorkbookId = currentHandle?.path ?? workbookSessionId;
   const [numberFormatManagerOpen, setNumberFormatManagerOpen] = useState(false);
@@ -1389,22 +1405,72 @@ export default function EditorScreen() {
       }
       const nextJson = JSON.stringify(fresh);
       applyMutatedSnapshot(nextJson);
-      // NOTE (v0.4.4 hot-fix): the imperative facade live-repaint that lived
-      // here (computeCfRepaint → setBackground / setFontColor / setFontWeight
-      // / setValue) was reverted because it had two runtime-only bugs:
-      //   1. iconSet rules' `setValue("↑ 42")` write was persisted by the
-      //      300 ms syncSnapshot debounce, turning numeric cells into strings
-      //      and breaking formulas / xlsx export.
-      //   2. After the first facade write, BASE for the next computeCfRepaint
-      //      call already carried the CF-painted bg/cl/bl, so removing a rule
-      //      diffed to "no change" and the painted color stuck forever.
-      // The helper itself (`computeCfRepaint`) and its tests stay as the
-      // foundation for a proper redo that tracks CF-imperative writes in a
-      // sidecar instead of letting them pollute the canonical snapshot. CF
-      // rules continue to render correctly at next createUnit via
-      // `patchCfRenders` in the snapshot patch pipeline — same behavior as
-      // before PR #211. See `high-cf-live-render` in docs/TODOS.md.
-      void prevRules; // referenced for the future re-wiring
+
+      // #241 CF live re-paint (sidecar approach, replaces the reverted PR #211).
+      //
+      // The plan computes per-cell style deltas using a sidecar that tracks the
+      // user-authored BASE style per cell. The sidecar ensures BASE never drifts
+      // even after repeated facade writes — defeating the two runtime bugs from
+      // the original PR #211 revert:
+      //   1. iconSet glyph: the plan records `iconValue` in the sidecar cfStyle
+      //      but the facade loop below skips `setValue` for cells that carry
+      //      `iconValue` (the glyph is already rendered by `patchCfRenders` in
+      //      the snapshot patch applied above via `applyMutatedSnapshot`). The
+      //      canonical snapshot's `v` field is never written with a glyph string,
+      //      so numeric cells stay numeric and formulas keep evaluating correctly.
+      //   2. BASE drift: the sidecar's `recordBase` is idempotent — once a BASE
+      //      is recorded it is never overwritten by a subsequent CF facade write,
+      //      so `clear` actions always restore the true user-authored style.
+      const fUniver = fUniverRef.current;
+      const sidecar = cfSidecarRef.current;
+      if (fUniver) {
+        try {
+          const snapshotForPlan = JSON.parse(nextJson) as {
+            sheets?: Record<string, { cellData?: Record<string, Record<string, unknown> | undefined> } | undefined>;
+          };
+          const plan = computeCfApplyPlan(
+            sidecar,
+            snapshotForPlan,
+            sheetId,
+            prevRules as CfRuleEntryType[],
+            next as CfRuleEntryType[],
+          );
+          const batches = batchCfPlan(plan);
+          const fWorkbook = fUniver.getActiveWorkbook();
+          if (fWorkbook) {
+            const fSheet = fWorkbook.getSheetBySheetId(sheetId);
+            if (fSheet) {
+              for (const batch of batches) {
+                if (batch.action === "noop") continue;
+                const { r1, c1, r2, c2 } = batch.rect;
+                const fRange = fSheet.getRange(r1, c1, r2 - r1 + 1, c2 - c1 + 1);
+                if (!fRange) continue;
+                const style = batch.style;
+                try {
+                  if (batch.action === "paint") {
+                    if (style.bg !== undefined) fRange.setBackground(style.bg);
+                    if (style.cl !== undefined) fRange.setFontColor(style.cl);
+                    if (style.bl !== undefined) fRange.setFontWeight(style.bl === 1 ? "bold" : "normal");
+                    // iconValue: glyph is applied by patchCfRenders on snapshot —
+                    // deliberately NOT calling setValue here to prevent numeric
+                    // cell corruption (the original show-stopper bug from PR #211).
+                  } else {
+                    // clear: restore base style
+                    fRange.setBackground(style.bg ?? "#FFFFFF");
+                    if (style.cl !== undefined) fRange.setFontColor(style.cl);
+                    if (style.bl !== undefined) fRange.setFontWeight(style.bl === 1 ? "bold" : "normal");
+                  }
+                } catch {
+                  // Best-effort: swallow per-range errors (same policy as applyHyperlink).
+                }
+              }
+            }
+          }
+        } catch {
+          // Live repaint failure is non-fatal — patchCfRenders on next createUnit
+          // will correct any visual drift.
+        }
+      }
     },
     [getReadyWorkbook, applyMutatedSnapshot],
   );
@@ -5735,6 +5801,29 @@ export default function EditorScreen() {
     [chartDialog, applyMutatedSnapshot],
   );
 
+  // Persist drag/resize result back to the workbook snapshot (#236 Step 5).
+  // Called by InGridChartLayer on every pointerup that moved/resized a chart.
+  // Uses the cached currentSnapshotJson (drag completes synchronously, so no
+  // dialog-open race). Pushed through applyMutatedSnapshot so Ctrl+Alt+Z
+  // (Coco undo) can roll it back.
+  const handleChartAnchorChange = useCallback(
+    (sheetId: string, chartIndex: number, updated: ChartEntry) => {
+      const snapshot = getSnapshotForTool("グラフ移動");
+      if (!snapshot) return;
+      const sheets = (snapshot.sheets as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const sheetObj = sheets[sheetId];
+      if (!sheetObj) return;
+      const existing = Array.isArray(sheetObj._charts)
+        ? (sheetObj._charts as Array<Record<string, unknown>>)
+        : [];
+      if (chartIndex < 0 || chartIndex >= existing.length) return;
+      const next = existing.map((c, i) => (i === chartIndex ? { ...c, ...updated } : c));
+      sheetObj._charts = next;
+      applyMutatedSnapshot(JSON.stringify(snapshot));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
   // Number-format dialog plumbing. Captures the active selection's bounding
   // rows/cols + the anchor cell's existing `_fmt` (so the dialog can pre-select
   // a preset) and stashes them in state. We pin coords at open time so the
@@ -8854,6 +8943,7 @@ export default function EditorScreen() {
         <InGridChartLayer
           workbookSnapshotJson={currentSnapshotJson}
           activeSheetId={activeSheetId}
+          onChartChange={handleChartAnchorChange}
         />
         <CommentIndicatorsPanel
           indicators={commentIndicators}

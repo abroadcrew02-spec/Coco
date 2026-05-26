@@ -26,6 +26,7 @@ import {
 } from "./cfSidecar";
 import {
   parseSqrefToCells,
+  evaluateIconSet,
   type CfRuleEntry,
   type CellCoord,
 } from "../components/conditionalFormatRender";
@@ -55,6 +56,15 @@ export function ruleKey(rule: CfRuleEntry, index: number): string {
   return `${p}-${t}-${rule.sqref}`;
 }
 
+/** Snapshot shape accepted by readBaseStyle / iconSet helpers. */
+export type SnapshotShapeForPlan = {
+  sheets?: Record<
+    string,
+    | { cellData?: Record<string, Record<string, unknown> | undefined> }
+    | undefined
+  >;
+};
+
 /**
  * Read a cell's current "raw" style from a snapshot shape — what the user
  * authored, ignoring whatever CF currently shows. Used as the baseStyle
@@ -63,13 +73,7 @@ export function ruleKey(rule: CfRuleEntry, index: number): string {
  * Tolerant — non-existent cells / sheets return an empty slice.
  */
 export function readBaseStyle(
-  snapshotShape: {
-    sheets?: Record<
-      string,
-      | { cellData?: Record<string, Record<string, unknown> | undefined> }
-      | undefined
-    >;
-  },
+  snapshotShape: SnapshotShapeForPlan,
   sheetId: string,
   row: number,
   col: number,
@@ -94,11 +98,56 @@ export function readBaseStyle(
 }
 
 /**
+ * Read the raw cell value (v field) from the snapshot. Returns undefined when
+ * absent. Used by iconSet glyph computation, which needs the numeric value.
+ */
+function readCellRawValue(
+  snapshotShape: SnapshotShapeForPlan,
+  sheetId: string,
+  row: number,
+  col: number,
+): unknown {
+  const cell = snapshotShape.sheets?.[sheetId]?.cellData?.[String(row)]?.[String(col)];
+  if (!cell || typeof cell !== "object") return undefined;
+  return (cell as Record<string, unknown>).v;
+}
+
+/**
+ * Compute the iconSet glyph for a single cell given the full set of values in
+ * the rule's sqref range (for min/max computation). Returns "" when the value
+ * is non-numeric or the range has no numeric data.
+ */
+export function computeIconSetGlyphForCell(
+  value: unknown,
+  rangeValues: unknown[],
+  iconStyle: string,
+): string {
+  const nums: number[] = [];
+  for (const v of rangeValues) {
+    const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : Number.NaN;
+    if (Number.isFinite(n)) nums.push(n);
+  }
+  if (nums.length === 0) return "";
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  return evaluateIconSet(value, iconStyle, min, max);
+}
+
+/**
  * Convert a CfRuleEntry's `style` field into a CellStyleSlice. CfRuleEntry
  * uses { bold, fontColor, bgColor } whereas CellStyleSlice uses the Univer
  * shape (bl / cl / bg). Pure mapping.
+ *
+ * For iconSet rules: the glyph (iconValue) is per-cell and cannot be computed
+ * here (range stats required). Returns an empty slice; the caller must compute
+ * iconValue separately and inject it into the per-cell cfStyle.
  */
 function ruleStyleSlice(rule: CfRuleEntry): CellStyleSlice {
+  // iconSet rules produce no fill / font style — only a glyph marker whose
+  // value depends on the cell's position in the range. Return empty so the
+  // caller handles iconValue injection separately.
+  if (rule.type === "iconSet") return {};
+
   const out: CellStyleSlice = {};
   const s = rule.style;
   if (!s) {
@@ -151,7 +200,7 @@ function cellsForRule(rule: CfRuleEntry): CellCoord[] {
  */
 export function computeCfApplyPlan(
   sidecar: CfSidecar,
-  snapshotShape: Parameters<typeof readBaseStyle>[0],
+  snapshotShape: SnapshotShapeForPlan,
   sheetId: string,
   prevRules: CfRuleEntry[],
   nextRules: CfRuleEntry[],
@@ -164,6 +213,22 @@ export function computeCfApplyPlan(
   // next are "removed" — every cell they touch needs to be cleared.
   const prevById = new Map<string, CfRuleEntry>();
   prevRules.forEach((r, i) => prevById.set(ruleKey(r, i), r));
+
+  // Pre-compute range values for iconSet rules so we can derive per-cell glyphs
+  // during the main loop. Only computed when at least one iconSet rule is in
+  // play (prev or next).
+  // Map from rule sqref → array of raw cell values (for min/max).
+  const iconSetRangeValues = new Map<string, unknown[]>();
+  const collectIconSetRange = (rule: CfRuleEntry) => {
+    if (rule.type !== "iconSet") return;
+    const key = rule.sqref;
+    if (iconSetRangeValues.has(key)) return;
+    const coords = cellsForRule(rule);
+    const values = coords.map((c) => readCellRawValue(snapshotShape, sheetId, c.row, c.col));
+    iconSetRangeValues.set(key, values);
+  };
+  for (const rule of prevRules) collectIconSetRange(rule);
+  for (const rule of nextRules) collectIconSetRange(rule);
 
   // Union of all cells touched by any prev OR next rule.
   type CellRef = string; // "row:col"
@@ -209,7 +274,21 @@ export function computeCfApplyPlan(
       const rule = sortedNext[i];
       const idx = nextRules.indexOf(rule);
       contributingRuleIds.push(ruleKey(rule, idx));
-      mergedCf = composeStyle(mergedCf, ruleStyleSlice(rule));
+      const styleSlice = ruleStyleSlice(rule);
+      // iconSet rules: inject the per-cell glyph into iconValue.
+      // The glyph is computed from the cell's raw value vs range min/max.
+      // Note: iconValue is stored in the sidecar so we can remove it on rule
+      // deletion. The caller (EditorScreen) must NOT call setValue for this
+      // key — the glyph is displayed via patchCfRenders at createUnit time.
+      if (rule.type === "iconSet") {
+        const rangeVals = iconSetRangeValues.get(rule.sqref) ?? [];
+        const cellValue = readCellRawValue(snapshotShape, sheetId, row, col);
+        const glyph = computeIconSetGlyphForCell(cellValue, rangeVals, rule.iconStyle ?? "3arrows");
+        if (glyph) {
+          styleSlice.iconValue = glyph;
+        }
+      }
+      mergedCf = composeStyle(mergedCf, styleSlice);
     }
 
     if (bag.next.length === 0) {
@@ -240,6 +319,7 @@ export function computeCfApplyPlan(
       prevCf.bl === mergedCf.bl &&
       prevCf.it === mergedCf.it &&
       prevCf.ul === mergedCf.ul &&
+      prevCf.iconValue === mergedCf.iconValue &&
       (existing?.ruleIds.size ?? 0) === contributingRuleIds.length;
 
     if (isSameCf) {

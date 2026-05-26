@@ -393,6 +393,143 @@ describe("SUMX / AVERAGEX / MINX / MAXX / COUNTX", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Step 3: FILTER + CALCULATE (filter context propagation)
+// ---------------------------------------------------------------------------
+
+describe("FILTER", () => {
+  const ctx = { model: model() };
+
+  it("returns rows passing the predicate", () => {
+    // 4 sales rows; only ones with Amount > 150 (200, 250) pass.
+    const r = evaluateDax("FILTER(Sales, Sales[Amount] > 150)", ctx) as Array<
+      Record<string, unknown>
+    >;
+    expect(Array.isArray(r)).toBe(true);
+    expect(r).toHaveLength(2);
+    expect(r.every((row) => (row.Amount as number) > 150)).toBe(true);
+  });
+
+  it("equality filter on string column works", () => {
+    const r = evaluateDax(
+      'FILTER(Sales, Sales[Region] = "East")',
+      ctx,
+    ) as Array<Record<string, unknown>>;
+    expect(r).toHaveLength(2);
+  });
+
+  it("returns empty array when no row matches", () => {
+    const r = evaluateDax(
+      "FILTER(Sales, Sales[Amount] > 9999)",
+      ctx,
+    ) as Array<Record<string, unknown>>;
+    expect(r).toEqual([]);
+  });
+
+  it("can be the input to SUMX/COUNTROWS for aggregation", () => {
+    expect(
+      evaluateDax(
+        "SUMX(FILTER(Sales, Sales[Amount] > 150), Sales[Amount])",
+        ctx,
+      ),
+    ).toBe(450); // 200 + 250
+    expect(
+      evaluateDax("COUNTROWS(FILTER(Sales, Sales[Amount] > 150))", ctx),
+    ).toBe(2);
+  });
+});
+
+describe("CALCULATE", () => {
+  const ctx = { model: model() };
+
+  it("evaluates expression with a single filter applied", () => {
+    // SUM of Amount, only East rows: 100 + 150 = 250
+    expect(
+      evaluateDax(
+        'CALCULATE(SUM(Sales[Amount]), FILTER(Sales, Sales[Region] = "East"))',
+        ctx,
+      ),
+    ).toBe(250);
+  });
+
+  it("INTERSECTS multiple filters on the same table", () => {
+    // East AND Q2 → only one row (Amount=150)
+    const r = evaluateDax(
+      `CALCULATE(
+        SUM(Sales[Amount]),
+        FILTER(Sales, Sales[Region] = "East"),
+        FILTER(Sales, Sales[Quarter] = "Q2")
+      )`,
+      ctx,
+    );
+    expect(r).toBe(150);
+  });
+
+  it("ALL bypasses the filter context", () => {
+    // CALCULATE with East filter → SUM(Sales[Amount]) = 250
+    // but ALL(Sales) drops the filter → SUM = 700
+    expect(
+      evaluateDax(
+        `CALCULATE(
+          SUMX(ALL(Sales), Sales[Amount]),
+          FILTER(Sales, Sales[Region] = "East")
+        )`,
+        ctx,
+      ),
+    ).toBe(700);
+  });
+
+  it("nested CALCULATE composes filters (intersection)", () => {
+    expect(
+      evaluateDax(
+        `CALCULATE(
+          CALCULATE(SUM(Sales[Amount]), FILTER(Sales, Sales[Quarter] = "Q2")),
+          FILTER(Sales, Sales[Region] = "East")
+        )`,
+        ctx,
+      ),
+    ).toBe(150); // East ∩ Q2 = single row Amount=150
+  });
+
+  it("rejects non-FILTER filter args", () => {
+    const r = evaluateDax(
+      "CALCULATE(SUM(Sales[Amount]), 42)",
+      ctx,
+    ) as { error: string };
+    expect(r.error).toContain("FILTER");
+  });
+
+  it("with no filter args degrades to plain expression", () => {
+    expect(evaluateDax("CALCULATE(SUM(Sales[Amount]))", ctx)).toBe(700);
+  });
+});
+
+describe("filter context propagation into nested aggregations", () => {
+  const ctx = { model: model() };
+
+  it("SUM inside CALCULATE sees only filtered rows", () => {
+    expect(
+      evaluateDax(
+        'CALCULATE(COUNTROWS(Sales), FILTER(Sales, Sales[Region] = "East"))',
+        ctx,
+      ),
+    ).toBe(2);
+  });
+
+  it("AVERAGEX inside CALCULATE iterates only filtered rows", () => {
+    // East rows: Amount = [100, 150] → avg = 125
+    expect(
+      evaluateDax(
+        `CALCULATE(
+          AVERAGEX(Sales, Sales[Amount]),
+          FILTER(Sales, Sales[Region] = "East")
+        )`,
+        ctx,
+      ),
+    ).toBe(125);
+  });
+});
+
 describe("IMPLEMENTED_FUNCTIONS", () => {
   it("contains the documented MVP function set (Step 1 + Step 2)", () => {
     // Step 1

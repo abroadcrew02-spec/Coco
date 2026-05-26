@@ -388,7 +388,50 @@ export const IMPLEMENTED_FUNCTIONS = new Set([
   "DISTINCTCOUNT",
   "IF",
   "ALL",
+  // Step 2 (PR #266):
+  "RELATED",
+  "SUMX",
+  "AVERAGEX",
+  "MINX",
+  "MAXX",
+  "COUNTX",
 ]);
+
+/**
+ * Resolve a M:1 relationship at the row level: given a "many" side row and
+ * the target "one" side (relatedTable[relatedColumn]), walk the model's
+ * relationships array, find the active relationship between the two tables,
+ * use the value of fromColumn on the current row as the key, look up the
+ * matching row on toTable by toColumn, and return that row's relatedColumn
+ * cell value.
+ *
+ * Returns `null` when:
+ *   - no relationship exists between fromTable and relatedTable
+ *   - the key value is null/undefined
+ *   - no row on toTable matches the key
+ *   - the related column doesn't exist on toTable
+ */
+function resolveRelated(
+  model: DataModel,
+  fromTable: string,
+  fromRow: Record<string, unknown>,
+  relatedTable: string,
+  relatedColumn: string,
+): unknown {
+  // Find a direct relationship from→to (only forward-direction supported in MVP).
+  const rel = model.relationships.find(
+    (r) => r.fromTable === fromTable && r.toTable === relatedTable,
+  );
+  if (!rel) return null;
+  const key = fromRow[rel.fromColumn];
+  if (key === undefined || key === null) return null;
+  const toTable = findTable(model, relatedTable);
+  if (!toTable) return null;
+  if (!toTable.columns.some((c) => c.name === relatedColumn)) return null;
+  const matching = toTable.rows.find((r) => r[rel.toColumn] === key);
+  if (!matching) return null;
+  return matching[relatedColumn];
+}
 
 function evalFuncCall(name: string, args: DaxAst[], ctx: EvalContext): unknown {
   const fn = name.toUpperCase();
@@ -425,6 +468,73 @@ function evalFuncCall(name: string, args: DaxAst[], ctx: EvalContext): unknown {
       const truthy = cond === true || (typeof cond === "number" && cond !== 0);
       if (truthy) return evaluate(args[1], ctx);
       return args[2] !== undefined ? evaluate(args[2], ctx) : null;
+    }
+    // Step 2: RELATED(otherTable[col]) — look up the M:1 related value for
+    // the current row context. Requires a row context (set by SUMX et al);
+    // outside one we return null since there's no "current row" to start from.
+    case "RELATED": {
+      if (args.length !== 1) throw new ParseError("RELATED expects 1 argument");
+      const arg = args[0];
+      if (arg.kind !== "columnRef") {
+        throw new ParseError("RELATED expects a column reference (table[col])");
+      }
+      if (!ctx.currentRow) return null;
+      return resolveRelated(
+        ctx.model,
+        ctx.currentRow.table,
+        ctx.currentRow.row,
+        arg.table,
+        arg.column,
+      );
+    }
+    // Step 2: SUMX / AVERAGEX / MINX / MAXX / COUNTX —
+    // iterate over a table evaluating the expression per row, then reduce.
+    // The row context lets RELATED + arithmetic on columns work.
+    case "SUMX":
+    case "AVERAGEX":
+    case "MINX":
+    case "MAXX":
+    case "COUNTX": {
+      if (args.length !== 2) throw new ParseError(`${fn} expects 2 arguments`);
+      const tableArg = args[0];
+      const exprArg = args[1];
+      let tableName: string | null = null;
+      let rows: Array<Record<string, unknown>> = [];
+      if (tableArg.kind === "tableRef") {
+        tableName = tableArg.table;
+        rows = findTable(ctx.model, tableArg.table)?.rows ?? [];
+      } else if (tableArg.kind === "funcCall" && tableArg.name === "ALL") {
+        // ALL(table) inside SUMX — degrades to plain table in MVP.
+        const inner = tableArg.args[0];
+        if (inner?.kind === "tableRef") {
+          tableName = inner.table;
+          rows = findTable(ctx.model, inner.table)?.rows ?? [];
+        }
+      }
+      if (!tableName) {
+        throw new ParseError(`${fn} expects a table reference as 1st argument`);
+      }
+      const results: unknown[] = [];
+      for (const row of rows) {
+        const rowCtx: EvalContext = {
+          model: ctx.model,
+          currentRow: { table: tableName, row },
+        };
+        results.push(evaluate(exprArg, rowCtx));
+      }
+      switch (fn) {
+        case "SUMX":
+          return reduceColumn("SUM", results);
+        case "AVERAGEX":
+          return reduceColumn("AVERAGE", results);
+        case "MINX":
+          return reduceColumn("MIN", results);
+        case "MAXX":
+          return reduceColumn("MAX", results);
+        case "COUNTX":
+          return reduceColumn("COUNT", results);
+      }
+      return null;
     }
     default:
       throw new ParseError(`unsupported function: ${fn}`);

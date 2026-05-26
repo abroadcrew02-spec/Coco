@@ -245,8 +245,157 @@ describe("evaluateDax — error handling", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Step 2: RELATED + SUMX / AVERAGEX / MINX / MAXX / COUNTX
+// ---------------------------------------------------------------------------
+
+function modelWithRelationship(): DataModel {
+  return {
+    tables: [
+      {
+        name: "Sales",
+        columns: [
+          { name: "ProductId", type: "string" },
+          { name: "Qty", type: "number" },
+        ],
+        rows: [
+          { ProductId: "P1", Qty: 3 },
+          { ProductId: "P2", Qty: 5 },
+          { ProductId: "P1", Qty: 2 },
+        ],
+      },
+      {
+        name: "Products",
+        columns: [
+          { name: "Id", type: "string" },
+          { name: "Name", type: "string" },
+          { name: "Price", type: "number" },
+        ],
+        rows: [
+          { Id: "P1", Name: "Apple", Price: 100 },
+          { Id: "P2", Name: "Banana", Price: 80 },
+        ],
+      },
+    ],
+    relationships: [
+      // M:1 — Sales.ProductId → Products.Id
+      { fromTable: "Sales", fromColumn: "ProductId", toTable: "Products", toColumn: "Id" },
+    ],
+  };
+}
+
+describe("RELATED — M:1 lookup", () => {
+  it("returns null outside a row context", () => {
+    const ctx = { model: modelWithRelationship() };
+    expect(evaluateDax("RELATED(Products[Price])", ctx)).toBeNull();
+  });
+
+  it("inside SUMX, RELATED resolves the joined row's column", () => {
+    const ctx = { model: modelWithRelationship() };
+    // SUM(Sales.Qty * Products.Price):
+    //   row 1 (P1, Qty=3): 3 * 100 = 300
+    //   row 2 (P2, Qty=5): 5 *  80 = 400
+    //   row 3 (P1, Qty=2): 2 * 100 = 200
+    //   total = 900
+    expect(
+      evaluateDax("SUMX(Sales, Sales[Qty] * RELATED(Products[Price]))", ctx),
+    ).toBe(900);
+  });
+
+  it("returns null when no relationship between tables (silent 0 in SUMX)", () => {
+    const ctx = {
+      model: {
+        tables: [
+          {
+            name: "Sales",
+            columns: [{ name: "Qty", type: "number" as const }],
+            rows: [{ Qty: 1 }],
+          },
+          {
+            name: "Other",
+            columns: [{ name: "X", type: "string" as const }],
+            rows: [{ X: "a" }],
+          },
+        ],
+        relationships: [],
+      },
+    };
+    expect(evaluateDax("SUMX(Sales, RELATED(Other[X]))", ctx)).toBe(0);
+  });
+
+  it("handles null key gracefully (row contributes 0 to SUM)", () => {
+    const m = modelWithRelationship();
+    m.tables[0].rows[0].ProductId = null;
+    const ctx = { model: m };
+    // Row 1's ProductId is null → RELATED returns null → Qty*null = NaN
+    // → dropped from SUM. Rows 2 & 3 contribute Price (80, 100).
+    expect(evaluateDax("SUMX(Sales, RELATED(Products[Price]))", ctx)).toBe(180);
+  });
+
+  it("rejects RELATED without a column reference argument", () => {
+    const r = evaluateDax("SUMX(Sales, RELATED(42))", { model: modelWithRelationship() }) as { error: string };
+    expect(r.error).toContain("RELATED");
+  });
+});
+
+describe("SUMX / AVERAGEX / MINX / MAXX / COUNTX", () => {
+  const ctx = { model: modelWithRelationship() };
+
+  it("SUMX sums per-row expressions", () => {
+    // Sales.Qty across 3 rows: 3 + 5 + 2 = 10
+    expect(evaluateDax("SUMX(Sales, Sales[Qty])", ctx)).toBe(10);
+  });
+
+  it("AVERAGEX averages per-row expressions", () => {
+    expect(evaluateDax("AVERAGEX(Sales, Sales[Qty])", ctx)).toBeCloseTo(10 / 3, 5);
+  });
+
+  it("MINX / MAXX find extremes", () => {
+    expect(evaluateDax("MINX(Sales, Sales[Qty])", ctx)).toBe(2);
+    expect(evaluateDax("MAXX(Sales, Sales[Qty])", ctx)).toBe(5);
+  });
+
+  it("COUNTX counts numeric per-row results", () => {
+    expect(evaluateDax("COUNTX(Sales, Sales[Qty])", ctx)).toBe(3);
+  });
+
+  it("SUMX with arithmetic expression evaluates per row", () => {
+    expect(evaluateDax("SUMX(Sales, Sales[Qty] * 10)", ctx)).toBe(100);
+  });
+
+  it("SUMX with IF iterates correctly", () => {
+    // Qty > 3 contributes Qty, else 0 → only row 2 (Qty=5) qualifies → 5
+    expect(
+      evaluateDax("SUMX(Sales, IF(Sales[Qty] > 3, Sales[Qty], 0))", ctx),
+    ).toBe(5);
+  });
+
+  it("SUMX(ALL(table), ...) — ALL passthrough still iterates", () => {
+    expect(evaluateDax("SUMX(ALL(Sales), Sales[Qty])", ctx)).toBe(10);
+  });
+
+  it("rejects SUMX without a table argument", () => {
+    const r = evaluateDax("SUMX(42, Sales[Qty])", ctx) as { error: string };
+    expect(r.error).toContain("SUMX");
+  });
+
+  it("returns NULL/0 baselines for empty inputs", () => {
+    const emptyCtx = {
+      model: {
+        tables: [{ name: "T", columns: [{ name: "X", type: "number" as const }], rows: [] }],
+        relationships: [],
+      },
+    };
+    expect(evaluateDax("SUMX(T, T[X])", emptyCtx)).toBe(0);
+    expect(evaluateDax("MINX(T, T[X])", emptyCtx)).toBeNull();
+    expect(evaluateDax("MAXX(T, T[X])", emptyCtx)).toBeNull();
+    expect(evaluateDax("AVERAGEX(T, T[X])", emptyCtx)).toBeNull();
+  });
+});
+
 describe("IMPLEMENTED_FUNCTIONS", () => {
-  it("contains the documented MVP function set", () => {
+  it("contains the documented MVP function set (Step 1 + Step 2)", () => {
+    // Step 1
     expect(IMPLEMENTED_FUNCTIONS.has("SUM")).toBe(true);
     expect(IMPLEMENTED_FUNCTIONS.has("AVERAGE")).toBe(true);
     expect(IMPLEMENTED_FUNCTIONS.has("MIN")).toBe(true);
@@ -256,5 +405,12 @@ describe("IMPLEMENTED_FUNCTIONS", () => {
     expect(IMPLEMENTED_FUNCTIONS.has("DISTINCTCOUNT")).toBe(true);
     expect(IMPLEMENTED_FUNCTIONS.has("IF")).toBe(true);
     expect(IMPLEMENTED_FUNCTIONS.has("ALL")).toBe(true);
+    // Step 2
+    expect(IMPLEMENTED_FUNCTIONS.has("RELATED")).toBe(true);
+    expect(IMPLEMENTED_FUNCTIONS.has("SUMX")).toBe(true);
+    expect(IMPLEMENTED_FUNCTIONS.has("AVERAGEX")).toBe(true);
+    expect(IMPLEMENTED_FUNCTIONS.has("MINX")).toBe(true);
+    expect(IMPLEMENTED_FUNCTIONS.has("MAXX")).toBe(true);
+    expect(IMPLEMENTED_FUNCTIONS.has("COUNTX")).toBe(true);
   });
 });

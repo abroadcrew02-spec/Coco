@@ -5795,6 +5795,29 @@ export default function EditorScreen() {
     [chartDialog, applyMutatedSnapshot],
   );
 
+  // Persist drag/resize result back to the workbook snapshot (#236 Step 5).
+  // Called by InGridChartLayer on every pointerup that moved/resized a chart.
+  // Uses the cached currentSnapshotJson (drag completes synchronously, so no
+  // dialog-open race). Pushed through applyMutatedSnapshot so Ctrl+Alt+Z
+  // (Coco undo) can roll it back.
+  const handleChartAnchorChange = useCallback(
+    (sheetId: string, chartIndex: number, updated: Record<string, unknown>) => {
+      const snapshot = getSnapshotForTool("グラフ移動");
+      if (!snapshot) return;
+      const sheets = (snapshot.sheets as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const sheetObj = sheets[sheetId];
+      if (!sheetObj) return;
+      const existing = Array.isArray(sheetObj._charts)
+        ? (sheetObj._charts as Array<Record<string, unknown>>)
+        : [];
+      if (chartIndex < 0 || chartIndex >= existing.length) return;
+      const next = existing.map((c, i) => (i === chartIndex ? { ...c, ...updated } : c));
+      sheetObj._charts = next;
+      applyMutatedSnapshot(JSON.stringify(snapshot));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
   // Number-format dialog plumbing. Captures the active selection's bounding
   // rows/cols + the anchor cell's existing `_fmt` (so the dialog can pre-select
   // a preset) and stashes them in state. We pin coords at open time so the
@@ -8914,6 +8937,7 @@ export default function EditorScreen() {
         <InGridChartLayer
           workbookSnapshotJson={currentSnapshotJson}
           activeSheetId={activeSheetId}
+          onChartChange={handleChartAnchorChange}
         />
         <CommentIndicatorsPanel
           indicators={commentIndicators}

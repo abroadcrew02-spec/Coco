@@ -873,3 +873,132 @@ export function evaluateCalculatedColumns(
     relationships: model.relationships,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Step 6: Measure evaluation
+// ---------------------------------------------------------------------------
+
+/**
+ * Sentinel string returned when a measure DAX expression fails to evaluate.
+ * Consistent with CALC_COLUMN_ERROR so callers can use a single error check.
+ */
+export const MEASURE_ERROR = "#ERROR!";
+
+/**
+ * A single measure definition: a name, the DAX expression to evaluate, and
+ * optional owning table (for field-list grouping — not required for eval).
+ *
+ * Unlike calculated columns, measures:
+ *   - Have NO row context (currentRow is always undefined).
+ *   - Are evaluated against the current filter context.
+ *   - Return a single scalar value (number, string, boolean, or null).
+ *   - Return MEASURE_ERROR when the expression is invalid or evaluation fails.
+ */
+export interface MeasureDef {
+  /** Workbook-unique measure name. Used for lookup and circular-ref detection. */
+  name: string;
+  /** DAX expression source text. */
+  expression: string;
+}
+
+/**
+ * Evaluate a single measure by name. Returns a scalar value.
+ *
+ * - `currentRow` is intentionally absent — measures have no row context.
+ *   If the expression produces an array (e.g., a bare tableRef without
+ *   aggregation), the result is coerced to MEASURE_ERROR.
+ * - `filterContext` maps table names to pre-filtered row sets, allowing
+ *   callers (e.g., Pivot Table cells) to scope evaluation to a sub-slice.
+ * - Circular references are detected via the `_evaluating` set and return
+ *   MEASURE_ERROR immediately.
+ *
+ * @param model       - Runtime DataModel (tables + relationships).
+ * @param measures    - All measures in scope (needed for cross-measure refs — deferred).
+ * @param measureName - Name of the measure to evaluate.
+ * @param filterContext - Optional external filter context (table → filtered rows).
+ * @returns Scalar result or MEASURE_ERROR.
+ */
+export function evaluateMeasure(
+  model: DataModel,
+  measures: MeasureDef[],
+  measureName: string,
+  filterContext?: Map<string, Array<Record<string, unknown>>>,
+): unknown {
+  return _evaluateMeasureInternal(model, measures, measureName, filterContext, new Set());
+}
+
+export function _evaluateMeasureInternal(
+  model: DataModel,
+  measures: MeasureDef[],
+  measureName: string,
+  filterContext: Map<string, Array<Record<string, unknown>>> | undefined,
+  _evaluating: Set<string>,
+): unknown {
+  // Circular reference guard.
+  if (_evaluating.has(measureName)) {
+    return MEASURE_ERROR;
+  }
+
+  const def = measures.find((m) => m.name === measureName);
+  if (!def) {
+    return MEASURE_ERROR;
+  }
+
+  _evaluating.add(measureName);
+  try {
+    // Parse once — fail fast on syntax errors.
+    let ast: DaxAst;
+    try {
+      ast = parseDax(def.expression);
+    } catch {
+      return MEASURE_ERROR;
+    }
+
+    // Evaluate with filter context but WITHOUT row context.
+    const ctx: EvalContext = {
+      model,
+      currentRow: undefined,
+      tableOverrides: filterContext,
+    };
+
+    let result: unknown;
+    try {
+      result = evaluate(ast, ctx);
+    } catch {
+      return MEASURE_ERROR;
+    }
+
+    // Guard against non-scalar results.
+    if (Array.isArray(result)) {
+      return MEASURE_ERROR;
+    }
+    if (result !== null && typeof result === "object" && "error" in result) {
+      return MEASURE_ERROR;
+    }
+
+    return result;
+  } finally {
+    _evaluating.delete(measureName);
+  }
+}
+
+/**
+ * Evaluate every measure in the list and return a map of measure name → value.
+ * This is a convenience wrapper for callers that need a full measure set
+ * (e.g., initial workbook load, Pivot Table row evaluation).
+ *
+ * Each measure is evaluated independently with the same `filterContext`.
+ * Cross-measure references are NOT supported in this MVP (deferred to a future
+ * step when the parser handles bare measure names as expressions).
+ */
+export function evaluateAllMeasures(
+  model: DataModel,
+  measures: MeasureDef[],
+  filterContext?: Map<string, Array<Record<string, unknown>>>,
+): Map<string, unknown> {
+  const results = new Map<string, unknown>();
+  for (const def of measures) {
+    results.set(def.name, evaluateMeasure(model, measures, def.name, filterContext));
+  }
+  return results;
+}

@@ -18,6 +18,8 @@ import { extractChartData, renderChart } from "../store/chartRender";
 import {
   snapAnchorToPixel,
   resizeChartAnchor,
+  CHART_MIN_WIDTH_PX,
+  CHART_MIN_HEIGHT_PX,
   type BoxableEntry,
 } from "../store/inGridChart";
 import type { CellPixelOptions, SheetPixelLayout } from "../store/cellPixelBounds";
@@ -210,8 +212,6 @@ export default function InGridChartLayer({
 
       const dx = e.clientX - d.startX;
       const dy = e.clientY - d.startY;
-      const MIN_W = 60;
-      const MIN_H = 40;
 
       let { left: newLeft, top: newTop, width: newWidth, height: newHeight } =
         { left: d.origLeft, top: d.origTop, width: d.origWidth, height: d.origHeight };
@@ -222,18 +222,18 @@ export default function InGridChartLayer({
       } else if (d.mode === "resize" && d.dir) {
         const dir = d.dir;
         if (dir.includes("e")) {
-          newWidth = Math.max(MIN_W, d.origWidth + dx);
+          newWidth = Math.max(CHART_MIN_WIDTH_PX, d.origWidth + dx);
         }
         if (dir.includes("w")) {
-          const clamped = Math.max(MIN_W, d.origWidth - dx);
+          const clamped = Math.max(CHART_MIN_WIDTH_PX, d.origWidth - dx);
           newLeft = d.origLeft + (d.origWidth - clamped);
           newWidth = clamped;
         }
         if (dir.includes("s")) {
-          newHeight = Math.max(MIN_H, d.origHeight + dy);
+          newHeight = Math.max(CHART_MIN_HEIGHT_PX, d.origHeight + dy);
         }
         if (dir.includes("n")) {
-          const clamped = Math.max(MIN_H, d.origHeight - dy);
+          const clamped = Math.max(CHART_MIN_HEIGHT_PX, d.origHeight - dy);
           newTop = d.origTop + (d.origHeight - clamped);
           newHeight = clamped;
         }

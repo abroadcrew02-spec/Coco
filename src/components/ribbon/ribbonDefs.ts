@@ -711,6 +711,13 @@ const dataTab: RibbonTabDef = {
           action: editorCommand("file-import-sheet"),
         },
         {
+          id: "data-get-transform",
+          labelKey: "ribbon.btn.getTransform",
+          icon: "⚡",
+          action: editorCommand("data-get-transform"),
+          size: "large",
+        },
+        {
           id: "data-connections",
           labelKey: "ribbon.btn.dataConnections",
           icon: "🔌",

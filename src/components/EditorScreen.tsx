@@ -351,6 +351,7 @@ import { addImportedSheetToSnapshot } from "../store/sheetImport";
 import DataConnectionsDialog, {
   type AddConnectionInput,
 } from "./DataConnectionsDialog";
+import GetTransformDialog from "./GetTransformDialog";
 import {
   type DataConnection,
   type EtlStep,
@@ -962,6 +963,8 @@ export default function EditorScreen() {
   // the current sheet. Same 300ms-poll cadence as navActiveSheetName above.
   const [activeSheetId, setActiveSheetId] = useState<string | null>(null);
   const [sheetImportOpen, setSheetImportOpen] = useState(false);
+  // #238 Step 2: Get & Transform dialog.
+  const [getTransformOpen, setGetTransformOpen] = useState(false);
   // #140 / #190: external data connections (Power Query) — modal dialog.
   const [dataConnectionsOpen, setDataConnectionsOpen] = useState(false);
   const [bookmarksPanelOpen, setBookmarksPanelOpen] = useState(false);
@@ -7215,6 +7218,9 @@ export default function EditorScreen() {
       case "file-import-sheet":
         setSheetImportOpen(true);
         break;
+      case "data-get-transform":
+        setGetTransformOpen(true);
+        break;
       case "data-data-connections":
         setDataConnectionsOpen(true);
         break;
@@ -9740,6 +9746,16 @@ export default function EditorScreen() {
             setSheetImportOpen(false);
           }}
           onClose={() => setSheetImportOpen(false)}
+        />
+      )}
+      {getTransformOpen && (
+        <GetTransformDialog
+          snapshotJson={currentSnapshotJson}
+          onApply={(newSnapshotJson) => {
+            applyMutatedSnapshot(newSnapshotJson);
+            setGetTransformOpen(false);
+          }}
+          onClose={() => setGetTransformOpen(false)}
         />
       )}
       {dataConnectionsOpen && (

@@ -10,7 +10,8 @@ Remaining steps deferred (XL, 残り 3-5週).
 | 1. Pipeline engine (selectColumns / dropColumns / filterRows / sort / rename / groupBy) | ✅ shipped | `src/store/getAndTransform.ts` |
 | 2. JSON / JSONL ソース → rows[] | ✅ shipped (PR #247) | 既存 `jsonImport.ts` |
 | 3. CSV ソース → rows[] | ✅ shipped | 既存 `workbook_import_csv` (Rust) |
-| 4. SQLite ソース → rows[] (new Rust command) | ⏳ next | `rusqlite` 既存依存を活用 |
+| 4. SQLite ソース → rows[] | ✅ 既存 shipped | `data_connection_load_sqlite` (Rust + `rusqlite`) |
+| 4b. xlsx round-trip: queryTables byte-preserve | ✅ shipped | PR #270 — PRESERVED_PREFIXES に追加 |
 | 5. GetAndTransformDialog UI (ソース選択 + ステップ追加 + プレビュー) | ⏳ | |
 | 6. `_cocoQueries` 保存 + COCO_ROOT_EXTENSION_KEYS | ⏳ | |
 | 7. xlsx round-trip via cocoExtensions/queries.json | ⏳ | |

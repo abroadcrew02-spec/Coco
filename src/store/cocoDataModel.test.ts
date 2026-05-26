@@ -4,6 +4,7 @@ import {
   addMeasure,
   addRelationship,
   addTable,
+  applyCalculatedColumns,
   EMPTY_DATA_MODEL,
   readDataModel,
   removeCalculatedColumn,
@@ -249,5 +250,87 @@ describe("round-trip (read ↔ write)", () => {
       EMPTY_DATA_MODEL,
     );
     expect(readDataModel(snap)).toEqual(EMPTY_DATA_MODEL);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 4: applyCalculatedColumns bridge
+// ---------------------------------------------------------------------------
+
+describe("applyCalculatedColumns", () => {
+  const tableWithRows: ModelTable = {
+    name: "Sales",
+    columns: [
+      { name: "Region", type: "string" },
+      { name: "Amount", type: "number" },
+    ],
+    rows: [
+      { Region: "East", Amount: 100 },
+      { Region: "West", Amount: 200 },
+    ],
+  };
+
+  function modelWithTable(): CocoDataModel {
+    return addTable(EMPTY_DATA_MODEL, tableWithRows);
+  }
+
+  it("applies stored calculated columns to the runtime DataModel", () => {
+    const cc: StoredCalculatedColumn = {
+      id: "cc1",
+      name: "AmountX2",
+      tableId: "Sales",
+      expression: "Sales[Amount] * 2",
+      columnName: "AmountX2",
+    };
+    const cocoModel = addCalculatedColumn(modelWithTable(), cc);
+    const base = toDataModel(cocoModel);
+    const runtime = applyCalculatedColumns(base, cocoModel);
+
+    expect(runtime.tables[0].rows[0].AmountX2).toBe(200);
+    expect(runtime.tables[0].rows[1].AmountX2).toBe(400);
+  });
+
+  it("does nothing when calculatedColumns array is empty", () => {
+    const base = toDataModel(modelWithTable());
+    const runtime = applyCalculatedColumns(base, modelWithTable());
+    // Same rows, no new columns.
+    expect(runtime.tables[0].rows[0]).not.toHaveProperty("AmountX2");
+    expect(runtime.tables[0].columns).toHaveLength(2);
+  });
+
+  it("multiple stored columns are applied in definition order", () => {
+    let cocoModel = modelWithTable();
+    const cc1: StoredCalculatedColumn = {
+      id: "cc1",
+      name: "AmountX2",
+      tableId: "Sales",
+      expression: "Sales[Amount] * 2",
+      columnName: "AmountX2",
+    };
+    const cc2: StoredCalculatedColumn = {
+      id: "cc2",
+      name: "AmountX4",
+      tableId: "Sales",
+      expression: "Sales[AmountX2] * 2",
+      columnName: "AmountX4",
+    };
+    cocoModel = addCalculatedColumn(addCalculatedColumn(cocoModel, cc1), cc2);
+    const runtime = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    expect(runtime.tables[0].rows[0].AmountX4).toBe(400);  // 100*2*2
+    expect(runtime.tables[0].rows[1].AmountX4).toBe(800);  // 200*2*2
+  });
+
+  it("bad expression marks cells as #ERROR! without crashing", () => {
+    const cc: StoredCalculatedColumn = {
+      id: "cc-bad",
+      name: "Bad",
+      tableId: "Sales",
+      expression: "1 +",  // trailing operator → parse error
+      columnName: "Bad",
+    };
+    const cocoModel = addCalculatedColumn(modelWithTable(), cc);
+    const runtime = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    expect(runtime.tables[0].rows[0].Bad).toBe("#ERROR!");
+    expect(runtime.tables[0].rows[1].Bad).toBe("#ERROR!");
   });
 });

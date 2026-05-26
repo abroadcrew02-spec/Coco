@@ -2,9 +2,12 @@ import { describe, it, expect } from "vitest";
 import {
   evaluate,
   evaluateDax,
+  evaluateCalculatedColumns,
   IMPLEMENTED_FUNCTIONS,
+  CALC_COLUMN_ERROR,
   parseDax,
   type DataModel,
+  type CalculatedColumnDef,
 } from "./daxEngine";
 
 // #239 Power Pivot / DAX engine foundation tests.
@@ -549,5 +552,288 @@ describe("IMPLEMENTED_FUNCTIONS", () => {
     expect(IMPLEMENTED_FUNCTIONS.has("MINX")).toBe(true);
     expect(IMPLEMENTED_FUNCTIONS.has("MAXX")).toBe(true);
     expect(IMPLEMENTED_FUNCTIONS.has("COUNTX")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 4: evaluateCalculatedColumns
+// ---------------------------------------------------------------------------
+
+function salesModel(): DataModel {
+  return {
+    tables: [
+      {
+        name: "Sales",
+        columns: [
+          { name: "Region", type: "string" },
+          { name: "Amount", type: "number" },
+        ],
+        rows: [
+          { Region: "East", Amount: 100 },
+          { Region: "West", Amount: 200 },
+        ],
+      },
+    ],
+    relationships: [],
+  };
+}
+
+describe("evaluateCalculatedColumns — basics", () => {
+  it("injects a simple arithmetic column into every row", () => {
+    const col: CalculatedColumnDef = {
+      tableId: "Sales",
+      columnName: "AmountX2",
+      expression: "Sales[Amount] * 2",
+    };
+    const result = evaluateCalculatedColumns(salesModel(), [col]);
+    const rows = result.tables[0].rows;
+    expect(rows[0].AmountX2).toBe(200);
+    expect(rows[1].AmountX2).toBe(400);
+  });
+
+  it("appends the column to ModelTable.columns with inferred type", () => {
+    const col: CalculatedColumnDef = {
+      tableId: "Sales",
+      columnName: "AmountX2",
+      expression: "Sales[Amount] * 2",
+    };
+    const result = evaluateCalculatedColumns(salesModel(), [col]);
+    const cols = result.tables[0].columns;
+    expect(cols.some((c) => c.name === "AmountX2")).toBe(true);
+  });
+
+  it("does NOT mutate the input model", () => {
+    const original = salesModel();
+    const originalRow0 = { ...original.tables[0].rows[0] };
+    const col: CalculatedColumnDef = {
+      tableId: "Sales",
+      columnName: "NewCol",
+      expression: "Sales[Amount] + 1",
+    };
+    evaluateCalculatedColumns(original, [col]);
+    expect(original.tables[0].rows[0]).toEqual(originalRow0);
+    expect(original.tables[0].columns).toHaveLength(2);
+  });
+
+  it("string expression is evaluated per row", () => {
+    const col: CalculatedColumnDef = {
+      tableId: "Sales",
+      columnName: "Label",
+      expression: 'Sales[Region] & " - ok"',
+    };
+    const result = evaluateCalculatedColumns(salesModel(), [col]);
+    const rows = result.tables[0].rows;
+    expect(rows[0].Label).toBe("East - ok");
+    expect(rows[1].Label).toBe("West - ok");
+  });
+
+  it("boolean expression is evaluated per row", () => {
+    const col: CalculatedColumnDef = {
+      tableId: "Sales",
+      columnName: "IsLarge",
+      expression: "Sales[Amount] > 150",
+    };
+    const result = evaluateCalculatedColumns(salesModel(), [col]);
+    expect(result.tables[0].rows[0].IsLarge).toBe(false);
+    expect(result.tables[0].rows[1].IsLarge).toBe(true);
+  });
+
+  it("IF expression works in row context", () => {
+    const col: CalculatedColumnDef = {
+      tableId: "Sales",
+      columnName: "Tier",
+      expression: 'IF(Sales[Amount] >= 200, "High", "Low")',
+    };
+    const result = evaluateCalculatedColumns(salesModel(), [col]);
+    expect(result.tables[0].rows[0].Tier).toBe("Low");
+    expect(result.tables[0].rows[1].Tier).toBe("High");
+  });
+});
+
+describe("evaluateCalculatedColumns — error handling", () => {
+  it("parse error marks every cell as CALC_COLUMN_ERROR", () => {
+    const col: CalculatedColumnDef = {
+      tableId: "Sales",
+      columnName: "Bad",
+      expression: "1 +",  // syntax error
+    };
+    const result = evaluateCalculatedColumns(salesModel(), [col]);
+    const rows = result.tables[0].rows;
+    expect(rows[0].Bad).toBe(CALC_COLUMN_ERROR);
+    expect(rows[1].Bad).toBe(CALC_COLUMN_ERROR);
+    // Column is still registered so callers can identify it.
+    expect(result.tables[0].columns.some((c) => c.name === "Bad")).toBe(true);
+  });
+
+  it("runtime error on a single row marks that cell, others are fine", () => {
+    // Divide by a column value that is 0 on one row.
+    const m: DataModel = {
+      tables: [
+        {
+          name: "T",
+          columns: [{ name: "X", type: "number" }],
+          rows: [{ X: 10 }, { X: 0 }, { X: 5 }],
+        },
+      ],
+      relationships: [],
+    };
+    const col: CalculatedColumnDef = {
+      tableId: "T",
+      columnName: "Inv",
+      expression: "10 / T[X]",
+    };
+    const result = evaluateCalculatedColumns(m, [col]);
+    const rows = result.tables[0].rows;
+    // 10/10 = 1, 10/0 = NaN (not an error object, so stored as NaN), 10/5 = 2
+    expect(rows[0].Inv).toBe(1);
+    expect(Number.isNaN(rows[1].Inv)).toBe(true);
+    expect(rows[2].Inv).toBe(2);
+  });
+
+  it("unknown function in expression marks every cell as CALC_COLUMN_ERROR", () => {
+    // evaluateDax returns { error: ... } for unknown function — should turn into CALC_COLUMN_ERROR
+    const col: CalculatedColumnDef = {
+      tableId: "Sales",
+      columnName: "Bad2",
+      expression: "NOPE(Sales[Amount])",
+    };
+    const result = evaluateCalculatedColumns(salesModel(), [col]);
+    const rows = result.tables[0].rows;
+    expect(rows[0].Bad2).toBe(CALC_COLUMN_ERROR);
+    expect(rows[1].Bad2).toBe(CALC_COLUMN_ERROR);
+  });
+
+  it("unknown tableId is silently skipped — model is not corrupted", () => {
+    const col: CalculatedColumnDef = {
+      tableId: "Ghost",
+      columnName: "X",
+      expression: "1",
+    };
+    const result = evaluateCalculatedColumns(salesModel(), [col]);
+    // Sales table is untouched.
+    expect(result.tables[0].columns).toHaveLength(2);
+    expect(result.tables[0].rows[0]).not.toHaveProperty("X");
+  });
+
+  it("empty table produces no rows but column metadata is registered", () => {
+    const m: DataModel = {
+      tables: [
+        { name: "T", columns: [{ name: "X", type: "number" }], rows: [] },
+      ],
+      relationships: [],
+    };
+    const col: CalculatedColumnDef = {
+      tableId: "T",
+      columnName: "Y",
+      expression: "T[X] * 2",
+    };
+    const result = evaluateCalculatedColumns(m, [col]);
+    expect(result.tables[0].rows).toHaveLength(0);
+    // Column registered even though there were no rows to infer type from.
+    expect(result.tables[0].columns.some((c) => c.name === "Y")).toBe(true);
+  });
+});
+
+describe("evaluateCalculatedColumns — RELATED in row context", () => {
+  it("RELATED resolves M:1 lookup inside a calculated column", () => {
+    const m: DataModel = {
+      tables: [
+        {
+          name: "Sales",
+          columns: [
+            { name: "ProductId", type: "string" },
+            { name: "Qty", type: "number" },
+          ],
+          rows: [
+            { ProductId: "P1", Qty: 3 },
+            { ProductId: "P2", Qty: 5 },
+          ],
+        },
+        {
+          name: "Products",
+          columns: [
+            { name: "Id", type: "string" },
+            { name: "Price", type: "number" },
+          ],
+          rows: [
+            { Id: "P1", Price: 100 },
+            { Id: "P2", Price: 80 },
+          ],
+        },
+      ],
+      relationships: [
+        { fromTable: "Sales", fromColumn: "ProductId", toTable: "Products", toColumn: "Id" },
+      ],
+    };
+    const col: CalculatedColumnDef = {
+      tableId: "Sales",
+      columnName: "Revenue",
+      expression: "Sales[Qty] * RELATED(Products[Price])",
+    };
+    const result = evaluateCalculatedColumns(m, [col]);
+    const rows = result.tables[0].rows;
+    expect(rows[0].Revenue).toBe(300);  // 3 * 100
+    expect(rows[1].Revenue).toBe(400);  // 5 * 80
+  });
+});
+
+describe("evaluateCalculatedColumns — column chaining", () => {
+  it("second column can reference values set by first column", () => {
+    const col1: CalculatedColumnDef = {
+      tableId: "Sales",
+      columnName: "AmountX2",
+      expression: "Sales[Amount] * 2",
+    };
+    const col2: CalculatedColumnDef = {
+      tableId: "Sales",
+      columnName: "AmountX4",
+      expression: "Sales[AmountX2] * 2",
+    };
+    const result = evaluateCalculatedColumns(salesModel(), [col1, col2]);
+    const rows = result.tables[0].rows;
+    // East: 100 → 200 → 400
+    expect(rows[0].AmountX2).toBe(200);
+    expect(rows[0].AmountX4).toBe(400);
+    // West: 200 → 400 → 800
+    expect(rows[1].AmountX2).toBe(400);
+    expect(rows[1].AmountX4).toBe(800);
+  });
+
+  it("multiple columns targeting different tables work independently", () => {
+    const m: DataModel = {
+      tables: [
+        {
+          name: "A",
+          columns: [{ name: "X", type: "number" }],
+          rows: [{ X: 10 }],
+        },
+        {
+          name: "B",
+          columns: [{ name: "Y", type: "number" }],
+          rows: [{ Y: 20 }],
+        },
+      ],
+      relationships: [],
+    };
+    const result = evaluateCalculatedColumns(m, [
+      { tableId: "A", columnName: "X2", expression: "A[X] * 2" },
+      { tableId: "B", columnName: "Y2", expression: "B[Y] * 2" },
+    ]);
+    expect(result.tables[0].rows[0].X2).toBe(20);
+    expect(result.tables[1].rows[0].Y2).toBe(40);
+  });
+});
+
+describe("evaluateCalculatedColumns — idempotent column registration", () => {
+  it("re-evaluating same columnName replaces values but doesn't duplicate column metadata", () => {
+    const col: CalculatedColumnDef = {
+      tableId: "Sales",
+      columnName: "AmountX2",
+      expression: "Sales[Amount] * 2",
+    };
+    // Apply twice — same column name.
+    const result = evaluateCalculatedColumns(salesModel(), [col, col]);
+    const cols = result.tables[0].columns;
+    expect(cols.filter((c) => c.name === "AmountX2")).toHaveLength(1);
   });
 });

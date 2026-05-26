@@ -751,3 +751,125 @@ export function evaluateDax(src: string, ctx: EvalContext): unknown {
     return { error: err instanceof Error ? err.message : String(err) };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Step 4: Calculated column evaluation
+// ---------------------------------------------------------------------------
+
+/**
+ * Sentinel string written into a row cell when a calculated-column DAX
+ * expression fails to evaluate (parse error, runtime error, etc.).
+ * Chosen to match Excel's display convention for formula errors.
+ */
+export const CALC_COLUMN_ERROR = "#ERROR!";
+
+/**
+ * A single calculated column definition: which table it belongs to, a
+ * column name to inject, and the DAX expression to evaluate per row.
+ *
+ * This is a runtime representation (no storage IDs, no format metadata).
+ * Callers typically build it from `StoredCalculatedColumn` in cocoDataModel.
+ */
+export interface CalculatedColumnDef {
+  /** Name of the target ModelTable. */
+  tableId: string;
+  /** Column name to inject into every row. */
+  columnName: string;
+  /** DAX expression evaluated in row context (may reference same-table columns). */
+  expression: string;
+}
+
+/**
+ * Evaluate all calculated columns against the given DataModel and return a
+ * *new* DataModel where:
+ *   - Each target table has the calculated column appended to `columns`.
+ *   - Each row has the computed value appended under `columnName`.
+ *   - If the DAX expression fails for a row, that cell is set to `CALC_COLUMN_ERROR`.
+ *   - If the expression fails to *parse*, every cell in that column is set to
+ *     `CALC_COLUMN_ERROR` (fail fast at parse time rather than per-row).
+ *   - If `tableId` doesn't match any table, the column definition is silently
+ *     skipped (best-effort — the model is not poisoned by a stale definition).
+ *
+ * Input `model` is never mutated. Returned model is a structural clone.
+ *
+ * Multiple columns targeting the same table are applied in order; later
+ * columns can reference earlier ones (row context includes all prior
+ * injected values).
+ */
+export function evaluateCalculatedColumns(
+  model: DataModel,
+  columns: CalculatedColumnDef[],
+): DataModel {
+  // Shallow-clone tables list; each table's rows/columns will be cloned when needed.
+  const tableMap = new Map<string, ModelTable>(
+    model.tables.map((t) => [t.name, { ...t, columns: t.columns.slice(), rows: t.rows.map((r) => ({ ...r })) }]),
+  );
+
+  for (const colDef of columns) {
+    const table = tableMap.get(colDef.tableId);
+    if (!table) continue; // silently skip unknown tables
+
+    // Pre-parse: catch syntax errors once rather than per-row.
+    let ast: DaxAst;
+    try {
+      ast = parseDax(colDef.expression);
+    } catch {
+      // Parse failed — mark every cell as error and move on.
+      for (const row of table.rows) {
+        row[colDef.columnName] = CALC_COLUMN_ERROR;
+      }
+      if (!table.columns.some((c) => c.name === colDef.columnName)) {
+        table.columns.push({ name: colDef.columnName, type: "string" });
+      }
+      continue;
+    }
+
+    // Build a DataModel view that includes already-evaluated columns from
+    // previous iterations so RELATED and same-table refs work.
+    // We update this snapshot after each column is fully evaluated.
+    const currentModel: DataModel = {
+      tables: Array.from(tableMap.values()),
+      relationships: model.relationships,
+    };
+
+    // Evaluate per row.
+    for (const row of table.rows) {
+      const rowCtx: EvalContext = {
+        model: currentModel,
+        currentRow: { table: colDef.tableId, row },
+        tableOverrides: undefined,
+      };
+      let cellValue: unknown;
+      try {
+        const raw = evaluate(ast, rowCtx);
+        // Guard against array results (e.g. columnRef outside row context) — not
+        // meaningful as a cell value.
+        if (Array.isArray(raw)) {
+          cellValue = CALC_COLUMN_ERROR;
+        } else if (raw !== null && typeof raw === "object" && "error" in raw) {
+          cellValue = CALC_COLUMN_ERROR;
+        } else {
+          cellValue = raw;
+        }
+      } catch {
+        cellValue = CALC_COLUMN_ERROR;
+      }
+      row[colDef.columnName] = cellValue;
+    }
+
+    // Register the column metadata if it's new.
+    if (!table.columns.some((c) => c.name === colDef.columnName)) {
+      // Infer a rough type from the first non-error cell value.
+      let inferredType: ModelColumn["type"] = "string";
+      const firstCell = table.rows[0]?.[colDef.columnName];
+      if (typeof firstCell === "number") inferredType = "number";
+      else if (typeof firstCell === "boolean") inferredType = "boolean";
+      table.columns.push({ name: colDef.columnName, type: inferredType });
+    }
+  }
+
+  return {
+    tables: Array.from(tableMap.values()),
+    relationships: model.relationships,
+  };
+}

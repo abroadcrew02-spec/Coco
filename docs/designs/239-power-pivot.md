@@ -11,7 +11,7 @@ Remaining steps deferred (XL, 残り 5-7週 MVP).
 | 2. RELATED + SUMX/AVERAGEX/MINX/MAXX/COUNTX (row context + M:1 lookup) | ✅ shipped | PR #266 — 6 関数追加 |
 | 3. FILTER / CALCULATE — filter context propagation | ✅ shipped | PR #267 — フィルター context 完成 |
 | 4. xlsx round-trip: `xl/model/item.data` 経路の preserve (Coco は触らない) | ✅ shipped | PR #270 — PRESERVED_PREFIXES に追加 |
-| 5. `_cocoDataModel` 保存 + Coco-native measure 定義 | ⏳ | |
+| 5. `_cocoDataModel` 保存 + Coco-native measure 定義 | ✅ shipped | PR #271 — pure helpers + 20 tests |
 | 6. DataModelDialog UI (テーブル一覧 + measure 編集) | ⏳ | |
 | 7. Pivot 統合 (PR #237 と連動) | ⏳ | |
 

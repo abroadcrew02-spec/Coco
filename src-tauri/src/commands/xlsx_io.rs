@@ -6424,6 +6424,22 @@ const PRESERVED_PREFIXES: &[&str] = &[
     "xl/pivotCache/",
     "xl/media/",
     "xl/externalLinks/",
+    // #239 Step 4: Power Pivot / Data Model. xl/model/item.data is the binary
+    // Vertipaq columnstore (xlsx 2013+). Coco doesn't author it — but a user
+    // opening an Excel-authored data-model workbook in Coco and re-saving
+    // would otherwise lose the model entirely. Byte-perfect round-trip via
+    // _preservedParts keeps the model intact even when Coco can't read it.
+    "xl/model/",
+    // #238 Step 4 (xlsx round-trip for Power Query connection definitions).
+    // Excel stores query connection metadata in connections.xml + queryTables/.
+    // Same preservation rationale as xl/model/.
+    "xl/queryTables/",
+    // #194 Step 1 (form controls OOXML preservation). ctrlProps + vmlDrawings
+    // carry form control state. Coco can't write these natively yet so
+    // byte-for-byte preservation keeps Excel-authored form controls intact
+    // through a Coco round-trip.
+    "xl/ctrlProps/",
+    "xl/embeddings/",
 ];
 
 /// Minimal base64 encoder — avoids adding a crate dependency for a single

@@ -58,6 +58,11 @@ export interface ChartEntry {
   seriesColors?: string[];
   hasHeaderRow?: boolean;
   hasHeaderCol?: boolean;
+  // In-grid placement fields (Step 3).
+  anchorRow?: number;
+  anchorCol?: number;
+  widthPx?: number;
+  heightPx?: number;
 }
 
 export interface ChartListing {

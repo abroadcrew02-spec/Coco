@@ -22,6 +22,12 @@ import {
 } from "./cellPixelBounds";
 import { parseRange } from "../components/chartPreviewData";
 
+// ---------------------------------------------------------------------------
+// Minimum chart dimensions (pixels). Used by resize logic and drag preview.
+// ---------------------------------------------------------------------------
+export const CHART_MIN_WIDTH_PX = 60;
+export const CHART_MIN_HEIGHT_PX = 40;
+
 /** Optional in-grid placement metadata attached to a ChartEntry. */
 export interface InGridChartAnchor {
   /** 0-based row of the top-left cell the chart anchors to. */
@@ -166,7 +172,8 @@ export function moveChartAnchor<T extends BoxableEntry>(
 
 /**
  * Resize an existing chart entry by a pixel delta. Clamps to a minimum
- * (60 × 40) so the chart can't be shrunk to invisibility.
+ * Minimum size is CHART_MIN_WIDTH_PX × CHART_MIN_HEIGHT_PX so the chart
+ * can't be shrunk to invisibility.
  */
 export function resizeChartAnchor<T extends BoxableEntry>(
   entry: T,
@@ -175,8 +182,8 @@ export function resizeChartAnchor<T extends BoxableEntry>(
 ): T {
   return {
     ...entry,
-    widthPx: Math.max(60, Math.floor(newWidth)),
-    heightPx: Math.max(40, Math.floor(newHeight)),
+    widthPx: Math.max(CHART_MIN_WIDTH_PX, Math.floor(newWidth)),
+    heightPx: Math.max(CHART_MIN_HEIGHT_PX, Math.floor(newHeight)),
   };
 }
 

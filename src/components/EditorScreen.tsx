@@ -358,12 +358,15 @@ import DataConnectionsDialog, {
 import GetTransformDialog from "./GetTransformDialog";
 import SavedQueriesPanel from "./SavedQueriesPanel";
 import MeasureListPanel from "./MeasureListPanel";
+import MeasureEditorDialog from "./MeasureEditorDialog";
 import {
   readDataModel,
   writeDataModel,
+  addMeasure,
   removeMeasure,
   removeCalculatedColumn,
 } from "../store/cocoDataModel";
+import type { StoredMeasure } from "../store/cocoDataModel";
 import {
   findQuery,
   removeQueryOnSnapshot,
@@ -2797,6 +2800,24 @@ export default function EditorScreen() {
   // jumpToOutputSheet is declared after jumpToA1OnSheet to avoid TDZ error.
 
   // --- #239 Measures ---------------------------------------------------------
+
+  const [measureEditor, setMeasureEditor] = useState<{ initial?: StoredMeasure } | null>(null);
+
+  const openMeasureEditor = useCallback((initial?: StoredMeasure) => {
+    setMeasureEditor({ initial });
+  }, []);
+
+  const applyMeasure = useCallback(
+    (measure: StoredMeasure) => {
+      const snap = getSnapshotForTool("メジャー保存");
+      if (!snap) return;
+      const model = readDataModel(snap);
+      const updated = addMeasure(model, measure);
+      const newSnap = writeDataModel(snap, updated);
+      applyMutatedSnapshot(JSON.stringify(newSnap));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
 
   const deleteMeasure = useCallback(
     (id: string, kind: "measure" | "calculatedColumn") => {
@@ -9194,6 +9215,8 @@ export default function EditorScreen() {
           <MeasureListPanel
             workbookSnapshotJson={currentSnapshotJson}
             onDelete={deleteMeasure}
+            onAdd={() => openMeasureEditor()}
+            onEdit={(m) => openMeasureEditor(m)}
           />
         )}
         {chartsCanvasPanelOpen && currentSnapshotJson && (
@@ -9405,6 +9428,23 @@ export default function EditorScreen() {
           onClose={() => setChartDialog(null)}
         />
       )}
+      {measureEditor && (() => {
+        const dmSnap = currentSnapshotJson ? (() => {
+          try { return JSON.parse(currentSnapshotJson) as unknown; } catch { return null; }
+        })() : null;
+        const dm = readDataModel(dmSnap);
+        const dmTables = dm.tables.map((t) => ({ id: t.name, name: t.name }));
+        const existingNames = dm.measures.map((m) => m.name);
+        return (
+          <MeasureEditorDialog
+            initialMeasure={measureEditor.initial}
+            tables={dmTables}
+            existingNames={existingNames}
+            onApply={applyMeasure}
+            onClose={() => setMeasureEditor(null)}
+          />
+        );
+      })()}
       {numFmtDialog && (
         <NumberFormatDialog
           rangeLabel={numFmtDialog.rangeLabel}

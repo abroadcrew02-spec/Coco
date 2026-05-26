@@ -39,6 +39,11 @@ export const COCO_ROOT_EXTENSION_KEYS = [
   // — without this graft the inserted drawing parts vanish on the next cell
   // edit, breaking xlsx export round-trip.
   "_preservedParts",
+  // #239 Step 5 — Coco-native Data Model (tables + relationships + measures).
+  // Distinct from `xl/model/item.data` (Excel's binary Vertipaq store, which
+  // we byte-preserve via _preservedParts). The Coco model is JSON and can be
+  // edited from the DataModelDialog (planned). Both layers can coexist.
+  "_cocoDataModel",
 ] as const;
 
 /**

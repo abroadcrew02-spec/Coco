@@ -15,6 +15,7 @@
 import {
   cellBoundsPx,
   defaultChartAnchorPx,
+  pixelToCell,
   type CellPixelOptions,
   type PixelBounds,
   type SheetPixelLayout,
@@ -176,5 +177,28 @@ export function resizeChartAnchor<T extends BoxableEntry>(
     ...entry,
     widthPx: Math.max(60, Math.floor(newWidth)),
     heightPx: Math.max(40, Math.floor(newHeight)),
+  };
+}
+
+/**
+ * Snap the chart's anchor cell from pixel coordinates (the drag-drop position).
+ * `pixelX` / `pixelY` are relative to the sheet canvas origin (includes header
+ * offsets). The resulting anchorRow/anchorCol become the cell whose top-left
+ * is closest to the drop point.
+ *
+ * Preserves widthPx / heightPx so the chart retains its dimensions.
+ */
+export function snapAnchorToPixel<T extends BoxableEntry>(
+  entry: T,
+  pixelX: number,
+  pixelY: number,
+  layout: SheetPixelLayout,
+  opts: CellPixelOptions = {},
+): T {
+  const { row, col } = pixelToCell(layout, pixelX, pixelY, opts);
+  return {
+    ...entry,
+    anchorRow: row,
+    anchorCol: col,
   };
 }

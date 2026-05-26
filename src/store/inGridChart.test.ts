@@ -4,6 +4,7 @@ import {
   moveChartAnchor,
   resizeChartAnchor,
   resolveChartBox,
+  snapAnchorToPixel,
   type BoxableEntry,
 } from "./inGridChart";
 
@@ -144,6 +145,40 @@ describe("moveChartAnchor", () => {
     const entry: BoxableEntry = { anchorRow: 1, anchorCol: 1 };
     moveChartAnchor(entry, 5, 5);
     expect(entry.anchorRow).toBe(1);
+  });
+});
+
+describe("snapAnchorToPixel", () => {
+  it("snaps to row 0 col 0 for a pixel inside A1", () => {
+    // A1 starts at headerLeft=46, headerTop=20; point (50, 25) is inside A1.
+    const entry: BoxableEntry = { anchorRow: 5, anchorCol: 5 };
+    const snapped = snapAnchorToPixel(entry, 50, 25, {});
+    expect(snapped.anchorRow).toBe(0);
+    expect(snapped.anchorCol).toBe(0);
+  });
+
+  it("snaps to row 1 col 1 for a pixel inside B2", () => {
+    // DEFAULT_COL=73, DEFAULT_ROW=19, HEADER_LEFT=46, HEADER_TOP=20
+    // B2 left = 46+73=119, top = 20+19=39; pick (125, 45) inside B2
+    const entry: BoxableEntry = { anchorRow: 0, anchorCol: 0 };
+    const snapped = snapAnchorToPixel(entry, 125, 45, {});
+    expect(snapped.anchorRow).toBe(1);
+    expect(snapped.anchorCol).toBe(1);
+  });
+
+  it("preserves other entry fields", () => {
+    const entry = { anchorRow: 0, anchorCol: 0, widthPx: 480, heightPx: 300, range: "A1:B2" } as BoxableEntry;
+    const snapped = snapAnchorToPixel(entry, 50, 25, {});
+    expect(snapped.widthPx).toBe(480);
+    expect(snapped.heightPx).toBe(300);
+    expect(snapped.range).toBe("A1:B2");
+  });
+
+  it("clamps to (0,0) for a point in the header region", () => {
+    const entry: BoxableEntry = { anchorRow: 3, anchorCol: 3 };
+    const snapped = snapAnchorToPixel(entry, 5, 5, {});
+    expect(snapped.anchorRow).toBe(0);
+    expect(snapped.anchorCol).toBe(0);
   });
 });
 

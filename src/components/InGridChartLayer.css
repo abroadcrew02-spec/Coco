@@ -1,3 +1,77 @@
-.ingrid-chart-layer { position: absolute; inset: 0; pointer-events: none; z-index: 15; overflow: hidden; }
-.ingrid-chart-frame { position: absolute; pointer-events: auto; background: var(--coco-bg-elevated); border: 1px solid var(--coco-border); box-shadow: 0 2px 6px var(--coco-shadow); overflow: hidden; }
-.ingrid-chart-frame > svg { width: 100%; height: 100%; display: block; }
+/* #236 Step 4 — In-grid chart overlay: frame + drag/resize handles */
+
+/* ── Layer ─────────────────────────────────────────────────────────────── */
+.ingrid-chart-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 15;
+  overflow: hidden;
+}
+
+/* ── Chart frame ────────────────────────────────────────────────────────── */
+.ingrid-chart-frame {
+  position: absolute;
+  left: var(--cf-left);
+  top: var(--cf-top);
+  width: var(--cf-width);
+  height: var(--cf-height);
+  pointer-events: auto;
+  background: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border);
+  box-shadow: 0 2px 6px var(--coco-shadow);
+  overflow: visible;
+}
+
+/* ── Chart body (drag to move) ──────────────────────────────────────────── */
+.ingrid-chart-body {
+  width: 100%;
+  height: 100%;
+  cursor: move;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.ingrid-chart-body > svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ── Resize handles ─────────────────────────────────────────────────────── */
+/*
+ * Handles are hidden by default; shown when the frame is hovered or during
+ * an active drag (pointer-capture keeps the element under the cursor).
+ * Each handle reads its position from --h-top / --h-left (set inline).
+ */
+.ingrid-chart-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  border: 1.5px solid #1a73e8;
+  border-radius: 2px;
+  transform: translate(-50%, -50%);
+  top: var(--h-top);
+  left: var(--h-left);
+  opacity: 0;
+  pointer-events: auto;
+  transition: opacity 0.1s;
+  z-index: 1;
+}
+
+.ingrid-chart-frame:hover .ingrid-chart-handle,
+.ingrid-chart-frame:focus-within .ingrid-chart-handle {
+  opacity: 1;
+}
+
+/* Cursor per direction — driven by data-dir attribute so no inline cursor */
+.ingrid-chart-handle[data-dir="nw"] { cursor: nw-resize; }
+.ingrid-chart-handle[data-dir="n"]  { cursor: n-resize;  }
+.ingrid-chart-handle[data-dir="ne"] { cursor: ne-resize; }
+.ingrid-chart-handle[data-dir="e"]  { cursor: e-resize;  }
+.ingrid-chart-handle[data-dir="se"] { cursor: se-resize; }
+.ingrid-chart-handle[data-dir="s"]  { cursor: s-resize;  }
+.ingrid-chart-handle[data-dir="sw"] { cursor: sw-resize; }
+.ingrid-chart-handle[data-dir="w"]  { cursor: w-resize;  }

@@ -145,6 +145,61 @@ export function rangeBoundsPx(
 }
 
 /**
+ * Inverse of `cellBoundsPx`: given an (x, y) pixel coordinate (relative to the
+ * sheet origin, i.e. including header offsets), returns the 0-based (row, col)
+ * of the cell that contains that point.
+ *
+ * Clamps to (0, 0) when the point is inside the header strip. Returns the last
+ * visible cell when the point exceeds the sheet extent (maxRow / maxCol).
+ */
+export function pixelToCell(
+  layout: SheetPixelLayout,
+  x: number,
+  y: number,
+  opts: CellPixelOptions = {},
+  maxRow = 200,
+  maxCol = 100,
+): { row: number; col: number } {
+  const defaultRow =
+    opts.defaultRowHeight ?? layout.defaultRowHeight ?? DEFAULT_ROW_HEIGHT_PX;
+  const defaultCol =
+    opts.defaultColWidth ?? layout.defaultColumnWidth ?? DEFAULT_COL_WIDTH_PX;
+  const headerLeft = opts.headerOffsetLeft ?? DEFAULT_HEADER_LEFT;
+  const headerTop = opts.headerOffsetTop ?? DEFAULT_HEADER_TOP;
+
+  // Walk columns until accumulated width exceeds x.
+  let accX = headerLeft;
+  let col = 0;
+  for (let c = 0; c < maxCol; c++) {
+    const w = colWidth(layout, c, defaultCol);
+    if (accX + w > x) {
+      col = c;
+      break;
+    }
+    accX += w;
+    col = c + 1;
+  }
+
+  // Walk rows until accumulated height exceeds y.
+  let accY = headerTop;
+  let row = 0;
+  for (let r = 0; r < maxRow; r++) {
+    const h = rowHeight(layout, r, defaultRow);
+    if (accY + h > y) {
+      row = r;
+      break;
+    }
+    accY += h;
+    row = r + 1;
+  }
+
+  return {
+    row: Math.max(0, Math.min(row, maxRow - 1)),
+    col: Math.max(0, Math.min(col, maxCol - 1)),
+  };
+}
+
+/**
  * "Where should a chart anchored to this source range be placed by default?"
  *
  * Excel and Google Sheets both anchor a new chart in the empty space to the

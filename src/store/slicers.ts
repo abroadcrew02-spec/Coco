@@ -45,13 +45,32 @@
 //   - `listAllSlicers(workbook)` — flat listing with sheet ids/names
 
 import type { TableEntry } from "./tables";
+import {
+  refreshPivot,
+  type PivotEntry,
+  type PivotFilter,
+  type SheetWithPivots,
+  type WorkbookPivotSnapshot,
+} from "./pivots";
 
 export interface SlicerEntry {
   /** Workbook-wide unique, e.g. "Slicer1". */
   name: string;
-  /** Table name (from `_tables`) this slicer filters. */
+  /**
+   * Name of the filter target. When `targetKind === "pivot"` this holds the
+   * pivot name (matching `PivotEntry.name` in `_pivots`). When omitted (legacy
+   * default), this holds the table name (matching `TableEntry.name` in
+   * `_tables`). Field name stays in `field` either way.
+   */
   targetTable: string;
-  /** Column header name within the target table. */
+  /**
+   * Discriminator. Defaults to "table" for backward compat with pre-2026
+   * slicers that only knew about tables. "pivot" routes the filter through
+   * `applySlicerFiltersToPivots` which re-runs the pivot with merged filters
+   * instead of hiding sheet rows.
+   */
+  targetKind?: "table" | "pivot";
+  /** Column header name within the target table OR pivot field. */
   field: string;
   /** Empty array => show all (no filter active); non-empty => inclusive whitelist. */
   selectedValues: string[];
@@ -347,6 +366,10 @@ export function applySlicerFilters(
     if (!Array.isArray(list) || list.length === 0) continue;
     for (const slicer of list) {
       if (!slicer || typeof slicer.targetTable !== "string") continue;
+      // Pivot-targeting slicers are handled by `applySlicerFiltersToPivots`
+      // (separate code path that re-runs the pivot). Skip them here so we
+      // don't try to hide rows in a non-existent table of the same name.
+      if (slicer.targetKind === "pivot") continue;
       const sel = Array.isArray(slicer.selectedValues) ? slicer.selectedValues : [];
       if (sel.length === 0) continue; // empty selection = show all
       const hit = findTable(cloned, slicer.targetTable);
@@ -468,4 +491,109 @@ export function listAllSlicers(workbook: WorkbookSlicerSnapshot): SlicerListing[
 /** Workbook-wide collection of existing slicer names (for `generateSlicerName`). */
 export function collectAllSlicerNames(workbook: WorkbookSlicerSnapshot): string[] {
   return listAllSlicers(workbook).map((e) => e.slicer.name);
+}
+
+// ===========================================================================
+// #235 follow-up: pivot-targeting slicers.
+// ===========================================================================
+
+/** Union shape so the helper can work on snapshots holding both kinds. */
+export type WorkbookSlicerPivotSnapshot = WorkbookSlicerSnapshot & WorkbookPivotSnapshot;
+
+interface ApplySlicersToPivotsResult {
+  /** Names of the pivots that were re-rendered. */
+  refreshedPivots: string[];
+  /** Names of the slicers that were skipped because their target pivot was missing. */
+  skippedSlicers: string[];
+}
+
+/**
+ * Walk every slicer with `targetKind === "pivot"`, augment the named pivot's
+ * `filters[]` with the slicer's selection, then re-render the pivot by calling
+ * `refreshPivot`.
+ *
+ * Idempotency: existing pivot filters whose `field` matches a slicer field are
+ * REPLACED (not appended), so toggling a slicer never accumulates stale entries.
+ * User-authored pivot filters on fields NOT touched by any slicer are preserved.
+ *
+ * Empty `selectedValues` removes that field's filter entirely (matches the
+ * Excel "Clear Filter" semantic).
+ *
+ * The snapshot is mutated in-place because `refreshPivot` mutates destination
+ * cells in-place. Caller should pass an already-cloned snapshot if it needs to
+ * retain the pre-call state (typical flow: `applyMutatedSnapshot` accepts the
+ * mutated snapshot directly).
+ */
+export function applySlicerFiltersToPivots(
+  workbook: WorkbookSlicerPivotSnapshot,
+): ApplySlicersToPivotsResult {
+  const refreshedPivots: string[] = [];
+  const skippedSlicers: string[] = [];
+  if (!workbook || typeof workbook !== "object") {
+    return { refreshedPivots, skippedSlicers };
+  }
+  const sheets = workbook.sheets;
+  if (!sheets || typeof sheets !== "object") {
+    return { refreshedPivots, skippedSlicers };
+  }
+
+  // Group slicers by pivot name (one pivot may have multiple slicer-driven
+  // filters, one per field).
+  type SlicerFilter = { field: string; values: string[] };
+  const byPivot = new Map<string, SlicerFilter[]>();
+  for (const sid of Object.keys(sheets)) {
+    const sh = sheets[sid] as (SheetWithSlicers & SheetWithPivots) | undefined;
+    const list = sh?._slicers;
+    if (!Array.isArray(list) || list.length === 0) continue;
+    for (const slicer of list) {
+      if (!slicer || slicer.targetKind !== "pivot") continue;
+      if (typeof slicer.targetTable !== "string" || typeof slicer.field !== "string") continue;
+      const sel = Array.isArray(slicer.selectedValues) ? slicer.selectedValues.slice() : [];
+      const bag = byPivot.get(slicer.targetTable) ?? [];
+      bag.push({ field: slicer.field, values: sel });
+      byPivot.set(slicer.targetTable, bag);
+    }
+  }
+
+  if (byPivot.size === 0) return { refreshedPivots, skippedSlicers };
+
+  // For each affected pivot, find the entry, merge slicer filters, refresh.
+  for (const [pivotName, slicerFilters] of byPivot) {
+    let entry: PivotEntry | null = null;
+    for (const sid of Object.keys(sheets)) {
+      const list = sheets[sid]?._pivots;
+      if (!Array.isArray(list)) continue;
+      for (const p of list) {
+        if (p && p.name === pivotName) {
+          entry = p;
+          break;
+        }
+      }
+      if (entry) break;
+    }
+    if (!entry) {
+      skippedSlicers.push(pivotName);
+      continue;
+    }
+
+    // Merge: preserve existing filters whose field isn't touched by any
+    // slicer; replace those whose field matches a slicer-driven filter.
+    const slicerFieldSet = new Set(slicerFilters.map((f) => f.field));
+    const preserved: PivotFilter[] = Array.isArray(entry.filters)
+      ? entry.filters.filter((f) => f && typeof f.field === "string" && !slicerFieldSet.has(f.field))
+      : [];
+    const newSlicerFilters: PivotFilter[] = slicerFilters
+      .filter((f) => f.values.length > 0) // empty selection = "no filter", omit entirely
+      .map((f) => ({ field: f.field, values: f.values }));
+    entry.filters = [...preserved, ...newSlicerFilters];
+
+    const result = refreshPivot(workbook, pivotName);
+    if (result.ok) {
+      refreshedPivots.push(pivotName);
+    } else {
+      skippedSlicers.push(pivotName);
+    }
+  }
+
+  return { refreshedPivots, skippedSlicers };
 }

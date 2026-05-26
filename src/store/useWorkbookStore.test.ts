@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // vi.mock is hoisted above imports, so the mock fns must be created via
@@ -18,6 +19,7 @@ import { useWorkbookStore } from "./useWorkbookStore";
 import { registerSnapshotFlush } from "./snapshotSync";
 import { friendlyError } from "./errorMessages";
 import type { SaveResult } from "../types/workbook";
+import { setLocale } from "../i18n/locale";
 
 const EMPTY_WORKBOOK_SNAPSHOT =
   "{\"sheetOrder\":[\"sheet-1\"],\"sheets\":{\"sheet-1\":{\"name\":\"Sheet1\",\"cellData\":{}}}}";
@@ -73,6 +75,7 @@ beforeEach(() => {
     pinnedOrder: [],
     suppressCsvPocWarning: false,
   });
+  setLocale("ja-JP");
 });
 
 describe("autoSave race prevention", () => {

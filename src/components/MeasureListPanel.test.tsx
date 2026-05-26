@@ -25,12 +25,12 @@ describe("MeasureListPanel — empty state", () => {
         onDelete={vi.fn()}
       />,
     );
-    expect(screen.getByText("データモデルにメジャーはありません。")).toBeTruthy();
+    expect(screen.getByText("データモデルは空です。テーブルパネルから「📊 データモデルへ追加」でテーブルを追加してください。")).toBeTruthy();
   });
 
   it("shows empty message when snapshot is empty string", () => {
     render(<MeasureListPanel workbookSnapshotJson="" onDelete={vi.fn()} />);
-    expect(screen.getByText("データモデルにメジャーはありません。")).toBeTruthy();
+    expect(screen.getByText("データモデルは空です。テーブルパネルから「📊 データモデルへ追加」でテーブルを追加してください。")).toBeTruthy();
   });
 });
 
@@ -177,5 +177,60 @@ describe("MeasureListPanel — delete propagation", () => {
     fireEvent.click(btn);
     expect(onDelete).toHaveBeenCalledOnce();
     expect(onDelete).toHaveBeenCalledWith("cc7", "calculatedColumn");
+  });
+});
+
+describe("MeasureListPanel — tables section", () => {
+  it("renders table rows with name, column count, and row count", () => {
+    const snap = makeSnapshot({
+      tables: [
+        {
+          name: "Sales",
+          columns: [
+            { name: "Date", type: "date" },
+            { name: "Amount", type: "number" },
+          ],
+          rows: [
+            { Date: "2026-05-01", Amount: 100 },
+            { Date: "2026-05-02", Amount: 200 },
+            { Date: "2026-05-03", Amount: 300 },
+          ],
+        },
+      ],
+    });
+    render(<MeasureListPanel workbookSnapshotJson={snap} onDelete={vi.fn()} />);
+    expect(screen.getByText("Sales")).toBeTruthy();
+    expect(screen.getByText("2 列")).toBeTruthy();
+    expect(screen.getByText("3 行")).toBeTruthy();
+  });
+
+  it("propagates onDeleteTable when a table delete button is clicked", () => {
+    const onDeleteTable = vi.fn();
+    const snap = makeSnapshot({
+      tables: [
+        { name: "Sales", columns: [{ name: "Amount", type: "number" }], rows: [] },
+      ],
+    });
+    render(
+      <MeasureListPanel
+        workbookSnapshotJson={snap}
+        onDelete={vi.fn()}
+        onDeleteTable={onDeleteTable}
+      />,
+    );
+    const btn = screen.getByRole("button", { name: "Sales を削除" });
+    fireEvent.click(btn);
+    expect(onDeleteTable).toHaveBeenCalledOnce();
+    expect(onDeleteTable).toHaveBeenCalledWith("Sales");
+  });
+
+  it("omits the table delete button when onDeleteTable is not provided", () => {
+    const snap = makeSnapshot({
+      tables: [
+        { name: "Sales", columns: [{ name: "Amount", type: "number" }], rows: [] },
+      ],
+    });
+    render(<MeasureListPanel workbookSnapshotJson={snap} onDelete={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Sales を削除" })).toBeNull();
   });
 });

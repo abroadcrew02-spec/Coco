@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { StoredMeasure, StoredCalculatedColumn } from "../store/cocoDataModel";
 import { readDataModel } from "../store/cocoDataModel";
+import type { ModelTable } from "../store/daxEngine";
 import "./MeasureListPanel.css";
 
 interface Props {
@@ -15,6 +16,8 @@ interface Props {
   onAddCalculatedColumn?: () => void;
   /** Open the editor to edit an existing calculated column. */
   onEditCalculatedColumn?: (col: StoredCalculatedColumn) => void;
+  /** Remove a table from the data model by name. */
+  onDeleteTable?: (name: string) => void;
 }
 
 interface MeasureRow {
@@ -32,25 +35,36 @@ export default function MeasureListPanel({
   onEdit,
   onAddCalculatedColumn,
   onEditCalculatedColumn,
+  onDeleteTable,
 }: Props) {
-  const { measures, calculatedColumns } = useMemo(() => {
-    if (!workbookSnapshotJson) return { measures: [] as StoredMeasure[], calculatedColumns: [] as StoredCalculatedColumn[] };
+  const { tables, measures, calculatedColumns } = useMemo(() => {
+    const empty = {
+      tables: [] as ModelTable[],
+      measures: [] as StoredMeasure[],
+      calculatedColumns: [] as StoredCalculatedColumn[],
+    };
+    if (!workbookSnapshotJson) return empty;
     try {
       const snap = JSON.parse(workbookSnapshotJson) as unknown;
       const model = readDataModel(snap);
-      return { measures: model.measures, calculatedColumns: model.calculatedColumns };
+      return {
+        tables: model.tables,
+        measures: model.measures,
+        calculatedColumns: model.calculatedColumns,
+      };
     } catch {
-      return { measures: [] as StoredMeasure[], calculatedColumns: [] as StoredCalculatedColumn[] };
+      return empty;
     }
   }, [workbookSnapshotJson]);
 
-  const isEmpty = measures.length === 0 && calculatedColumns.length === 0;
+  const isEmpty =
+    tables.length === 0 && measures.length === 0 && calculatedColumns.length === 0;
 
   if (isEmpty) {
     return (
       <div className="mlp-root">
         <div className="mlp-header">
-          <span>メジャー一覧</span>
+          <span>データモデル</span>
           {onAdd && (
             <button
               type="button"
@@ -63,7 +77,9 @@ export default function MeasureListPanel({
             </button>
           )}
         </div>
-        <p className="mlp-empty">データモデルにメジャーはありません。</p>
+        <p className="mlp-empty">
+          データモデルは空です。テーブルパネルから「📊 データモデルへ追加」でテーブルを追加してください。
+        </p>
       </div>
     );
   }
@@ -129,7 +145,7 @@ export default function MeasureListPanel({
   return (
     <div className="mlp-root">
       <div className="mlp-header">
-        <span>メジャー一覧 ({measures.length + calculatedColumns.length})</span>
+        <span>データモデル ({tables.length} テーブル / {measures.length + calculatedColumns.length} メジャー)</span>
         {onAdd && (
           <button
             type="button"
@@ -142,6 +158,37 @@ export default function MeasureListPanel({
           </button>
         )}
       </div>
+      {tables.length > 0 && (
+        <>
+          <div className="mlp-section-label">テーブル</div>
+          <ul className="mlp-list">
+            {tables.map((t) => (
+              <li key={t.name} className="mlp-row">
+                <div className="mlp-info">
+                  <span className="mlp-info-inner">
+                    <span className="mlp-name">{t.name}</span>
+                    <span className="mlp-meta">
+                      <span className="mlp-badge">{t.columns.length} 列</span>
+                      <span className="mlp-expr">{t.rows.length} 行</span>
+                    </span>
+                  </span>
+                </div>
+                {onDeleteTable && (
+                  <button
+                    type="button"
+                    className="mlp-delete"
+                    onClick={() => onDeleteTable(t.name)}
+                    aria-label={`${t.name} を削除`}
+                    title="削除"
+                  >
+                    ×
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {measures.length > 0 && (
         <>
           <div className="mlp-section-label">メジャー</div>

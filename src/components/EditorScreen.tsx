@@ -987,6 +987,11 @@ export default function EditorScreen() {
   useEffect(() => {
     setWorkbookSessionId(generateWorkbookSessionId());
   }, [currentHandle?.path]);
+  // Reset CF sidecar on file-open so stale base-style state doesn't carry
+  // across workbook switches (promised in the cfSidecarRef comment above).
+  useEffect(() => {
+    cfSidecarRef.current.clearAll();
+  }, [currentHandle?.path]);
   const bookmarkWorkbookId = currentHandle?.path ?? workbookSessionId;
   const [numberFormatManagerOpen, setNumberFormatManagerOpen] = useState(false);
   const [rangeCompareState, setRangeCompareState] = useState<{

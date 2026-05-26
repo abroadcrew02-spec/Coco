@@ -1,6 +1,20 @@
-# #235 Power Query 風 Get & Transform — MVP 設計
+# #238 Power Query 風 Get & Transform — MVP 設計
 
-Status: **Design only**. Implementation deferred (XL, 4-6週).
+Status: **Step 1 shipped** — pure pipeline engine (6 transforms) + 31 tests (PR #264).
+Remaining steps deferred (XL, 残り 3-5週).
+
+## Progress
+
+| Step | Status | Notes |
+| --- | --- | --- |
+| 1. Pipeline engine (selectColumns / dropColumns / filterRows / sort / rename / groupBy) | ✅ shipped | `src/store/getAndTransform.ts` |
+| 2. JSON / JSONL ソース → rows[] | ✅ shipped (PR #247) | 既存 `jsonImport.ts` |
+| 3. CSV ソース → rows[] | ✅ shipped | 既存 `workbook_import_csv` (Rust) |
+| 4. SQLite ソース → rows[] (new Rust command) | ⏳ next | `rusqlite` 既存依存を活用 |
+| 5. GetAndTransformDialog UI (ソース選択 + ステップ追加 + プレビュー) | ⏳ | |
+| 6. `_cocoQueries` 保存 + COCO_ROOT_EXTENSION_KEYS | ⏳ | |
+| 7. xlsx round-trip via cocoExtensions/queries.json | ⏳ | |
+| 8. Refresh query (既存 query を再実行) | ⏳ | |
 
 ## ゴール (再掲)
 

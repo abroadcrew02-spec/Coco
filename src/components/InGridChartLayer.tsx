@@ -90,6 +90,14 @@ interface Props {
     chartIndex: number,
     updated: ChartEntry,
   ) => void;
+  /**
+   * Called when the user double-clicks a chart frame to open the editor.
+   */
+  onChartEdit?: (
+    sheetId: string,
+    chartIndex: number,
+    entry: ChartEntry,
+  ) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,6 +108,7 @@ export default function InGridChartLayer({
   activeSheetId,
   pixelOpts,
   onChartChange,
+  onChartEdit,
 }: Props) {
   const drag = useRef<DragState | null>(null);
   // Tracks live (uncommitted) box positions during a drag so we can preview
@@ -324,6 +333,14 @@ export default function InGridChartLayer({
               onPointerDown={(e) => onBodyPointerDown(e, index, box)}
               onPointerMove={(e) => onPointerMove(e, index)}
               onPointerUp={(e) => onPointerUp(e, index, entry)}
+              onDoubleClick={() => {
+                // Skip if a drag was active (pointer capture clears drag.current on pointerup,
+                // but guard just in case).
+                if (drag.current !== null) return;
+                if (onChartEdit && activeSheetId) {
+                  onChartEdit(activeSheetId, index, entry);
+                }
+              }}
               dangerouslySetInnerHTML={{ __html: svg }}
             />
 

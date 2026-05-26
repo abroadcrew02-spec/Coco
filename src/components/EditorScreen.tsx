@@ -753,6 +753,10 @@ export default function EditorScreen() {
   const [chartDialog, setChartDialog] = useState<{
     sheetId: string;
     range: string;
+    /** When defined, the dialog runs in edit mode for this chart index. */
+    editingIndex?: number;
+    /** Pre-populated values for edit mode. */
+    initialValue?: ChartFormValue;
   } | null>(null);
   // Number-format dialog state: null while closed. Captures the active sheet
   // + the bounding rows/cols of the selection (inclusive) at open time, plus
@@ -5802,10 +5806,43 @@ export default function EditorScreen() {
       if (value.stacked !== undefined) entry.stacked = value.stacked;
       if (value.hasHeaderRow !== undefined) entry.hasHeaderRow = value.hasHeaderRow;
       if (value.hasHeaderCol !== undefined) entry.hasHeaderCol = value.hasHeaderCol;
-      sheetObj._charts = [...existing, entry];
+      if (chartDialog.editingIndex !== undefined) {
+        // Edit mode: replace the entry at the given index, preserving anchor/size.
+        const prev = existing[chartDialog.editingIndex] as Record<string, unknown> | undefined;
+        const merged: Record<string, unknown> = {
+          ...prev,
+          ...entry,
+        };
+        const updated = [...existing];
+        updated[chartDialog.editingIndex] = merged;
+        sheetObj._charts = updated;
+      } else {
+        sheetObj._charts = [...existing, entry];
+      }
       applyMutatedSnapshot(JSON.stringify(snapshot));
     },
     [chartDialog, applyMutatedSnapshot],
+  );
+
+  // Open the chart editor dialog pre-populated with the given chart entry.
+  // Called by InGridChartLayer on double-click of a chart frame.
+  const openChartEditor = useCallback(
+    (sheetId: string, chartIndex: number, entry: ChartEntry) => {
+      const initialValue: ChartFormValue = {
+        range: entry.range ?? "",
+        chartType: entry.type ?? "bar",
+        title: entry.title ?? "",
+        xAxisLabel: entry.xAxisLabel,
+        yAxisLabel: entry.yAxisLabel,
+        showLegend: entry.showLegend,
+        showDataLabels: entry.showDataLabels,
+        stacked: entry.stacked,
+        hasHeaderRow: entry.hasHeaderRow,
+        hasHeaderCol: entry.hasHeaderCol,
+      };
+      setChartDialog({ sheetId, range: initialValue.range, editingIndex: chartIndex, initialValue });
+    },
+    [],
   );
 
   // Persist drag/resize result back to the workbook snapshot (#236 Step 5).
@@ -8951,6 +8988,7 @@ export default function EditorScreen() {
           workbookSnapshotJson={currentSnapshotJson}
           activeSheetId={activeSheetId}
           onChartChange={handleChartAnchorChange}
+          onChartEdit={openChartEditor}
         />
         <CommentIndicatorsPanel
           indicators={commentIndicators}
@@ -9220,6 +9258,7 @@ export default function EditorScreen() {
       {chartDialog && (
         <InsertChartDialog
           initialRange={chartDialog.range}
+          initialValue={chartDialog.initialValue}
           onApply={applyChart}
           onClose={() => setChartDialog(null)}
         />

@@ -1,0 +1,116 @@
+.mlp-root {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.mlp-header {
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--coco-accent);
+  background-color: var(--coco-accent-subtle);
+  border-bottom: 1px solid var(--coco-border);
+}
+
+.mlp-empty {
+  margin: 0;
+  padding: 14px;
+  font-size: 12px;
+  color: var(--coco-text-muted);
+}
+
+.mlp-section-label {
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--coco-text-muted);
+  background-color: var(--coco-bg-elevated);
+  border-bottom: 1px solid var(--coco-border);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mlp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.mlp-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--coco-border);
+}
+
+.mlp-row:last-child {
+  border-bottom: none;
+}
+
+.mlp-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 12px;
+  min-width: 0;
+}
+
+.mlp-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--coco-accent);
+}
+
+.mlp-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--coco-text-muted);
+  min-width: 0;
+}
+
+.mlp-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background-color: var(--coco-accent-subtle);
+  color: var(--coco-accent);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: "Consolas", "Courier New", monospace;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mlp-expr {
+  color: var(--coco-text);
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 11px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.mlp-delete {
+  background: none;
+  border: none;
+  color: var(--coco-text-faint);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 12px;
+  border-left: 1px solid var(--coco-border);
+}
+
+.mlp-delete:hover {
+  color: var(--coco-danger);
+  background-color: var(--coco-danger-bg);
+}

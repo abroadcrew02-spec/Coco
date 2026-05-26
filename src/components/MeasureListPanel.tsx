@@ -11,6 +11,10 @@ interface Props {
   onAdd?: () => void;
   /** Open the editor to edit an existing measure. */
   onEdit?: (measure: StoredMeasure) => void;
+  /** Open the editor to create a new calculated column. */
+  onAddCalculatedColumn?: () => void;
+  /** Open the editor to edit an existing calculated column. */
+  onEditCalculatedColumn?: (col: StoredCalculatedColumn) => void;
 }
 
 interface MeasureRow {
@@ -21,7 +25,14 @@ interface MeasureRow {
   kind: "measure" | "calculatedColumn";
 }
 
-export default function MeasureListPanel({ workbookSnapshotJson, onDelete, onAdd, onEdit }: Props) {
+export default function MeasureListPanel({
+  workbookSnapshotJson,
+  onDelete,
+  onAdd,
+  onEdit,
+  onAddCalculatedColumn,
+  onEditCalculatedColumn,
+}: Props) {
   const { measures, calculatedColumns } = useMemo(() => {
     if (!workbookSnapshotJson) return { measures: [] as StoredMeasure[], calculatedColumns: [] as StoredCalculatedColumn[] };
     try {
@@ -70,15 +81,26 @@ export default function MeasureListPanel({ workbookSnapshotJson, onDelete, onAdd
   const renderRow = (row: MeasureRow) => {
     const isMeasure = row.kind === "measure";
     const measure = isMeasure ? measures.find((m) => m.id === row.id) : undefined;
-    const canEdit = isMeasure && !!onEdit && !!measure;
+    const calcCol = !isMeasure ? calculatedColumns.find((c) => c.id === row.id) : undefined;
+    const canEditMeasure = isMeasure && !!onEdit && !!measure;
+    const canEditCalcCol = !isMeasure && !!onEditCalculatedColumn && !!calcCol;
 
     return (
       <li key={row.id} className="mlp-row">
-        {canEdit ? (
+        {canEditMeasure ? (
           <button
             type="button"
             className="mlp-info mlp-info--editable"
             onClick={() => onEdit!(measure!)}
+            aria-label={`${row.name} を編集`}
+          >
+            {renderMeasureInfo(row)}
+          </button>
+        ) : canEditCalcCol ? (
+          <button
+            type="button"
+            className="mlp-info mlp-info--editable"
+            onClick={() => onEditCalculatedColumn!(calcCol!)}
             aria-label={`${row.name} を編集`}
           >
             {renderMeasureInfo(row)}
@@ -126,10 +148,25 @@ export default function MeasureListPanel({ workbookSnapshotJson, onDelete, onAdd
           <ul className="mlp-list">{measureRows.map(renderRow)}</ul>
         </>
       )}
-      {calculatedColumns.length > 0 && (
+      {(calculatedColumns.length > 0 || onAddCalculatedColumn) && (
         <>
-          <div className="mlp-section-label">計算列</div>
-          <ul className="mlp-list">{calcColRows.map(renderRow)}</ul>
+          <div className="mlp-section-label">
+            <span>計算列</span>
+            {onAddCalculatedColumn && (
+              <button
+                type="button"
+                className="mlp-add"
+                onClick={onAddCalculatedColumn}
+                aria-label="新規計算列"
+                title="新規計算列"
+              >
+                +
+              </button>
+            )}
+          </div>
+          {calculatedColumns.length > 0 && (
+            <ul className="mlp-list">{calcColRows.map(renderRow)}</ul>
+          )}
         </>
       )}
     </div>

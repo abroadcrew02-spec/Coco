@@ -82,6 +82,76 @@ describe("MeasureListPanel — row rendering", () => {
   });
 });
 
+describe("MeasureListPanel — add/edit propagation", () => {
+  it("calls onAddCalculatedColumn when + button in calc column section is clicked", () => {
+    const onAddCalculatedColumn = vi.fn();
+    const snap = makeSnapshot({});
+    render(
+      <MeasureListPanel
+        workbookSnapshotJson={snap}
+        onDelete={vi.fn()}
+        onAdd={vi.fn()}
+        onAddCalculatedColumn={onAddCalculatedColumn}
+      />,
+    );
+    // The panel shows an empty message for measures, but calc column + button
+    // is only rendered when onAddCalculatedColumn is provided.
+    // Render with a calc column row present so the section + button appears.
+    cleanup();
+    const snapWithCol = makeSnapshot({
+      calculatedColumns: [
+        { id: "cc1", name: "Tax", tableId: "Orders", expression: "[Price]*0.1", columnName: "Tax" },
+      ],
+    });
+    render(
+      <MeasureListPanel
+        workbookSnapshotJson={snapWithCol}
+        onDelete={vi.fn()}
+        onAddCalculatedColumn={onAddCalculatedColumn}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "新規計算列" }));
+    expect(onAddCalculatedColumn).toHaveBeenCalledOnce();
+  });
+
+  it("calls onEditCalculatedColumn when calc column row is clicked", () => {
+    const onEditCalculatedColumn = vi.fn();
+    const snap = makeSnapshot({
+      calculatedColumns: [
+        { id: "cc2", name: "FullName", tableId: "Customers", expression: "[A] & [B]", columnName: "FullName" },
+      ],
+    });
+    render(
+      <MeasureListPanel
+        workbookSnapshotJson={snap}
+        onDelete={vi.fn()}
+        onEditCalculatedColumn={onEditCalculatedColumn}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "FullName を編集" }));
+    expect(onEditCalculatedColumn).toHaveBeenCalledOnce();
+    const arg = onEditCalculatedColumn.mock.calls[0][0];
+    expect(arg.id).toBe("cc2");
+    expect(arg.columnName).toBe("FullName");
+  });
+
+  it("calls onAdd (measure) when + button in header is clicked", () => {
+    const onAdd = vi.fn();
+    const snap = makeSnapshot({
+      measures: [{ id: "m1", name: "Total", tableId: "T1", expression: "SUM(T1[A])" }],
+    });
+    render(
+      <MeasureListPanel
+        workbookSnapshotJson={snap}
+        onDelete={vi.fn()}
+        onAdd={onAdd}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "新規メジャー" }));
+    expect(onAdd).toHaveBeenCalledOnce();
+  });
+});
+
 describe("MeasureListPanel — delete propagation", () => {
   it("calls onDelete with id and 'measure' kind when delete button clicked", () => {
     const onDelete = vi.fn();

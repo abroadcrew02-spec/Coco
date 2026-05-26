@@ -340,16 +340,43 @@ describe("describeStep", () => {
     expect(describeStep(g)).toContain("sum(Sales)");
   });
 
-  it("returns a JA label for Step 3 step kinds", () => {
+  it("describeStep: changeType", () => {
     expect(describeStep({ kind: "changeType", column: "A", targetType: "number" })).toContain("number");
+  });
+
+  it("describeStep: fillMissing forward", () => {
     expect(describeStep({ kind: "fillMissing", column: "A", direction: "forward" })).toContain("前方");
+  });
+
+  it("describeStep: fillMissing backward", () => {
     expect(describeStep({ kind: "fillMissing", column: "A", direction: "backward" })).toContain("後方");
+  });
+
+  it("describeStep: fillMissing fixed", () => {
     expect(describeStep({ kind: "fillMissing", column: "A", direction: "fixed", fixedValue: "0" })).toContain("0");
+  });
+
+  it("describeStep: conditionalColumn", () => {
     expect(describeStep({ kind: "conditionalColumn", newColumn: "Cat", column: "Score", op: ">", value: "80", thenValue: "High", elseValue: "Low" })).toContain("Cat");
+  });
+
+  it("describeStep: replaceValue (literal)", () => {
     expect(describeStep({ kind: "replaceValue", column: "A", find: "x", replace: "y" })).toContain("x");
+  });
+
+  it("describeStep: replaceValue (regex)", () => {
     expect(describeStep({ kind: "replaceValue", column: "A", find: "x", replace: "y", useRegex: true })).toContain("regex");
+  });
+
+  it("describeStep: splitColumn", () => {
     expect(describeStep({ kind: "splitColumn", column: "A", delimiter: "," })).toContain(",");
+  });
+
+  it("describeStep: mergeColumns", () => {
     expect(describeStep({ kind: "mergeColumns", columns: ["A", "B"], newColumn: "C" })).toContain("C");
+  });
+
+  it("describeStep: addIndexColumn", () => {
     expect(describeStep({ kind: "addIndexColumn" })).toContain("Index");
   });
 });

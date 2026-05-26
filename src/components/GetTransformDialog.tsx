@@ -860,7 +860,7 @@ function StepEditor({ step, columns, onChange }: StepEditorProps) {
           >
             <option value="keep">失敗時: そのまま</option>
             <option value="null">失敗時: null に</option>
-            <option value="error">失敗時: 警告 (keep)</option>
+            <option value="error">失敗時: 警告 (値を保持)</option>
           </select>
         </>
       );

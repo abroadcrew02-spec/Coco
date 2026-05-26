@@ -84,6 +84,7 @@ import { patchCfRenders, type CfRuleEntry as CfRuleEntryType } from "./condition
 import { CfSidecar } from "../store/cfSidecar";
 import { computeCfApplyPlan } from "../store/cfApplyPlan";
 import { batchCfPlan } from "../store/cfRangeBatch";
+import type { ChartEntry } from "../store/chartRender";
 import { patchCheckboxRenders } from "./checkboxRender";
 import {
   addCheckbox,
@@ -5806,7 +5807,7 @@ export default function EditorScreen() {
   // dialog-open race). Pushed through applyMutatedSnapshot so Ctrl+Alt+Z
   // (Coco undo) can roll it back.
   const handleChartAnchorChange = useCallback(
-    (sheetId: string, chartIndex: number, updated: Record<string, unknown>) => {
+    (sheetId: string, chartIndex: number, updated: ChartEntry) => {
       const snapshot = getSnapshotForTool("グラフ移動");
       if (!snapshot) return;
       const sheets = (snapshot.sheets as Record<string, Record<string, unknown>> | undefined) ?? {};

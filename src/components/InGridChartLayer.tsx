@@ -259,7 +259,7 @@ export default function InGridChartLayer({
   );
 
   const onPointerUp = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>, index: number, entry: ChartEntry) => {
+    (_e: React.PointerEvent<HTMLDivElement>, index: number, entry: ChartEntry) => {
       const d = drag.current;
       if (!d || d.index !== index) return;
       drag.current = null;

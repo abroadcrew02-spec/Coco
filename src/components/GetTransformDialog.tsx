@@ -218,7 +218,7 @@ export default function GetTransformDialog({
     setError(null);
     try {
       const fetcher = createTauriSourceFetcher(
-        <T>(cmd: string, args?: Record<string, unknown>) =>
+        <T,>(cmd: string, args?: Record<string, unknown>) =>
           invoke<T>(cmd, args),
       );
       const querySource: QuerySource =
@@ -303,7 +303,7 @@ export default function GetTransformDialog({
       };
 
       const fetcher = createTauriSourceFetcher(
-        <T>(cmd: string, args?: Record<string, unknown>) =>
+        <T,>(cmd: string, args?: Record<string, unknown>) =>
           invoke<T>(cmd, args),
       );
       const result = await runQuery(query, { fetcher });

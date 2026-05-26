@@ -161,3 +161,40 @@
   background-color: var(--coco-accent-hover);
   border-color: var(--coco-accent-hover);
 }
+
+.ic-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--coco-text);
+  cursor: pointer;
+}
+
+.ic-details {
+  border: 1px solid var(--coco-border);
+  border-radius: 4px;
+  padding: 0;
+}
+
+.ic-details-summary {
+  font-size: 12px;
+  color: var(--coco-text-muted);
+  padding: 6px 10px;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  list-style: revert;
+}
+
+.ic-details-summary:hover {
+  color: var(--coco-text);
+}
+
+.ic-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--coco-border);
+}

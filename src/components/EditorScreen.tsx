@@ -5790,11 +5790,18 @@ export default function EditorScreen() {
       const existing = Array.isArray(sheetObj._charts)
         ? (sheetObj._charts as Array<Record<string, unknown>>)
         : [];
-      const entry: Record<string, string> = {
+      const entry: Record<string, unknown> = {
         range: value.range,
         type: value.chartType,
       };
       if (value.title) entry.title = value.title;
+      if (value.xAxisLabel) entry.xAxisLabel = value.xAxisLabel;
+      if (value.yAxisLabel) entry.yAxisLabel = value.yAxisLabel;
+      if (value.showLegend !== undefined) entry.showLegend = value.showLegend;
+      if (value.showDataLabels !== undefined) entry.showDataLabels = value.showDataLabels;
+      if (value.stacked !== undefined) entry.stacked = value.stacked;
+      if (value.hasHeaderRow !== undefined) entry.hasHeaderRow = value.hasHeaderRow;
+      if (value.hasHeaderCol !== undefined) entry.hasHeaderCol = value.hasHeaderCol;
       sheetObj._charts = [...existing, entry];
       applyMutatedSnapshot(JSON.stringify(snapshot));
     },

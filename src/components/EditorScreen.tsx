@@ -195,7 +195,9 @@ import InsertSlicerDialog from "./InsertSlicerDialog";
 import SlicerPanel from "./SlicerPanel";
 import {
   type SlicerEntry,
+  type WorkbookSlicerPivotSnapshot,
   type WorkbookSlicerSnapshot,
+  applySlicerFiltersToPivots,
   generateSlicerName,
   removeSlicer as removeSlicerHelper,
   toggleSlicerValue as toggleSlicerValueHelper,
@@ -2682,6 +2684,44 @@ export default function EditorScreen() {
     return out;
   }, [currentSnapshotJson]);
 
+  // Pivot-targeting slicer support (PR #253 follow-up). Pivot's filter
+  // surface is the SOURCE header set (since slicer changes which rows feed
+  // the aggregation), so columns = inferFieldNames(sourceCellData, range).
+  const availableSlicerPivots = useMemo(() => {
+    if (!currentSnapshotJson) return [];
+    let parsed: {
+      sheetOrder?: string[];
+      sheets?: Record<
+        string,
+        | {
+            name?: string;
+            _pivots?: PivotEntry[];
+            cellData?: Record<string, Record<string, { v?: unknown } | undefined> | undefined>;
+          }
+        | undefined
+      >;
+    };
+    try {
+      parsed = JSON.parse(currentSnapshotJson);
+    } catch {
+      return [];
+    }
+    const out: Array<{ name: string; sheetId: string; columns: string[] }> = [];
+    const sheets = parsed.sheets ?? {};
+    const order = parsed.sheetOrder ?? Object.keys(sheets);
+    for (const sid of order) {
+      const sh = sheets[sid];
+      if (!Array.isArray(sh?._pivots)) continue;
+      for (const p of sh!._pivots!) {
+        if (!p?.name || !p.source) continue;
+        const srcSheet = sheets[p.source.sheetId];
+        const columns = inferFieldNames(srcSheet?.cellData, p.source.range, p.hasHeader);
+        out.push({ name: p.name, sheetId: sid, columns });
+      }
+    }
+    return out;
+  }, [currentSnapshotJson]);
+
   const applySlicer = useCallback(
     (entry: SlicerEntry, sheetId: string) => {
       const fUniver = fUniverRef.current;
@@ -2721,9 +2761,13 @@ export default function EditorScreen() {
       if (!workbook) return;
       const fresh = workbook.save() as unknown as WorkbookSlicerSnapshot;
       const next = toggleSlicerValueHelper(fresh, name, value);
-      if (next) {
-        applyMutatedSnapshot(JSON.stringify(next));
-      }
+      if (!next) return;
+      // PR #253 follow-up: also re-render any pivots whose filter set is
+      // driven by this (or any) slicer. No-op when nothing pivot-targets.
+      // The helper mutates the snapshot in place, including writing the
+      // updated pivot output cells.
+      applySlicerFiltersToPivots(next as unknown as WorkbookSlicerPivotSnapshot);
+      applyMutatedSnapshot(JSON.stringify(next));
     },
     [applyMutatedSnapshot],
   );
@@ -9184,6 +9228,7 @@ export default function EditorScreen() {
       {slicerDialogOpen && (
         <InsertSlicerDialog
           availableTables={availableSlicerTables}
+          availablePivots={availableSlicerPivots}
           onApply={(entry, sheetId) => {
             applySlicer(entry, sheetId);
             setSlicerDialogOpen(false);

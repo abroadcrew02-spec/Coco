@@ -3,11 +3,16 @@ import {
   evaluate,
   evaluateDax,
   evaluateCalculatedColumns,
+  evaluateMeasure,
+  evaluateAllMeasures,
+  _evaluateMeasureInternal,
   IMPLEMENTED_FUNCTIONS,
   CALC_COLUMN_ERROR,
+  MEASURE_ERROR,
   parseDax,
   type DataModel,
   type CalculatedColumnDef,
+  type MeasureDef,
 } from "./daxEngine";
 
 // #239 Power Pivot / DAX engine foundation tests.
@@ -835,5 +840,295 @@ describe("evaluateCalculatedColumns — idempotent column registration", () => {
     const result = evaluateCalculatedColumns(salesModel(), [col, col]);
     const cols = result.tables[0].columns;
     expect(cols.filter((c) => c.name === "AmountX2")).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 6: evaluateMeasure / evaluateAllMeasures
+// ---------------------------------------------------------------------------
+
+function measureModel(): DataModel {
+  return {
+    tables: [
+      {
+        name: "Sales",
+        columns: [
+          { name: "Region", type: "string" },
+          { name: "Amount", type: "number" },
+          { name: "Quantity", type: "number" },
+        ],
+        rows: [
+          { Region: "East", Amount: 100, Quantity: 2 },
+          { Region: "East", Amount: 150, Quantity: 3 },
+          { Region: "West", Amount: 200, Quantity: 1 },
+          { Region: "West", Amount: 250, Quantity: 4 },
+        ],
+      },
+      {
+        name: "Regions",
+        columns: [
+          { name: "Code", type: "string" },
+          { name: "Label", type: "string" },
+        ],
+        rows: [
+          { Code: "East", Label: "Eastern Region" },
+          { Code: "West", Label: "Western Region" },
+        ],
+      },
+    ],
+    relationships: [],
+  };
+}
+
+function defs(measures: Array<{ name: string; expression: string }>): MeasureDef[] {
+  return measures;
+}
+
+describe("evaluateMeasure — basic aggregations", () => {
+  it("SUM measure returns correct total", () => {
+    const result = evaluateMeasure(
+      measureModel(),
+      defs([{ name: "Total Amount", expression: "SUM(Sales[Amount])" }]),
+      "Total Amount",
+    );
+    expect(result).toBe(700);
+  });
+
+  it("AVERAGE measure returns correct mean", () => {
+    const result = evaluateMeasure(
+      measureModel(),
+      defs([{ name: "Avg Amount", expression: "AVERAGE(Sales[Amount])" }]),
+      "Avg Amount",
+    );
+    expect(result).toBe(175);
+  });
+
+  it("COUNT measure counts numeric rows", () => {
+    const result = evaluateMeasure(
+      measureModel(),
+      defs([{ name: "Row Count", expression: "COUNTROWS(Sales)" }]),
+      "Row Count",
+    );
+    expect(result).toBe(4);
+  });
+
+  it("MAX / MIN measures return correct extremes", () => {
+    const m = measureModel();
+    const ms = defs([
+      { name: "Max Amt", expression: "MAX(Sales[Amount])" },
+      { name: "Min Amt", expression: "MIN(Sales[Amount])" },
+    ]);
+    expect(evaluateMeasure(m, ms, "Max Amt")).toBe(250);
+    expect(evaluateMeasure(m, ms, "Min Amt")).toBe(100);
+  });
+
+  it("arithmetic expression measure returns scalar", () => {
+    const result = evaluateMeasure(
+      measureModel(),
+      defs([{ name: "Hard Coded", expression: "10 + 5 * 2" }]),
+      "Hard Coded",
+    );
+    expect(result).toBe(20);
+  });
+});
+
+describe("evaluateMeasure — filter context", () => {
+  it("evaluates with external filter context (East only)", () => {
+    const m = measureModel();
+    const eastRows = m.tables[0].rows.filter((r) => r.Region === "East");
+    const filterCtx = new Map<string, Array<Record<string, unknown>>>([
+      ["Sales", eastRows],
+    ]);
+    const result = evaluateMeasure(
+      m,
+      defs([{ name: "East Total", expression: "SUM(Sales[Amount])" }]),
+      "East Total",
+      filterCtx,
+    );
+    expect(result).toBe(250); // 100 + 150
+  });
+
+  it("CALCULATE measure modifies its own filter context", () => {
+    const result = evaluateMeasure(
+      measureModel(),
+      defs([
+        {
+          name: "West Total",
+          expression: "CALCULATE(SUM(Sales[Amount]), FILTER(Sales, Sales[Region] = \"West\"))",
+        },
+      ]),
+      "West Total",
+    );
+    expect(result).toBe(450); // 200 + 250
+  });
+
+  it("FILTER inside measure returns filtered table to COUNTROWS", () => {
+    const result = evaluateMeasure(
+      measureModel(),
+      defs([
+        {
+          name: "East Count",
+          expression: "COUNTROWS(FILTER(Sales, Sales[Region] = \"East\"))",
+        },
+      ]),
+      "East Count",
+    );
+    expect(result).toBe(2);
+  });
+
+  it("ALL bypasses external filter context", () => {
+    const m = measureModel();
+    // Apply an East-only filter externally.
+    const eastRows = m.tables[0].rows.filter((r) => r.Region === "East");
+    const filterCtx = new Map<string, Array<Record<string, unknown>>>([
+      ["Sales", eastRows],
+    ]);
+    // The measure uses ALL to ignore the filter and sum the full dataset.
+    const result = evaluateMeasure(
+      m,
+      defs([{ name: "All Total", expression: "SUM(ALL(Sales[Amount]))" }]),
+      "All Total",
+      filterCtx,
+    );
+    expect(result).toBe(700); // all 4 rows
+  });
+
+  it("CALCULATE intersects with external filter context", () => {
+    const m = measureModel();
+    // External: East rows only.
+    const eastRows = m.tables[0].rows.filter((r) => r.Region === "East");
+    const filterCtx = new Map<string, Array<Record<string, unknown>>>([
+      ["Sales", eastRows],
+    ]);
+    // CALCULATE pushes a FILTER for Amount > 120 on top.
+    // Only East row with Amount=150 passes both filters.
+    const result = evaluateMeasure(
+      m,
+      defs([
+        {
+          name: "East High",
+          expression: "CALCULATE(SUM(Sales[Amount]), FILTER(Sales, Sales[Amount] > 120))",
+        },
+      ]),
+      "East High",
+      filterCtx,
+    );
+    // Intersection: East rows ∩ Amount>120 → only row {East,150}
+    expect(result).toBe(150);
+  });
+});
+
+describe("evaluateMeasure — error handling", () => {
+  it("returns MEASURE_ERROR for unknown measure name", () => {
+    expect(
+      evaluateMeasure(measureModel(), defs([]), "No Such Measure"),
+    ).toBe(MEASURE_ERROR);
+  });
+
+  it("returns MEASURE_ERROR for parse error in expression", () => {
+    const result = evaluateMeasure(
+      measureModel(),
+      defs([{ name: "Bad Expr", expression: "SUM(Sales[Amount]" }]), // missing ')'
+      "Bad Expr",
+    );
+    expect(result).toBe(MEASURE_ERROR);
+  });
+
+  it("returns MEASURE_ERROR for unsupported function in expression", () => {
+    const result = evaluateMeasure(
+      measureModel(),
+      defs([{ name: "Bad Fn", expression: "NOSUCHFN(Sales[Amount])" }]),
+      "Bad Fn",
+    );
+    expect(result).toBe(MEASURE_ERROR);
+  });
+
+  it("returns MEASURE_ERROR for circular reference (self-referential measure)", () => {
+    // Directly invoke the internal function with "Self" already in the evaluating set
+    // to simulate a re-entrant call — this is the exact scenario the guard protects against.
+    const evaluating = new Set(["Self"]);
+    const result = _evaluateMeasureInternal(
+      measureModel(),
+      defs([{ name: "Self", expression: "SUM(Sales[Amount])" }]),
+      "Self",
+      undefined,
+      evaluating,
+    );
+    expect(result).toBe(MEASURE_ERROR);
+  });
+
+  it("MEASURE_ERROR sentinel matches CALC_COLUMN_ERROR sentinel value", () => {
+    // Consistent error sentinel across calculated columns and measures.
+    expect(MEASURE_ERROR).toBe(CALC_COLUMN_ERROR);
+  });
+
+  it("returns MEASURE_ERROR when expression produces an array (no aggregation)", () => {
+    // A bare tableRef without COUNTROWS or SUM returns an array — invalid scalar.
+    const result = evaluateMeasure(
+      measureModel(),
+      defs([{ name: "Table Ref", expression: "Sales" }]),
+      "Table Ref",
+    );
+    expect(result).toBe(MEASURE_ERROR);
+  });
+});
+
+describe("evaluateMeasure — no row context", () => {
+  it("SUMX inside a measure iterates the table normally (measure has no currentRow)", () => {
+    const result = evaluateMeasure(
+      measureModel(),
+      defs([
+        {
+          name: "SumX Measure",
+          expression: "SUMX(Sales, Sales[Amount] * Sales[Quantity])",
+        },
+      ]),
+      "SumX Measure",
+    );
+    // 100*2 + 150*3 + 200*1 + 250*4 = 200+450+200+1000 = 1850
+    expect(result).toBe(1850);
+  });
+});
+
+describe("evaluateAllMeasures", () => {
+  it("returns a map with all measure names and their values", () => {
+    const ms = defs([
+      { name: "Total", expression: "SUM(Sales[Amount])" },
+      { name: "Count", expression: "COUNTROWS(Sales)" },
+    ]);
+    const results = evaluateAllMeasures(measureModel(), ms);
+    expect(results.size).toBe(2);
+    expect(results.get("Total")).toBe(700);
+    expect(results.get("Count")).toBe(4);
+  });
+
+  it("returns MEASURE_ERROR for individual failed measures, others succeed", () => {
+    const ms = defs([
+      { name: "Good", expression: "SUM(Sales[Amount])" },
+      { name: "Bad", expression: "SUM(Sales[Amount]" }, // parse error
+    ]);
+    const results = evaluateAllMeasures(measureModel(), ms);
+    expect(results.get("Good")).toBe(700);
+    expect(results.get("Bad")).toBe(MEASURE_ERROR);
+  });
+
+  it("returns empty map for empty measure list", () => {
+    const results = evaluateAllMeasures(measureModel(), []);
+    expect(results.size).toBe(0);
+  });
+
+  it("respects filter context for all measures", () => {
+    const m = measureModel();
+    const eastRows = m.tables[0].rows.filter((r) => r.Region === "East");
+    const filterCtx = new Map<string, Array<Record<string, unknown>>>([
+      ["Sales", eastRows],
+    ]);
+    const ms = defs([
+      { name: "Total", expression: "SUM(Sales[Amount])" },
+      { name: "Count", expression: "COUNTROWS(Sales)" },
+    ]);
+    const results = evaluateAllMeasures(m, ms, filterCtx);
+    expect(results.get("Total")).toBe(250);
+    expect(results.get("Count")).toBe(2);
   });
 });

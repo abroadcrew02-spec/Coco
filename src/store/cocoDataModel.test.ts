@@ -6,6 +6,8 @@ import {
   addTable,
   applyCalculatedColumns,
   EMPTY_DATA_MODEL,
+  evaluateAllStoredMeasures,
+  evaluateStoredMeasure,
   readDataModel,
   removeCalculatedColumn,
   removeMeasure,
@@ -17,6 +19,7 @@ import {
   type StoredCalculatedColumn,
   type StoredMeasure,
 } from "./cocoDataModel";
+import { MEASURE_ERROR } from "./daxEngine";
 import type { ModelRelationship, ModelTable } from "./daxEngine";
 
 const sampleTable: ModelTable = {
@@ -332,5 +335,121 @@ describe("applyCalculatedColumns", () => {
     const runtime = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
     expect(runtime.tables[0].rows[0].Bad).toBe("#ERROR!");
     expect(runtime.tables[0].rows[1].Bad).toBe("#ERROR!");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 6: evaluateStoredMeasure / evaluateAllStoredMeasures bridges
+// ---------------------------------------------------------------------------
+
+function modelWithMeasures(): CocoDataModel {
+  const t: ModelTable = {
+    name: "Sales",
+    columns: [
+      { name: "Region", type: "string" },
+      { name: "Amount", type: "number" },
+    ],
+    rows: [
+      { Region: "East", Amount: 100 },
+      { Region: "East", Amount: 150 },
+      { Region: "West", Amount: 200 },
+    ],
+  };
+  let m: CocoDataModel = addTable(EMPTY_DATA_MODEL, t);
+  m = addMeasure(m, {
+    id: "m-total",
+    name: "Total Amount",
+    tableId: "Sales",
+    expression: "SUM(Sales[Amount])",
+  });
+  m = addMeasure(m, {
+    id: "m-count",
+    name: "Row Count",
+    tableId: "Sales",
+    expression: "COUNTROWS(Sales)",
+  });
+  m = addMeasure(m, {
+    id: "m-west",
+    name: "West Total",
+    tableId: "Sales",
+    expression: 'CALCULATE(SUM(Sales[Amount]), FILTER(Sales, Sales[Region] = "West"))',
+  });
+  return m;
+}
+
+describe("evaluateStoredMeasure — bridge", () => {
+  it("evaluates a simple SUM measure via the coco model", () => {
+    const cocoModel = modelWithMeasures();
+    const runtime = toDataModel(cocoModel);
+    expect(evaluateStoredMeasure(runtime, cocoModel, "Total Amount")).toBe(450);
+  });
+
+  it("evaluates a COUNTROWS measure", () => {
+    const cocoModel = modelWithMeasures();
+    const runtime = toDataModel(cocoModel);
+    expect(evaluateStoredMeasure(runtime, cocoModel, "Row Count")).toBe(3);
+  });
+
+  it("evaluates a CALCULATE measure", () => {
+    const cocoModel = modelWithMeasures();
+    const runtime = toDataModel(cocoModel);
+    expect(evaluateStoredMeasure(runtime, cocoModel, "West Total")).toBe(200);
+  });
+
+  it("returns MEASURE_ERROR for unknown measure name", () => {
+    const cocoModel = modelWithMeasures();
+    const runtime = toDataModel(cocoModel);
+    expect(evaluateStoredMeasure(runtime, cocoModel, "No Such")).toBe(MEASURE_ERROR);
+  });
+
+  it("respects external filter context", () => {
+    const cocoModel = modelWithMeasures();
+    const runtime = toDataModel(cocoModel);
+    const eastRows = runtime.tables[0].rows.filter((r) => r.Region === "East");
+    const ctx = new Map<string, Array<Record<string, unknown>>>([["Sales", eastRows]]);
+    expect(evaluateStoredMeasure(runtime, cocoModel, "Total Amount", ctx)).toBe(250);
+  });
+
+  it("works with applyCalculatedColumns runtime (calculated columns visible to measures)", () => {
+    // Add a calculated column, then evaluate a measure that references it.
+    let cocoModel = modelWithMeasures();
+    const cc: StoredCalculatedColumn = {
+      id: "cc-x2",
+      name: "AmountX2",
+      tableId: "Sales",
+      expression: "Sales[Amount] * 2",
+      columnName: "AmountX2",
+    };
+    cocoModel = addCalculatedColumn(cocoModel, cc);
+    cocoModel = addMeasure(cocoModel, {
+      id: "m-x2-sum",
+      name: "Sum AmountX2",
+      tableId: "Sales",
+      expression: "SUM(Sales[AmountX2])",
+    });
+    const runtime = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    expect(evaluateStoredMeasure(runtime, cocoModel, "Sum AmountX2")).toBe(900); // (100+150+200)*2
+  });
+});
+
+describe("evaluateAllStoredMeasures — bridge", () => {
+  it("evaluates all measures in the model", () => {
+    const cocoModel = modelWithMeasures();
+    const runtime = toDataModel(cocoModel);
+    const results = evaluateAllStoredMeasures(runtime, cocoModel);
+    expect(results.size).toBe(3);
+    expect(results.get("Total Amount")).toBe(450);
+    expect(results.get("Row Count")).toBe(3);
+    expect(results.get("West Total")).toBe(200);
+  });
+
+  it("returns empty map for model with no measures", () => {
+    const cocoModel = addTable(EMPTY_DATA_MODEL, {
+      name: "T",
+      columns: [],
+      rows: [],
+    });
+    const results = evaluateAllStoredMeasures(toDataModel(cocoModel), cocoModel);
+    expect(results.size).toBe(0);
   });
 });

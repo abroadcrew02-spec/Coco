@@ -374,9 +374,38 @@ function esc(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * Allowlist-based color sanitizer for SVG attribute values.
+ *
+ * Accepts:
+ *   - #RGB      (#abc)
+ *   - #RRGGBB   (#aabbcc)
+ *   - #RRGGBBAA (#aabbccdd)
+ *   - CSS named colors (e.g. "red", "steelblue")
+ *   - rgb() / rgba() functional notation
+ *   - hsl() / hsla() functional notation
+ *   - "none" / "transparent"
+ *
+ * Anything that does not match is replaced with the first DEFAULT_PALETTE
+ * color so a rogue value never reaches the SVG attribute.
+ */
+const COLOR_ALLOWLIST =
+  /^(#[0-9a-f]{3,4}|#[0-9a-f]{6}|#[0-9a-f]{8}|rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)|rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*[\d.]+\s*\)|hsl\(\s*[\d.]+\s*,\s*[\d.]+%\s*,\s*[\d.]+%\s*\)|hsla\(\s*[\d.]+\s*,\s*[\d.]+%\s*,\s*[\d.]+%\s*,\s*[\d.]+\s*\)|[a-z]{2,30}|none|transparent)$/i;
+
+export function sanitizeColor(color: string): string {
+  const trimmed = color.trim();
+  if (COLOR_ALLOWLIST.test(trimmed)) {
+    return esc(trimmed);
+  }
+  return DEFAULT_PALETTE[0];
+}
+
 function pickColor(palette: string[], idx: number): string {
-  if (palette.length === 0) return DEFAULT_PALETTE[idx % DEFAULT_PALETTE.length];
-  return palette[idx % palette.length];
+  const raw =
+    palette.length === 0
+      ? DEFAULT_PALETTE[idx % DEFAULT_PALETTE.length]
+      : palette[idx % palette.length];
+  return sanitizeColor(raw);
 }
 
 /**

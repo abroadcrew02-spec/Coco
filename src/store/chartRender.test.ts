@@ -13,6 +13,7 @@ import {
   renderScatterChart,
   renderAreaChart,
   renderChart,
+  sanitizeColor,
   type ChartData,
   type RenderOpts,
   type ChartEntry,
@@ -621,4 +622,145 @@ describe("edge cases", () => {
     expect(svg).toContain("<svg");
     expect(svg).toContain("</svg>");
   });
+});
+
+// ---------- sanitizeColor ----------
+
+describe("sanitizeColor", () => {
+  // Allow: valid hex
+  it("allows #RRGGBB hex colors", () => {
+    expect(sanitizeColor("#5B9BD5")).toBe("#5B9BD5");
+  });
+
+  it("allows #RGB shorthand", () => {
+    expect(sanitizeColor("#abc")).toBe("#abc");
+  });
+
+  it("allows #RRGGBBAA (8-digit hex)", () => {
+    expect(sanitizeColor("#aabbccdd")).toBe("#aabbccdd");
+  });
+
+  // Allow: CSS named colors
+  it("allows CSS named color 'red'", () => {
+    expect(sanitizeColor("red")).toBe("red");
+  });
+
+  it("allows CSS named color 'steelblue'", () => {
+    expect(sanitizeColor("steelblue")).toBe("steelblue");
+  });
+
+  // Allow: functional notation
+  it("allows rgb() notation", () => {
+    expect(sanitizeColor("rgb(255, 0, 0)")).toBe("rgb(255, 0, 0)");
+  });
+
+  it("allows rgba() notation", () => {
+    expect(sanitizeColor("rgba(0, 0, 255, 0.5)")).toBe("rgba(0, 0, 255, 0.5)");
+  });
+
+  // Allow: special keywords
+  it("allows 'none'", () => {
+    expect(sanitizeColor("none")).toBe("none");
+  });
+
+  it("allows 'transparent'", () => {
+    expect(sanitizeColor("transparent")).toBe("transparent");
+  });
+
+  // Reject: attribute breakout payloads
+  it("rejects attribute breakout: quote + onload payload", () => {
+    const result = sanitizeColor('" onload="alert(1)');
+    expect(result).toBe(DEFAULT_PALETTE[0]);
+  });
+
+  it("rejects attribute breakout: quote + event handler variant", () => {
+    const result = sanitizeColor('" onerror="evil()');
+    expect(result).toBe(DEFAULT_PALETTE[0]);
+  });
+
+  it("rejects <script> tag injection", () => {
+    const result = sanitizeColor("<script>alert(1)</script>");
+    expect(result).toBe(DEFAULT_PALETTE[0]);
+  });
+
+  it("rejects newline-based breakout", () => {
+    const result = sanitizeColor("\nx=injected");
+    expect(result).toBe(DEFAULT_PALETTE[0]);
+  });
+
+  it("rejects javascript: URL", () => {
+    const result = sanitizeColor("javascript:alert(1)");
+    expect(result).toBe(DEFAULT_PALETTE[0]);
+  });
+
+  it("rejects semicolons (CSS injection attempt)", () => {
+    const result = sanitizeColor("red;background:url(evil)");
+    expect(result).toBe(DEFAULT_PALETTE[0]);
+  });
+});
+
+// ---------- seriesColors injection (integration) ----------
+
+describe("seriesColors injection prevention", () => {
+  const injectionPayloads = [
+    '" onload="alert(1)',
+    '" onerror="evil()',
+    "<script>alert(1)</script>",
+    "\nx=injected",
+    "javascript:void(0)",
+    "red;background:url(x)",
+  ];
+
+  for (const payload of injectionPayloads) {
+    it(`renderBarChart: seriesColors payload does not appear verbatim: ${JSON.stringify(payload)}`, () => {
+      const svg = renderBarChart(
+        makeData(),
+        makeOpts({ palette: [payload] }),
+        false,
+      );
+      expect(svg).not.toContain(payload);
+      expect(svg).toContain("<svg");
+    });
+
+    it(`renderLineChart: seriesColors payload does not appear verbatim: ${JSON.stringify(payload)}`, () => {
+      const svg = renderLineChart(makeData(), makeOpts({ palette: [payload] }));
+      expect(svg).not.toContain(payload);
+      expect(svg).toContain("<svg");
+    });
+
+    it(`renderPieChart: seriesColors payload does not appear verbatim: ${JSON.stringify(payload)}`, () => {
+      const svg = renderPieChart(makeData(), makeOpts({ palette: [payload] }));
+      expect(svg).not.toContain(payload);
+      expect(svg).toContain("<svg");
+    });
+
+    it(`renderAreaChart: seriesColors payload does not appear verbatim: ${JSON.stringify(payload)}`, () => {
+      const svg = renderAreaChart(makeData(), makeOpts({ palette: [payload] }));
+      expect(svg).not.toContain(payload);
+      expect(svg).toContain("<svg");
+    });
+
+    it(`renderScatterChart: seriesColors payload does not appear verbatim: ${JSON.stringify(payload)}`, () => {
+      const svg = renderScatterChart(makeData(), makeOpts({ palette: [payload] }));
+      expect(svg).not.toContain(payload);
+      expect(svg).toContain("<svg");
+    });
+
+    it(`renderDoughnutChart: seriesColors payload does not appear verbatim: ${JSON.stringify(payload)}`, () => {
+      const svg = renderDoughnutChart(makeData(), makeOpts({ palette: [payload] }));
+      expect(svg).not.toContain(payload);
+      expect(svg).toContain("<svg");
+    });
+
+    it(`renderChart dispatcher: seriesColors payload does not appear verbatim: ${JSON.stringify(payload)}`, () => {
+      const entry: ChartEntry = {
+        range: "A1:C3",
+        type: "bar",
+        seriesColors: [payload],
+      };
+      const svg = renderChart(makeData(), entry, 400, 300);
+      expect(svg).not.toContain(payload);
+      expect(svg).toContain("<svg");
+    });
+  }
 });

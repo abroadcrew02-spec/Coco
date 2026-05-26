@@ -368,6 +368,7 @@ import {
   removeCalculatedColumn,
   addCalculatedColumn,
   addTable as addModelTable,
+  removeTable as removeDataModelTable,
 } from "../store/cocoDataModel";
 import type { StoredMeasure, StoredCalculatedColumn } from "../store/cocoDataModel";
 import { excelTableToModelTable } from "../store/dataModelTableImport";
@@ -2853,6 +2854,18 @@ export default function EditorScreen() {
         kind === "measure"
           ? removeMeasure(model, id)
           : removeCalculatedColumn(model, id);
+      const newSnap = writeDataModel(snap, updated);
+      applyMutatedSnapshot(JSON.stringify(newSnap));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
+  const deleteDataModelTable = useCallback(
+    (name: string) => {
+      const snap = getSnapshotForTool("データモデルテーブル削除");
+      if (!snap) return;
+      const model = readDataModel(snap);
+      const updated = removeDataModelTable(model, name);
       const newSnap = writeDataModel(snap, updated);
       applyMutatedSnapshot(JSON.stringify(newSnap));
     },
@@ -9267,6 +9280,7 @@ export default function EditorScreen() {
             onEdit={(m) => openMeasureEditor(m)}
             onAddCalculatedColumn={() => openCalcColEditor()}
             onEditCalculatedColumn={(c) => openCalcColEditor(c)}
+            onDeleteTable={deleteDataModelTable}
           />
         )}
         {chartsCanvasPanelOpen && currentSnapshotJson && (

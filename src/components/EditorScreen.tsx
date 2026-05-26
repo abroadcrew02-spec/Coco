@@ -367,8 +367,10 @@ import {
   removeMeasure,
   removeCalculatedColumn,
   addCalculatedColumn,
+  addTable as addModelTable,
 } from "../store/cocoDataModel";
 import type { StoredMeasure, StoredCalculatedColumn } from "../store/cocoDataModel";
+import { excelTableToModelTable } from "../store/dataModelTableImport";
 import {
   findQuery,
   removeQueryOnSnapshot,
@@ -2851,6 +2853,29 @@ export default function EditorScreen() {
         kind === "measure"
           ? removeMeasure(model, id)
           : removeCalculatedColumn(model, id);
+      const newSnap = writeDataModel(snap, updated);
+      applyMutatedSnapshot(JSON.stringify(newSnap));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
+  // --- #239 Add Excel table to Data Model ------------------------------------
+
+  const addTableToDataModel = useCallback(
+    (sheetId: string, tableName: string) => {
+      const snap = getSnapshotForTool("データモデルへ追加");
+      if (!snap) return;
+      const modelTable = excelTableToModelTable(
+        snap as WorkbookTableSnapshot,
+        sheetId,
+        tableName,
+      );
+      if (!modelTable) {
+        setEditorOperationError("テーブルが見つかりません");
+        return;
+      }
+      const model = readDataModel(snap);
+      const updated = addModelTable(model, modelTable);
       const newSnap = writeDataModel(snap, updated);
       applyMutatedSnapshot(JSON.stringify(newSnap));
     },
@@ -9202,6 +9227,7 @@ export default function EditorScreen() {
             onJumpTo={jumpToA1OnSheet}
             onRename={renameTableAcrossWorkbook}
             onDelete={deleteTable}
+            onAddToDataModel={addTableToDataModel}
           />
         )}
         {sparklinesPanelOpen && (

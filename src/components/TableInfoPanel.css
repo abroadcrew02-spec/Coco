@@ -144,6 +144,18 @@
   background-color: var(--coco-danger-bg);
 }
 
+.tip-btn--model {
+  color: var(--coco-accent);
+  border-color: var(--coco-border);
+  background-color: var(--coco-accent-subtle);
+  white-space: nowrap;
+}
+
+.tip-btn--model:hover:not(:disabled) {
+  background-color: var(--coco-accent-subtle);
+  text-decoration: underline;
+}
+
 .tip-meta {
   font-size: 11px;
   color: var(--coco-text-muted);

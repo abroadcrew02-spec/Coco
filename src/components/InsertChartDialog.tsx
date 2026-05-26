@@ -1,12 +1,20 @@
 import { useEffect, useState } from "react";
 import "./InsertChartDialog.css";
+import type { LiveChartType } from "../store/chartRender";
 
-export type ChartType = "bar" | "line" | "pie";
+export type ChartType = LiveChartType;
 
 export interface ChartFormValue {
   range: string;
   chartType: ChartType;
   title: string;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  showLegend?: boolean;
+  showDataLabels?: boolean;
+  stacked?: boolean;
+  hasHeaderRow?: boolean;
+  hasHeaderCol?: boolean;
 }
 
 interface Props {
@@ -28,6 +36,18 @@ function validateRange(range: string): string | null {
   return null;
 }
 
+const CHART_TYPES: { value: ChartType; label: string }[] = [
+  { value: "bar",      label: "縦棒 (bar)" },
+  { value: "line",     label: "折れ線 (line)" },
+  { value: "pie",      label: "円 (pie)" },
+  { value: "scatter",  label: "散布図 (scatter)" },
+  { value: "area",     label: "面 (area)" },
+  { value: "doughnut", label: "ドーナツ (doughnut)" },
+];
+
+/** Chart types for which the "stacked" option is meaningful. */
+const STACKED_TYPES = new Set<ChartType>(["bar", "line"]);
+
 export default function InsertChartDialog({
   initialRange,
   onApply,
@@ -36,6 +56,13 @@ export default function InsertChartDialog({
   const [range, setRange] = useState(initialRange);
   const [chartType, setChartType] = useState<ChartType>("bar");
   const [title, setTitle] = useState("");
+  const [xAxisLabel, setXAxisLabel] = useState("");
+  const [yAxisLabel, setYAxisLabel] = useState("");
+  const [showLegend, setShowLegend] = useState(true);
+  const [showDataLabels, setShowDataLabels] = useState(false);
+  const [stacked, setStacked] = useState(false);
+  const [hasHeaderRow, setHasHeaderRow] = useState(true);
+  const [hasHeaderCol, setHasHeaderCol] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -56,11 +83,19 @@ export default function InsertChartDialog({
       return;
     }
     setError(null);
-    onApply({
+    const value: ChartFormValue = {
       range: range.trim(),
       chartType,
       title: title.trim(),
-    });
+      showLegend,
+      showDataLabels,
+      hasHeaderRow,
+      hasHeaderCol,
+    };
+    if (xAxisLabel.trim()) value.xAxisLabel = xAxisLabel.trim();
+    if (yAxisLabel.trim()) value.yAxisLabel = yAxisLabel.trim();
+    if (STACKED_TYPES.has(chartType)) value.stacked = stacked;
+    onApply(value);
     onClose();
   };
 
@@ -88,41 +123,25 @@ export default function InsertChartDialog({
               value={range}
               onChange={(e) => setRange(e.target.value)}
               placeholder="A1:B10"
+              title="データ範囲 (例: A1:B10)"
               autoFocus
             />
           </label>
           <fieldset className="ic-field ic-field--types">
             <legend className="ic-field-label">グラフの種類</legend>
-            <label className="ic-radio">
-              <input
-                type="radio"
-                name="chartType"
-                value="bar"
-                checked={chartType === "bar"}
-                onChange={() => setChartType("bar")}
-              />
-              <span>縦棒 (bar)</span>
-            </label>
-            <label className="ic-radio">
-              <input
-                type="radio"
-                name="chartType"
-                value="line"
-                checked={chartType === "line"}
-                onChange={() => setChartType("line")}
-              />
-              <span>折れ線 (line)</span>
-            </label>
-            <label className="ic-radio">
-              <input
-                type="radio"
-                name="chartType"
-                value="pie"
-                checked={chartType === "pie"}
-                onChange={() => setChartType("pie")}
-              />
-              <span>円 (pie)</span>
-            </label>
+            {CHART_TYPES.map(({ value, label }) => (
+              <label key={value} className="ic-radio">
+                <input
+                  type="radio"
+                  name="chartType"
+                  value={value}
+                  checked={chartType === value}
+                  onChange={() => setChartType(value)}
+                  title={label}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
           </fieldset>
           <label className="ic-field">
             <span className="ic-field-label">タイトル</span>
@@ -132,16 +151,86 @@ export default function InsertChartDialog({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="(省略可)"
+              title="グラフタイトル"
             />
           </label>
+          <details className="ic-details">
+            <summary className="ic-details-summary">詳細オプション</summary>
+            <div className="ic-details-body">
+              <label className="ic-field">
+                <span className="ic-field-label">X軸タイトル</span>
+                <input
+                  type="text"
+                  className="ic-input"
+                  value={xAxisLabel}
+                  onChange={(e) => setXAxisLabel(e.target.value)}
+                  placeholder="(省略可)"
+                  title="X軸タイトル"
+                />
+              </label>
+              <label className="ic-field">
+                <span className="ic-field-label">Y軸タイトル</span>
+                <input
+                  type="text"
+                  className="ic-input"
+                  value={yAxisLabel}
+                  onChange={(e) => setYAxisLabel(e.target.value)}
+                  placeholder="(省略可)"
+                  title="Y軸タイトル"
+                />
+              </label>
+              <label className="ic-checkbox">
+                <input
+                  type="checkbox"
+                  checked={showLegend}
+                  onChange={(e) => setShowLegend(e.target.checked)}
+                  title="凡例を表示"
+                />
+                <span>凡例を表示</span>
+              </label>
+              <label className="ic-checkbox">
+                <input
+                  type="checkbox"
+                  checked={showDataLabels}
+                  onChange={(e) => setShowDataLabels(e.target.checked)}
+                  title="データラベルを表示"
+                />
+                <span>データラベルを表示</span>
+              </label>
+              {STACKED_TYPES.has(chartType) && (
+                <label className="ic-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={stacked}
+                    onChange={(e) => setStacked(e.target.checked)}
+                    title="積み上げ"
+                  />
+                  <span>積み上げ</span>
+                </label>
+              )}
+              <label className="ic-checkbox">
+                <input
+                  type="checkbox"
+                  checked={hasHeaderRow}
+                  onChange={(e) => setHasHeaderRow(e.target.checked)}
+                  title="ヘッダ行を含む"
+                />
+                <span>ヘッダ行を含む</span>
+              </label>
+              <label className="ic-checkbox">
+                <input
+                  type="checkbox"
+                  checked={hasHeaderCol}
+                  onChange={(e) => setHasHeaderCol(e.target.checked)}
+                  title="ヘッダ列を含む"
+                />
+                <span>ヘッダ列を含む</span>
+              </label>
+            </div>
+          </details>
           {error && <p className="ic-error">{error}</p>}
         </div>
         <footer className="ic-footer">
-          <p className="ic-hint">
-            このビルドではグラフ描画プラグインを同梱していないため、グラフは保存時に
-            スナップショットへ書き出され、再オープン時に表示されない場合があります。
-            既存ファイルのグラフはバイト単位で保持されます。
-          </p>
           <div className="ic-footer-actions">
             <button type="button" className="ic-btn" onClick={onClose}>
               キャンセル

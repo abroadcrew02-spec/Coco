@@ -7,14 +7,13 @@ Remaining steps deferred (XL, 残り 5-7週 MVP).
 
 | Step | Status | Notes |
 | --- | --- | --- |
-| 1. DAX engine: parser + evaluator (SUM/AVG/MIN/MAX/COUNT/COUNTROWS/DISTINCTCOUNT/IF/ALL) | ✅ shipped | `src/store/daxEngine.ts` |
-| 2. RELATED + relationship traversal | ⏳ next | M:1 lookup |
-| 3. FILTER / CALCULATE — filter context propagation | ⏳ | |
-| 4. SUMX / AVERAGEX — row-context iteration | ⏳ | |
-| 5. xlsx round-trip: `xl/model/item.data` 経路の preserve (Coco は触らない) | ⏳ | |
-| 6. `_cocoDataModel` 保存 + Coco-native measure 定義 | ⏳ | |
-| 7. DataModelDialog UI (テーブル一覧 + measure 編集) | ⏳ | |
-| 8. Pivot 統合 (PR #237 と連動) | ⏳ | |
+| 1. DAX engine: parser + evaluator (SUM/AVG/MIN/MAX/COUNT/COUNTROWS/DISTINCTCOUNT/IF/ALL) | ✅ shipped | PR #265, `src/store/daxEngine.ts` |
+| 2. RELATED + SUMX/AVERAGEX/MINX/MAXX/COUNTX (row context + M:1 lookup) | ✅ shipped | PR #266 — 6 関数追加 |
+| 3. FILTER / CALCULATE — filter context propagation | ⏳ next | |
+| 4. xlsx round-trip: `xl/model/item.data` 経路の preserve (Coco は触らない) | ⏳ | |
+| 5. `_cocoDataModel` 保存 + Coco-native measure 定義 | ⏳ | |
+| 6. DataModelDialog UI (テーブル一覧 + measure 編集) | ⏳ | |
+| 7. Pivot 統合 (PR #237 と連動) | ⏳ | |
 
 ## ゴール (再掲)
 

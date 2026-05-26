@@ -16,6 +16,8 @@ interface Props {
   onRename: (oldName: string, newName: string) => void;
   /** Drop a table from a specific sheet. */
   onDelete: (sheetId: string, name: string) => void;
+  /** Import the table into the Coco Data Model. */
+  onAddToDataModel?: (sheetId: string, tableName: string) => void;
 }
 
 export default function TableInfoPanel({
@@ -23,6 +25,7 @@ export default function TableInfoPanel({
   onJumpTo,
   onRename,
   onDelete,
+  onAddToDataModel,
 }: Props) {
   // Inline-edit state: which table name is being typed, and the in-flight
   // draft. We track by table name (workbook-unique) so the input doesn't
@@ -132,6 +135,16 @@ export default function TableInfoPanel({
                     >
                       削除
                     </button>
+                    {onAddToDataModel && (
+                      <button
+                        type="button"
+                        className="tip-btn tip-btn--model"
+                        onClick={() => onAddToDataModel(sheetId, table.name)}
+                        aria-label={`${table.name} をデータモデルへ追加`}
+                      >
+                        📊 データモデルへ追加
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="tip-meta">

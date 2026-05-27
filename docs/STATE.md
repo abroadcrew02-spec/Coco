@@ -37,6 +37,7 @@ Snapshot 2026-05-26 against `main` (HEAD `669adaa`).
 - **Power Query**: ribbon → 「データの取得と変換」dialog → json / csv / sqlite / jsonl / tsv source → 13-step transform pipeline (selectColumns / dropColumns / filterRows / sort / rename / groupBy / changeType / fillMissing / conditionalColumn / replaceValue / splitColumn / mergeColumns / addIndexColumn) → expand to sheet. Queries persist in `_cocoQueries`; **SavedQueriesPanel** (ribbon 📋) lists / refreshes / deletes.
 - **Power Pivot / DAX**: 17 functions evaluable (SUM / AVERAGE / MIN / MAX / COUNT / COUNTROWS / DISTINCTCOUNT / IF / ALL / RELATED / SUMX / AVERAGEX / MINX / MAXX / COUNTX / FILTER / CALCULATE). **MeasureListPanel** (ribbon Σ) shows tables + measures + calculated columns, each with author / edit / delete; **TableInfoPanel** has 📊 「データモデルへ追加」for promoting Excel tables to ModelTables.
 - **CF live re-paint**: sidecar + apply-plan + range batching + iconSet decoration channel; numeric values intact when iconSet glyphs render.
+- **Local Linked Data Types (#244)**: register local CSV files as data-type sources, look up the active cell value against the key column (case-insensitive), display matched row as a data card, expand to adjacent cells via `セルに展開`. Fully local / serverless — no external API calls. Sources and model persist in `_cocoDataTypes` snapshot key.
 - CSV export with UTF-8 BOM or Shift_JIS, format-code rendering (date / datetime / time / percent / currency / `@` text), injection-guard prefix.
 - Sidebar preview (round-trip preserves, fallback for legacy charts): chart blob preview, image insertion.
 - Find / Replace (Ctrl+F / Ctrl+H), undo cap 100, filter, sort, frozen panes, paste-special, autofill, sheet protection live enforcement.
@@ -55,8 +56,8 @@ Snapshot 2026-05-26 against `main` (HEAD `669adaa`).
 - **High** (visible UX gaps): image live in-grid canvas overlay (`high-image-live` — chart equivalent shipped via #236); Pivot live editing dialog / DnD editor (#237, design-only); DAX autocomplete in `MeasureEditorDialog` / `CalculatedColumnEditorDialog`; Pivot integration with DAX measures (#239 Step 7).
 - **Medium** (round-trip / power-user): CF dxf import-side reconstruction; more CF rule types (aboveAverage / timePeriod) on export; streaming `detect_unsupported_features`; promote number-formats + rich-text into `CellStyle`; concurrent open race token; Form Control OOXML native round-trip (#194).
 - **Low** (polish): perf bench multi-fixture harness; CSV import edge-case tests; xlsx round-trip edge-case tests; verify + likely-remove the StrictMode×Univer deferred-dispose guard on Univer 0.24 (#232).
-- **Open methodology questions**: Stock / Geography Linked Data Types — server-dependent, requires local-first decision (#244).
-- **Wontfix / out of scope**: VBA execution; real-time collab; `.coco` encryption (DG-04); audit log (§5.3.5); automated signing / notarization (process-gated on credentials); external-link auto-fetch.
+- **Open methodology questions**: ~~Stock / Geography Linked Data Types — server-dependent~~ → #244 resolved as local CSV-based MVP (shipped).
+- **Wontfix / out of scope**: VBA execution; real-time collab; `.coco` encryption (DG-04); audit log (§5.3.5); automated signing / notarization (process-gated on credentials); external-link auto-fetch; Excel-compatible cloud Linked Data Types (Bing / Refinitiv — API-dependent).
 
 ## Build + install
 

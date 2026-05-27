@@ -51,6 +51,7 @@ export type DaxAst =
   | { kind: "string"; value: string }
   | { kind: "boolean"; value: boolean }
   | { kind: "columnRef"; table: string; column: string }
+  | { kind: "measureRef"; name: string }
   | { kind: "tableRef"; table: string }
   | { kind: "binaryOp"; op: BinaryOp; left: DaxAst; right: DaxAst }
   | { kind: "funcCall"; name: string; args: DaxAst[] };
@@ -76,6 +77,7 @@ type Token =
   | { kind: "num"; value: number }
   | { kind: "str"; value: string }
   | { kind: "ident"; value: string }
+  | { kind: "bracketIdent"; value: string }
   | { kind: "punct"; value: string };
 
 function tokenize(src: string): Token[] {
@@ -133,6 +135,20 @@ function tokenize(src: string): Token[] {
       i = j;
       continue;
     }
+    // Bracket-enclosed identifier: [name] — used for column names and measure
+    // names (may contain spaces and other non-ident characters). Consumed as a
+    // single token so the parser can decide context (columnRef vs measureRef).
+    if (ch === "[") {
+      i++;
+      let acc = "";
+      while (i < n && src[i] !== "]") {
+        acc += src[i];
+        i++;
+      }
+      i++; // consume ']'
+      out.push({ kind: "bracketIdent", value: acc });
+      continue;
+    }
     // Multi-char punctuation.
     if (src.startsWith("<>", i) || src.startsWith("<=", i) || src.startsWith(">=", i)) {
       out.push({ kind: "punct", value: src.slice(i, i + 2) });
@@ -141,7 +157,7 @@ function tokenize(src: string): Token[] {
     }
     // Single-char punctuation.
     if (
-      ch === "(" || ch === ")" || ch === "[" || ch === "]" ||
+      ch === "(" || ch === ")" ||
       ch === "," || ch === "+" || ch === "-" || ch === "*" ||
       ch === "/" || ch === "&" || ch === "=" || ch === "<" || ch === ">"
     ) {
@@ -211,6 +227,12 @@ function parsePrimary(s: ParseState): DaxAst {
     const right = parsePrimary(s);
     return { kind: "binaryOp", op: "-", left: { kind: "number", value: 0 }, right };
   }
+  // Bare bracketed identifier: [MeasureName] — no preceding table identifier.
+  // The tokenizer emits `[...]` as a single `bracketIdent` token, so we only
+  // need to check if the *consumed* token is a bracketIdent without a preceding ident.
+  if (t.kind === "bracketIdent") {
+    return { kind: "measureRef", name: t.value };
+  }
   if (t.kind === "ident") {
     // Boolean literals first.
     const lower = t.value.toLowerCase();
@@ -232,15 +254,10 @@ function parsePrimary(s: ParseState): DaxAst {
       expectPunct(s, ")");
       return { kind: "funcCall", name: t.value.toUpperCase(), args };
     }
-    // Identifier followed by '[col]' = columnRef.
-    if (next?.kind === "punct" && next.value === "[") {
+    // Identifier followed by [col] (bracketIdent) = columnRef.
+    if (next?.kind === "bracketIdent") {
       consume(s);
-      const colTok = consume(s);
-      if (!colTok || colTok.kind !== "ident") {
-        throw new ParseError("expected column name in []");
-      }
-      expectPunct(s, "]");
-      return { kind: "columnRef", table: t.value, column: colTok.value };
+      return { kind: "columnRef", table: t.value, column: next.value };
     }
     // Bare identifier = tableRef.
     return { kind: "tableRef", table: t.value };
@@ -290,6 +307,15 @@ export interface EvalContext {
    * CALCULATEs INTERSECT with the existing override (Excel semantic).
    */
   tableOverrides?: Map<string, Array<Record<string, unknown>>>;
+  /**
+   * Step 7: cross-measure references. When non-empty, [MeasureName] expressions
+   * resolve by evaluating the named measure from this list. The same
+   * `_evaluating` set used in `_evaluateMeasureInternal` propagates through so
+   * circular references are detected correctly.
+   */
+  measures?: MeasureDef[];
+  /** Internal — tracks in-progress measure evaluations for cycle detection. */
+  _evaluating?: Set<string>;
 }
 
 /** Active rows for a table — filter-context-aware. Pure helper. */
@@ -341,6 +367,28 @@ export function evaluate(ast: DaxAst, ctx: EvalContext): unknown {
       return ast.value;
     case "boolean":
       return ast.value;
+    case "measureRef": {
+      // [MeasureName] — look up and evaluate the named measure in the current
+      // filter context. Requires `ctx.measures` to be populated; otherwise
+      // throws so the enclosing measure evaluation returns MEASURE_ERROR.
+      if (!ctx.measures || ctx.measures.length === 0) {
+        throw new Error(`measure [${ast.name}] not found: no measures in scope`);
+      }
+      const evaluating = ctx._evaluating ?? new Set<string>();
+      const result = _evaluateMeasureInternal(
+        ctx.model,
+        ctx.measures,
+        ast.name,
+        ctx.tableOverrides,
+        evaluating,
+      );
+      // Propagate errors by throwing — the caller's try-catch in
+      // _evaluateMeasureInternal will catch this and return MEASURE_ERROR.
+      if (result === MEASURE_ERROR) {
+        throw new Error(`measure [${ast.name}] evaluated to MEASURE_ERROR`);
+      }
+      return result;
+    }
     case "columnRef": {
       // When we're inside a row context (SUMX / IF row-by-row), return the
       // single cell value. Otherwise return the filter-context-aware
@@ -955,10 +1003,14 @@ export function _evaluateMeasureInternal(
     }
 
     // Evaluate with filter context but WITHOUT row context.
+    // Pass measures + _evaluating so that [MeasureName] cross-references inside
+    // this expression can recursively call other measures and detect cycles.
     const ctx: EvalContext = {
       model,
       currentRow: undefined,
       tableOverrides: filterContext,
+      measures,
+      _evaluating,
     };
 
     let result: unknown;

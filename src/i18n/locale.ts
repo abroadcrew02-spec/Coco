@@ -405,6 +405,9 @@ const jaJP = {
   "ribbon.btn.sheetUnhide": "シートの再表示",
   "ribbon.btn.sheetMoveCopy": "シートの移動 / コピー",
   "ribbon.btn.close": "終了",
+  // #244 — Linked Data Types
+  "ribbon.btn.linkedDataTypes": "リンクされたデータ型",
+  "panel.linkedDataTypes": "リンクされたデータ型",
   // Dropdown menus (#202 Phase 3)
   "ribbon.menu.numberFormat.general": "標準",
   "ribbon.menu.numberFormat.number": "数値",
@@ -786,6 +789,9 @@ const enUS: Record<StringKey, string> = {
   "ribbon.btn.sheetUnhide": "Unhide Sheet",
   "ribbon.btn.sheetMoveCopy": "Move / Copy Sheet",
   "ribbon.btn.close": "Exit",
+  // #244 — Linked Data Types
+  "ribbon.btn.linkedDataTypes": "Linked Data Types",
+  "panel.linkedDataTypes": "Linked Data Types",
   "ribbon.menu.numberFormat.general": "General",
   "ribbon.menu.numberFormat.number": "Number",
   "ribbon.menu.numberFormat.more": "More Number Formats...",

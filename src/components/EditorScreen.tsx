@@ -360,6 +360,7 @@ import DataConnectionsDialog, {
 import GetTransformDialog from "./GetTransformDialog";
 import SavedQueriesPanel from "./SavedQueriesPanel";
 import MeasureListPanel from "./MeasureListPanel";
+import LinkedDataTypesPanel, { type LookupResult } from "./LinkedDataTypesPanel";
 import MeasureEditorDialog from "./MeasureEditorDialog";
 import CalculatedColumnEditorDialog from "./CalculatedColumnEditorDialog";
 import {
@@ -373,6 +374,12 @@ import {
   removeTable as removeDataModelTable,
 } from "../store/cocoDataModel";
 import type { StoredMeasure, StoredCalculatedColumn } from "../store/cocoDataModel";
+import {
+  type CocoLinkedDataTypes,
+  readLinkedDataTypes,
+  writeLinkedDataTypes,
+  EMPTY_LINKED_DATA_TYPES,
+} from "../store/linkedDataTypes";
 import { excelTableToModelTable } from "../store/dataModelTableImport";
 import {
   findQuery,
@@ -1012,6 +1019,9 @@ export default function EditorScreen() {
   const [savedQueriesPanelOpen, setSavedQueriesPanelOpen] = useState(false);
   // #239 Step 7: Measure list panel.
   const [measuresPanelOpen, setMeasuresPanelOpen] = useState(false);
+  // #244: Linked Data Types panel (local CSV-based).
+  const [linkedDataTypesPanelOpen, setLinkedDataTypesPanelOpen] = useState(false);
+  const [activeCellValue, setActiveCellValue] = useState("");
   // #140 / #190: external data connections (Power Query) — modal dialog.
   const [dataConnectionsOpen, setDataConnectionsOpen] = useState(false);
   const [bookmarksPanelOpen, setBookmarksPanelOpen] = useState(false);
@@ -2907,6 +2917,65 @@ export default function EditorScreen() {
       applyMutatedSnapshot(JSON.stringify(newSnap));
     },
     [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
+  // --- #244 Linked Data Types ------------------------------------------------
+
+  /**
+   * Read the current CocoLinkedDataTypes model from the live snapshot.
+   * Falls back to EMPTY when snapshot is unavailable.
+   */
+  const linkedDataTypesModel: CocoLinkedDataTypes = (() => {
+    if (!currentSnapshotJson) return EMPTY_LINKED_DATA_TYPES;
+    try {
+      return readLinkedDataTypes(JSON.parse(currentSnapshotJson));
+    } catch {
+      return EMPTY_LINKED_DATA_TYPES;
+    }
+  })();
+
+  const updateLinkedDataTypes = useCallback(
+    (next: CocoLinkedDataTypes) => {
+      const snap = getSnapshotForTool("リンクされたデータ型");
+      if (!snap) return;
+      const newSnap = writeLinkedDataTypes(snap, next);
+      applyMutatedSnapshot(JSON.stringify(newSnap));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
+  /**
+   * Expand a lookup result into adjacent cells.
+   * Writes each non-key column value into the cell to the right of the
+   * active cell, then one column further right for each subsequent column.
+   */
+  const expandLookupToCells = useCallback(
+    (result: LookupResult) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      try {
+        const workbook = fUniver.getActiveWorkbook();
+        if (!workbook) return;
+        const sheet = workbook.getActiveSheet();
+        if (!sheet) return;
+        const sel = sheet.getSelection();
+        const range = sel?.getActiveRange();
+        if (!range) return;
+        const row = range.getRow();
+        const col = range.getColumn();
+        const cols = result.source.columns.filter((c) => c !== result.source.keyColumn);
+        cols.forEach((colName, idx) => {
+          const val = result.row[colName] ?? "";
+          const targetRange = sheet.getRange(row, col + 1 + idx);
+          if (targetRange) {
+            targetRange.setValue(val);
+          }
+        });
+      } catch {
+        // Best-effort: ignore facade errors.
+      }
+    },
+    [],
   );
 
   // --- #239 Add Excel table to Data Model ------------------------------------
@@ -7599,6 +7668,21 @@ export default function EditorScreen() {
       case "datamodel-manage-measures":
         setMeasuresPanelOpen((v) => !v);
         break;
+      case "data-linked-data-types":
+        // Refresh active cell value before opening the panel.
+        try {
+          const wb = fUniverRef.current?.getActiveWorkbook();
+          const sh = wb?.getActiveSheet();
+          const r = sh?.getSelection()?.getActiveRange();
+          if (r) {
+            const v = r.getValue();
+            setActiveCellValue(typeof v === "string" ? v : v != null ? String(v) : "");
+          }
+        } catch {
+          // Best-effort.
+        }
+        setLinkedDataTypesPanelOpen((prev) => !prev);
+        break;
       case "data-data-connections":
         setDataConnectionsOpen(true);
         break;
@@ -9319,6 +9403,15 @@ export default function EditorScreen() {
             onAddCalculatedColumn={() => openCalcColEditor()}
             onEditCalculatedColumn={(c) => openCalcColEditor(c)}
             onDeleteTable={deleteDataModelTable}
+          />
+        )}
+        {linkedDataTypesPanelOpen && (
+          <LinkedDataTypesPanel
+            model={linkedDataTypesModel}
+            onModelChange={updateLinkedDataTypes}
+            activeCellValue={activeCellValue}
+            onExpandToCells={expandLookupToCells}
+            onClose={() => setLinkedDataTypesPanelOpen(false)}
           />
         )}
         {chartsCanvasPanelOpen && currentSnapshotJson && (

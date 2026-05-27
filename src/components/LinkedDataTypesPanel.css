@@ -1,0 +1,374 @@
+/* LinkedDataTypesPanel — local CSV data type sources panel.
+   Accent colour: teal (#0d9488 / coco-accent token) to distinguish from
+   other panels. Uses existing coco CSS custom-property tokens throughout. */
+
+.ldtp-root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background-color: var(--coco-bg-elevated);
+  border-left: 1px solid var(--coco-border);
+  overflow: hidden;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+/* ---------- header ---------- */
+
+.ldtp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--coco-border);
+  background-color: var(--coco-accent-subtle);
+}
+
+.ldtp-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--coco-accent);
+}
+
+.ldtp-header-close {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 16px;
+  color: var(--coco-text-muted);
+  padding: 0 4px;
+  line-height: 1;
+  border-radius: 3px;
+}
+
+.ldtp-header-close:hover {
+  color: var(--coco-text);
+  background: var(--coco-surface-hover);
+}
+
+/* ---------- section labels ---------- */
+
+.ldtp-section {
+  padding: 8px 14px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--coco-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--coco-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ---------- source list ---------- */
+
+.ldtp-sources {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  max-height: 180px;
+  border-bottom: 1px solid var(--coco-border);
+}
+
+.ldtp-source-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--coco-border);
+}
+
+.ldtp-source-item:last-child {
+  border-bottom: none;
+}
+
+.ldtp-source-info {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ldtp-source-name {
+  font-weight: 600;
+  color: var(--coco-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ldtp-source-meta {
+  font-size: 10px;
+  color: var(--coco-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
+.ldtp-remove-btn {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--coco-text-faint);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.ldtp-remove-btn:hover {
+  color: var(--coco-danger);
+  background: var(--coco-danger-bg);
+}
+
+.ldtp-empty {
+  padding: 12px 14px;
+  color: var(--coco-text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ---------- register form ---------- */
+
+.ldtp-register-area {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--coco-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ldtp-register-btn {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: var(--coco-accent);
+  color: var(--coco-accent-text);
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.ldtp-register-btn:hover:not(:disabled) {
+  background: var(--coco-accent-hover);
+}
+
+.ldtp-register-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ldtp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ldtp-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ldtp-form-label {
+  font-size: 11px;
+  color: var(--coco-text-muted);
+}
+
+.ldtp-form-input,
+.ldtp-form-select {
+  padding: 4px 8px;
+  border: 1px solid var(--coco-border-strong);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--coco-bg-elevated);
+  color: var(--coco-text);
+}
+
+.ldtp-form-input:focus,
+.ldtp-form-select:focus {
+  outline: 2px solid var(--coco-accent);
+  outline-offset: 1px;
+}
+
+.ldtp-form-file-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.ldtp-form-file-path {
+  flex: 1;
+  font-size: 11px;
+  color: var(--coco-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ldtp-form-buttons {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.ldtp-form-btn {
+  padding: 4px 12px;
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid var(--coco-border-strong);
+  background: var(--coco-bg-elevated);
+  color: var(--coco-text);
+  font-family: inherit;
+}
+
+.ldtp-form-btn--primary {
+  background: var(--coco-accent);
+  color: var(--coco-accent-text);
+  border-color: var(--coco-accent);
+}
+
+.ldtp-form-btn--primary:hover:not(:disabled) {
+  background: var(--coco-accent-hover);
+}
+
+.ldtp-form-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ldtp-error {
+  color: var(--coco-danger);
+  font-size: 11px;
+}
+
+/* ---------- lookup / card section ---------- */
+
+.ldtp-lookup-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ldtp-lookup-hint {
+  font-size: 11px;
+  color: var(--coco-text-muted);
+  line-height: 1.5;
+}
+
+.ldtp-lookup-key {
+  font-size: 12px;
+  color: var(--coco-text);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.ldtp-card {
+  border: 1px solid var(--coco-border-strong);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.ldtp-card-source {
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--coco-accent);
+  background: var(--coco-accent-subtle);
+  border-bottom: 1px solid var(--coco-border);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ldtp-card-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ldtp-card-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--coco-border);
+}
+
+.ldtp-card-row:last-child {
+  border-bottom: none;
+}
+
+.ldtp-card-col {
+  width: 100px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--coco-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ldtp-card-val {
+  flex: 1;
+  font-size: 12px;
+  color: var(--coco-text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ldtp-expand-btn {
+  margin-top: 6px;
+  width: 100%;
+  padding: 5px 10px;
+  font-size: 11px;
+  border: 1px solid var(--coco-border-strong);
+  border-radius: 4px;
+  background: var(--coco-bg-elevated);
+  color: var(--coco-text);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.ldtp-expand-btn:hover:not(:disabled) {
+  background: var(--coco-surface-hover);
+}
+
+.ldtp-expand-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ldtp-loading {
+  font-size: 11px;
+  color: var(--coco-text-muted);
+  font-style: italic;
+}
+
+.ldtp-miss {
+  font-size: 11px;
+  color: var(--coco-text-muted);
+}
+
+/* ---------- dark mode ---------- */
+
+[data-theme="dark"] .ldtp-register-btn {
+  background: var(--coco-accent);
+}
+
+[data-theme="dark"] .ldtp-form-input,
+[data-theme="dark"] .ldtp-form-select {
+  background: var(--coco-surface);
+}

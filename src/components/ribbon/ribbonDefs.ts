@@ -730,6 +730,12 @@ const dataTab: RibbonTabDef = {
           action: editorCommand("datamodel-manage-measures"),
         },
         {
+          id: "data-linked-data-types",
+          labelKey: "ribbon.btn.linkedDataTypes",
+          icon: "📇",
+          action: editorCommand("data-linked-data-types"),
+        },
+        {
           id: "data-connections",
           labelKey: "ribbon.btn.dataConnections",
           icon: "🔌",

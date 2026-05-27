@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { CocoDataModel, StoredMeasure } from "../store/cocoDataModel";
 import { evaluateTransientMeasure } from "../store/cocoDataModel";
-import { MEASURE_ERROR } from "../store/daxEngine";
+import { DAX_FUNCTION_REFERENCE, MEASURE_ERROR } from "../store/daxEngine";
+import DaxAutocomplete from "./DaxAutocomplete";
 import DaxColumnRefChips from "./DaxColumnRefChips";
 import DaxFunctionChips from "./DaxFunctionChips";
 import "./MeasureEditorDialog.css";
@@ -56,6 +57,27 @@ export default function MeasureEditorDialog({
       textarea.setSelectionRange(newPos, newPos);
     });
   };
+
+  const autocompleTables = (cocoModel?.tables ?? []).map((t) => ({
+    name: t.name,
+    columns: t.columns.map((c) => ({ name: c.name })),
+  }));
+
+  const autocomplete = DaxAutocomplete({
+    textareaRef,
+    value: expression,
+    onInsert: (newExpression, newCaret) => {
+      setExpression(newExpression);
+      requestAnimationFrame(() => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        textarea.focus();
+        textarea.setSelectionRange(newCaret, newCaret);
+      });
+    },
+    functions: DAX_FUNCTION_REFERENCE,
+    tables: autocompleTables,
+  });
 
   // Live preview — debounced 300 ms to avoid evaluating on every keystroke.
   useEffect(() => {
@@ -181,15 +203,22 @@ export default function MeasureEditorDialog({
           </label>
           <label className="med-field">
             <span className="med-field-label">DAX 式</span>
-            <textarea
-              ref={textareaRef}
-              className="med-textarea"
-              rows={5}
-              value={expression}
-              onChange={(e) => setExpression(e.target.value)}
-              placeholder="例: SUM(Sales[Amount])"
-              aria-required="true"
-            />
+            <div className="dac-wrapper">
+              <textarea
+                ref={textareaRef}
+                className="med-textarea"
+                rows={5}
+                value={expression}
+                onChange={(e) => {
+                  setExpression(e.target.value);
+                  autocomplete.handleChange(e);
+                }}
+                onKeyDown={autocomplete.handleKeyDown}
+                placeholder="例: SUM(Sales[Amount])"
+                aria-required="true"
+              />
+              {autocomplete.dropdown}
+            </div>
             <DaxFunctionChips onInsert={handleChipInsert} />
             <DaxColumnRefChips
               tables={cocoModel?.tables ?? []}

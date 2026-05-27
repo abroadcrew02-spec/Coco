@@ -1,0 +1,66 @@
+.dac-wrapper {
+  position: relative;
+}
+
+.dac-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 1400;
+  background-color: var(--coco-bg-elevated);
+  border: 1px solid var(--coco-border-strong);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px var(--coco-shadow);
+  min-width: 240px;
+  max-width: 360px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: 2px;
+}
+
+.dac-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--coco-text);
+  user-select: none;
+}
+
+.dac-item:hover,
+.dac-item[aria-selected="true"] {
+  background-color: var(--coco-accent);
+  color: var(--coco-accent-text);
+}
+
+.dac-item-name {
+  font-family: var(--coco-font-mono, monospace);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dac-item-desc {
+  font-size: 11px;
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dac-item-kind {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background-color: var(--coco-surface);
+  color: var(--coco-text-muted);
+  margin-left: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.dac-item[aria-selected="true"] .dac-item-kind {
+  background-color: rgba(255, 255, 255, 0.2);
+  color: inherit;
+}

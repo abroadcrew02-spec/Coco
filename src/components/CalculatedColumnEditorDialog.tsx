@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { StoredCalculatedColumn } from "../store/cocoDataModel";
+import type { CocoDataModel, StoredCalculatedColumn } from "../store/cocoDataModel";
+import { evaluateTransientCalculatedColumn } from "../store/cocoDataModel";
+import { CALC_COLUMN_ERROR } from "../store/daxEngine";
 import DaxFunctionChips from "./DaxFunctionChips";
 import "./CalculatedColumnEditorDialog.css";
 
@@ -15,6 +17,8 @@ interface Props {
   tables: Array<{ id: string; name: string }>;
   /** Existing (tableId, columnName) pairs for uniqueness validation. */
   existingPairs: ExistingPair[];
+  /** Full data model — used for the live-preview evaluation. */
+  cocoModel?: CocoDataModel;
   onApply: (col: StoredCalculatedColumn) => void;
   onClose: () => void;
 }
@@ -23,6 +27,7 @@ export default function CalculatedColumnEditorDialog({
   initialColumn,
   tables,
   existingPairs,
+  cocoModel,
   onApply,
   onClose,
 }: Props) {
@@ -37,6 +42,7 @@ export default function CalculatedColumnEditorDialog({
   const [format, setFormat] = useState(initialColumn?.format ?? "");
   const [description, setDescription] = useState(initialColumn?.description ?? "");
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ values: unknown[]; hasError: boolean } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleChipInsert = (insertText: string) => {
@@ -54,6 +60,33 @@ export default function CalculatedColumnEditorDialog({
       textarea.setSelectionRange(newPos, newPos);
     });
   };
+
+  // Live preview — debounced 300 ms.
+  useEffect(() => {
+    if (!expression.trim() || !cocoModel || !tableId) {
+      setPreview(null);
+      return;
+    }
+    const colPreviewName = columnName.trim() || "_preview_";
+    const tid = setTimeout(() => {
+      try {
+        const values = evaluateTransientCalculatedColumn(cocoModel, {
+          tableId,
+          columnName: colPreviewName,
+          expression: expression.trim(),
+        });
+        if (values === null) {
+          setPreview(null);
+          return;
+        }
+        const hasError = values.some((v) => v === CALC_COLUMN_ERROR);
+        setPreview({ values, hasError });
+      } catch {
+        setPreview({ values: [CALC_COLUMN_ERROR], hasError: true });
+      }
+    }, 300);
+    return () => clearTimeout(tid);
+  }, [expression, tableId, columnName, cocoModel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -188,6 +221,15 @@ export default function CalculatedColumnEditorDialog({
               aria-required="true"
             />
             <DaxFunctionChips onInsert={handleChipInsert} />
+            {preview !== null && (
+              preview.hasError ? (
+                <div className="cced-preview cced-preview--error">{CALC_COLUMN_ERROR}</div>
+              ) : (
+                <div className="cced-preview">
+                  プレビュー: <strong>[{preview.values.map((v) => String(v)).join(", ")}]</strong>
+                </div>
+              )
+            )}
           </label>
           <label className="cced-field">
             <span className="cced-field-label">書式コード（省略可）</span>

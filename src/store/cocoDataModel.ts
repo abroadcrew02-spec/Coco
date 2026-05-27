@@ -303,3 +303,65 @@ export function evaluateAllStoredMeasures(
 
 // Re-export engine types that callers need when working with measure evaluation.
 export type { MeasureDef };
+
+// ---------------------------------------------------------------------------
+// Live-preview helpers — evaluate transient (unsaved) definitions
+// ---------------------------------------------------------------------------
+
+/**
+ * Evaluate a transient measure expression that has NOT been added to the model
+ * yet. Used by the editor dialog's live-preview feature.
+ *
+ * Combines the existing stored measures with the transient definition so that
+ * cross-measure references still resolve during preview.
+ *
+ * Returns MEASURE_ERROR ("#ERROR!") on any parse or runtime failure.
+ */
+export function evaluateTransientMeasure(
+  cocoModel: CocoDataModel,
+  transient: { name: string; expression: string },
+): unknown {
+  const base = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+  // Merge stored measures + transient, transient wins on name collision.
+  const defs: MeasureDef[] = [
+    ...cocoModel.measures
+      .filter((m) => m.name !== transient.name)
+      .map((m) => ({ name: m.name, expression: m.expression })),
+    { name: transient.name, expression: transient.expression },
+  ];
+  return evaluateMeasure(base, defs, transient.name);
+}
+
+/**
+ * Evaluate a transient calculated column expression that has NOT been saved
+ * yet. Returns the first 5 row values (or fewer) so the editor dialog can
+ * display a compact preview.
+ *
+ * Returns an array of cell values. Each cell is either the computed value or
+ * CALC_COLUMN_ERROR ("#ERROR!") for that row.
+ * Returns null when the target table is not found in the model.
+ */
+export function evaluateTransientCalculatedColumn(
+  cocoModel: CocoDataModel,
+  transient: { tableId: string; columnName: string; expression: string },
+  maxRows = 5,
+): unknown[] | null {
+  const base = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+  const table = base.tables.find((t) => t.name === transient.tableId);
+  if (!table) return null;
+
+  const withCol = evaluateCalculatedColumns(base, [
+    {
+      tableId: transient.tableId,
+      columnName: transient.columnName,
+      expression: transient.expression,
+    },
+  ]);
+
+  const previewTable = withCol.tables.find((t) => t.name === transient.tableId);
+  if (!previewTable) return null;
+
+  return previewTable.rows
+    .slice(0, maxRows)
+    .map((r) => r[transient.columnName]);
+}

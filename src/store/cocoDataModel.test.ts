@@ -15,6 +15,8 @@ import {
   removeMeasure,
   removeRelationship,
   removeTable,
+  renameMeasure,
+  renameCalculatedColumn,
   toDataModel,
   writeDataModel,
   type CocoDataModel,
@@ -571,5 +573,139 @@ describe("evaluateTransientCalculatedColumn", () => {
     );
     expect(values).toHaveLength(3);
     expect(values).toEqual([2, 4, 6]);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// renameMeasure
+// ---------------------------------------------------------------------------
+
+describe("renameMeasure", () => {
+  function makeModel(): CocoDataModel {
+    const m1: StoredMeasure = { id: "m1", name: "Total Sales", tableId: "Sales", expression: "SUM(Sales[Amount])" };
+    const m2: StoredMeasure = { id: "m2", name: "Avg Price", tableId: "Sales", expression: "AVERAGE(Sales[Amount])" };
+    return addMeasure(addMeasure(EMPTY_DATA_MODEL, m1), m2);
+  }
+
+  it("renames a measure successfully", () => {
+    const model = makeModel();
+    const result = renameMeasure(model, "Total Sales", "Grand Total");
+    expect(result.nameChanged).toBe(true);
+    expect(result.collided).toBe(false);
+    expect(result.model.measures.find((m) => m.id === "m1")?.name).toBe("Grand Total");
+  });
+
+  it("is a noop when oldName === newName", () => {
+    const model = makeModel();
+    const result = renameMeasure(model, "Total Sales", "Total Sales");
+    expect(result.nameChanged).toBe(false);
+    expect(result.collided).toBe(false);
+    expect(result.model).toBe(model);
+  });
+
+  it("returns collided:true when newName is already taken by another measure", () => {
+    const model = makeModel();
+    const result = renameMeasure(model, "Total Sales", "Avg Price");
+    expect(result.collided).toBe(true);
+    expect(result.nameChanged).toBe(false);
+    // Model must not be mutated.
+    expect(result.model.measures.find((m) => m.id === "m1")?.name).toBe("Total Sales");
+  });
+
+  it("returns nameChanged:false when oldName does not exist", () => {
+    const model = makeModel();
+    const result = renameMeasure(model, "NoSuch", "Something");
+    expect(result.nameChanged).toBe(false);
+    expect(result.collided).toBe(false);
+    expect(result.model).toBe(model);
+  });
+
+  it("preserves other measure fields when renaming", () => {
+    const model = makeModel();
+    const result = renameMeasure(model, "Total Sales", "Revenue");
+    const renamed = result.model.measures.find((m) => m.id === "m1");
+    expect(renamed?.expression).toBe("SUM(Sales[Amount])");
+    expect(renamed?.tableId).toBe("Sales");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renameCalculatedColumn
+// ---------------------------------------------------------------------------
+
+describe("renameCalculatedColumn", () => {
+  function makeModel(): CocoDataModel {
+    const table: ModelTable = {
+      name: "Sales",
+      columns: [
+        { name: "Amount", type: "number" },
+        { name: "Region", type: "string" },
+      ],
+      rows: [],
+    };
+    const col1: StoredCalculatedColumn = {
+      id: "cc1",
+      name: "NetAmount",
+      columnName: "NetAmount",
+      tableId: "Sales",
+      expression: "Sales[Amount] * 0.9",
+    };
+    const col2: StoredCalculatedColumn = {
+      id: "cc2",
+      name: "GrossAmount",
+      columnName: "GrossAmount",
+      tableId: "Sales",
+      expression: "Sales[Amount] * 1.1",
+    };
+    return addCalculatedColumn(addCalculatedColumn(addTable(EMPTY_DATA_MODEL, table), col1), col2);
+  }
+
+  it("renames a calculated column successfully", () => {
+    const model = makeModel();
+    const result = renameCalculatedColumn(model, "cc1", "DiscountedAmount");
+    expect(result.nameChanged).toBe(true);
+    expect(result.collided).toBe(false);
+    const col = result.model.calculatedColumns.find((c) => c.id === "cc1");
+    expect(col?.name).toBe("DiscountedAmount");
+    expect(col?.columnName).toBe("DiscountedAmount");
+  });
+
+  it("is a noop when the column name is unchanged", () => {
+    const model = makeModel();
+    const result = renameCalculatedColumn(model, "cc1", "NetAmount");
+    expect(result.nameChanged).toBe(false);
+    expect(result.collided).toBe(false);
+    expect(result.model).toBe(model);
+  });
+
+  it("returns collided:true when newColumnName is taken by another calc col in the same table", () => {
+    const model = makeModel();
+    const result = renameCalculatedColumn(model, "cc1", "GrossAmount");
+    expect(result.collided).toBe(true);
+    expect(result.nameChanged).toBe(false);
+  });
+
+  it("returns collided:true when newColumnName conflicts with an original table column", () => {
+    const model = makeModel();
+    const result = renameCalculatedColumn(model, "cc1", "Amount");
+    expect(result.collided).toBe(true);
+    expect(result.nameChanged).toBe(false);
+  });
+
+  it("returns nameChanged:false when id does not exist", () => {
+    const model = makeModel();
+    const result = renameCalculatedColumn(model, "no-such-id", "Whatever");
+    expect(result.nameChanged).toBe(false);
+    expect(result.collided).toBe(false);
+    expect(result.model).toBe(model);
+  });
+
+  it("preserves other column fields when renaming", () => {
+    const model = makeModel();
+    const result = renameCalculatedColumn(model, "cc2", "Revenue");
+    const col = result.model.calculatedColumns.find((c) => c.id === "cc2");
+    expect(col?.expression).toBe("Sales[Amount] * 1.1");
+    expect(col?.tableId).toBe("Sales");
   });
 });

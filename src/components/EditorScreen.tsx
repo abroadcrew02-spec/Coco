@@ -196,6 +196,7 @@ import {
   parseA1Range as parsePivotA1Range,
   rangeToA1 as pivotRangeToA1,
   cellToA1 as pivotCellToA1,
+  renameMeasureReferences,
 } from "../store/pivots";
 import { toDataModel, applyCalculatedColumns } from "../store/cocoDataModel";
 import ChartCanvasPanel from "./ChartCanvasPanel";
@@ -372,6 +373,8 @@ import {
   removeMeasure,
   removeCalculatedColumn,
   addCalculatedColumn,
+  renameMeasure,
+  renameCalculatedColumn,
   addTable as addModelTable,
   removeTable as removeDataModelTable,
 } from "../store/cocoDataModel";
@@ -3015,6 +3018,41 @@ export default function EditorScreen() {
       }
     },
     [],
+  );
+
+  // --- #239 measure / calc col rename cascade --------------------------------
+
+  const renameMeasureCascading = useCallback(
+    (oldName: string, newName: string): { nameChanged: boolean; collided: boolean } => {
+      // `getSnapshotForTool` returns a fresh `JSON.parse(currentSnapshotJson)` —
+      // a deep clone disconnected from Univer's internal state — so it is safe
+      // for `renameMeasureReferences` to mutate `_pivots` in place below.
+      const snap = getSnapshotForTool("メジャー名前変更");
+      if (!snap) return { nameChanged: false, collided: false };
+      const model = readDataModel(snap);
+      const renameResult = renameMeasure(model, oldName, newName);
+      if (!renameResult.nameChanged) return { nameChanged: false, collided: renameResult.collided };
+      const workbook = snap as import("../store/pivots").WorkbookPivotSnapshot;
+      renameMeasureReferences(workbook, oldName, newName);
+      const newSnap = writeDataModel(workbook as unknown as Record<string, unknown>, renameResult.model);
+      applyMutatedSnapshot(JSON.stringify(newSnap));
+      return { nameChanged: true, collided: false };
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
+  const renameCalculatedColumnCascading = useCallback(
+    (id: string, newColumnName: string): { nameChanged: boolean; collided: boolean } => {
+      const snap = getSnapshotForTool("計算列名前変更");
+      if (!snap) return { nameChanged: false, collided: false };
+      const model = readDataModel(snap);
+      const renameResult = renameCalculatedColumn(model, id, newColumnName);
+      if (!renameResult.nameChanged) return { nameChanged: false, collided: renameResult.collided };
+      const newSnap = writeDataModel(snap, renameResult.model);
+      applyMutatedSnapshot(JSON.stringify(newSnap));
+      return { nameChanged: true, collided: false };
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
   );
 
   // --- #239 Add Excel table to Data Model ------------------------------------
@@ -9442,6 +9480,8 @@ export default function EditorScreen() {
             onAddCalculatedColumn={() => openCalcColEditor()}
             onEditCalculatedColumn={(c) => openCalcColEditor(c)}
             onDeleteTable={deleteDataModelTable}
+            onRenameMeasure={renameMeasureCascading}
+            onRenameCalculatedColumn={renameCalculatedColumnCascading}
           />
         )}
         {linkedDataTypesPanelOpen && (

@@ -1127,6 +1127,46 @@ export function replacePivotInSheet(
   return { ok: true };
 }
 
+// ---------- measure rename cascade ----------
+
+/**
+ * Walk all pivots in the workbook and update any `{ kind: 'measure', measureName: oldName }`
+ * value fields to use `newName`.
+ *
+ * Mutates the `_pivots` arrays in place for efficiency (caller owns the
+ * snapshot clone). Returns the number of PivotEntry records that were updated.
+ *
+ * Legacy (un-normalised) entries are normalised before the rename check so
+ * that missing `kind` fields do not cause stale references to survive.
+ */
+export function renameMeasureReferences(
+  workbook: WorkbookPivotSnapshot,
+  oldName: string,
+  newName: string,
+): { updatedPivotCount: number } {
+  const sheets = workbook?.sheets;
+  if (!sheets || typeof sheets !== "object") return { updatedPivotCount: 0 };
+  let updatedPivotCount = 0;
+  for (const sheetId of Object.keys(sheets)) {
+    const sheet = sheets[sheetId];
+    if (!sheet || !Array.isArray(sheet._pivots)) continue;
+    for (const entry of sheet._pivots) {
+      if (!entry || !Array.isArray(entry.values)) continue;
+      normalizePivotEntry(entry);
+      let changed = false;
+      entry.values = entry.values.map((v) => {
+        if (v.kind === "measure" && v.measureName === oldName) {
+          changed = true;
+          return { kind: "measure" as const, measureName: newName };
+        }
+        return v;
+      });
+      if (changed) updatedPivotCount++;
+    }
+  }
+  return { updatedPivotCount };
+}
+
 // ---------- A1 helpers (shared with dialog / panel) ----------
 
 export function colIndexToLetters(col: number): string {

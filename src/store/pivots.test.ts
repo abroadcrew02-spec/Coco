@@ -8,6 +8,7 @@ import {
   normalizePivotEntry,
   refreshPivot,
   replacePivotInSheet,
+  renameMeasureReferences,
   type PivotConfig,
   type PivotEntry,
   type PivotRange,
@@ -694,5 +695,128 @@ describe("refreshPivot (model source)", () => {
 
     // The old cell at row 4 col 0 (outside new footprint) should be wiped.
     expect(wb.sheets!["dest"]!.cellData!["4"]?.["0"]).toBeUndefined();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// renameMeasureReferences
+// ---------------------------------------------------------------------------
+
+describe("renameMeasureReferences", () => {
+  function makeWorkbook(pivots: PivotEntry[]): WorkbookPivotSnapshot {
+    return {
+      sheetOrder: ["s1"],
+      sheets: {
+        s1: {
+          name: "Sheet1",
+          _pivots: pivots,
+        },
+      },
+    };
+  }
+
+  function measureEntry(name: string): PivotEntry {
+    return {
+      name,
+      source: { kind: "model", tableName: "Sales" },
+      destination: { row: 0, col: 0 },
+      rows: [],
+      cols: [],
+      values: [{ kind: "measure", measureName: "Total Sales" }],
+      hasHeader: false,
+    };
+  }
+
+  it("returns updatedPivotCount:0 when no pivots reference oldName", () => {
+    const wb = makeWorkbook([measureEntry("P1")]);
+    const result = renameMeasureReferences(wb, "NoSuch", "NewName");
+    expect(result.updatedPivotCount).toBe(0);
+    const values = wb.sheets!["s1"]!._pivots![0].values;
+    expect(values[0]).toEqual({ kind: "measure", measureName: "Total Sales" });
+  });
+
+  it("updates a single measure reference in a single pivot", () => {
+    const wb = makeWorkbook([measureEntry("P1")]);
+    const result = renameMeasureReferences(wb, "Total Sales", "Revenue");
+    expect(result.updatedPivotCount).toBe(1);
+    const values = wb.sheets!["s1"]!._pivots![0].values;
+    expect(values[0]).toEqual({ kind: "measure", measureName: "Revenue" });
+  });
+
+  it("does not touch column-kind values", () => {
+    const wb: WorkbookPivotSnapshot = {
+      sheets: {
+        s1: {
+          _pivots: [
+            {
+              name: "P1",
+              source: { kind: "model", tableName: "Sales" },
+              destination: { row: 0, col: 0 },
+              rows: [],
+              cols: [],
+              values: [
+                { kind: "column", field: "Total Sales", agg: "SUM" },
+                { kind: "measure", measureName: "Total Sales" },
+              ],
+              hasHeader: false,
+            },
+          ],
+        },
+      },
+    };
+    renameMeasureReferences(wb, "Total Sales", "Revenue");
+    const values = wb.sheets!["s1"]!._pivots![0].values;
+    // column-kind must stay untouched
+    expect(values[0]).toEqual({ kind: "column", field: "Total Sales", agg: "SUM" });
+    // measure-kind must be updated
+    expect(values[1]).toEqual({ kind: "measure", measureName: "Revenue" });
+  });
+
+  it("updates references across multiple sheets and pivots", () => {
+    const wb: WorkbookPivotSnapshot = {
+      sheets: {
+        s1: {
+          _pivots: [
+            {
+              name: "P1",
+              source: { kind: "model", tableName: "Sales" },
+              destination: { row: 0, col: 0 },
+              rows: [],
+              cols: [],
+              values: [{ kind: "measure", measureName: "Total Sales" }],
+              hasHeader: false,
+            },
+          ],
+        },
+        s2: {
+          _pivots: [
+            {
+              name: "P2",
+              source: { kind: "model", tableName: "Sales" },
+              destination: { row: 0, col: 0 },
+              rows: [],
+              cols: [],
+              values: [
+                { kind: "measure", measureName: "Total Sales" },
+                { kind: "measure", measureName: "Avg Price" },
+              ],
+              hasHeader: false,
+            },
+          ],
+        },
+      },
+    };
+    const result = renameMeasureReferences(wb, "Total Sales", "Revenue");
+    expect(result.updatedPivotCount).toBe(2);
+    expect(wb.sheets!["s1"]!._pivots![0].values[0]).toEqual({ kind: "measure", measureName: "Revenue" });
+    expect(wb.sheets!["s2"]!._pivots![0].values[0]).toEqual({ kind: "measure", measureName: "Revenue" });
+    // Unrelated measure untouched
+    expect(wb.sheets!["s2"]!._pivots![0].values[1]).toEqual({ kind: "measure", measureName: "Avg Price" });
+  });
+
+  it("handles an empty workbook gracefully", () => {
+    const result = renameMeasureReferences({}, "Total Sales", "Revenue");
+    expect(result.updatedPivotCount).toBe(0);
   });
 });

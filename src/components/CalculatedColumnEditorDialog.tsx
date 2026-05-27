@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { CocoDataModel, StoredCalculatedColumn } from "../store/cocoDataModel";
 import { evaluateTransientCalculatedColumn } from "../store/cocoDataModel";
-import { CALC_COLUMN_ERROR } from "../store/daxEngine";
+import { CALC_COLUMN_ERROR, DAX_FUNCTION_REFERENCE } from "../store/daxEngine";
+import { useDaxAutocomplete } from "./useDaxAutocomplete";
 import DaxColumnRefChips from "./DaxColumnRefChips";
 import DaxFunctionChips from "./DaxFunctionChips";
 import "./CalculatedColumnEditorDialog.css";
@@ -61,6 +62,31 @@ export default function CalculatedColumnEditorDialog({
       textarea.setSelectionRange(newPos, newPos);
     });
   };
+
+  // Resolve the currently selected table name for column suggestions.
+  const selectedTableName = tables.find((t) => t.id === tableId)?.name;
+
+  const autocompleteTables = (cocoModel?.tables ?? []).map((t) => ({
+    name: t.name,
+    columns: t.columns.map((c) => ({ name: c.name })),
+  }));
+
+  const autocomplete = useDaxAutocomplete({
+    textareaRef,
+    value: expression,
+    onInsert: (newExpression, newCaret) => {
+      setExpression(newExpression);
+      requestAnimationFrame(() => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        textarea.focus();
+        textarea.setSelectionRange(newCaret, newCaret);
+      });
+    },
+    functions: DAX_FUNCTION_REFERENCE,
+    tables: autocompleteTables,
+    contextTableName: selectedTableName,
+  });
 
   // Live preview — debounced 300 ms.
   useEffect(() => {
@@ -212,15 +238,22 @@ export default function CalculatedColumnEditorDialog({
           </label>
           <label className="cced-field">
             <span className="cced-field-label">DAX 式</span>
-            <textarea
-              ref={textareaRef}
-              className="cced-textarea"
-              rows={5}
-              value={expression}
-              onChange={(e) => setExpression(e.target.value)}
-              placeholder={'例: [FirstName] & " " & [LastName]'}
-              aria-required="true"
-            />
+            <div className="dac-wrapper">
+              <textarea
+                ref={textareaRef}
+                className="cced-textarea"
+                rows={5}
+                value={expression}
+                onChange={(e) => {
+                  setExpression(e.target.value);
+                  autocomplete.handleChange(e);
+                }}
+                onKeyDown={autocomplete.handleKeyDown}
+                placeholder={'例: [FirstName] & " " & [LastName]'}
+                aria-required="true"
+              />
+              {autocomplete.dropdown}
+            </div>
             <DaxFunctionChips onInsert={handleChipInsert} />
             <DaxColumnRefChips
               tables={cocoModel?.tables ?? []}

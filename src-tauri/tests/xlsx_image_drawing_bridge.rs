@@ -176,6 +176,7 @@ fn build_image_fixture_with(tmp: &TempDir, image_bytes: &[u8]) -> PathBuf {
 }
 
 #[test]
+#[ignore = "#312: SHEET_DRAWING_PLUGIN bridge disabled; replaced by _images normalisation (see xlsx_image_inline.rs)"]
 fn drawing_bridge_emits_sheet_drawing_plugin_resource() {
     let tmp = TempDir::new().unwrap();
     let fixture = build_image_fixture(&tmp);
@@ -430,6 +431,7 @@ fn build_mixed_anchor_fixture(tmp: &TempDir) -> PathBuf {
 /// still emit "1", proving the kind is threaded out of the parser, not
 /// inferred from anchor order or some other proxy.
 #[test]
+#[ignore = "#312: SHEET_DRAWING_PLUGIN bridge disabled; replaced by _images normalisation (see xlsx_image_inline.rs)"]
 fn one_cell_anchor_emits_position_anchor_type() {
     let tmp = TempDir::new().unwrap();
     let fixture = build_mixed_anchor_fixture(&tmp);
@@ -627,6 +629,7 @@ fn build_escaped_name_fixture(tmp: &TempDir) -> PathBuf {
 /// the entity raw (`A&amp;B`), which mismatched calamine's decoded form
 /// (`A&B`) and silently dropped both pipelines.
 #[test]
+#[ignore = "#312: SHEET_DRAWING_PLUGIN bridge disabled; replaced by _images normalisation (see xlsx_image_inline.rs)"]
 fn xml_escaped_sheet_name_drawing_is_preserved_and_emitted() {
     let tmp = TempDir::new().unwrap();
     let fixture = build_escaped_name_fixture(&tmp);

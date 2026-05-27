@@ -189,6 +189,7 @@ import {
   collectAllPivotNames,
   inferFieldNames,
   computePivot,
+  computeModelPivot,
   addPivot as addPivotToSheet,
   refreshPivot as refreshPivotInSheet,
   replacePivotInSheet,
@@ -196,6 +197,7 @@ import {
   rangeToA1 as pivotRangeToA1,
   cellToA1 as pivotCellToA1,
 } from "../store/pivots";
+import { toDataModel, applyCalculatedColumns } from "../store/cocoDataModel";
 import ChartCanvasPanel from "./ChartCanvasPanel";
 import InGridChartLayer from "./InGridChartLayer";
 import InsertSlicerDialog from "./InsertSlicerDialog";
@@ -2725,12 +2727,48 @@ export default function EditorScreen() {
       const fresh = workbook.save() as unknown as WorkbookPivotSnapshot & {
         sheets?: Record<string, { cellData?: Record<string, Record<string, unknown>> }>;
       };
-      if (config.source.kind !== "sheet") return;
-      const src = fresh.sheets?.[config.source.sheetId];
-      if (!src) return;
 
       const editingEntry = pivotDialog?.initialEntry;
       const isEdit = editingEntry !== undefined;
+      const name = isEdit ? editingEntry!.name : generatePivotName(collectAllPivotNames(fresh));
+
+      if (config.source.kind === "model") {
+        // Model-source pivot: compute via computeModelPivot and write to the active sheet.
+        const cocoModel = readDataModel(fresh);
+        const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+        const result = computeModelPivot(runtimeModel, cocoModel, config);
+        const entry: PivotEntry = { ...config, name, lastOutputRows: result.rowCount, lastOutputCols: result.colCount };
+
+        if (isEdit) {
+          replacePivotInSheet(fresh, entry);
+        }
+
+        // Write output to the destination sheet (use activeSheetId, fall back to first sheet).
+        const destSheetId = activeSheetId ?? Object.keys(fresh.sheets ?? {})[0] ?? "";
+        const destSheet = fresh.sheets?.[destSheetId];
+        if (destSheet) {
+          if (!destSheet.cellData) destSheet.cellData = {};
+          for (let r = 0; r < result.output.length; r++) {
+            const row = result.output[r];
+            const targetRow = config.destination.row + r;
+            const rowKey = String(targetRow);
+            if (!destSheet.cellData[rowKey]) destSheet.cellData[rowKey] = {};
+            for (let c = 0; c < row.length; c++) {
+              (destSheet.cellData[rowKey] as Record<string, unknown>)[String(config.destination.col + c)] = { v: row[c] };
+            }
+          }
+        }
+
+        if (!isEdit) {
+          addPivotToSheet(fresh, entry, cocoModel, destSheetId);
+        }
+        applyMutatedSnapshot(JSON.stringify(fresh));
+        return;
+      }
+
+      // Sheet-source pivot (original path).
+      const src = fresh.sheets?.[config.source.sheetId];
+      if (!src) return;
 
       // Slice source cells into a 2-D array
       const sourceCells: Array<Array<unknown>> = [];
@@ -2745,7 +2783,6 @@ export default function EditorScreen() {
       const result = computePivot(sourceCells, config);
 
       // Determine the pivot name: reuse existing name in edit mode, generate new in insert mode.
-      const name = isEdit ? editingEntry!.name : generatePivotName(collectAllPivotNames(fresh));
       const entry: PivotEntry = { ...config, name, lastOutputRows: result.rowCount, lastOutputCols: result.colCount };
 
       if (isEdit) {
@@ -2773,7 +2810,7 @@ export default function EditorScreen() {
       }
       applyMutatedSnapshot(JSON.stringify(fresh));
     },
-    [applyMutatedSnapshot, pivotDialog],
+    [applyMutatedSnapshot, pivotDialog, activeSheetId],
   );
 
   const refreshPivotByName = useCallback(
@@ -9773,20 +9810,34 @@ export default function EditorScreen() {
           onClose={() => setFlashFillDialog(null)}
         />
       )}
-      {pivotDialog && (
-        <InsertPivotDialog
-          initialSourceRange={pivotDialog.sourceRange}
-          initialDestination={pivotDialog.destCell}
-          sourceFieldNames={pivotDialog.fieldNames}
-          sourceSheetId={pivotDialog.sheetId}
-          initialEntry={pivotDialog.initialEntry}
-          onApply={(config) => {
-            applyPivot(config);
-            setPivotDialog(null);
-          }}
-          onClose={() => setPivotDialog(null)}
-        />
-      )}
+      {pivotDialog && (() => {
+        const dmSnap = currentSnapshotJson ? (() => {
+          try { return JSON.parse(currentSnapshotJson) as unknown; } catch { return null; }
+        })() : null;
+        const dm = readDataModel(dmSnap);
+        const pivotModelTables = dm.tables.length > 0
+          ? dm.tables.map((t) => ({ name: t.name, columns: t.columns.map((c) => ({ name: c.name, type: c.type })) }))
+          : undefined;
+        const pivotMeasures = dm.measures.length > 0
+          ? dm.measures.map((m) => ({ name: m.name, tableId: m.tableId }))
+          : undefined;
+        return (
+          <InsertPivotDialog
+            initialSourceRange={pivotDialog.sourceRange}
+            initialDestination={pivotDialog.destCell}
+            sourceFieldNames={pivotDialog.fieldNames}
+            sourceSheetId={pivotDialog.sheetId}
+            initialEntry={pivotDialog.initialEntry}
+            modelTables={pivotModelTables}
+            availableMeasures={pivotMeasures}
+            onApply={(config) => {
+              applyPivot(config);
+              setPivotDialog(null);
+            }}
+            onClose={() => setPivotDialog(null)}
+          />
+        );
+      })()}
       {slicerDialogOpen && (
         <InsertSlicerDialog
           availableTables={availableSlicerTables}

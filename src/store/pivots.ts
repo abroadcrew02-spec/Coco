@@ -326,7 +326,7 @@ function valueLabel(v: PivotValueField): string {
 
 // Stable group key from a list of raw cell values. Stringified + joined with a
 // delimiter that won't collide with normal data. Empty values become "".
-const KEY_DELIM = " ";
+const KEY_DELIM = " ";
 function tupleKey(values: unknown[]): string {
   const parts: string[] = [];
   for (const v of values) {
@@ -876,9 +876,6 @@ export function computeModelPivot(
       return true;
     });
 
-    // Collect values for Total column per value field.
-    const rowTotalValues: unknown[] = [];
-
     for (let ci = 0; ci < sortedColKeys.length; ci++) {
       const colMeta = sortedColKeys[ci];
       const vfCount = Math.max(valueFields.length, 1);
@@ -897,9 +894,7 @@ export function computeModelPivot(
           matrix[matrixRow][col] = "";
           continue;
         }
-        const v = evalValueForRows(valueFields[vi], cellRows);
-        matrix[matrixRow][col] = v;
-        if (ci === 0) rowTotalValues.push(v);
+        matrix[matrixRow][col] = evalValueForRows(valueFields[vi], cellRows);
       }
     }
 

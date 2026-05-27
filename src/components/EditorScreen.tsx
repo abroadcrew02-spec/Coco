@@ -2819,7 +2819,8 @@ export default function EditorScreen() {
       const workbook = fUniver?.getActiveWorkbook();
       if (!workbook) return;
       const fresh = workbook.save() as unknown as WorkbookPivotSnapshot;
-      const res = refreshPivotInSheet(fresh, name);
+      const cocoModel = readDataModel(fresh);
+      const res = refreshPivotInSheet(fresh, name, cocoModel);
       if (res.ok) applyMutatedSnapshot(JSON.stringify(fresh));
     },
     [applyMutatedSnapshot],

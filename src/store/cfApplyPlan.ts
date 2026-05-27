@@ -98,8 +98,75 @@ export function readBaseStyle(
 }
 
 /**
+ * Recover the numeric original value from a polluted cell.v string.
+ *
+ * A "polluted" snapshot occurs when a previous CF pipeline run (e.g. an
+ * older save or a recovery candidate) baked the iconSet glyph directly into
+ * cell.v — e.g. "↓ 1", "→ 5", "🔴 42", "★☆☆☆☆ 3".  When `readCellRawValue`
+ * feeds such a string into `computeIconSetGlyphForCell`, `Number("↓ 1")`
+ * returns NaN, the glyph cannot be computed, and the sidecar diff triggers an
+ * unwanted repaint on every poll cycle.
+ *
+ * Detection heuristic (mirrors the decoration registry in `renderGlyphs.ts`):
+ *   1. Single-codepoint iconSet glyph (↓ → ↑ 🔴 🟡 🟢 ★ ☆) followed by " "
+ *      → strip the glyph + space, parse the remainder as a number.
+ *   2. Multi-character 5-rating prefix ("★★★★★ " … "★☆☆☆☆ ")
+ *      → strip the prefix, parse the remainder.
+ *
+ * Returns the recovered number when successful, otherwise the original value
+ * unchanged.
+ */
+export function recoverNumericFromPolluted(v: unknown): unknown {
+  if (typeof v !== "string" || v.length === 0) return v;
+
+  // Multi-character 5-rating prefixes — check longest first.
+  const multiPrefixes: readonly string[] = [
+    "★★★★★ ",
+    "★★★★☆ ",
+    "★★★☆☆ ",
+    "★★☆☆☆ ",
+    "★☆☆☆☆ ",
+  ];
+  for (const prefix of multiPrefixes) {
+    if (v.startsWith(prefix)) {
+      const rest = v.slice(prefix.length);
+      const n = Number(rest);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+
+  // Single-codepoint iconSet glyphs followed by a space.
+  const singleGlyphs: readonly string[] = [
+    "↓", "→", "↑",
+    "\u{1F534}", // 🔴
+    "\u{1F7E1}", // 🟡
+    "\u{1F7E2}", // 🟢
+    "★", "☆",
+  ];
+  const cp = v.codePointAt(0);
+  if (cp !== undefined) {
+    const firstGlyph = String.fromCodePoint(cp);
+    if (singleGlyphs.includes(firstGlyph)) {
+      const afterGlyph = v.slice(firstGlyph.length);
+      if (afterGlyph.startsWith(" ")) {
+        const rest = afterGlyph.slice(1);
+        const n = Number(rest);
+        if (Number.isFinite(n)) return n;
+      }
+    }
+  }
+
+  return v;
+}
+
+/**
  * Read the raw cell value (v field) from the snapshot. Returns undefined when
  * absent. Used by iconSet glyph computation, which needs the numeric value.
+ *
+ * When cell.v is a polluted iconSet string (e.g. "↓ 42" from an older
+ * snapshot that baked the glyph into the cell), `recoverNumericFromPolluted`
+ * strips the glyph prefix and returns the bare number so iconSet glyph
+ * re-computation stays idempotent across recovery-candidate loads.
  */
 function readCellRawValue(
   snapshotShape: SnapshotShapeForPlan,
@@ -109,7 +176,8 @@ function readCellRawValue(
 ): unknown {
   const cell = snapshotShape.sheets?.[sheetId]?.cellData?.[String(row)]?.[String(col)];
   if (!cell || typeof cell !== "object") return undefined;
-  return (cell as Record<string, unknown>).v;
+  const raw = (cell as Record<string, unknown>).v;
+  return recoverNumericFromPolluted(raw);
 }
 
 /**

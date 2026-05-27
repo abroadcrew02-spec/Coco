@@ -6200,6 +6200,22 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
         }
     }
 
+    // #309: Emit OOXML ctrlProp / vmlDrawing for Coco-new checkboxes.
+    if let Err(e) = inject_coco_form_controls(&tmp_path, &snapshot, &sheet_order) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Ok(ExportResult {
+            success: false,
+            path: path.clone(),
+            warnings: vec![CompatibilityWarning {
+                severity: "blocking".to_string(),
+                code: "XLSX_FORM_CONTROL_EMIT_FAILED".to_string(),
+                message: format!("Coco-new form control emit failed: {e}"),
+                affected_sheets: None,
+            }],
+            error: Some(format!("XLSX_FORM_CONTROL_EMIT_FAILED: {e}")),
+        });
+    }
+
     // #105 / #120: Coco-extension preservation. Snapshot fields that have no
     // first-class OOXML representation (tables, sparklines, outline groups,
     // pivot metadata, slicers, scenarios, sheet notes, Coco-authored charts,
@@ -8390,6 +8406,341 @@ mod freeze_projection_tests {
         );
     }
 }
+
+// ============================================================================
+// #309: Coco-new CheckBox OOXML emit
+// ============================================================================
+
+struct CocoNewCheckbox {
+    row: u32,
+    col: u32,
+    label: String,
+    checked: bool,
+    fmla_link: Option<String>,
+}
+
+fn collect_coco_new_checkboxes(
+    snapshot: &Value,
+    sheet_order: &[Value],
+) -> Vec<(usize, Vec<CocoNewCheckbox>)> {
+    let mut result: Vec<(usize, Vec<CocoNewCheckbox>)> = Vec::new();
+    let Some(sheets_obj) = snapshot.get("sheets").and_then(|v| v.as_object()) else {
+        return result;
+    };
+    for (sheet_idx, sid_val) in sheet_order.iter().enumerate() {
+        let Some(sid) = sid_val.as_str() else { continue };
+        let Some(sheet) = sheets_obj.get(sid) else { continue };
+        let Some(arr) = sheet.get("_checkboxes").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        let mut coco_new: Vec<CocoNewCheckbox> = Vec::new();
+        for cb_val in arr {
+            let Some(obj) = cb_val.as_object() else { continue };
+            let provenance = obj.get("_provenance").and_then(|v| v.as_str()).unwrap_or("");
+            if provenance != "coco-new" {
+                continue;
+            }
+            coco_new.push(CocoNewCheckbox {
+                row: obj.get("row").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                col: obj.get("col").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                label: obj
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("CheckBox")
+                    .to_string(),
+                checked: obj.get("checked").and_then(|v| v.as_bool()).unwrap_or(false),
+                fmla_link: obj
+                    .get("fmlaLink")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+            });
+        }
+        if !coco_new.is_empty() {
+            result.push((sheet_idx, coco_new));
+        }
+    }
+    result
+}
+
+fn build_ctrl_prop_xml_309(cb: &CocoNewCheckbox) -> String {
+    let checked_attr = if cb.checked { "Checked" } else { "Unchecked" };
+    let fmla_link_attr = if let Some(ref link) = cb.fmla_link {
+        format!(" fmlaLink=\"{}\"", encode_xml_text(link))
+    } else {
+        String::new()
+    };
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+\n<formControlPr xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2009/9/main\" \
+objectType=\"CheckBox\" checked=\"{checked_attr}\"{fmla_link_attr} \
+lockText=\"1\" defaultSize=\"0\" noThreeD=\"1\"/>\n"
+    )
+}
+
+fn build_vml_shape_309(shape_id: u32, cb: &CocoNewCheckbox) -> String {
+    let right_col = cb.col + 2;
+    let bottom_row = cb.row + 1;
+    let anchor = format!("{}, 0, {}, 0, {right_col}, 0, {bottom_row}, 0", cb.col, cb.row);
+    let checked_el = if cb.checked { "<x:Checked>1</x:Checked>\n      " } else { "" };
+    let fmla_link_el = if let Some(ref link) = cb.fmla_link {
+        format!("<x:FmlaLink>{}</x:FmlaLink>\n      ", encode_xml_text(link))
+    } else {
+        String::new()
+    };
+    let label_escaped = encode_xml_text(&cb.label);
+    let shape_id_str = format!("_x0000_s{shape_id}");
+    format!(
+        "  <v:shape id=\"{shape_id_str}\" type=\"#_x0000_t201\" \
+style=\"position:absolute;margin-left:36pt;margin-top:3pt;\
+width:108pt;height:14.25pt;z-index:1\" \
+fillcolor=\"window\" strokecolor=\"windowText\" filled=\"f\" stroked=\"f\">\n\
+    <v:path shadowok=\"f\" o:connecttype=\"none\"/>\n\
+    <v:textbox style=\"mso-direction-alt:auto\">\
+<div style=\"text-align:left\"><span>{label_escaped}</span></div></v:textbox>\n\
+    <x:ClientData ObjectType=\"Checkbox\">\n\
+      <x:Anchor>{anchor}</x:Anchor>\n\
+      <x:PrintObject/>\n\
+      <x:AutoFill>False</x:AutoFill>\n\
+      {checked_el}{fmla_link_el}<x:NoThreeD/>\n\
+    </x:ClientData>\n\
+  </v:shape>\n"
+    )
+}
+
+fn build_vml_drawing_xml_309(shape_base: u32, checkboxes: &[CocoNewCheckbox]) -> String {
+    let mut shapes = String::new();
+    for (i, cb) in checkboxes.iter().enumerate() {
+        shapes.push_str(&build_vml_shape_309(shape_base + i as u32, cb));
+    }
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n\
+<xml xmlns:v=\"urn:schemas-microsoft-com:vml\"\n\
+     xmlns:o=\"urn:schemas-microsoft-com:office:office\"\n\
+     xmlns:x=\"urn:schemas-microsoft-com:office:excel\">\n\
+  <o:shapelayout v:ext=\"edit\">\n\
+    <o:idmap v:ext=\"edit\" data=\"1\"/>\n\
+  </o:shapelayout>\n\
+  <v:shapetype id=\"#_x0000_t201\" coordsize=\"21600,21600\" o:spt=\"201\"\n\
+               path=\"m,l,21600r21600,xe\">\n\
+    <v:stroke joinstyle=\"miter\"/>\n\
+    <v:path shadowok=\"f\" o:connecttype=\"none\"/>\n\
+  </v:shapetype>\n\
+{shapes}</xml>\n"
+    )
+}
+
+fn build_vml_drawing_rels_309(ctrl_prop_base: u32, count: usize) -> String {
+    let mut rels = String::new();
+    for i in 0..count {
+        let ctrl_n = ctrl_prop_base + i as u32;
+        rels.push_str(&format!(
+            "<Relationship Id=\"rId{rid}\" \
+Type=\"http://schemas.microsoft.com/office/2006/relationships/ctrlProp\" \
+Target=\"../ctrlProps/ctrlProp{ctrl_n}.xml\"/>\n",
+            rid = i + 1
+        ));
+    }
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n\
+<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n\
+{rels}</Relationships>\n"
+    )
+}
+
+/// Inject OOXML form-control parts for Coco-new checkboxes after the base xlsx is written.
+fn inject_coco_form_controls(
+    tmp_path: &std::path::Path,
+    snapshot: &Value,
+    sheet_order: &[Value],
+) -> Result<(), String> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::{write::FileOptions, ZipArchive, ZipWriter};
+
+    let sheets_with_checkboxes = collect_coco_new_checkboxes(snapshot, sheet_order);
+    if sheets_with_checkboxes.is_empty() {
+        return Ok(());
+    }
+
+    const SHAPE_BASE: u32 = 9000;
+    const CTRL_BASE: u32 = 9000;
+    const VML_BASE: u32 = 9000;
+
+    let original_bytes = fs::read(tmp_path).map_err(|e| e.to_string())?;
+
+    let mut new_parts: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut sheet_xml_rewrites: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut sheet_rels_rewrites: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut ct_overrides: Vec<String> = Vec::new();
+
+    for (sheet_idx, checkboxes) in &sheets_with_checkboxes {
+        let sheet_n = sheet_idx + 1;
+        let vml_n = VML_BASE + *sheet_idx as u32;
+        let ctrl_base = CTRL_BASE + *sheet_idx as u32 * 100;
+        let shape_base = SHAPE_BASE + *sheet_idx as u32 * 100;
+
+        // ctrlProp parts (one per checkbox).
+        for (i, cb) in checkboxes.iter().enumerate() {
+            let ctrl_n = ctrl_base + i as u32;
+            let ctrl_path = format!("xl/ctrlProps/ctrlProp{ctrl_n}.xml");
+            let xml = build_ctrl_prop_xml_309(cb);
+            new_parts.push((ctrl_path.clone(), xml.into_bytes()));
+            ct_overrides.push(format!(
+                "<Override PartName=\"/{ctrl_path}\" \
+ContentType=\"application/vnd.ms-excel.controlproperties+xml\"/>"
+            ));
+        }
+
+        // vmlDrawing part.
+        let vml_path = format!("xl/drawings/vmlDrawing{vml_n}.vml");
+        let vml_xml = build_vml_drawing_xml_309(shape_base, checkboxes);
+        new_parts.push((vml_path.clone(), vml_xml.into_bytes()));
+        ct_overrides.push(format!(
+            "<Override PartName=\"/{vml_path}\" \
+ContentType=\"application/vnd.openxmlformats-officedocument.vmlDrawing\"/>"
+        ));
+
+        // vmlDrawing rels.
+        let vml_rels_path = format!("xl/drawings/_rels/vmlDrawing{vml_n}.vml.rels");
+        let vml_rels_xml = build_vml_drawing_rels_309(ctrl_base, checkboxes.len());
+        new_parts.push((vml_rels_path, vml_rels_xml.into_bytes()));
+
+        // Sheet XML: inject <legacyDrawing>.
+        let vml_rid = format!("rIdVml{sheet_n}");
+        let sheet_xml_path = format!("xl/worksheets/sheet{sheet_n}.xml");
+        let sheet_xml: String = {
+            let mut arc = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+            let mut s = String::new();
+            if let Ok(mut e) = arc.by_name(&sheet_xml_path) {
+                let _ = std::io::Read::read_to_string(&mut e, &mut s);
+            }
+            s
+        };
+        if !sheet_xml.is_empty() && !sheet_xml.contains("<legacyDrawing") {
+            if let Some(pos) = sheet_xml.rfind("</worksheet>") {
+                let mut s = String::with_capacity(sheet_xml.len() + 64);
+                s.push_str(&sheet_xml[..pos]);
+                s.push_str(&format!("<legacyDrawing r:id=\"{vml_rid}\"/>"));
+                s.push_str(&sheet_xml[pos..]);
+                sheet_xml_rewrites.insert(sheet_xml_path, s.into_bytes());
+            }
+        }
+
+        // Sheet rels: inject vmlDrawing relationship.
+        let sheet_rels_path = format!("xl/worksheets/_rels/sheet{sheet_n}.xml.rels");
+        let existing_rels: String = {
+            let mut arc = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+            let mut s = String::new();
+            if let Ok(mut e) = arc.by_name(&sheet_rels_path) {
+                let _ = std::io::Read::read_to_string(&mut e, &mut s);
+            }
+            s
+        };
+        if !existing_rels.contains(&vml_rid) {
+            let vml_rel = format!(
+                "<Relationship Id=\"{vml_rid}\" \
+Type=\"http://schemas.microsoft.com/office/2006/relationships/vmlDrawing\" \
+Target=\"../drawings/vmlDrawing{vml_n}.vml\"/>"
+            );
+            let new_rels = if existing_rels.trim().is_empty() {
+                format!(
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n\
+<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n\
+{vml_rel}\n</Relationships>\n"
+                )
+            } else if let Some(close_pos) = existing_rels.rfind("</Relationships>") {
+                let mut s = String::with_capacity(existing_rels.len() + vml_rel.len() + 2);
+                s.push_str(&existing_rels[..close_pos]);
+                s.push_str(&vml_rel);
+                s.push('\n');
+                s.push_str(&existing_rels[close_pos..]);
+                s
+            } else {
+                existing_rels.clone()
+            };
+            sheet_rels_rewrites.insert(sheet_rels_path, new_rels.into_bytes());
+        }
+    }
+
+    let mut skip_names: HashSet<String> = HashSet::new();
+    skip_names.insert("[Content_Types].xml".to_string());
+    for (name, _) in &new_parts {
+        skip_names.insert(name.clone());
+    }
+    for name in sheet_xml_rewrites.keys() {
+        skip_names.insert(name.clone());
+    }
+    for name in sheet_rels_rewrites.keys() {
+        skip_names.insert(name.clone());
+    }
+
+    let mut src = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+    let mut out_buf: Vec<u8> = Vec::with_capacity(original_bytes.len() + 65536);
+    {
+        let mut out = ZipWriter::new(Cursor::new(&mut out_buf));
+        let opts: FileOptions =
+            FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+        let mut ct_xml = String::new();
+        for i in 0..src.len() {
+            let mut entry = src.by_index(i).map_err(|e| e.to_string())?;
+            let name = entry.name().to_string();
+            if name == "[Content_Types].xml" {
+                let _ = std::io::Read::read_to_string(&mut entry, &mut ct_xml);
+                continue;
+            }
+            if skip_names.contains(&name) {
+                let mut _buf = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut entry, &mut _buf);
+                continue;
+            }
+            let mut buf = Vec::with_capacity(entry.size() as usize);
+            std::io::Read::read_to_end(&mut entry, &mut buf).map_err(|e| e.to_string())?;
+            out.start_file(&name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, &buf).map_err(|e| e.to_string())?;
+        }
+
+        for (name, bytes) in &new_parts {
+            out.start_file(name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, bytes).map_err(|e| e.to_string())?;
+        }
+        for (name, bytes) in &sheet_xml_rewrites {
+            out.start_file(name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, bytes).map_err(|e| e.to_string())?;
+        }
+        for (name, bytes) in &sheet_rels_rewrites {
+            out.start_file(name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, bytes).map_err(|e| e.to_string())?;
+        }
+
+        // [Content_Types].xml with new Overrides spliced in.
+        if !ct_overrides.is_empty() && !ct_xml.is_empty() {
+            let close_tag = "</Types>";
+            let insert_before = ct_xml.rfind(close_tag).unwrap_or(ct_xml.len());
+            let mut new_ct = String::with_capacity(ct_xml.len() + ct_overrides.len() * 120);
+            new_ct.push_str(&ct_xml[..insert_before]);
+            for ov in &ct_overrides {
+                if !ct_xml.contains(ov.as_str()) {
+                    new_ct.push_str(ov);
+                    new_ct.push('\n');
+                }
+            }
+            new_ct.push_str(&ct_xml[insert_before..]);
+            out.start_file("[Content_Types].xml", opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, new_ct.as_bytes()).map_err(|e| e.to_string())?;
+        } else {
+            out.start_file("[Content_Types].xml", opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, ct_xml.as_bytes()).map_err(|e| e.to_string())?;
+        }
+
+        out.finish().map_err(|e| e.to_string())?;
+    }
+
+    fs::write(tmp_path, &out_buf).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ============================================================================
 
 #[cfg(test)]
 mod external_ref_tests {

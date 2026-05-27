@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState, useRef, useCallback } from "react";
 import type { StoredMeasure, StoredCalculatedColumn } from "../store/cocoDataModel";
 import { readDataModel } from "../store/cocoDataModel";
 import type { ModelTable } from "../store/daxEngine";
@@ -18,6 +18,23 @@ interface Props {
   onEditCalculatedColumn?: (col: StoredCalculatedColumn) => void;
   /** Remove a table from the data model by name. */
   onDeleteTable?: (name: string) => void;
+  /**
+   * Rename a measure. Returns `{ nameChanged, collided }`. When `collided` is
+   * true the panel shows an inline error; caller persists on `nameChanged`.
+   */
+  onRenameMeasure?: (
+    oldName: string,
+    newName: string,
+  ) => { nameChanged: boolean; collided: boolean };
+  /**
+   * Rename a calculated column. Same contract as `onRenameMeasure` but
+   * identifies the column by `id` (not name, because the name is the value
+   * being changed).
+   */
+  onRenameCalculatedColumn?: (
+    id: string,
+    newColumnName: string,
+  ) => { nameChanged: boolean; collided: boolean };
 }
 
 interface MeasureRow {
@@ -28,6 +45,12 @@ interface MeasureRow {
   kind: "measure" | "calculatedColumn";
 }
 
+interface RenameState {
+  id: string;
+  value: string;
+  error: string | null;
+}
+
 export default function MeasureListPanel({
   workbookSnapshotJson,
   onDelete,
@@ -36,6 +59,8 @@ export default function MeasureListPanel({
   onAddCalculatedColumn,
   onEditCalculatedColumn,
   onDeleteTable,
+  onRenameMeasure,
+  onRenameCalculatedColumn,
 }: Props) {
   const { tables, measures, calculatedColumns } = useMemo(() => {
     const empty = {
@@ -56,6 +81,45 @@ export default function MeasureListPanel({
       return empty;
     }
   }, [workbookSnapshotJson]);
+
+  const [renaming, setRenaming] = useState<RenameState | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const startRename = useCallback((row: MeasureRow) => {
+    setRenaming({ id: row.id, value: row.name, error: null });
+    // Focus after the render cycle.
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, []);
+
+  const cancelRename = useCallback(() => setRenaming(null), []);
+
+  const commitRename = useCallback(
+    (row: MeasureRow) => {
+      if (!renaming) return;
+      const newName = renaming.value.trim();
+      if (!newName) {
+        setRenaming((r) => r && { ...r, error: "名前を入力してください" });
+        return;
+      }
+      if (row.kind === "measure") {
+        if (!onRenameMeasure) { setRenaming(null); return; }
+        const result = onRenameMeasure(row.name, newName);
+        if (result.collided) {
+          setRenaming((r) => r && { ...r, error: "この名前は既に使われています" });
+          return;
+        }
+      } else {
+        if (!onRenameCalculatedColumn) { setRenaming(null); return; }
+        const result = onRenameCalculatedColumn(row.id, newName);
+        if (result.collided) {
+          setRenaming((r) => r && { ...r, error: "この名前は既に使われています" });
+          return;
+        }
+      }
+      setRenaming(null);
+    },
+    [renaming, onRenameMeasure, onRenameCalculatedColumn],
+  );
 
   const isEmpty =
     tables.length === 0 && measures.length === 0 && calculatedColumns.length === 0;
@@ -100,6 +164,44 @@ export default function MeasureListPanel({
     const calcCol = !isMeasure ? calculatedColumns.find((c) => c.id === row.id) : undefined;
     const canEditMeasure = isMeasure && !!onEdit && !!measure;
     const canEditCalcCol = !isMeasure && !!onEditCalculatedColumn && !!calcCol;
+    const canRenameMeasure = isMeasure && !!onRenameMeasure;
+    const canRenameCalcCol = !isMeasure && !!onRenameCalculatedColumn;
+    const isRenaming = renaming?.id === row.id;
+
+    if (isRenaming && renaming) {
+      return (
+        <li key={row.id} className="mlp-row mlp-row--renaming">
+          <div className="mlp-rename-wrap">
+            <input
+              ref={inputRef}
+              className={`mlp-rename-input${renaming.error ? " mlp-rename-input--error" : ""}`}
+              value={renaming.value}
+              onChange={(e) =>
+                setRenaming((r) => r && { ...r, value: e.target.value, error: null })
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRename(row);
+                if (e.key === "Escape") cancelRename();
+              }}
+              onBlur={() => commitRename(row)}
+              aria-label="新しい名前"
+            />
+            {renaming.error && (
+              <span className="mlp-rename-error" role="alert">{renaming.error}</span>
+            )}
+          </div>
+          <button
+            type="button"
+            className="mlp-delete"
+            onClick={cancelRename}
+            aria-label="名前変更をキャンセル"
+            title="キャンセル"
+          >
+            ×
+          </button>
+        </li>
+      );
+    }
 
     return (
       <li key={row.id} className="mlp-row">
@@ -125,6 +227,17 @@ export default function MeasureListPanel({
           <div className="mlp-info">
             {renderMeasureInfo(row)}
           </div>
+        )}
+        {(canRenameMeasure || canRenameCalcCol) && (
+          <button
+            type="button"
+            className="mlp-rename"
+            onClick={() => startRename(row)}
+            aria-label={`${row.name} の名前を変更`}
+            title="名前変更"
+          >
+            ✏
+          </button>
         )}
         <button
           type="button"

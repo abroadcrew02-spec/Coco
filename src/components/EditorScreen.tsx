@@ -196,6 +196,7 @@ import {
   parseA1Range as parsePivotA1Range,
   rangeToA1 as pivotRangeToA1,
   cellToA1 as pivotCellToA1,
+  renameMeasureReferences,
 } from "../store/pivots";
 import { toDataModel, applyCalculatedColumns } from "../store/cocoDataModel";
 import ChartCanvasPanel from "./ChartCanvasPanel";
@@ -371,6 +372,8 @@ import {
   removeMeasure,
   removeCalculatedColumn,
   addCalculatedColumn,
+  renameMeasure,
+  renameCalculatedColumn,
   addTable as addModelTable,
   removeTable as removeDataModelTable,
 } from "../store/cocoDataModel";
@@ -2944,6 +2947,36 @@ export default function EditorScreen() {
       const updated = removeDataModelTable(model, name);
       const newSnap = writeDataModel(snap, updated);
       applyMutatedSnapshot(JSON.stringify(newSnap));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
+  const renameMeasureCascading = useCallback(
+    (oldName: string, newName: string): { nameChanged: boolean; collided: boolean } => {
+      const snap = getSnapshotForTool("メジャー名前変更");
+      if (!snap) return { nameChanged: false, collided: false };
+      const model = readDataModel(snap);
+      const renameResult = renameMeasure(model, oldName, newName);
+      if (!renameResult.nameChanged) return { nameChanged: false, collided: renameResult.collided };
+      const workbook = snap as import("../store/pivots").WorkbookPivotSnapshot;
+      renameMeasureReferences(workbook, oldName, newName);
+      const newSnap = writeDataModel(workbook as unknown as Record<string, unknown>, renameResult.model);
+      applyMutatedSnapshot(JSON.stringify(newSnap));
+      return { nameChanged: true, collided: false };
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
+  const renameCalculatedColumnCascading = useCallback(
+    (id: string, newColumnName: string): { nameChanged: boolean; collided: boolean } => {
+      const snap = getSnapshotForTool("計算列名前変更");
+      if (!snap) return { nameChanged: false, collided: false };
+      const model = readDataModel(snap);
+      const renameResult = renameCalculatedColumn(model, id, newColumnName);
+      if (!renameResult.nameChanged) return { nameChanged: false, collided: renameResult.collided };
+      const newSnap = writeDataModel(snap, renameResult.model);
+      applyMutatedSnapshot(JSON.stringify(newSnap));
+      return { nameChanged: true, collided: false };
     },
     [getSnapshotForTool, applyMutatedSnapshot],
   );
@@ -9358,6 +9391,8 @@ export default function EditorScreen() {
             onAddCalculatedColumn={() => openCalcColEditor()}
             onEditCalculatedColumn={(c) => openCalcColEditor(c)}
             onDeleteTable={deleteDataModelTable}
+            onRenameMeasure={renameMeasureCascading}
+            onRenameCalculatedColumn={renameCalculatedColumnCascading}
           />
         )}
         {chartsCanvasPanelOpen && currentSnapshotJson && (

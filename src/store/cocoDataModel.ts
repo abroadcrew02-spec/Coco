@@ -218,6 +218,96 @@ export function removeCalculatedColumn(
   };
 }
 
+/**
+ * Rename a measure identified by `oldName` to `newName`.
+ *
+ * Returns:
+ *   - `nameChanged: false` when `oldName === newName` (noop).
+ *   - `collided: true` when `newName` is already used by a different measure
+ *     (the model is not mutated; caller shows an error UI).
+ *   - `nameChanged: true` on success — the returned `model` has the measure
+ *     name updated.
+ *
+ * Cascade to Pivot references is the caller's responsibility (use
+ * `renameMeasureReferences` from `pivots.ts`).
+ */
+export function renameMeasure(
+  model: CocoDataModel,
+  oldName: string,
+  newName: string,
+): { model: CocoDataModel; nameChanged: boolean; collided: boolean } {
+  if (oldName === newName) {
+    return { model, nameChanged: false, collided: false };
+  }
+  const target = model.measures.find((m) => m.name === oldName);
+  if (!target) {
+    return { model, nameChanged: false, collided: false };
+  }
+  const collision = model.measures.some((m) => m.name === newName && m.id !== target.id);
+  if (collision) {
+    return { model, nameChanged: false, collided: true };
+  }
+  const measures = model.measures.map((m) =>
+    m.id === target.id ? { ...m, name: newName } : m,
+  );
+  return { model: { ...model, measures }, nameChanged: true, collided: false };
+}
+
+/**
+ * Rename a calculated column identified by `id`, updating its `name` and
+ * `columnName` fields to `newColumnName`.
+ *
+ * Returns:
+ *   - `nameChanged: false` when the column's current name already equals
+ *     `newColumnName` (noop).
+ *   - `collided: true` when `newColumnName` conflicts with another calc col in
+ *     the same table, or with an original column defined in the table's schema.
+ *     The model is not mutated; caller shows a warning UI.
+ *   - `nameChanged: true` on success.
+ *
+ * Note: DAX expression references inside measures / other calc cols are NOT
+ * rewritten automatically (parser round-trip needed, out of scope for MVP).
+ * The caller should warn users that expressions referencing
+ * `TableName[OldName]` may break.
+ */
+export function renameCalculatedColumn(
+  model: CocoDataModel,
+  id: string,
+  newColumnName: string,
+): { model: CocoDataModel; nameChanged: boolean; collided: boolean } {
+  const target = model.calculatedColumns.find((c) => c.id === id);
+  if (!target) {
+    return { model, nameChanged: false, collided: false };
+  }
+  if (target.columnName === newColumnName) {
+    return { model, nameChanged: false, collided: false };
+  }
+  // Check collision against other calc cols in the same table.
+  const sameTableCalcCols = model.calculatedColumns.filter(
+    (c) => c.tableId === target.tableId && c.id !== id,
+  );
+  const collisionCalcCol = sameTableCalcCols.some((c) => c.columnName === newColumnName);
+  if (collisionCalcCol) {
+    return { model, nameChanged: false, collided: true };
+  }
+  // Check collision against original table columns.
+  const table = model.tables.find((t) => t.name === target.tableId);
+  const collisionOriginal = table
+    ? table.columns.some((col) => col.name === newColumnName)
+    : false;
+  if (collisionOriginal) {
+    return { model, nameChanged: false, collided: true };
+  }
+  const calculatedColumns = model.calculatedColumns.map((c) =>
+    c.id === id ? { ...c, name: newColumnName, columnName: newColumnName } : c,
+  );
+  return {
+    model: { ...model, calculatedColumns },
+    nameChanged: true,
+    collided: false,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Step 4: convenience bridge — storage model → evaluated runtime model
 // ---------------------------------------------------------------------------

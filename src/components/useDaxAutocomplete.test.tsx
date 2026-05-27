@@ -2,14 +2,14 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { useRef, useState } from "react";
-import DaxAutocomplete from "./DaxAutocomplete";
+import { useDaxAutocomplete } from "./useDaxAutocomplete";
 import { DAX_FUNCTION_REFERENCE } from "../store/daxEngine";
-import type { DaxTable } from "./DaxAutocomplete";
+import type { DaxTable } from "./useDaxAutocomplete";
 
 afterEach(() => cleanup());
 
 // ---------------------------------------------------------------------------
-// Test harness: a thin wrapper that wires DaxAutocomplete to a textarea.
+// Test harness: a thin wrapper that wires useDaxAutocomplete to a textarea.
 // ---------------------------------------------------------------------------
 
 const TEST_TABLES: DaxTable[] = [
@@ -33,7 +33,7 @@ function Harness({ initialValue = "", contextTableName, onInsertSpy }: HarnessPr
   const [value, setValue] = useState(initialValue);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const autocomplete = DaxAutocomplete({
+  const autocomplete = useDaxAutocomplete({
     textareaRef,
     value,
     onInsert: (newExpr, newCaret) => {
@@ -79,7 +79,7 @@ function typeIntoTextarea(textarea: HTMLTextAreaElement, value: string, caretPos
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("DaxAutocomplete — function suggestions", () => {
+describe("useDaxAutocomplete — function suggestions", () => {
   it("shows SUM and SUMX when 'SU' is typed", () => {
     render(<Harness />);
     const ta = screen.getByTestId("expr-input") as HTMLTextAreaElement;
@@ -115,7 +115,7 @@ describe("DaxAutocomplete — function suggestions", () => {
   });
 });
 
-describe("DaxAutocomplete — column suggestions", () => {
+describe("useDaxAutocomplete — column suggestions", () => {
   it("shows column names after '[' is typed", () => {
     render(<Harness contextTableName="Sales" />);
     const ta = screen.getByTestId("expr-input") as HTMLTextAreaElement;
@@ -142,7 +142,7 @@ describe("DaxAutocomplete — column suggestions", () => {
   });
 });
 
-describe("DaxAutocomplete — keyboard navigation", () => {
+describe("useDaxAutocomplete — keyboard navigation", () => {
   it("ArrowDown moves highlight to the next item", () => {
     render(<Harness />);
     const ta = screen.getByTestId("expr-input") as HTMLTextAreaElement;
@@ -186,7 +186,7 @@ describe("DaxAutocomplete — keyboard navigation", () => {
   });
 });
 
-describe("DaxAutocomplete — Enter confirms selection", () => {
+describe("useDaxAutocomplete — Enter confirms selection", () => {
   it("Enter inserts SUM(|) and places caret inside the parens", () => {
     const onInsertSpy = vi.fn();
     render(<Harness onInsertSpy={onInsertSpy} />);
@@ -221,7 +221,7 @@ describe("DaxAutocomplete — Enter confirms selection", () => {
   });
 });
 
-describe("DaxAutocomplete — table suggestions", () => {
+describe("useDaxAutocomplete — table suggestions", () => {
   it("shows table name when typing 'Sal'", () => {
     render(<Harness />);
     const ta = screen.getByTestId("expr-input") as HTMLTextAreaElement;

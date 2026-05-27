@@ -2953,6 +2953,9 @@ export default function EditorScreen() {
 
   const renameMeasureCascading = useCallback(
     (oldName: string, newName: string): { nameChanged: boolean; collided: boolean } => {
+      // `getSnapshotForTool` returns a fresh `JSON.parse(currentSnapshotJson)` —
+      // a deep clone disconnected from Univer's internal state — so it is safe
+      // for `renameMeasureReferences` to mutate `_pivots` in place below.
       const snap = getSnapshotForTool("メジャー名前変更");
       if (!snap) return { nameChanged: false, collided: false };
       const model = readDataModel(snap);

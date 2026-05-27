@@ -269,6 +269,11 @@ export function renameMeasure(
  * rewritten automatically (parser round-trip needed, out of scope for MVP).
  * The caller should warn users that expressions referencing
  * `TableName[OldName]` may break.
+ *
+ * Identifier convention: `StoredCalculatedColumn.tableId` is matched against
+ * `ModelTable.name` (not a separate id field — `ModelTable` does not currently
+ * have a stable id distinct from its name). If a future refactor introduces a
+ * `ModelTable.id`, update this lookup and the matching `tableId` writers.
  */
 export function renameCalculatedColumn(
   model: CocoDataModel,

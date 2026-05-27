@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CocoDataModel, StoredMeasure } from "../store/cocoDataModel";
 import { evaluateTransientMeasure } from "../store/cocoDataModel";
 import { DAX_FUNCTION_REFERENCE, MEASURE_ERROR } from "../store/daxEngine";
-import DaxAutocomplete from "./DaxAutocomplete";
+import { useDaxAutocomplete } from "./useDaxAutocomplete";
 import DaxColumnRefChips from "./DaxColumnRefChips";
 import DaxFunctionChips from "./DaxFunctionChips";
 import "./MeasureEditorDialog.css";
@@ -58,12 +58,12 @@ export default function MeasureEditorDialog({
     });
   };
 
-  const autocompleTables = (cocoModel?.tables ?? []).map((t) => ({
+  const autocompleteTables = (cocoModel?.tables ?? []).map((t) => ({
     name: t.name,
     columns: t.columns.map((c) => ({ name: c.name })),
   }));
 
-  const autocomplete = DaxAutocomplete({
+  const autocomplete = useDaxAutocomplete({
     textareaRef,
     value: expression,
     onInsert: (newExpression, newCaret) => {
@@ -76,7 +76,7 @@ export default function MeasureEditorDialog({
       });
     },
     functions: DAX_FUNCTION_REFERENCE,
-    tables: autocompleTables,
+    tables: autocompleteTables,
   });
 
   // Live preview — debounced 300 ms to avoid evaluating on every keystroke.

@@ -1,9 +1,9 @@
 /**
- * DaxAutocomplete — keyboard-driven autocomplete overlay for DAX formula textareas.
+ * useDaxAutocomplete — keyboard-driven autocomplete hook for DAX formula textareas.
  *
- * Usage: wrap the <textarea> with <DaxAutocomplete ...> and pass the textarea ref.
- * The component hooks into the textarea's onChange / onKeyDown events and renders
- * a dropdown positioned below the wrapped element.
+ * Returns `{ isOpen, handleChange, handleKeyDown, dropdown }`. Caller wires
+ * `handleChange` / `handleKeyDown` to the textarea events and renders `dropdown`
+ * (JSX `<ul>` or `null`) under the textarea.
  *
  * Trigger rules:
  *  - Identifier characters (A-Z, a-z, underscore) → match function names and table names by prefix.
@@ -11,6 +11,10 @@
  *  - ESC → close dropdown without inserting.
  *  - ↑ / ↓ → navigate candidates.
  *  - Enter / Tab → confirm selection; inserts text at caret (functions get trailing `(|)`).
+ *
+ * Defined as a custom hook (prefix `use*`) — not a component — because it owns
+ * React state via `useState` / `useEffect` / `useCallback`. This brings it under
+ * the Rules of Hooks linter so conditional usage is caught.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -234,7 +238,7 @@ const KIND_LABELS: Record<Candidate["kind"], string> = {
   column: "列",
 };
 
-export default function DaxAutocomplete({
+export function useDaxAutocomplete({
   textareaRef,
   value,
   onInsert,

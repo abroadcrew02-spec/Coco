@@ -176,6 +176,7 @@ export default function LinkedDataTypesPanel({
 
       setLookupLoading(true);
       setLookupSourceId(source.id);
+      setFormError("");
       try {
         // Read the full CSV via Tauri.
         const rows = await invoke<Array<Record<string, string>>>("read_csv_rows", {
@@ -183,8 +184,10 @@ export default function LinkedDataTypesPanel({
           maxRows: 1000,
         });
         setLookupData(rows);
-      } catch {
+      } catch (err) {
         setLookupData(null);
+        const msg = err instanceof Error ? err.message : String(err);
+        setFormError(`ソース "${source.name}" の読込に失敗しました: ${msg}`);
       } finally {
         setLookupLoading(false);
       }

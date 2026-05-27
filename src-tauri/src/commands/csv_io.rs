@@ -1465,12 +1465,19 @@ pub fn workbook_import_csv(
 pub fn read_csv_header(path: String) -> Result<Vec<String>, String> {
     use std::io::{BufRead, BufReader};
 
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("指定されたパスはファイルではありません".to_string());
+    }
     let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(file);
     let mut first_line = String::new();
     reader
         .read_line(&mut first_line)
         .map_err(|e| e.to_string())?;
+    if first_line.len() > 65_536 {
+        return Err("ヘッダー行が長すぎます (>64 KiB)".to_string());
+    }
 
     // Strip UTF-8 BOM if present.
     let stripped = first_line.trim_start_matches('\u{feff}');
@@ -1505,6 +1512,10 @@ pub fn read_csv_rows(
 ) -> Result<Vec<std::collections::HashMap<String, String>>, String> {
     use std::io::{BufRead, BufReader};
 
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("指定されたパスはファイルではありません".to_string());
+    }
     let cap = max_rows.unwrap_or(1000).min(1000);
     let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
     let reader = BufReader::new(file);

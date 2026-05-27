@@ -1149,3 +1149,113 @@ describe("DAX_FUNCTION_REFERENCE", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Step 7: Cross-measure references via [MeasureName] syntax (#311)
+// ---------------------------------------------------------------------------
+
+describe("parseDax — measureRef nodes", () => {
+  it("parses [MeasureName] as a measureRef AST node", () => {
+    const ast = parseDax("[TotalSales]");
+    expect(ast).toEqual({ kind: "measureRef", name: "TotalSales" });
+  });
+
+  it("parses measure names containing spaces", () => {
+    const ast = parseDax("[Total Sales]");
+    expect(ast).toEqual({ kind: "measureRef", name: "Total Sales" });
+  });
+
+  it("parses [MeasureName] in a binary expression", () => {
+    const ast = parseDax("[TotalSales] * 1.1");
+    expect(ast).toMatchObject({
+      kind: "binaryOp",
+      op: "*",
+      left: { kind: "measureRef", name: "TotalSales" },
+      right: { kind: "number", value: 1.1 },
+    });
+  });
+
+  it("does NOT confuse Sales[Amount] (columnRef) with [Amount] (measureRef)", () => {
+    const colAst = parseDax("Sales[Amount]");
+    expect(colAst).toEqual({ kind: "columnRef", table: "Sales", column: "Amount" });
+
+    const refAst = parseDax("[Amount]");
+    expect(refAst).toEqual({ kind: "measureRef", name: "Amount" });
+  });
+});
+
+describe("evaluateMeasure — cross-measure references", () => {
+  it("[MeasureName] evaluates the referenced measure", () => {
+    const m = measureModel();
+    const ms = defs([
+      { name: "TotalSales", expression: "SUM(Sales[Amount])" },
+      { name: "TaxedSales", expression: "[TotalSales] * 1.1" },
+    ]);
+    expect(evaluateMeasure(m, ms, "TotalSales")).toBe(700);
+    expect(evaluateMeasure(m, ms, "TaxedSales")).toBeCloseTo(770, 5);
+  });
+
+  it("three-level chain A → B → C evaluates correctly", () => {
+    const m = measureModel();
+    const ms = defs([
+      { name: "Base", expression: "SUM(Sales[Amount])" },
+      { name: "Double", expression: "[Base] * 2" },
+      { name: "Triple", expression: "[Double] + [Base]" },
+    ]);
+    // Base = 700, Double = 1400, Triple = 1400 + 700 = 2100
+    expect(evaluateMeasure(m, ms, "Triple")).toBe(2100);
+  });
+
+  it("returns MEASURE_ERROR for a reference to a non-existent measure", () => {
+    const m = measureModel();
+    const ms = defs([
+      { name: "Broken", expression: "[DoesNotExist] * 2" },
+    ]);
+    expect(evaluateMeasure(m, ms, "Broken")).toBe(MEASURE_ERROR);
+  });
+
+  it("returns MEASURE_ERROR for a direct circular reference (A = [A])", () => {
+    const m = measureModel();
+    const ms = defs([
+      { name: "SelfRef", expression: "[SelfRef] + 1" },
+    ]);
+    expect(evaluateMeasure(m, ms, "SelfRef")).toBe(MEASURE_ERROR);
+  });
+
+  it("returns MEASURE_ERROR for a mutual circular reference (A = [B], B = [A])", () => {
+    const m = measureModel();
+    const ms = defs([
+      { name: "A", expression: "[B]" },
+      { name: "B", expression: "[A]" },
+    ]);
+    expect(evaluateMeasure(m, ms, "A")).toBe(MEASURE_ERROR);
+    expect(evaluateMeasure(m, ms, "B")).toBe(MEASURE_ERROR);
+  });
+
+  it("[MeasureName] inherits the external filter context", () => {
+    const m = measureModel();
+    // East rows only: Amount = 100 + 150 = 250
+    const eastRows = m.tables[0].rows.filter((r) => r.Region === "East");
+    const filterCtx = new Map<string, Array<Record<string, unknown>>>([
+      ["Sales", eastRows],
+    ]);
+    const ms = defs([
+      { name: "TotalSales", expression: "SUM(Sales[Amount])" },
+      { name: "TaxedSales", expression: "[TotalSales] * 1.1" },
+    ]);
+    // TotalSales under East filter = 250; TaxedSales = 250 * 1.1 = 275
+    expect(evaluateMeasure(m, ms, "TotalSales", filterCtx)).toBe(250);
+    expect(evaluateMeasure(m, ms, "TaxedSales", filterCtx)).toBeCloseTo(275, 5);
+  });
+
+  it("evaluateAllMeasures resolves cross-measure refs for all measures", () => {
+    const m = measureModel();
+    const ms = defs([
+      { name: "Base", expression: "SUM(Sales[Amount])" },
+      { name: "Ratio", expression: "[Base] / COUNTROWS(Sales)" },
+    ]);
+    const results = evaluateAllMeasures(m, ms);
+    expect(results.get("Base")).toBe(700);
+    expect(results.get("Ratio")).toBe(175); // 700 / 4
+  });
+});

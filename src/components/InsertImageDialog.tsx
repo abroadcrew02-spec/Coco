@@ -13,10 +13,12 @@ export interface ImagePickResult {
 export interface ImageFormValue {
   /** Anchor cell in A1 notation (single cell, top-left). */
   cell: string;
-  /** Lowercased ext used to derive the new media part name. */
+  /** Lowercased ext. */
   ext: string;
-  /** Base64 of the file bytes — embedded straight into _preservedParts. */
+  /** Base64 of the file bytes. */
   base64: string;
+  /** Display name (basename) of the original file. Optional. */
+  name?: string;
 }
 
 interface Props {
@@ -103,6 +105,7 @@ export default function InsertImageDialog({
       cell: cell.trim(),
       ext: picked.ext,
       base64: picked.base64,
+      name: picked.name,
     });
     if (applyErr) {
       // #50: keep the dialog open so the user sees why the insert couldn't

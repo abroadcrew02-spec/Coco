@@ -53,9 +53,20 @@ interface PreservedParts {
   >;
 }
 
+interface InGridImageEntry {
+  base64: string;
+  ext: string;
+  anchorRow: number;
+  anchorCol: number;
+  widthPx: number;
+  heightPx: number;
+  name?: string;
+  mediaPath?: string;
+}
+
 interface ImageSnapshot {
   sheetOrder?: string[];
-  sheets?: Record<string, { name?: string } | undefined>;
+  sheets?: Record<string, { name?: string; _images?: InGridImageEntry[] } | undefined>;
   _preservedParts?: PreservedParts;
 }
 
@@ -216,6 +227,10 @@ export function extToMime(ext: string): string {
  * `<xdr:twoCellAnchor>` that has both a resolvable from-anchor and a
  * resolvable embedded media part.
  *
+ * Priority: reads from sheets[id]._images (new #312 path) first. Falls back
+ * to the legacy _preservedParts drawing XML path for images that came in via
+ * xlsx import before #312 was deployed.
+ *
  * Tolerates: missing _preservedParts, missing parts map, missing
  * sheetRefs, broken base64, malformed XML, dangling rIds, and absent
  * media files. In every failure case the offending anchor is silently
@@ -231,15 +246,43 @@ export function computeImagePreviews(
   } catch {
     return [];
   }
-  const pp = parsed._preservedParts;
-  if (!pp || typeof pp !== "object") return [];
-  const parts = pp.parts;
-  const sheetRefs = pp.sheetRefs;
-  if (!parts || !Array.isArray(sheetRefs)) return [];
 
   const sheetOrder = Array.isArray(parsed.sheetOrder) ? parsed.sheetOrder : [];
   const sheets = parsed.sheets ?? {};
   const out: ImagePreview[] = [];
+
+  // --- Path 1: _images entries (new #312 in-grid flow) ---
+  for (const sheetId of sheetOrder) {
+    const sheetEntry = sheets[sheetId];
+    if (!sheetEntry) continue;
+    const sheetName =
+      typeof sheetEntry.name === "string" && sheetEntry.name
+        ? sheetEntry.name
+        : sheetId;
+    const images = sheetEntry._images;
+    if (!Array.isArray(images) || images.length === 0) continue;
+    for (const img of images) {
+      if (!img || typeof img !== "object") continue;
+      if (typeof img.anchorRow !== "number" || typeof img.anchorCol !== "number") continue;
+      if (!img.base64 || !img.ext) continue;
+      const mime = extToMime(img.ext);
+      out.push({
+        sheetId,
+        sheetName,
+        fromCol: img.anchorCol,
+        fromRow: img.anchorRow,
+        src: `data:${mime};base64,${img.base64}`,
+        mediaPath: img.mediaPath ?? "",
+      });
+    }
+  }
+
+  // --- Path 2: _preservedParts fallback (legacy xlsx-imported images) ---
+  const pp = parsed._preservedParts;
+  if (!pp || typeof pp !== "object") return out;
+  const parts = pp.parts;
+  const sheetRefs = pp.sheetRefs;
+  if (!parts || !Array.isArray(sheetRefs)) return out;
 
   for (let i = 0; i < sheetRefs.length; i++) {
     const ref = sheetRefs[i];

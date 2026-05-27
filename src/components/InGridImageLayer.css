@@ -1,0 +1,79 @@
+/* #312 — In-grid image overlay: frame + drag/resize handles */
+
+/* ── Layer ─────────────────────────────────────────────────────────────── */
+.ingrid-image-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 14;
+  overflow: hidden;
+}
+
+/* ── Image frame ────────────────────────────────────────────────────────── */
+.ingrid-image-frame {
+  position: absolute;
+  left: var(--if-left);
+  top: var(--if-top);
+  width: var(--if-width);
+  height: var(--if-height);
+  pointer-events: auto;
+  border: 1px solid var(--coco-border);
+  box-shadow: 0 2px 6px var(--coco-shadow);
+  overflow: visible;
+}
+
+/* Focus outline: keyboard users see a blue ring when the frame is focused */
+.ingrid-image-frame:focus {
+  outline: 2px solid #1a73e8;
+  outline-offset: 1px;
+}
+
+/* ── Image body (drag to move) ──────────────────────────────────────────── */
+.ingrid-image-body {
+  width: 100%;
+  height: 100%;
+  cursor: move;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.ingrid-image-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* ── Resize handles ─────────────────────────────────────────────────────── */
+.ingrid-image-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  border: 1.5px solid #1a73e8;
+  border-radius: 2px;
+  transform: translate(-50%, -50%);
+  top: var(--h-top);
+  left: var(--h-left);
+  opacity: 0;
+  pointer-events: auto;
+  transition: opacity 0.1s;
+  z-index: 1;
+}
+
+.ingrid-image-frame:hover .ingrid-image-handle,
+.ingrid-image-frame:focus-within .ingrid-image-handle {
+  opacity: 1;
+}
+
+/* Cursor per direction */
+.ingrid-image-handle[data-dir="nw"] { cursor: nw-resize; }
+.ingrid-image-handle[data-dir="n"]  { cursor: n-resize;  }
+.ingrid-image-handle[data-dir="ne"] { cursor: ne-resize; }
+.ingrid-image-handle[data-dir="e"]  { cursor: e-resize;  }
+.ingrid-image-handle[data-dir="se"] { cursor: se-resize; }
+.ingrid-image-handle[data-dir="s"]  { cursor: s-resize;  }
+.ingrid-image-handle[data-dir="sw"] { cursor: sw-resize; }
+.ingrid-image-handle[data-dir="w"]  { cursor: w-resize;  }

@@ -67,6 +67,7 @@ describe("InsertImageDialog", () => {
       cell: "C4",
       ext: "png",
       base64: fakeBase64,
+      name: "pixel.png",
     });
     expect(onClose).toHaveBeenCalledTimes(1);
   });

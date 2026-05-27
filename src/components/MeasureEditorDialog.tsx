@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CocoDataModel, StoredMeasure } from "../store/cocoDataModel";
 import { evaluateTransientMeasure } from "../store/cocoDataModel";
 import { MEASURE_ERROR } from "../store/daxEngine";
+import DaxColumnRefChips from "./DaxColumnRefChips";
 import DaxFunctionChips from "./DaxFunctionChips";
 import "./MeasureEditorDialog.css";
 
@@ -190,6 +191,10 @@ export default function MeasureEditorDialog({
               aria-required="true"
             />
             <DaxFunctionChips onInsert={handleChipInsert} />
+            <DaxColumnRefChips
+              tables={cocoModel?.tables ?? []}
+              onInsert={handleChipInsert}
+            />
             {preview !== null && (
               preview.error !== null ? (
                 <div className="med-preview med-preview--error">{preview.error}</div>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CocoDataModel, StoredCalculatedColumn } from "../store/cocoDataModel";
 import { evaluateTransientCalculatedColumn } from "../store/cocoDataModel";
 import { CALC_COLUMN_ERROR } from "../store/daxEngine";
+import DaxColumnRefChips from "./DaxColumnRefChips";
 import DaxFunctionChips from "./DaxFunctionChips";
 import "./CalculatedColumnEditorDialog.css";
 
@@ -221,6 +222,10 @@ export default function CalculatedColumnEditorDialog({
               aria-required="true"
             />
             <DaxFunctionChips onInsert={handleChipInsert} />
+            <DaxColumnRefChips
+              tables={cocoModel?.tables ?? []}
+              onInsert={handleChipInsert}
+            />
             {preview !== null && (
               preview.hasError ? (
                 <div className="cced-preview cced-preview--error">{CALC_COLUMN_ERROR}</div>

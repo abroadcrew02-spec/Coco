@@ -2,14 +2,19 @@ import { describe, it, expect } from "vitest";
 import {
   aggregate,
   computePivot,
+  computeModelPivot,
   generatePivotName,
   inferFieldNames,
+  normalizePivotEntry,
+  refreshPivot,
   replacePivotInSheet,
   type PivotConfig,
   type PivotEntry,
   type PivotRange,
   type WorkbookPivotSnapshot,
 } from "./pivots";
+import type { CocoDataModel } from "./cocoDataModel";
+import { applyCalculatedColumns, toDataModel } from "./cocoDataModel";
 
 // #237 — Regression suite for the pre-existing pivot engine. The
 // `src/store/pivots.ts` module shipped without test coverage; this file locks
@@ -113,11 +118,11 @@ describe("computePivot", () => {
 
   function makeConfig(overrides: Partial<PivotConfig> = {}): PivotConfig {
     return {
-      source: { sheetId: "s1", range },
+      source: { kind: "sheet" as const, sheetId: "s1", range },
       destination: { row: 0, col: 5 },
       rows: ["Year"],
       cols: ["Region"],
-      values: [{ field: "Sales", agg: "SUM" }],
+      values: [{ kind: "column" as const, field: "Sales", agg: "SUM" as const }],
       filters: [],
       hasHeader: true,
       ...overrides,
@@ -153,8 +158,8 @@ describe("computePivot", () => {
   it("supports multiple value fields side-by-side", () => {
     const config = makeConfig({
       values: [
-        { field: "Sales", agg: "SUM" },
-        { field: "Sales", agg: "COUNT" },
+        { kind: "column" as const, field: "Sales", agg: "SUM" as const },
+        { kind: "column" as const, field: "Sales", agg: "COUNT" as const },
       ],
     });
     const result = computePivot(source, config);
@@ -207,7 +212,7 @@ describe("computePivot", () => {
     const config = makeConfig({
       rows: ["UnknownRowField"],
       cols: [],
-      values: [{ field: "Sales", agg: "SUM" }],
+      values: [{ kind: "column" as const, field: "Sales", agg: "SUM" as const }],
     });
     // Unknown row field is silently dropped; computePivot still produces a
     // matrix (collapsed because rows ended up empty after the filter).
@@ -224,7 +229,7 @@ describe("computePivot", () => {
       hasHeader: false,
       rows: ["Column1"],
       cols: ["Column2"],
-      values: [{ field: "Column3", agg: "SUM" }],
+      values: [{ kind: "column" as const, field: "Column3", agg: "SUM" as const }],
     });
     const result = computePivot(noHeader, config);
     // Just confirm it produces a non-empty matrix with the expected totals.
@@ -250,11 +255,11 @@ describe("replacePivotInSheet", () => {
           _pivots: [
             {
               name: "Pivot1",
-              source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
+              source: { kind: "sheet" as const, sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
               destination: { row: 10, col: 0 },
               rows: ["Year"],
               cols: [],
-              values: [{ field: "Sales", agg: "SUM" }],
+              values: [{ kind: "column" as const, field: "Sales", agg: "SUM" as const }],
               filters: [],
               hasHeader: true,
               lastOutputRows: 3,
@@ -270,11 +275,11 @@ describe("replacePivotInSheet", () => {
     const wb = makeWorkbook();
     const newEntry: PivotEntry = {
       name: "Pivot1",
-      source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
+      source: { kind: "sheet" as const, sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
       destination: { row: 10, col: 0 },
       rows: ["Region"],
       cols: [],
-      values: [{ field: "Sales", agg: "AVERAGE" }],
+      values: [{ kind: "column" as const, field: "Sales", agg: "AVERAGE" as const }],
       hasHeader: true,
       lastOutputRows: 2,
       lastOutputCols: 2,
@@ -284,18 +289,19 @@ describe("replacePivotInSheet", () => {
     const pivots = wb.sheets!["s1"]!._pivots!;
     expect(pivots).toHaveLength(1);
     expect(pivots[0].rows).toEqual(["Region"]);
-    expect(pivots[0].values[0].agg).toBe("AVERAGE");
+    const v0 = pivots[0].values[0];
+    expect(v0.kind === "column" && v0.agg).toBe("AVERAGE");
   });
 
   it("wipes the old output footprint from cellData", () => {
     const wb = makeWorkbook();
     const newEntry: PivotEntry = {
       name: "Pivot1",
-      source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
+      source: { kind: "sheet" as const, sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
       destination: { row: 10, col: 0 },
       rows: ["Region"],
       cols: [],
-      values: [{ field: "Sales", agg: "SUM" }],
+      values: [{ kind: "column" as const, field: "Sales", agg: "SUM" as const }],
       hasHeader: true,
       lastOutputRows: 2,
       lastOutputCols: 2,
@@ -313,11 +319,11 @@ describe("replacePivotInSheet", () => {
     const wb = makeWorkbook();
     const newEntry: PivotEntry = {
       name: "NonExistent",
-      source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
+      source: { kind: "sheet" as const, sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
       destination: { row: 0, col: 0 },
       rows: [],
       cols: [],
-      values: [{ field: "Sales", agg: "SUM" }],
+      values: [{ kind: "column" as const, field: "Sales", agg: "SUM" as const }],
       hasHeader: true,
     };
     const result = replacePivotInSheet(wb, newEntry);
@@ -327,13 +333,366 @@ describe("replacePivotInSheet", () => {
   it("returns { ok: false } for an empty workbook", () => {
     const result = replacePivotInSheet({}, {
       name: "Pivot1",
-      source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 1, c2: 1 } },
+      source: { kind: "sheet" as const, sheetId: "s1", range: { r1: 0, c1: 0, r2: 1, c2: 1 } },
       destination: { row: 0, col: 0 },
       rows: [],
       cols: [],
-      values: [{ field: "Sales", agg: "SUM" }],
+      values: [{ kind: "column" as const, field: "Sales", agg: "SUM" as const }],
       hasHeader: true,
     } satisfies PivotEntry);
     expect(result.ok).toBe(false);
+  });
+});
+
+// ---------- #239 Step 7: normalizePivotEntry ----------
+
+describe("normalizePivotEntry", () => {
+  it("passes through a fully-formed entry unchanged", () => {
+    const entry: PivotEntry = {
+      name: "P1",
+      source: { kind: "sheet", sheetId: "s1", range: { r1: 0, c1: 0, r2: 1, c2: 1 } },
+      destination: { row: 0, col: 0 },
+      rows: [], cols: [],
+      values: [{ kind: "column", field: "Sales", agg: "SUM" }],
+      hasHeader: true,
+    };
+    const result = normalizePivotEntry(entry);
+    expect(result.source.kind).toBe("sheet");
+    expect(result.values[0].kind).toBe("column");
+  });
+
+  it("upgrades a legacy source (no kind) to kind='sheet'", () => {
+    const raw = {
+      name: "P1",
+      source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 1, c2: 1 } },
+      destination: { row: 0, col: 0 },
+      rows: [], cols: [],
+      values: [{ field: "Sales", agg: "SUM" }],
+      hasHeader: true,
+    } as unknown as PivotEntry;
+    normalizePivotEntry(raw);
+    expect(raw.source.kind).toBe("sheet");
+  });
+
+  it("upgrades legacy values (no kind) to kind='column'", () => {
+    const raw = {
+      name: "P1",
+      source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 1, c2: 1 } },
+      destination: { row: 0, col: 0 },
+      rows: [], cols: [],
+      values: [{ field: "Amount", agg: "SUM" }, { field: "Qty", agg: "COUNT" }],
+      hasHeader: true,
+    } as unknown as PivotEntry;
+    normalizePivotEntry(raw);
+    expect(raw.values[0].kind).toBe("column");
+    expect(raw.values[1].kind).toBe("column");
+  });
+
+  it("preserves measure-kind values unchanged", () => {
+    const entry: PivotEntry = {
+      name: "P1",
+      source: { kind: "model", tableName: "Sales" },
+      destination: { row: 0, col: 0 },
+      rows: ["Region"], cols: [],
+      values: [{ kind: "measure", measureName: "TotalSales" }],
+      hasHeader: false,
+    };
+    normalizePivotEntry(entry);
+    expect(entry.values[0].kind).toBe("measure");
+  });
+});
+
+// ---------- #239 Step 7: computeModelPivot ----------
+
+describe("computeModelPivot", () => {
+  // CocoDataModel with a single table "Sales" containing Region, Year, Amount.
+  // One measure TotalSales = SUM(Sales[Amount]).
+  function makeCocoModel(): CocoDataModel {
+    return {
+      tables: [
+        {
+          name: "Sales",
+          columns: [
+            { name: "Region", type: "string" },
+            { name: "Year", type: "number" },
+            { name: "Amount", type: "number" },
+          ],
+          rows: [
+            { Region: "East", Year: 2024, Amount: 100 },
+            { Region: "West", Year: 2024, Amount: 200 },
+            { Region: "East", Year: 2025, Amount: 150 },
+            { Region: "West", Year: 2025, Amount: 250 },
+          ],
+        },
+      ],
+      relationships: [],
+      measures: [
+        { id: "m1", name: "TotalSales", tableId: "Sales", expression: "SUM(Sales[Amount])" },
+      ],
+      calculatedColumns: [],
+    };
+  }
+
+  function makeConfig(overrides: Partial<PivotConfig> = {}): PivotConfig {
+    return {
+      source: { kind: "model", tableName: "Sales" },
+      destination: { row: 0, col: 0 },
+      rows: ["Region"],
+      cols: ["Year"],
+      values: [{ kind: "measure", measureName: "TotalSales" }],
+      filters: [],
+      hasHeader: false,
+      ...overrides,
+    };
+  }
+
+  it("builds a Region × Year matrix with measure values + totals", () => {
+    const cocoModel = makeCocoModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+
+    const result = computeModelPivot(runtimeModel, cocoModel, makeConfig());
+
+    const flat = result.output.flat().map(String);
+    // Row headers present.
+    expect(flat).toContain("East");
+    expect(flat).toContain("West");
+    // Col headers present.
+    expect(flat).toContain("2024");
+    expect(flat).toContain("2025");
+    // Data values: East/2024=100, East/2025=150, West/2024=200, West/2025=250.
+    const nums = result.output.flat().filter((v) => typeof v === "number");
+    expect(nums).toContain(100);
+    expect(nums).toContain(150);
+    expect(nums).toContain(200);
+    expect(nums).toContain(250);
+  });
+
+  it("computes correct Total row (row ALL per column)", () => {
+    const cocoModel = makeCocoModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+
+    const result = computeModelPivot(runtimeModel, cocoModel, makeConfig());
+
+    // Last row is Total row.
+    const totalRow = result.output[result.output.length - 1];
+    expect(totalRow[0]).toBe("Total");
+    // Total for 2024 column: East(100) + West(200) = 300.
+    // Total for 2025 column: East(150) + West(250) = 400.
+    // Bottom-right grand total: 100+200+150+250 = 700.
+    const nums = totalRow.filter((v): v is number => typeof v === "number");
+    expect(nums).toContain(300);
+    expect(nums).toContain(400);
+    expect(nums).toContain(700);
+  });
+
+  it("computes correct Total column (col ALL per row)", () => {
+    const cocoModel = makeCocoModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+
+    const result = computeModelPivot(runtimeModel, cocoModel, makeConfig());
+
+    // Find East row and West row; last column is Total column.
+    const lastCol = result.colCount - 1;
+    const eastRow = result.output.find((row) => row[0] === "East");
+    const westRow = result.output.find((row) => row[0] === "West");
+    expect(eastRow).toBeDefined();
+    expect(westRow).toBeDefined();
+    // East total = 100 + 150 = 250, West total = 200 + 250 = 450.
+    expect(eastRow![lastCol]).toBe(250);
+    expect(westRow![lastCol]).toBe(450);
+  });
+
+  it("applies filter fields before bucketing", () => {
+    const cocoModel = makeCocoModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+
+    const result = computeModelPivot(runtimeModel, cocoModel, makeConfig({
+      filters: [{ field: "Region", values: ["East"] }],
+    }));
+
+    const flat = result.output.flat().map(String);
+    // West should not appear anywhere — filtered out.
+    expect(flat).not.toContain("West");
+    expect(flat).toContain("East");
+    // East/2024=100, East/2025=150, total=250.
+    const nums = result.output.flat().filter((v): v is number => typeof v === "number");
+    expect(nums).toContain(100);
+    expect(nums).toContain(150);
+  });
+
+  it("handles a mixed column+measure values config", () => {
+    const cocoModel = makeCocoModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+
+    const result = computeModelPivot(runtimeModel, cocoModel, {
+      source: { kind: "model", tableName: "Sales" },
+      destination: { row: 0, col: 0 },
+      rows: ["Region"],
+      cols: [],
+      values: [
+        { kind: "column", field: "Amount", agg: "SUM" },
+        { kind: "measure", measureName: "TotalSales" },
+      ],
+      filters: [],
+      hasHeader: false,
+    });
+
+    const flatStr = result.output.flat().map(String);
+    // Both "SUM of Amount" label and "TotalSales" label should appear.
+    expect(flatStr).toContain("SUM of Amount");
+    expect(flatStr).toContain("TotalSales");
+    // For East: SUM(Amount)=250, TotalSales=250 both present.
+    const nums = result.output.flat().filter((v): v is number => typeof v === "number");
+    expect(nums).toContain(250);
+  });
+
+  it("returns rowCount/colCount matching matrix dimensions", () => {
+    const cocoModel = makeCocoModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+
+    const result = computeModelPivot(runtimeModel, cocoModel, makeConfig());
+    expect(result.rowCount).toBe(result.output.length);
+    expect(result.colCount).toBe(result.output[0]?.length ?? 0);
+  });
+
+  it("throws when source.kind is not 'model'", () => {
+    const cocoModel = makeCocoModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+
+    const badConfig: PivotConfig = {
+      source: { kind: "sheet", sheetId: "s1", range: { r1: 0, c1: 0, r2: 1, c2: 1 } },
+      destination: { row: 0, col: 0 },
+      rows: [], cols: [],
+      values: [],
+      hasHeader: true,
+    };
+    expect(() => computeModelPivot(runtimeModel, cocoModel, badConfig)).toThrow();
+  });
+});
+
+// ---------- #239 Step 7: refreshPivot model mode ----------
+
+describe("refreshPivot (model source)", () => {
+  function makeCocoModel(): CocoDataModel {
+    return {
+      tables: [
+        {
+          name: "Sales",
+          columns: [
+            { name: "Region", type: "string" },
+            { name: "Amount", type: "number" },
+          ],
+          rows: [
+            { Region: "East", Amount: 100 },
+            { Region: "West", Amount: 200 },
+          ],
+        },
+      ],
+      relationships: [],
+      measures: [
+        { id: "m1", name: "Total", tableId: "Sales", expression: "SUM(Sales[Amount])" },
+      ],
+      calculatedColumns: [],
+    };
+  }
+
+  it("writes computeModelPivot output into the destination sheet", () => {
+    const cocoModel = makeCocoModel();
+    const wb: WorkbookPivotSnapshot = {
+      sheetOrder: ["dest"],
+      sheets: {
+        dest: {
+          name: "Output",
+          cellData: {},
+          _pivots: [
+            {
+              name: "ModelPivot1",
+              source: { kind: "model", tableName: "Sales" },
+              destination: { row: 0, col: 0 },
+              rows: ["Region"],
+              cols: [],
+              values: [{ kind: "measure", measureName: "Total" }],
+              filters: [],
+              hasHeader: false,
+            },
+          ],
+        },
+      },
+    };
+
+    const res = refreshPivot(wb, "ModelPivot1", cocoModel, "dest");
+    expect(res.ok).toBe(true);
+
+    const cellData = wb.sheets!["dest"]!.cellData!;
+    const allValues = Object.values(cellData).flatMap((row) =>
+      Object.values(row ?? {}).map((cell) => (cell as { v?: unknown })?.v),
+    );
+    // East=100, West=200, Total=300 should all appear in the written output.
+    expect(allValues).toContain(100);
+    expect(allValues).toContain(200);
+    expect(allValues).toContain(300);
+  });
+
+  it("returns { ok: false } when cocoModel is not supplied for a model pivot", () => {
+    const wb: WorkbookPivotSnapshot = {
+      sheetOrder: ["dest"],
+      sheets: {
+        dest: {
+          name: "Output",
+          cellData: {},
+          _pivots: [
+            {
+              name: "ModelPivot1",
+              source: { kind: "model", tableName: "Sales" },
+              destination: { row: 0, col: 0 },
+              rows: [],
+              cols: [],
+              values: [{ kind: "measure", measureName: "Total" }],
+              filters: [],
+              hasHeader: false,
+            },
+          ],
+        },
+      },
+    };
+    const res = refreshPivot(wb, "ModelPivot1");
+    expect(res.ok).toBe(false);
+  });
+
+  it("wipes old footprint before writing new output", () => {
+    const cocoModel = makeCocoModel();
+    const wb: WorkbookPivotSnapshot = {
+      sheetOrder: ["dest"],
+      sheets: {
+        dest: {
+          name: "Output",
+          cellData: {
+            // Old stale cells at row 0-4
+            "0": { "0": { v: "Stale" }, "1": { v: "Header" } },
+            "1": { "0": { v: "OldRow1" }, "1": { v: 999 } },
+            "4": { "0": { v: "OldRow5" }, "1": { v: 999 } },
+          },
+          _pivots: [
+            {
+              name: "ModelPivot1",
+              source: { kind: "model", tableName: "Sales" },
+              destination: { row: 0, col: 0 },
+              rows: ["Region"],
+              cols: [],
+              values: [{ kind: "measure", measureName: "Total" }],
+              filters: [],
+              hasHeader: false,
+              lastOutputRows: 5,
+              lastOutputCols: 2,
+            },
+          ],
+        },
+      },
+    };
+
+    refreshPivot(wb, "ModelPivot1", cocoModel, "dest");
+
+    // The old cell at row 4 col 0 (outside new footprint) should be wiped.
+    expect(wb.sheets!["dest"]!.cellData!["4"]?.["0"]).toBeUndefined();
   });
 });

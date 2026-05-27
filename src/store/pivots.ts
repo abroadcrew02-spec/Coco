@@ -28,14 +28,23 @@
 //     }
 //   }
 //
-// We persist PivotEntry records on the *source* sheet (not the destination
-// sheet) so a pivot is unique by (sourceSheetId, name). `addPivot` and
-// `refreshPivot` only touch _pivots and the destination cellData; everything
-// else is the caller's responsibility (writing output cells, calling
-// applyMutatedSnapshot for undo, etc.).
+// Source kinds:
+//   - "sheet": reads rows from a rectangular cellData range (legacy / default).
+//   - "model": reads rows from a CocoDataModel table; measure values are
+//     evaluated via the DAX engine with per-cell filter contexts.
+//
+// We persist PivotEntry records on the *destination* sheet (for model pivots)
+// or the *source* sheet (for sheet pivots) so `addPivot` and `refreshPivot`
+// only touch _pivots and the destination cellData; everything else is the
+// caller's responsibility (writing output cells, calling applyMutatedSnapshot
+// for undo, etc.).
 //
 // Kept side-effect free so the dialog can preview and so it can be unit-
 // tested without Univer.
+
+import type { DataModel } from "./daxEngine";
+import type { CocoDataModel } from "./cocoDataModel";
+import { evaluateStoredMeasure, applyCalculatedColumns, toDataModel } from "./cocoDataModel";
 
 export type PivotAggregator = "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN";
 
@@ -50,11 +59,23 @@ export interface PivotRange {
   c2: number;
 }
 
-export interface PivotValueField {
-  /** Header name from source. */
-  field: string;
-  agg: PivotAggregator;
-}
+/**
+ * Discriminated union for pivot data sources.
+ *   - "sheet": the classic mode — rows come from a rectangular cellData range.
+ *   - "model": rows come from a named table in the Coco Data Model.
+ */
+export type PivotSource =
+  | { kind: "sheet"; sheetId: string; range: PivotRange }
+  | { kind: "model"; tableName: string };
+
+/**
+ * Discriminated union for pivot value fields.
+ *   - "column": aggregate a raw column from the source data.
+ *   - "measure": evaluate a DAX measure from the Coco Data Model.
+ */
+export type PivotValueField =
+  | { kind: "column"; field: string; agg: PivotAggregator }
+  | { kind: "measure"; measureName: string };
 
 export interface PivotFilter {
   /** Header name from source. */
@@ -64,13 +85,17 @@ export interface PivotFilter {
 }
 
 export interface PivotConfig {
-  source: { sheetId: string; range: PivotRange };
+  source: PivotSource;
   /** 0-based destination top-left in absolute sheet coords. */
   destination: { row: number; col: number };
   rows: string[];
   cols: string[];
   values: PivotValueField[];
   filters?: PivotFilter[];
+  /**
+   * Only meaningful for sheet-source pivots. Model pivots read all rows from
+   * the table directly and do not have a header row concept.
+   */
   hasHeader: boolean;
 }
 
@@ -86,6 +111,43 @@ export interface PivotEntry extends PivotConfig {
   lastOutputRows?: number;
   /** Companion to `lastOutputRows` — number of cols in the last refresh. */
   lastOutputCols?: number;
+}
+
+/**
+ * Normalize a PivotEntry that may have been authored before the discriminated
+ * union was introduced (i.e. a "legacy" snapshot entry). Mutates the entry
+ * in-place for efficiency — callers hold the only reference at the normalise
+ * call site.
+ *
+ * Legacy shapes handled:
+ *   - `source` with no `kind` field (has `sheetId` + `range`) → `{ kind: 'sheet', ... }`
+ *   - `values[]` items with no `kind` field (have `field` + `agg`) → `{ kind: 'column', ... }`
+ */
+export function normalizePivotEntry(entry: PivotEntry): PivotEntry {
+  // Normalize source.
+  const src = entry.source as unknown as Record<string, unknown>;
+  if (typeof src.kind !== "string") {
+    // Legacy sheet-source entry: { sheetId, range } with no kind.
+    (entry as unknown as Record<string, unknown>).source = {
+      kind: "sheet",
+      sheetId: src.sheetId,
+      range: src.range,
+    };
+  }
+
+  // Normalize values array.
+  if (Array.isArray(entry.values)) {
+    entry.values = entry.values.map((v) => {
+      const vr = v as unknown as Record<string, unknown>;
+      if (typeof vr.kind !== "string") {
+        // Legacy column value: { field, agg } with no kind.
+        return { kind: "column", field: vr.field, agg: vr.agg } as PivotValueField;
+      }
+      return v;
+    });
+  }
+
+  return entry;
 }
 
 export interface PivotResult {
@@ -258,12 +320,13 @@ export function aggregate(values: number[], op: PivotAggregator): number {
 
 /** Display label for a value field, matching Excel ("SUM of Amount"). */
 function valueLabel(v: PivotValueField): string {
+  if (v.kind === "measure") return v.measureName;
   return `${v.agg} of ${v.field}`;
 }
 
 // Stable group key from a list of raw cell values. Stringified + joined with a
 // delimiter that won't collide with normal data. Empty values become "".
-const KEY_DELIM = " ";
+const KEY_DELIM = " ";
 function tupleKey(values: unknown[]): string {
   const parts: string[] = [];
   for (const v of values) {
@@ -318,18 +381,24 @@ export function computePivot(
   const colsIdx = config.cols
     .map((f) => fieldIndex.get(f))
     .filter((n): n is number => typeof n === "number");
-  const valueFields: PivotValueField[] =
+  // computePivot only handles column-kind value fields (sheet-source pivots).
+  // Measure-kind fields require a DataModel and are handled by computeModelPivot.
+  const columnValueFields: Array<{ kind: "column"; field: string; agg: PivotAggregator }> =
     config.values.length > 0
-      ? config.values.filter((v) => fieldIndex.has(v.field))
+      ? (config.values.filter(
+          (v) => v.kind === "column" && fieldIndex.has(v.field),
+        ) as Array<{ kind: "column"; field: string; agg: PivotAggregator }>)
       : // No values configured -> fall back to COUNT of the first source field.
         // We invent a placeholder so the matrix still has data cells.
         [
           {
+            kind: "column",
             field: headerRow ? String(headerRow[0] ?? "Row") : "Row",
             agg: "COUNT",
           },
         ];
-  const valueIdx = valueFields.map((v) => fieldIndex.get(v.field) ?? 0);
+  const valueFields: PivotValueField[] = columnValueFields;
+  const valueIdx = columnValueFields.map((v) => fieldIndex.get(v.field) ?? 0);
 
   // Filter index lookup: field -> Set of allowed stringified values.
   const filterSets = new Map<number, Set<string>>();
@@ -467,10 +536,10 @@ export function computePivot(
     for (let ci = 0; ci < sortedColKeys.length; ci++) {
       const ck = sortedColKeys[ci].key;
       const perValue = byCol.get(ck);
-      for (let vi = 0; vi < valueFields.length; vi++) {
-        const col = rowHeaderColCount + ci * valueFields.length + vi;
+      for (let vi = 0; vi < columnValueFields.length; vi++) {
+        const col = rowHeaderColCount + ci * columnValueFields.length + vi;
         const nums = perValue ? perValue[vi] : [];
-        const v = aggregate(nums, valueFields[vi].agg);
+        const v = aggregate(nums, columnValueFields[vi].agg);
         matrix[matrixRow][col] = Number.isFinite(v) ? v : "";
         if (nums && nums.length) rowGrandPerValue[vi].push(...nums);
       }
@@ -483,7 +552,7 @@ export function computePivot(
     const totalCol = totalCols - 1;
     const flat: number[] = [];
     for (const arr of rowGrandPerValue) flat.push(...arr);
-    const rowTotal = aggregate(flat, valueFields[0].agg);
+    const rowTotal = aggregate(flat, columnValueFields[0].agg);
     matrix[matrixRow][totalCol] = Number.isFinite(rowTotal) ? rowTotal : "";
   }
 
@@ -493,15 +562,15 @@ export function computePivot(
   // Per-column grand totals (per value field).
   for (let ci = 0; ci < sortedColKeys.length; ci++) {
     const ck = sortedColKeys[ci].key;
-    for (let vi = 0; vi < valueFields.length; vi++) {
-      const col = rowHeaderColCount + ci * valueFields.length + vi;
+    for (let vi = 0; vi < columnValueFields.length; vi++) {
+      const col = rowHeaderColCount + ci * columnValueFields.length + vi;
       const allNums: number[] = [];
       for (const meta of sortedRowKeys) {
         const byCol = buckets.get(meta.key);
         const perValue = byCol?.get(ck);
         if (perValue && perValue[vi]) allNums.push(...perValue[vi]);
       }
-      const v = aggregate(allNums, valueFields[vi].agg);
+      const v = aggregate(allNums, columnValueFields[vi].agg);
       matrix[totalRow][col] = Number.isFinite(v) ? v : "";
     }
   }
@@ -516,7 +585,7 @@ export function computePivot(
       for (const arr of perValue) grandFlat.push(...arr);
     }
   }
-  const grand = aggregate(grandFlat, valueFields[0].agg);
+  const grand = aggregate(grandFlat, columnValueFields[0].agg);
   matrix[totalRow][totalCols - 1] = Number.isFinite(grand) ? grand : "";
 
   return { output: matrix, rowCount: totalRows, colCount: totalCols };
@@ -525,34 +594,63 @@ export function computePivot(
 // ---------- workbook helpers ----------
 
 /**
- * Append a PivotEntry to the source sheet's `_pivots`. Returns the workbook
- * snapshot (mutated in place — pass a fresh clone if you need immutability).
- * No-op when the source sheet isn't present.
+ * Append a PivotEntry to the appropriate sheet's `_pivots`. Returns the
+ * workbook snapshot (mutated in place — pass a fresh clone if you need
+ * immutability).
+ *
+ * Sheet-source pivots: stored on the source sheet (legacy behaviour).
+ * Model-source pivots: stored on the destination sheet (the sheet at
+ *   `destination.row/col`). The caller must supply `destSheetId` for model
+ *   pivots; without it the entry cannot be persisted and the function is a
+ *   no-op.
  *
  * Side-effect: when the caller did not pre-populate `lastOutputRows` /
  * `lastOutputCols`, we compute them from the current config so that the next
  * `refreshPivot` call has the data it needs to wipe the prior footprint.
  * (`addPivot` doesn't itself write cells — the caller does that — but we
  * record the dimensions of the matrix the caller will write.)
+ *
+ * @param cocoModel  Required when `entry.source.kind === 'model'` so that the
+ *   footprint seed can call `computeModelPivot`.
+ * @param destSheetId  The sheet id where the output will be written (required
+ *   for model pivots; ignored for sheet pivots which derive it from the source).
  */
 export function addPivot(
   workbook: WorkbookPivotSnapshot,
   entry: PivotEntry,
+  cocoModel?: CocoDataModel,
+  destSheetId?: string,
 ): WorkbookPivotSnapshot {
+  normalizePivotEntry(entry);
+
   const sheets = workbook?.sheets;
   if (!sheets || typeof sheets !== "object") return workbook;
-  const sheet = sheets[entry.source.sheetId];
+
+  let sheet: SheetWithPivots | undefined;
+  if (entry.source.kind === "model") {
+    if (!destSheetId) return workbook;
+    sheet = sheets[destSheetId];
+  } else {
+    sheet = sheets[entry.source.sheetId];
+  }
   if (!sheet || typeof sheet !== "object") return workbook;
+
   const list = Array.isArray(sheet._pivots) ? sheet._pivots.slice() : [];
   // Seed footprint dimensions so subsequent refresh can wipe stale cells if
-  // the data later shrinks. We re-derive from the source sheet's cellData to
-  // keep this self-contained.
+  // the data later shrinks.
   if (entry.lastOutputRows === undefined || entry.lastOutputCols === undefined) {
     try {
-      const matrix = readSourceMatrix(sheet.cellData, entry.source.range);
-      const result = computePivot(matrix, entry);
-      entry.lastOutputRows = result.rowCount;
-      entry.lastOutputCols = result.colCount;
+      if (entry.source.kind === "model" && cocoModel) {
+        const runtimeModel = applyCalculatedColumnsForPivot(cocoModel);
+        const result = computeModelPivot(runtimeModel, cocoModel, entry);
+        entry.lastOutputRows = result.rowCount;
+        entry.lastOutputCols = result.colCount;
+      } else if (entry.source.kind === "sheet") {
+        const matrix = readSourceMatrix(sheet.cellData, entry.source.range);
+        const result = computePivot(matrix, entry);
+        entry.lastOutputRows = result.rowCount;
+        entry.lastOutputCols = result.colCount;
+      }
     } catch {
       // Best-effort: leave fields undefined if compute fails; refresh will
       // simply skip the wipe step.
@@ -619,6 +717,227 @@ function readSourceMatrix(
   return rows;
 }
 
+// ---------- model pivot engine ----------
+
+function applyCalculatedColumnsForPivot(cocoModel: CocoDataModel): DataModel {
+  return applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+}
+
+/**
+ * Compute the pivot 2-D matrix from a Coco Data Model table.
+ *
+ * Unlike `computePivot` (which reads from a flat cellData rectangle), this
+ * function operates directly on the in-memory model rows. Value fields may be
+ * either column aggregates OR DAX measure evaluations.
+ *
+ * The output matrix shape is identical to `computePivot` so the same write
+ * path can be reused.
+ *
+ * @param runtimeModel  DataModel produced by `applyCalculatedColumns` — has
+ *   calculated columns already injected into table rows.
+ * @param cocoModel  CocoDataModel used to look up measure definitions.
+ * @param config  PivotConfig with `source.kind === 'model'`.
+ */
+export function computeModelPivot(
+  runtimeModel: DataModel,
+  cocoModel: CocoDataModel,
+  config: PivotConfig,
+): PivotResult {
+  if (config.source.kind !== "model") {
+    throw new Error("computeModelPivot requires source.kind === 'model'");
+  }
+  const { tableName } = config.source;
+
+  const table = runtimeModel.tables.find((t) => t.name === tableName);
+  const baseRows: Array<Record<string, unknown>> = table ? table.rows.slice() : [];
+
+  // Apply filter fields (PivotFilter.field matches column values in the table).
+  const filterSets = new Map<string, Set<string>>();
+  for (const f of config.filters ?? []) {
+    filterSets.set(f.field, new Set(f.values));
+  }
+  const baseFiltered =
+    filterSets.size === 0
+      ? baseRows
+      : baseRows.filter((row) => {
+          for (const [field, allowed] of filterSets) {
+            const v = row[field];
+            const s = v === undefined || v === null ? "" : String(v);
+            if (!allowed.has(s)) return false;
+          }
+          return true;
+        });
+
+  // Extract unique row/col tuples (first-seen order, same as computePivot).
+  type RowKeyMeta = { key: string; parts: unknown[]; order: number };
+  const rowKeys = new Map<string, RowKeyMeta>();
+  const colKeys = new Map<string, RowKeyMeta>();
+  let rowOrder = 0;
+  let colOrder = 0;
+
+  for (const row of baseFiltered) {
+    const rowParts = config.rows.map((f) => row[f]);
+    const colParts = config.cols.map((f) => row[f]);
+    const rk = tupleKey(rowParts);
+    const ck = tupleKey(colParts);
+    if (!rowKeys.has(rk)) rowKeys.set(rk, { key: rk, parts: rowParts, order: rowOrder++ });
+    if (!colKeys.has(ck)) colKeys.set(ck, { key: ck, parts: colParts, order: colOrder++ });
+  }
+
+  const sortedRowKeys = [...rowKeys.values()].sort((a, b) => a.order - b.order);
+  const sortedColKeys = [...colKeys.values()].sort((a, b) => a.order - b.order);
+
+  const valueFields = config.values.length > 0 ? config.values : [];
+
+  // Matrix dimensions (same formula as computePivot).
+  const colLevels = Math.max(config.cols.length, 0);
+  const showValueLabelRow = valueFields.length > 1 || config.cols.length === 0;
+  const headerRowCount = Math.max(colLevels + (showValueLabelRow ? 1 : 0), 1);
+  const rowHeaderColCount = Math.max(config.rows.length, 1);
+  const colKeyCount = Math.max(sortedColKeys.length, 1);
+  const dataColCount = colKeyCount * Math.max(valueFields.length, 1);
+  const totalCols = rowHeaderColCount + dataColCount + 1;
+  const totalRows = headerRowCount + sortedRowKeys.length + 1;
+
+  const matrix: Array<Array<unknown>> = [];
+  for (let r = 0; r < totalRows; r++) {
+    matrix.push(new Array(totalCols).fill(""));
+  }
+
+  // Top-left: row-field labels in last header row.
+  const lastHeaderRow = headerRowCount - 1;
+  for (let i = 0; i < config.rows.length; i++) {
+    matrix[lastHeaderRow][i] = config.rows[i];
+  }
+  if (config.rows.length === 0) {
+    matrix[lastHeaderRow][0] = TOTAL_LABEL;
+  }
+
+  // Column headers.
+  for (let lvl = 0; lvl < colLevels; lvl++) {
+    let prev: unknown = undefined;
+    for (let ci = 0; ci < sortedColKeys.length; ci++) {
+      const v = sortedColKeys[ci].parts[lvl];
+      const start = rowHeaderColCount + ci * Math.max(valueFields.length, 1);
+      if (lvl > 0 || ci === 0 || String(v) !== String(prev)) {
+        matrix[lvl][start] = v;
+      }
+      prev = v;
+    }
+  }
+
+  if (showValueLabelRow) {
+    for (let ci = 0; ci < colKeyCount; ci++) {
+      for (let vi = 0; vi < Math.max(valueFields.length, 1); vi++) {
+        const col = rowHeaderColCount + ci * Math.max(valueFields.length, 1) + vi;
+        matrix[lastHeaderRow][col] = valueFields[vi] ? valueLabel(valueFields[vi]) : "";
+      }
+    }
+  }
+  matrix[lastHeaderRow][totalCols - 1] = TOTAL_LABEL;
+
+  /**
+   * Evaluate a single value field for a given set of rows. For column-kind
+   * fields we aggregate numerically; for measure-kind fields we call the DAX
+   * engine with a per-cell filter context.
+   */
+  function evalValueForRows(
+    vf: PivotValueField,
+    cellRows: Array<Record<string, unknown>>,
+  ): unknown {
+    if (vf.kind === "measure") {
+      const filterContext = new Map([[tableName, cellRows]]);
+      return evaluateStoredMeasure(runtimeModel, cocoModel, vf.measureName, filterContext);
+    }
+    // column aggregation
+    const nums = cellRows.map((r) => toNumber(r[vf.field]));
+    const v = aggregate(nums, vf.agg);
+    return Number.isFinite(v) ? v : "";
+  }
+
+  // Body rows — per (rowTuple × colTuple × valueField).
+  for (let ri = 0; ri < sortedRowKeys.length; ri++) {
+    const rowMeta = sortedRowKeys[ri];
+    const matrixRow = headerRowCount + ri;
+
+    if (config.rows.length === 0) {
+      matrix[matrixRow][0] = "";
+    } else {
+      for (let i = 0; i < rowMeta.parts.length; i++) {
+        matrix[matrixRow][i] = rowMeta.parts[i];
+      }
+    }
+
+    // Filter base rows to those matching this row tuple.
+    const rowMatchedRows = baseFiltered.filter((row) => {
+      for (let i = 0; i < config.rows.length; i++) {
+        if (String(row[config.rows[i]] ?? "") !== String(rowMeta.parts[i] ?? "")) return false;
+      }
+      return true;
+    });
+
+    for (let ci = 0; ci < sortedColKeys.length; ci++) {
+      const colMeta = sortedColKeys[ci];
+      const vfCount = Math.max(valueFields.length, 1);
+
+      // Filter to rows matching both row and col tuples.
+      const cellRows = rowMatchedRows.filter((row) => {
+        for (let i = 0; i < config.cols.length; i++) {
+          if (String(row[config.cols[i]] ?? "") !== String(colMeta.parts[i] ?? "")) return false;
+        }
+        return true;
+      });
+
+      for (let vi = 0; vi < vfCount; vi++) {
+        const col = rowHeaderColCount + ci * vfCount + vi;
+        if (!valueFields[vi]) {
+          matrix[matrixRow][col] = "";
+          continue;
+        }
+        matrix[matrixRow][col] = evalValueForRows(valueFields[vi], cellRows);
+      }
+    }
+
+    // Total column: row ALL (all col groups combined), per first value field.
+    const totalCol = totalCols - 1;
+    if (valueFields.length > 0) {
+      matrix[matrixRow][totalCol] = evalValueForRows(valueFields[0], rowMatchedRows);
+    }
+  }
+
+  // Grand-total row.
+  const totalRow = totalRows - 1;
+  matrix[totalRow][0] = TOTAL_LABEL;
+
+  for (let ci = 0; ci < sortedColKeys.length; ci++) {
+    const colMeta = sortedColKeys[ci];
+    const vfCount = Math.max(valueFields.length, 1);
+
+    const colMatchedRows = baseFiltered.filter((row) => {
+      for (let i = 0; i < config.cols.length; i++) {
+        if (String(row[config.cols[i]] ?? "") !== String(colMeta.parts[i] ?? "")) return false;
+      }
+      return true;
+    });
+
+    for (let vi = 0; vi < vfCount; vi++) {
+      const col = rowHeaderColCount + ci * vfCount + vi;
+      if (!valueFields[vi]) {
+        matrix[totalRow][col] = "";
+        continue;
+      }
+      matrix[totalRow][col] = evalValueForRows(valueFields[vi], colMatchedRows);
+    }
+  }
+
+  // Bottom-right corner: grand total over all filtered rows.
+  if (valueFields.length > 0) {
+    matrix[totalRow][totalCols - 1] = evalValueForRows(valueFields[0], baseFiltered);
+  }
+
+  return { output: matrix, rowCount: totalRows, colCount: totalCols };
+}
+
 /**
  * Recompute a pivot by name and rewrite its destination cells in place on the
  * snapshot. The caller is responsible for persisting the snapshot back into
@@ -626,14 +945,23 @@ function readSourceMatrix(
  *
  * Returns `{ ok: true }` when the pivot was found and rewritten,
  * `{ ok: false }` when the pivot doesn't exist or the source sheet is gone.
+ *
+ * @param cocoModel  Required for model-source pivots (`source.kind === 'model'`).
+ *   Without it, model pivots return `{ ok: false }`.
+ * @param destSheetId  The sheet id where the pivot output should be written.
+ *   Required for model-source pivots; for sheet-source pivots the destination
+ *   defaults to the source sheet (legacy behaviour).
  */
 export function refreshPivot(
   workbook: WorkbookPivotSnapshot,
   name: string,
+  cocoModel?: CocoDataModel,
+  destSheetId?: string,
 ): { ok: boolean } {
   const sheets = workbook?.sheets;
   if (!sheets || typeof sheets !== "object") return { ok: false };
-  // Find the pivot entry (it lives on its source sheet).
+
+  // Find the pivot entry (it may live on any sheet's _pivots list).
   let entry: PivotEntry | null = null;
   for (const sid of Object.keys(sheets)) {
     const list = sheets[sid]?._pivots;
@@ -648,14 +976,28 @@ export function refreshPivot(
   }
   if (!entry) return { ok: false };
 
-  const sourceSheet = sheets[entry.source.sheetId];
-  if (!sourceSheet) return { ok: false };
-  const matrix = readSourceMatrix(sourceSheet.cellData, entry.source.range);
-  const result = computePivot(matrix, entry);
+  normalizePivotEntry(entry);
 
-  // The destination sheet defaults to the source sheet (pivots are written
-  // to the same sheet in the MVP — destination is a single (row, col) pair).
-  const destSheet = sourceSheet;
+  let result: PivotResult;
+  let destSheet: SheetWithPivots;
+
+  if (entry.source.kind === "model") {
+    if (!cocoModel) return { ok: false };
+    const resolvedDestSheetId = destSheetId ?? Object.keys(sheets)[0];
+    const ds = sheets[resolvedDestSheetId];
+    if (!ds) return { ok: false };
+    destSheet = ds;
+    const runtimeModel = applyCalculatedColumnsForPivot(cocoModel);
+    result = computeModelPivot(runtimeModel, cocoModel, entry);
+  } else {
+    const sourceSheet = sheets[entry.source.sheetId];
+    if (!sourceSheet) return { ok: false };
+    const matrix = readSourceMatrix(sourceSheet.cellData, entry.source.range);
+    result = computePivot(matrix, entry);
+    // The destination sheet defaults to the source sheet.
+    destSheet = sheets[destSheetId ?? entry.source.sheetId] ?? sourceSheet;
+  }
+
   const cellData = (destSheet.cellData ?? {}) as Record<
     string,
     Record<string, { v?: unknown; s?: unknown; f?: unknown } | undefined> | undefined
@@ -748,6 +1090,8 @@ export function replacePivotInSheet(
     if (foundSheetId) break;
   }
   if (!foundSheetId || !oldEntry) return { ok: false };
+
+  normalizePivotEntry(newEntry);
 
   const sheet = sheets[foundSheetId];
   if (!sheet) return { ok: false };

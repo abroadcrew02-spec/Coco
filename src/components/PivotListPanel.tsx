@@ -55,7 +55,7 @@ export default function PivotListPanel({
       <div className="pvlp-header">ピボット一覧 ({rows.length})</div>
       <ul className="pvlp-list">
         {rows.map((row) => {
-          const sourceA1 = rangeToA1(row.pivot.source.range);
+          const sourceA1 = row.pivot.source.kind === "sheet" ? rangeToA1(row.pivot.source.range) : row.pivot.source.tableName;
           const destA1 = cellToA1(row.pivot.destination.row, row.pivot.destination.col);
           const rowCount = row.pivot.rows.length;
           const colCount = row.pivot.cols.length;

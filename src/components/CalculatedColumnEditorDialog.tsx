@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { StoredCalculatedColumn } from "../store/cocoDataModel";
+import DaxFunctionChips from "./DaxFunctionChips";
 import "./CalculatedColumnEditorDialog.css";
 
 interface ExistingPair {
@@ -36,6 +37,23 @@ export default function CalculatedColumnEditorDialog({
   const [format, setFormat] = useState(initialColumn?.format ?? "");
   const [description, setDescription] = useState(initialColumn?.description ?? "");
   const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleChipInsert = (insertText: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart ?? expression.length;
+    const textWithoutCaret = insertText.replace("|", "");
+    const caretOffset = insertText.indexOf("|");
+    const newExpression =
+      expression.slice(0, start) + textWithoutCaret + expression.slice(start);
+    setExpression(newExpression);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const newPos = start + (caretOffset >= 0 ? caretOffset : textWithoutCaret.length);
+      textarea.setSelectionRange(newPos, newPos);
+    });
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -161,6 +179,7 @@ export default function CalculatedColumnEditorDialog({
           <label className="cced-field">
             <span className="cced-field-label">DAX 式</span>
             <textarea
+              ref={textareaRef}
               className="cced-textarea"
               rows={5}
               value={expression}
@@ -168,6 +187,7 @@ export default function CalculatedColumnEditorDialog({
               placeholder={'例: [FirstName] & " " & [LastName]'}
               aria-required="true"
             />
+            <DaxFunctionChips onInsert={handleChipInsert} />
           </label>
           <label className="cced-field">
             <span className="cced-field-label">書式コード（省略可）</span>

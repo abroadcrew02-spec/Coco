@@ -85,6 +85,8 @@ pub fn run() {
             commands::csv_io::workbook_export_csv,
             commands::csv_io::workbook_import_csv,
             commands::csv_io::list_sheet_names,
+            commands::csv_io::read_csv_header,
+            commands::csv_io::read_csv_rows,
             commands::data_connection::data_connection_load,
             commands::data_connection::data_connection_load_web,
             commands::data_connection::data_connection_load_sqlite,

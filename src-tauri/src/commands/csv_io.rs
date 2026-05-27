@@ -1449,3 +1449,138 @@ pub fn workbook_import_csv(
     }
     Ok(result)
 }
+
+// ---------------------------------------------------------------------------
+// #244 — Linked Data Types: CSV utility commands
+// ---------------------------------------------------------------------------
+
+/// Read only the header row (first line) of a local CSV file.
+///
+/// Returns a `Vec<String>` of column names. Used by LinkedDataTypesPanel to
+/// populate the key-column selector after the user picks a file.
+///
+/// Limits: reads up to 64 KiB to find the first line; returns an error for
+/// binary files or files with no newline in the first 64 KiB.
+#[tauri::command]
+pub fn read_csv_header(path: String) -> Result<Vec<String>, String> {
+    use std::io::{BufRead, BufReader};
+
+    let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+    let mut reader = BufReader::new(file);
+    let mut first_line = String::new();
+    reader
+        .read_line(&mut first_line)
+        .map_err(|e| e.to_string())?;
+
+    // Strip UTF-8 BOM if present.
+    let stripped = first_line.trim_start_matches('\u{feff}');
+    let line = stripped.trim_end_matches(['\n', '\r']);
+
+    if line.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Detect delimiter: prefer tab when the line contains a tab.
+    let delimiter = if line.contains('\t') { '\t' } else { ',' };
+
+    let columns: Vec<String> = split_csv_line(line, delimiter)
+        .into_iter()
+        .map(|s| s.trim_matches('"').to_string())
+        .collect();
+
+    Ok(columns)
+}
+
+/// Read up to `max_rows` data rows from a local CSV file and return them as
+/// an array of `{columnName: value}` maps (both keys and values are strings).
+///
+/// Used by LinkedDataTypesPanel to perform in-panel lookups without a
+/// persistent cache. Row 0 is interpreted as the header.
+///
+/// `max_rows` is capped at 1000 to avoid blocking the frontend with huge files.
+#[tauri::command]
+pub fn read_csv_rows(
+    path: String,
+    max_rows: Option<usize>,
+) -> Result<Vec<std::collections::HashMap<String, String>>, String> {
+    use std::io::{BufRead, BufReader};
+
+    let cap = max_rows.unwrap_or(1000).min(1000);
+    let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+    let reader = BufReader::new(file);
+
+    let mut lines = reader.lines();
+
+    // Header row.
+    let header_line = lines
+        .next()
+        .ok_or_else(|| "CSV ファイルが空です".to_string())?
+        .map_err(|e| e.to_string())?;
+    let header_raw = header_line.trim_start_matches('\u{feff}');
+    let delimiter = if header_raw.contains('\t') { '\t' } else { ',' };
+    let headers: Vec<String> = split_csv_line(header_raw.trim_end_matches(['\n', '\r']), delimiter)
+        .into_iter()
+        .map(|s| s.trim_matches('"').to_string())
+        .collect();
+
+    if headers.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut rows: Vec<std::collections::HashMap<String, String>> = Vec::new();
+
+    for line_result in lines.take(cap) {
+        let line = line_result.map_err(|e| e.to_string())?;
+        let trimmed = line.trim_end_matches(['\n', '\r']);
+        if trimmed.is_empty() {
+            continue;
+        }
+        let fields = split_csv_line(trimmed, delimiter);
+        let mut row = std::collections::HashMap::new();
+        for (i, col) in headers.iter().enumerate() {
+            let val = fields
+                .get(i)
+                .map(|s| s.trim_matches('"').to_string())
+                .unwrap_or_default();
+            row.insert(col.clone(), val);
+        }
+        rows.push(row);
+    }
+
+    Ok(rows)
+}
+
+/// Minimal CSV line splitter that handles double-quoted fields (RFC 4180 subset).
+/// Does not handle multi-line quoted fields — those are rare in data-type CSVs.
+fn split_csv_line(line: &str, delimiter: char) -> Vec<String> {
+    let mut fields: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if !in_quotes => {
+                in_quotes = true;
+            }
+            '"' if in_quotes => {
+                // Peek for escaped quote ("").
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    current.push('"');
+                } else {
+                    in_quotes = false;
+                }
+            }
+            c if c == delimiter && !in_quotes => {
+                fields.push(current.clone());
+                current.clear();
+            }
+            c => {
+                current.push(c);
+            }
+        }
+    }
+    fields.push(current);
+    fields
+}

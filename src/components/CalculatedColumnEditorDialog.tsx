@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CocoDataModel, StoredCalculatedColumn } from "../store/cocoDataModel";
 import { evaluateTransientCalculatedColumn } from "../store/cocoDataModel";
 import { CALC_COLUMN_ERROR, DAX_FUNCTION_REFERENCE } from "../store/daxEngine";
-import DaxAutocomplete from "./DaxAutocomplete";
+import { useDaxAutocomplete } from "./useDaxAutocomplete";
 import DaxColumnRefChips from "./DaxColumnRefChips";
 import DaxFunctionChips from "./DaxFunctionChips";
 import "./CalculatedColumnEditorDialog.css";
@@ -66,12 +66,12 @@ export default function CalculatedColumnEditorDialog({
   // Resolve the currently selected table name for column suggestions.
   const selectedTableName = tables.find((t) => t.id === tableId)?.name;
 
-  const autocompleTables = (cocoModel?.tables ?? []).map((t) => ({
+  const autocompleteTables = (cocoModel?.tables ?? []).map((t) => ({
     name: t.name,
     columns: t.columns.map((c) => ({ name: c.name })),
   }));
 
-  const autocomplete = DaxAutocomplete({
+  const autocomplete = useDaxAutocomplete({
     textareaRef,
     value: expression,
     onInsert: (newExpression, newCaret) => {
@@ -84,7 +84,7 @@ export default function CalculatedColumnEditorDialog({
       });
     },
     functions: DAX_FUNCTION_REFERENCE,
-    tables: autocompleTables,
+    tables: autocompleteTables,
     contextTableName: selectedTableName,
   });
 

@@ -1,10 +1,10 @@
 # Coco — current state
 
-Snapshot 2026-05-26 against `main` (HEAD `669adaa`).
+Snapshot 2026-05-27 against `main` (HEAD `abb2c09`).
 
 ## Headline
 
-**MVP-1 functionally complete; Phase 2 authoring UI delivered; Phase 3 "最強Excel" roadmap in flight.** All MVP-1 (FR-001..FR-014), MVP-2 import (FR-101..FR-105), MVP-3 export (FR-201..FR-204), and CSV (FR-301..FR-304) feature IDs verdict OK in `docs/COVERAGE.md`. Phase 3 (issues #236 / #238 / #239 / #241 under meta #248) ships in-grid chart CRUD, Power Query end-to-end, a DAX engine with measure / calculated-column authoring UI, and CF live re-paint with sidecar + iconSet.
+**MVP-1 functionally complete; Phase 2 authoring UI delivered; Phase 3 "最強Excel" roadmap in flight.** All MVP-1 (FR-001..FR-014), MVP-2 import (FR-101..FR-105), MVP-3 export (FR-201..FR-204), and CSV (FR-301..FR-304) feature IDs verdict OK in `docs/COVERAGE.md`. Phase 3 (issues #236 / #238 / #239 / #241 under meta #248) ships in-grid chart CRUD, Power Query end-to-end, a DAX engine with measure / calculated-column authoring UI, **Pivot×DAX measure 統合 (Step 7)**, and CF live re-paint with sidecar + iconSet.
 
 ## Key counts
 
@@ -24,7 +24,7 @@ Snapshot 2026-05-26 against `main` (HEAD `669adaa`).
 |---|---|
 | **#236 In-grid Chart** | Insert / move / resize / **double-click edit** / **Delete-key delete** all shipped (PRs #263, #273, #279, #284, #286, #288, #290–#292). InsertChartDialog exposes all 6 chart types + advanced options (legend / labels / stacked / header-row/col). |
 | **#238 Power Query** | Step 1-7 pipeline engine + 13 transforms, dialog UI with json / csv / sqlite / jsonl / tsv sources, snapshot storage, executor, and **SavedQueriesPanel** (list + refresh + delete, ribbon `クエリの管理`) shipped (PRs #264, #272, #281, #285, #289, #293). |
-| **#239 Power Pivot / DAX** | Engine: 17 DAX functions (SUM/AVG/MIN/MAX/COUNT/COUNTROWS/DISTINCTCOUNT/IF/ALL/RELATED/SUMX/AVERAGEX/MINX/MAXX/COUNTX/FILTER/CALCULATE), measure + calculated-column storage and evaluation. UI: **MeasureListPanel** with three sections (tables / measures / calc cols), **MeasureEditorDialog** + **CalculatedColumnEditorDialog** (author + edit + unique-name validation), and **"📊 データモデルへ追加"** action on TableInfoPanel rows to populate the model from existing workbook tables (PRs #265-#267, #271, #283, #287, #294-#297, plus the data-model-tables-panel step). |
+| **#239 Power Pivot / DAX** | Engine: 17 DAX functions (SUM/AVG/MIN/MAX/COUNT/COUNTROWS/DISTINCTCOUNT/IF/ALL/RELATED/SUMX/AVERAGEX/MINX/MAXX/COUNTX/FILTER/CALCULATE), measure + calculated-column storage and evaluation. UI: **MeasureListPanel** with three sections (tables / measures / calc cols), **MeasureEditorDialog** + **CalculatedColumnEditorDialog** (author + edit + unique-name validation + DAX function/column chips + live preview), and **"📊 データモデルへ追加"** action on TableInfoPanel rows to populate the model from existing workbook tables (PRs #265-#267, #271, #283, #287, #294-#297, #298-#302). **Step 7 Pivot×Measure 統合**: `PivotSource` / `PivotValueField` を discriminated union 化、`computeModelPivot` でモデル table を source にして per-cell filter context で measure を評価。InsertPivotDialog に「データソース: シート範囲 / データモデル」モードトグル + measure 値フィールド追加 (新 PR). |
 | **#241 CF live re-paint** | Sidecar foundation, computeCfApplyPlan, range batching, iconSet decoration channel (numeric values intact), e2e integration test all shipped (PRs #262, #268, #269, #274, #282, #288). |
 
 ## What works end-to-end
@@ -35,7 +35,7 @@ Snapshot 2026-05-26 against `main` (HEAD `669adaa`).
 - CSV export with UTF-8 BOM or Shift_JIS, format-code rendering (date / datetime / time / percent / currency / `@` text), injection-guard prefix.
 - Authoring dialogs (live in-grid): named ranges, data validation, conditional formatting, hyperlink, comment, number format, sort, tab color, sheet protection, format painter, **in-grid chart (insert / move / resize / double-click edit / Delete-key delete; 6 chart types + axis labels / legend / stacked / header-row/col)**.
 - **Power Query**: ribbon → 「データの取得と変換」dialog → json / csv / sqlite / jsonl / tsv source → 13-step transform pipeline (selectColumns / dropColumns / filterRows / sort / rename / groupBy / changeType / fillMissing / conditionalColumn / replaceValue / splitColumn / mergeColumns / addIndexColumn) → expand to sheet. Queries persist in `_cocoQueries`; **SavedQueriesPanel** (ribbon 📋) lists / refreshes / deletes.
-- **Power Pivot / DAX**: 17 functions evaluable (SUM / AVERAGE / MIN / MAX / COUNT / COUNTROWS / DISTINCTCOUNT / IF / ALL / RELATED / SUMX / AVERAGEX / MINX / MAXX / COUNTX / FILTER / CALCULATE). **MeasureListPanel** (ribbon Σ) shows tables + measures + calculated columns, each with author / edit / delete; **TableInfoPanel** has 📊 「データモデルへ追加」for promoting Excel tables to ModelTables.
+- **Power Pivot / DAX**: 17 functions evaluable (SUM / AVERAGE / MIN / MAX / COUNT / COUNTROWS / DISTINCTCOUNT / IF / ALL / RELATED / SUMX / AVERAGEX / MINX / MAXX / COUNTX / FILTER / CALCULATE). **MeasureListPanel** (ribbon Σ) shows tables + measures + calculated columns, each with author / edit / delete; **TableInfoPanel** has 📊 「データモデルへ追加」for promoting Excel tables to ModelTables. **Pivot×Measure 統合**: InsertPivotDialog の「データモデル」モードで model table を source にできる + 値フィールドに measure を割り当て可能 (Step 7).
 - **CF live re-paint**: sidecar + apply-plan + range batching + iconSet decoration channel; numeric values intact when iconSet glyphs render.
 - CSV export with UTF-8 BOM or Shift_JIS, format-code rendering (date / datetime / time / percent / currency / `@` text), injection-guard prefix.
 - Sidebar preview (round-trip preserves, fallback for legacy charts): chart blob preview, image insertion.
@@ -52,7 +52,7 @@ Snapshot 2026-05-26 against `main` (HEAD `669adaa`).
 ## Outstanding TODOs (link → `docs/TODOS.md`)
 
 - **Blocker**: none.
-- **High** (visible UX gaps): image live in-grid canvas overlay (`high-image-live` — chart equivalent shipped via #236); Pivot live editing dialog / DnD editor (#237, design-only); DAX autocomplete in `MeasureEditorDialog` / `CalculatedColumnEditorDialog`; Pivot integration with DAX measures (#239 Step 7).
+- **High** (visible UX gaps): image live in-grid canvas overlay (`high-image-live` — chart equivalent shipped via #236); DAX autocomplete in `MeasureEditorDialog` / `CalculatedColumnEditorDialog`; calculated column を Pivot rows/cols として直接扱う UI (Step 7 後の課題).
 - **Medium** (round-trip / power-user): CF dxf import-side reconstruction; more CF rule types (aboveAverage / timePeriod) on export; streaming `detect_unsupported_features`; promote number-formats + rich-text into `CellStyle`; concurrent open race token; Form Control OOXML native round-trip (#194).
 - **Low** (polish): perf bench multi-fixture harness; CSV import edge-case tests; xlsx round-trip edge-case tests; verify + likely-remove the StrictMode×Univer deferred-dispose guard on Univer 0.24 (#232).
 - **Open methodology questions**: Stock / Geography Linked Data Types — server-dependent, requires local-first decision (#244).

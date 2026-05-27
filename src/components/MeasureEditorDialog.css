@@ -156,3 +156,19 @@
   background-color: var(--coco-accent-hover);
   border-color: var(--coco-accent-hover);
 }
+
+.med-preview {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--coco-border);
+  border-radius: 3px;
+  font-family: var(--coco-font-mono, monospace);
+  font-size: 12px;
+  color: var(--coco-text-muted);
+  background-color: var(--coco-surface);
+}
+
+.med-preview--error {
+  color: var(--coco-danger);
+  border-color: var(--coco-danger);
+}

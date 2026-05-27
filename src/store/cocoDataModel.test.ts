@@ -8,6 +8,8 @@ import {
   EMPTY_DATA_MODEL,
   evaluateAllStoredMeasures,
   evaluateStoredMeasure,
+  evaluateTransientCalculatedColumn,
+  evaluateTransientMeasure,
   readDataModel,
   removeCalculatedColumn,
   removeMeasure,
@@ -19,7 +21,7 @@ import {
   type StoredCalculatedColumn,
   type StoredMeasure,
 } from "./cocoDataModel";
-import { MEASURE_ERROR } from "./daxEngine";
+import { CALC_COLUMN_ERROR, MEASURE_ERROR } from "./daxEngine";
 import type { ModelRelationship, ModelTable } from "./daxEngine";
 
 const sampleTable: ModelTable = {
@@ -451,5 +453,123 @@ describe("evaluateAllStoredMeasures — bridge", () => {
     });
     const results = evaluateAllStoredMeasures(toDataModel(cocoModel), cocoModel);
     expect(results.size).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Live-preview helpers
+// ---------------------------------------------------------------------------
+
+describe("evaluateTransientMeasure", () => {
+  const tableWithRows: ModelTable = {
+    name: "Sales",
+    columns: [
+      { name: "Amount", type: "number" },
+    ],
+    rows: [
+      { Amount: 10 },
+      { Amount: 20 },
+      { Amount: 30 },
+    ],
+  };
+
+  function baseModel(): CocoDataModel {
+    return addTable(EMPTY_DATA_MODEL, tableWithRows);
+  }
+
+  it("evaluates a transient SUM measure against existing data", () => {
+    const result = evaluateTransientMeasure(baseModel(), {
+      name: "Preview Sum",
+      expression: "SUM(Sales[Amount])",
+    });
+    expect(result).toBe(60);
+  });
+
+  it("returns MEASURE_ERROR for a parse-error expression", () => {
+    const result = evaluateTransientMeasure(baseModel(), {
+      name: "Bad",
+      expression: "SUM(",
+    });
+    expect(result).toBe(MEASURE_ERROR);
+  });
+
+  it("a transient measure shadows an existing stored measure with the same name", () => {
+    let m = baseModel();
+    m = addMeasure(m, {
+      id: "existing",
+      name: "Preview Sum",
+      tableId: "Sales",
+      expression: "1",
+    });
+    // transient expression should win
+    const result = evaluateTransientMeasure(m, {
+      name: "Preview Sum",
+      expression: "SUM(Sales[Amount])",
+    });
+    expect(result).toBe(60);
+  });
+});
+
+describe("evaluateTransientCalculatedColumn", () => {
+  const tableWithRows: ModelTable = {
+    name: "Products",
+    columns: [
+      { name: "Price", type: "number" },
+      { name: "Qty", type: "number" },
+    ],
+    rows: [
+      { Price: 10, Qty: 2 },
+      { Price: 5, Qty: 4 },
+      { Price: 8, Qty: 3 },
+    ],
+  };
+
+  function baseModel(): CocoDataModel {
+    return addTable(EMPTY_DATA_MODEL, tableWithRows);
+  }
+
+  it("returns per-row computed values (up to 5)", () => {
+    const values = evaluateTransientCalculatedColumn(baseModel(), {
+      tableId: "Products",
+      columnName: "Total",
+      expression: "Products[Price] * Products[Qty]",
+    });
+    expect(values).toEqual([20, 20, 24]);
+  });
+
+  it("returns CALC_COLUMN_ERROR cells for bad expression", () => {
+    const values = evaluateTransientCalculatedColumn(baseModel(), {
+      tableId: "Products",
+      columnName: "Bad",
+      expression: "* +",
+    });
+    expect(values).not.toBeNull();
+    expect(values![0]).toBe(CALC_COLUMN_ERROR);
+  });
+
+  it("returns null when tableId does not exist in the model", () => {
+    const values = evaluateTransientCalculatedColumn(baseModel(), {
+      tableId: "NoSuchTable",
+      columnName: "X",
+      expression: "1",
+    });
+    expect(values).toBeNull();
+  });
+
+  it("limits preview to maxRows", () => {
+    // Add 7 rows.
+    const manyRows: ModelTable = {
+      name: "Big",
+      columns: [{ name: "V", type: "number" }],
+      rows: Array.from({ length: 7 }, (_, i) => ({ V: i + 1 })),
+    };
+    const m = addTable(EMPTY_DATA_MODEL, manyRows);
+    const values = evaluateTransientCalculatedColumn(
+      m,
+      { tableId: "Big", columnName: "V2", expression: "Big[V] * 2" },
+      3,
+    );
+    expect(values).toHaveLength(3);
+    expect(values).toEqual([2, 4, 6]);
   });
 });

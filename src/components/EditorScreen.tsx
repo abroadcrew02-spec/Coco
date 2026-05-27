@@ -9504,6 +9504,7 @@ export default function EditorScreen() {
             initialMeasure={measureEditor.initial}
             tables={dmTables}
             existingNames={existingNames}
+            cocoModel={dm}
             onApply={applyMeasure}
             onClose={() => setMeasureEditor(null)}
           />
@@ -9524,6 +9525,7 @@ export default function EditorScreen() {
             initialColumn={calcColEditor.initial}
             tables={dmTables}
             existingPairs={existingPairs}
+            cocoModel={dm}
             onApply={applyCalculatedColumn}
             onClose={() => setCalcColEditor(null)}
           />

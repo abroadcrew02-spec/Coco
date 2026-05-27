@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import CalculatedColumnEditorDialog from "./CalculatedColumnEditorDialog";
-import type { StoredCalculatedColumn } from "../store/cocoDataModel";
+import type { CocoDataModel, StoredCalculatedColumn } from "../store/cocoDataModel";
+import { addTable, EMPTY_DATA_MODEL } from "../store/cocoDataModel";
+import type { ModelTable } from "../store/daxEngine";
 
 afterEach(() => cleanup());
 
@@ -226,5 +228,83 @@ describe("CalculatedColumnEditorDialog — cancel", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onApply).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("CalculatedColumnEditorDialog — live preview", () => {
+  const custTable: ModelTable = {
+    name: "Customers",
+    columns: [
+      { name: "First", type: "string" },
+      { name: "Last", type: "string" },
+    ],
+    rows: [
+      { First: "Alice", Last: "Smith" },
+      { First: "Bob", Last: "Jones" },
+    ],
+  };
+  const cocoModel: CocoDataModel = addTable(EMPTY_DATA_MODEL, custTable);
+
+  it("shows preview rows after 300ms when expression is entered", async () => {
+    vi.useFakeTimers();
+    render(
+      <CalculatedColumnEditorDialog
+        tables={TABLES}
+        existingPairs={[]}
+        cocoModel={cocoModel}
+        onApply={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.change(
+      screen.getByPlaceholderText("例: [FirstName] & \" \" & [LastName]"),
+      { target: { value: 'Customers[First] & " " & Customers[Last]' } },
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.getByText(/プレビュー/)).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("does not show preview when expression is empty", async () => {
+    vi.useFakeTimers();
+    render(
+      <CalculatedColumnEditorDialog
+        tables={TABLES}
+        existingPairs={[]}
+        cocoModel={cocoModel}
+        onApply={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.queryByText(/プレビュー/)).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("shows error style for invalid expression after 300ms", async () => {
+    vi.useFakeTimers();
+    render(
+      <CalculatedColumnEditorDialog
+        tables={TABLES}
+        existingPairs={[]}
+        cocoModel={cocoModel}
+        onApply={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.change(
+      screen.getByPlaceholderText("例: [FirstName] & \" \" & [LastName]"),
+      { target: { value: "* +" } },
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    const errEl = document.querySelector(".cced-preview--error");
+    expect(errEl).not.toBeNull();
+    vi.useRealTimers();
   });
 });

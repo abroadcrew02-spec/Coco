@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import MeasureEditorDialog from "./MeasureEditorDialog";
-import type { StoredMeasure } from "../store/cocoDataModel";
+import type { CocoDataModel, StoredMeasure } from "../store/cocoDataModel";
+import { addTable, EMPTY_DATA_MODEL } from "../store/cocoDataModel";
+import type { ModelTable } from "../store/daxEngine";
 
 afterEach(() => cleanup());
 
@@ -138,5 +140,77 @@ describe("MeasureEditorDialog — cancel", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onApply).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("MeasureEditorDialog — live preview", () => {
+  const salesTable: ModelTable = {
+    name: "Sales",
+    columns: [{ name: "Amount", type: "number" }],
+    rows: [{ Amount: 100 }, { Amount: 200 }],
+  };
+  const cocoModel: CocoDataModel = addTable(EMPTY_DATA_MODEL, salesTable);
+
+  it("shows preview value after 300ms when expression is entered", async () => {
+    vi.useFakeTimers();
+    render(
+      <MeasureEditorDialog
+        tables={TABLES}
+        existingNames={[]}
+        cocoModel={cocoModel}
+        onApply={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByPlaceholderText("例: SUM(Sales[Amount])"), {
+      target: { value: "SUM(Sales[Amount])" },
+    });
+    // Preview not visible yet (debounce).
+    expect(screen.queryByText(/プレビュー/)).toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.getByText(/プレビュー/)).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("does not show preview when expression is empty", async () => {
+    vi.useFakeTimers();
+    render(
+      <MeasureEditorDialog
+        tables={TABLES}
+        existingNames={[]}
+        cocoModel={cocoModel}
+        onApply={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.queryByText(/プレビュー/)).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("shows error style for invalid expression after 300ms", async () => {
+    vi.useFakeTimers();
+    render(
+      <MeasureEditorDialog
+        tables={TABLES}
+        existingNames={[]}
+        cocoModel={cocoModel}
+        onApply={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByPlaceholderText("例: SUM(Sales[Amount])"), {
+      target: { value: "SUM(" },
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    const errEl = document.querySelector(".med-preview--error");
+    expect(errEl).not.toBeNull();
+    vi.useRealTimers();
   });
 });

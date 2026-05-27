@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { StoredMeasure } from "../store/cocoDataModel";
+import type { CocoDataModel, StoredMeasure } from "../store/cocoDataModel";
+import { evaluateTransientMeasure } from "../store/cocoDataModel";
+import { MEASURE_ERROR } from "../store/daxEngine";
 import DaxFunctionChips from "./DaxFunctionChips";
 import "./MeasureEditorDialog.css";
 
@@ -10,6 +12,8 @@ interface Props {
   tables: Array<{ id: string; name: string }>;
   /** Existing measure names — for unique-name validation. */
   existingNames: string[];
+  /** Full data model — used for the live-preview evaluation. */
+  cocoModel?: CocoDataModel;
   onApply: (measure: StoredMeasure) => void;
   onClose: () => void;
 }
@@ -18,6 +22,7 @@ export default function MeasureEditorDialog({
   initialMeasure,
   tables,
   existingNames,
+  cocoModel,
   onApply,
   onClose,
 }: Props) {
@@ -31,6 +36,7 @@ export default function MeasureEditorDialog({
   const [format, setFormat] = useState(initialMeasure?.format ?? "");
   const [description, setDescription] = useState(initialMeasure?.description ?? "");
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ value: unknown; error: string | null } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleChipInsert = (insertText: string) => {
@@ -49,6 +55,30 @@ export default function MeasureEditorDialog({
       textarea.setSelectionRange(newPos, newPos);
     });
   };
+
+  // Live preview — debounced 300 ms to avoid evaluating on every keystroke.
+  useEffect(() => {
+    if (!expression.trim() || !cocoModel) {
+      setPreview(null);
+      return;
+    }
+    const tid = setTimeout(() => {
+      try {
+        const result = evaluateTransientMeasure(cocoModel, {
+          name: name.trim() || "_preview_",
+          expression: expression.trim(),
+        });
+        if (result === MEASURE_ERROR) {
+          setPreview({ value: null, error: MEASURE_ERROR });
+        } else {
+          setPreview({ value: result, error: null });
+        }
+      } catch (err) {
+        setPreview({ value: null, error: err instanceof Error ? err.message : String(err) });
+      }
+    }, 300);
+    return () => clearTimeout(tid);
+  }, [expression, name, cocoModel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -160,6 +190,19 @@ export default function MeasureEditorDialog({
               aria-required="true"
             />
             <DaxFunctionChips onInsert={handleChipInsert} />
+            {preview !== null && (
+              preview.error !== null ? (
+                <div className="med-preview med-preview--error">{preview.error}</div>
+              ) : (
+                <div className="med-preview">
+                  プレビュー: <strong>
+                    {typeof preview.value === "number"
+                      ? preview.value.toLocaleString()
+                      : String(preview.value)}
+                  </strong>
+                </div>
+              )
+            )}
           </label>
           <label className="med-field">
             <span className="med-field-label">書式コード（省略可）</span>

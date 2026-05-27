@@ -12,7 +12,11 @@
 //! + call *_core (or the Tauri command which doesn't require AppHandle) +
 //! assert against serde_json::Value.
 
-use coco_lib::commands::csv_io::{import_csv_core, list_sheet_names, workbook_export_csv};
+use coco_lib::commands::csv_io::{
+    import_csv_core, list_sheet_names, read_sqlite_columns, read_sqlite_rows, read_sqlite_tables,
+    workbook_export_csv,
+};
+use rusqlite::Connection;
 use std::fs;
 use tempfile::TempDir;
 
@@ -643,4 +647,113 @@ fn field_at_32k_chars_imports_intact() {
         "value at the 32,767 Excel cap must survive intact"
     );
     assert_eq!(cd["0"]["1"]["v"], "next");
+}
+
+// ---------------------------------------------------------------------------
+// #310 — SQLite source commands
+// ---------------------------------------------------------------------------
+
+/// Helper: create a minimal SQLite DB with two tables and return its path.
+fn make_sqlite_db(dir: &TempDir) -> String {
+    let db_path = dir.path().join("test.db");
+    let conn = Connection::open(&db_path).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE stocks (ticker TEXT, price REAL, industry TEXT);
+         INSERT INTO stocks VALUES ('MSFT', 420.0, 'Technology');
+         INSERT INTO stocks VALUES ('AAPL', 185.5, 'Technology');
+         INSERT INTO stocks VALUES ('Toyota', 3200.0, 'Automotive');
+         CREATE TABLE metadata (key TEXT, value TEXT);
+         INSERT INTO metadata VALUES ('version', '1');",
+    )
+    .unwrap();
+    db_path.to_string_lossy().into_owned()
+}
+
+#[test]
+fn read_sqlite_tables_returns_user_tables() {
+    let dir = TempDir::new().unwrap();
+    let db_path = make_sqlite_db(&dir);
+
+    let tables = read_sqlite_tables(db_path).unwrap();
+    // Both user tables must be present; system tables must be absent.
+    assert!(tables.contains(&"stocks".to_string()), "missing: stocks");
+    assert!(tables.contains(&"metadata".to_string()), "missing: metadata");
+    assert!(
+        tables.iter().all(|t| !t.starts_with("sqlite_")),
+        "system table leaked: {:?}",
+        tables
+    );
+}
+
+#[test]
+fn read_sqlite_columns_returns_column_names() {
+    let dir = TempDir::new().unwrap();
+    let db_path = make_sqlite_db(&dir);
+
+    let cols = read_sqlite_columns(db_path, "stocks".to_string()).unwrap();
+    assert_eq!(cols, vec!["ticker", "price", "industry"]);
+}
+
+#[test]
+fn read_sqlite_columns_errors_on_missing_table() {
+    let dir = TempDir::new().unwrap();
+    let db_path = make_sqlite_db(&dir);
+
+    let err = read_sqlite_columns(db_path, "nonexistent".to_string()).unwrap_err();
+    assert!(
+        err.contains("テーブルが見つかりません"),
+        "unexpected error: {}",
+        err
+    );
+}
+
+#[test]
+fn read_sqlite_rows_returns_all_data_as_strings() {
+    let dir = TempDir::new().unwrap();
+    let db_path = make_sqlite_db(&dir);
+
+    let rows = read_sqlite_rows(db_path, "stocks".to_string(), None).unwrap();
+    assert_eq!(rows.len(), 3, "expected 3 rows, got {}", rows.len());
+
+    let msft = rows.iter().find(|r| r.get("ticker").map(|s| s.as_str()) == Some("MSFT"));
+    assert!(msft.is_some(), "MSFT row not found");
+    let msft = msft.unwrap();
+    assert_eq!(msft["industry"], "Technology");
+    // REAL 420.0 → "420" (fract == 0, stored as integer)
+    assert_eq!(msft["price"], "420");
+
+    let aapl = rows.iter().find(|r| r.get("ticker").map(|s| s.as_str()) == Some("AAPL"));
+    let aapl = aapl.unwrap();
+    // 185.5 has fractional part.
+    assert_eq!(aapl["price"], "185.5");
+}
+
+#[test]
+fn read_sqlite_rows_respects_max_rows_cap() {
+    let dir = TempDir::new().unwrap();
+    let db_path = make_sqlite_db(&dir);
+
+    // stocks has 3 rows; cap at 2.
+    let rows = read_sqlite_rows(db_path, "stocks".to_string(), Some(2)).unwrap();
+    assert_eq!(rows.len(), 2, "max_rows=2 should limit result to 2");
+}
+
+#[test]
+fn read_sqlite_tables_errors_on_nonexistent_path() {
+    let err = read_sqlite_tables("/no/such/file.db".to_string()).unwrap_err();
+    assert!(!err.is_empty());
+}
+
+#[test]
+fn read_sqlite_columns_rejects_injection_attempt() {
+    let dir = TempDir::new().unwrap();
+    let db_path = make_sqlite_db(&dir);
+
+    // Table name contains a semicolon — should be rejected by the validation guard.
+    let err = read_sqlite_columns(db_path, "stocks; DROP TABLE stocks".to_string()).unwrap_err();
+    assert!(
+        err.contains("テーブル名が不正です"),
+        "unexpected error: {}",
+        err
+    );
 }

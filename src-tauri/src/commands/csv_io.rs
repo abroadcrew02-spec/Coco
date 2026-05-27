@@ -1561,6 +1561,175 @@ pub fn read_csv_rows(
     Ok(rows)
 }
 
+// ---------------------------------------------------------------------------
+// #310 — Linked Data Types: SQLite source commands
+// ---------------------------------------------------------------------------
+
+/// Return the list of table names in a local SQLite database file.
+///
+/// Only user-visible tables are returned (no sqlite_* system tables). The file
+/// must exist and be a regular file; an error is returned otherwise.
+#[tauri::command]
+pub fn read_sqlite_tables(path: String) -> Result<Vec<String>, String> {
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("指定されたパスはファイルではありません".to_string());
+    }
+    let conn = rusqlite::Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT name FROM sqlite_master \
+             WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
+             ORDER BY name",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let tables: Result<Vec<String>, _> = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect();
+
+    tables.map_err(|e| e.to_string())
+}
+
+/// Return the column names for a given table in a local SQLite database.
+///
+/// Uses `PRAGMA table_info` which works for all table types including views.
+/// The file must exist and be a regular file; the table must exist in the DB.
+#[tauri::command]
+pub fn read_sqlite_columns(path: String, table: String) -> Result<Vec<String>, String> {
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("指定されたパスはファイルではありません".to_string());
+    }
+    let conn = rusqlite::Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Validate table name to prevent SQL injection via identifier injection.
+    // SQLite identifiers may contain letters, digits, underscores, and some
+    // Unicode — but for safety we allow only ASCII identifier characters.
+    if table.is_empty()
+        || !table
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ' ')
+    {
+        return Err(format!("テーブル名が不正です: {:?}", table));
+    }
+
+    let query = format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\""));
+    let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
+
+    // PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk
+    let columns: Result<Vec<String>, _> = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| e.to_string())?
+        .collect();
+
+    let cols = columns.map_err(|e| e.to_string())?;
+    if cols.is_empty() {
+        return Err(format!("テーブルが見つかりません: {}", table));
+    }
+    Ok(cols)
+}
+
+/// Read up to `max_rows` rows from a SQLite table and return them as an array
+/// of `{columnName: value}` maps (all values serialised as strings).
+///
+/// Used by LinkedDataTypesPanel the same way `read_csv_rows` is used for CSV
+/// sources. The 1000-row cap mirrors the CSV command to keep UI responsive.
+#[tauri::command]
+pub fn read_sqlite_rows(
+    path: String,
+    table: String,
+    max_rows: Option<usize>,
+) -> Result<Vec<std::collections::HashMap<String, String>>, String> {
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("指定されたパスはファイルではありません".to_string());
+    }
+
+    // Validate table name (same rules as read_sqlite_columns).
+    if table.is_empty()
+        || !table
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ' ')
+    {
+        return Err(format!("テーブル名が不正です: {:?}", table));
+    }
+
+    let cap = max_rows.unwrap_or(1000).min(1000);
+
+    let conn = rusqlite::Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let query = format!(
+        "SELECT * FROM \"{}\" LIMIT {}",
+        table.replace('"', "\"\""),
+        cap
+    );
+    let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
+
+    let col_names: Vec<String> = stmt
+        .column_names()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    let mut rows_query = stmt.query([]).map_err(|e| e.to_string())?;
+
+    let mut rows: Vec<std::collections::HashMap<String, String>> = Vec::new();
+    while let Some(row) = rows_query.next().map_err(|e| e.to_string())? {
+        let mut map = std::collections::HashMap::new();
+        for (i, col) in col_names.iter().enumerate() {
+            let val: String = row
+                .get::<_, rusqlite::types::Value>(i)
+                .unwrap_or(rusqlite::types::Value::Null)
+                .into_text()
+                .unwrap_or_default();
+            map.insert(col.clone(), val);
+        }
+        rows.push(map);
+    }
+
+    Ok(rows)
+}
+
+// Helper: convert a rusqlite Value to a text representation.
+trait IntoText {
+    fn into_text(self) -> Option<String>;
+}
+
+impl IntoText for rusqlite::types::Value {
+    fn into_text(self) -> Option<String> {
+        Some(match self {
+            rusqlite::types::Value::Null => String::new(),
+            rusqlite::types::Value::Integer(n) => n.to_string(),
+            rusqlite::types::Value::Real(f) => {
+                if f.fract() == 0.0 && f.abs() < 1e15 {
+                    format!("{}", f as i64)
+                } else {
+                    format!("{}", f)
+                }
+            }
+            rusqlite::types::Value::Text(s) => s,
+            rusqlite::types::Value::Blob(b) => {
+                format!("<BLOB {} bytes>", b.len())
+            }
+        })
+    }
+}
+
 /// Minimal CSV line splitter that handles double-quoted fields (RFC 4180 subset).
 /// Does not handle multi-line quoted fields — those are rare in data-type CSVs.
 fn split_csv_line(line: &str, delimiter: char) -> Vec<String> {

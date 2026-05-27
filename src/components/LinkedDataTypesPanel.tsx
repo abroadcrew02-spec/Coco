@@ -1,8 +1,11 @@
 // #244 — LinkedDataTypesPanel
+// #310 — SQLite source type added.
 //
-// Ribbon panel for local CSV-based linked data types. Three sections:
+// Ribbon panel for local CSV / SQLite linked data types. Three sections:
 //   1. Registered source list (name, key column, column count, delete)
 //   2. Register new source (file picker → header read → key column + name)
+//      CSV:    file picker → read_csv_header → key column selector
+//      SQLite: file picker → read_sqlite_tables → table selector → read_sqlite_columns → key column selector
 //   3. Cell lookup card — shows data for the currently selected cell value
 //
 // No external API calls: fully local / serverless per Coco's policy.
@@ -49,18 +52,29 @@ interface Props {
 // Registration form state
 // ---------------------------------------------------------------------------
 
+type SourceKind = "csv" | "sqlite";
+
 interface RegForm {
+  kind: SourceKind;
   filePath: string;
+  /** CSV: header columns. SQLite: columns of the selected table. */
   headers: string[];
   keyColumn: string;
   sourceName: string;
+  /** SQLite only: table names returned by read_sqlite_tables. */
+  sqliteTables: string[];
+  /** SQLite only: the selected table name. */
+  sqliteTable: string;
 }
 
 const EMPTY_FORM: RegForm = {
+  kind: "csv",
   filePath: "",
   headers: [],
   keyColumn: "",
   sourceName: "",
+  sqliteTables: [],
+  sqliteTable: "",
 };
 
 // ---------------------------------------------------------------------------
@@ -94,41 +108,95 @@ export default function LinkedDataTypesPanel({
 
   const handlePickFile = useCallback(async () => {
     try {
+      const isSqlite = form.kind === "sqlite";
       const result = await openFileDialog({
-        filters: [{ name: "CSV ファイル", extensions: ["csv", "tsv"] }],
+        filters: isSqlite
+          ? [{ name: "SQLite データベース", extensions: ["db", "sqlite", "sqlite3"] }]
+          : [{ name: "CSV ファイル", extensions: ["csv", "tsv"] }],
         multiple: false,
       });
       if (!result || Array.isArray(result)) return;
       const filePath = result as string;
 
-      // Read the first row as CSV header via Tauri command.
-      let headers: string[] = [];
-      try {
-        headers = await invoke<string[]>("read_csv_header", { path: filePath });
-      } catch (e) {
-        setFormError(`ヘッダーの読み取りに失敗しました: ${String(e)}`);
-        return;
-      }
-      if (headers.length === 0) {
-        setFormError("CSV にヘッダー行が見つかりませんでした。");
-        return;
-      }
-
       // Auto-fill source name from file basename.
       const basename = filePath.replace(/\\/g, "/").split("/").pop() ?? filePath;
-      const nameSuggestion = basename.replace(/\.(csv|tsv)$/i, "");
+      const nameSuggestion = basename.replace(/\.(csv|tsv|db|sqlite|sqlite3)$/i, "");
 
-      setForm({
-        filePath,
-        headers,
-        keyColumn: headers[0],
-        sourceName: nameSuggestion,
-      });
-      setFormError("");
+      if (isSqlite) {
+        // SQLite: first read table list; columns are fetched after table selection.
+        let tables: string[] = [];
+        try {
+          tables = await invoke<string[]>("read_sqlite_tables", { path: filePath });
+        } catch (e) {
+          setFormError(`テーブル一覧の取得に失敗しました: ${String(e)}`);
+          return;
+        }
+        if (tables.length === 0) {
+          setFormError("データベースにテーブルが見つかりませんでした。");
+          return;
+        }
+        setForm((f) => ({
+          ...f,
+          filePath,
+          sourceName: nameSuggestion,
+          sqliteTables: tables,
+          sqliteTable: tables[0],
+          headers: [],
+          keyColumn: "",
+        }));
+        setFormError("");
+        // Fetch columns for the first table immediately.
+        handleSqliteTableChange(filePath, tables[0]);
+      } else {
+        // CSV: read header row.
+        let headers: string[] = [];
+        try {
+          headers = await invoke<string[]>("read_csv_header", { path: filePath });
+        } catch (e) {
+          setFormError(`ヘッダーの読み取りに失敗しました: ${String(e)}`);
+          return;
+        }
+        if (headers.length === 0) {
+          setFormError("CSV にヘッダー行が見つかりませんでした。");
+          return;
+        }
+        setForm((f) => ({
+          ...f,
+          filePath,
+          headers,
+          keyColumn: headers[0],
+          sourceName: nameSuggestion,
+        }));
+        setFormError("");
+      }
     } catch {
       // User cancelled the dialog — no action needed.
     }
-  }, []);
+  }, [form.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- SQLite table selector -----------------------------------------------
+
+  const handleSqliteTableChange = useCallback(
+    async (filePath: string, table: string) => {
+      if (!filePath || !table) return;
+      try {
+        const cols = await invoke<string[]>("read_sqlite_columns", {
+          path: filePath,
+          table,
+        });
+        setForm((f) => ({
+          ...f,
+          sqliteTable: table,
+          headers: cols,
+          keyColumn: cols[0] ?? "",
+        }));
+        setFormError("");
+      } catch (e) {
+        setFormError(`列情報の取得に失敗しました: ${String(e)}`);
+      }
+    },
+    [],
+  );
 
   // ---- register form submit ------------------------------------------------
 
@@ -145,6 +213,10 @@ export default function LinkedDataTypesPanel({
       setFormError("キー列を選択してください。");
       return;
     }
+    if (form.kind === "sqlite" && !form.sqliteTable) {
+      setFormError("テーブルを選択してください。");
+      return;
+    }
 
     const newSource: LinkedDataTypeSource = {
       id: crypto.randomUUID(),
@@ -153,6 +225,8 @@ export default function LinkedDataTypesPanel({
       keyColumn: form.keyColumn,
       columns: form.headers,
       updatedAt: new Date().toISOString(),
+      kind: form.kind,
+      ...(form.kind === "sqlite" ? { sqliteTable: form.sqliteTable } : {}),
     };
 
     onModelChange(addSource(model, newSource));
@@ -195,11 +269,24 @@ export default function LinkedDataTypesPanel({
 
       setLookupLoading(true);
       try {
-        // Read the full CSV via Tauri.
-        const rows = await invoke<Array<Record<string, string>>>("read_csv_rows", {
-          path: source.sourcePath,
-          maxRows: 1000,
-        });
+        let rows: Array<Record<string, string>>;
+        const effectiveKind = source.kind ?? "csv";
+
+        if (effectiveKind === "sqlite") {
+          // SQLite source: use read_sqlite_rows.
+          rows = await invoke<Array<Record<string, string>>>("read_sqlite_rows", {
+            path: source.sourcePath,
+            table: source.sqliteTable ?? "",
+            maxRows: 1000,
+          });
+        } else {
+          // CSV source (default): use read_csv_rows.
+          rows = await invoke<Array<Record<string, string>>>("read_csv_rows", {
+            path: source.sourcePath,
+            maxRows: 1000,
+          });
+        }
+
         csvCacheRef.current.set(source.id, { ts: Date.now(), rows });
         setLookupData(rows);
       } catch (err) {
@@ -296,12 +383,46 @@ export default function LinkedDataTypesPanel({
             className="ldtp-register-btn"
             onClick={() => setShowForm(true)}
           >
-            + CSV ソースを登録
+            + ソースを登録
           </button>
         ) : (
           <div className="ldtp-form">
+            {/* File type selector (CSV / SQLite) */}
             <div className="ldtp-form-row">
-              <label className="ldtp-form-label">CSV ファイル</label>
+              <span className="ldtp-form-label">ファイルタイプ</span>
+              <div className="ldtp-form-radio-group" role="group" aria-label="ファイルタイプ選択">
+                <label className="ldtp-form-radio-label">
+                  <input
+                    type="radio"
+                    name="ldtp-kind"
+                    value="csv"
+                    checked={form.kind === "csv"}
+                    onChange={() =>
+                      setForm({ ...EMPTY_FORM, kind: "csv" })
+                    }
+                  />
+                  CSV
+                </label>
+                <label className="ldtp-form-radio-label">
+                  <input
+                    type="radio"
+                    name="ldtp-kind"
+                    value="sqlite"
+                    checked={form.kind === "sqlite"}
+                    onChange={() =>
+                      setForm({ ...EMPTY_FORM, kind: "sqlite" })
+                    }
+                  />
+                  SQLite
+                </label>
+              </div>
+            </div>
+
+            {/* File path picker */}
+            <div className="ldtp-form-row">
+              <label className="ldtp-form-label">
+                {form.kind === "sqlite" ? "SQLite ファイル" : "CSV ファイル"}
+              </label>
               <div className="ldtp-form-file-row">
                 <span className="ldtp-form-file-path">
                   {form.filePath || "（未選択）"}
@@ -316,11 +437,40 @@ export default function LinkedDataTypesPanel({
               </div>
             </div>
 
+            {/* SQLite: table selector */}
+            {form.kind === "sqlite" && form.sqliteTables.length > 0 && (
+              <div className="ldtp-form-row">
+                <label htmlFor="ldtp-sqlite-table" className="ldtp-form-label">
+                  テーブル
+                </label>
+                <select
+                  id="ldtp-sqlite-table"
+                  className="ldtp-form-select"
+                  title="SQLite テーブル選択"
+                  aria-label="SQLite テーブル選択"
+                  value={form.sqliteTable}
+                  onChange={(e) =>
+                    handleSqliteTableChange(form.filePath, e.target.value)
+                  }
+                >
+                  {form.sqliteTables.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Source name + key column (shown once columns are available) */}
             {form.headers.length > 0 && (
               <>
                 <div className="ldtp-form-row">
-                  <label className="ldtp-form-label">ソース名</label>
+                  <label htmlFor="ldtp-source-name" className="ldtp-form-label">
+                    ソース名
+                  </label>
                   <input
+                    id="ldtp-source-name"
                     type="text"
                     className="ldtp-form-input"
                     value={form.sourceName}
@@ -331,9 +481,14 @@ export default function LinkedDataTypesPanel({
                   />
                 </div>
                 <div className="ldtp-form-row">
-                  <label className="ldtp-form-label">キー列</label>
+                  <label htmlFor="ldtp-key-column" className="ldtp-form-label">
+                    キー列
+                  </label>
                   <select
+                    id="ldtp-key-column"
                     className="ldtp-form-select"
+                    title="キー列選択"
+                    aria-label="キー列選択"
                     value={form.keyColumn}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, keyColumn: e.target.value }))

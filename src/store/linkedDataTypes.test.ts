@@ -12,6 +12,7 @@ import {
   updateSource,
   listSources,
   lookupInSource,
+  normalizeSource,
 } from "./linkedDataTypes";
 
 // ---------------------------------------------------------------------------
@@ -26,6 +27,21 @@ function makeSource(overrides: Partial<LinkedDataTypeSource> = {}): LinkedDataTy
     keyColumn: "Ticker",
     columns: ["Ticker", "Price", "Industry"],
     updatedAt: "2026-05-27T00:00:00.000Z",
+    kind: "csv",
+    ...overrides,
+  };
+}
+
+function makeSqliteSource(overrides: Partial<LinkedDataTypeSource> = {}): LinkedDataTypeSource {
+  return {
+    id: "src-sqlite-1",
+    name: "SQLite データ",
+    sourcePath: "/data/stocks.db",
+    keyColumn: "ticker",
+    columns: ["ticker", "price", "industry"],
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    kind: "sqlite",
+    sqliteTable: "stocks",
     ...overrides,
   };
 }
@@ -199,5 +215,99 @@ describe("lookupInSource", () => {
   it("returns all columns in the matched row", () => {
     const result = lookupInSource(SAMPLE_CSV_DATA, "AAPL", source);
     expect(result).toMatchObject({ Ticker: "AAPL", Price: "185", Industry: "Technology" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #310 — SQLite source kind tests
+// ---------------------------------------------------------------------------
+
+describe("normalizeSource", () => {
+  it("adds kind='csv' to a legacy source that has no kind field", () => {
+    const legacy = makeSource();
+    // Simulate a pre-#310 snapshot entry by omitting the kind field.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { kind: _omit, ...legacyRest } = legacy;
+    const legacyNoKind = legacyRest as unknown as LinkedDataTypeSource;
+    expect(legacyNoKind.kind).toBeUndefined();
+
+    const normalized = normalizeSource(legacyNoKind);
+    expect(normalized.kind).toBe("csv");
+    // Other fields must be preserved.
+    expect(normalized.id).toBe("src-1");
+    expect(normalized.keyColumn).toBe("Ticker");
+  });
+
+  it("does not change kind when already set to 'csv'", () => {
+    const src = makeSource({ kind: "csv" });
+    expect(normalizeSource(src).kind).toBe("csv");
+  });
+
+  it("does not change kind when set to 'sqlite'", () => {
+    const src = makeSqliteSource();
+    const normalized = normalizeSource(src);
+    expect(normalized.kind).toBe("sqlite");
+    expect(normalized.sqliteTable).toBe("stocks");
+  });
+});
+
+describe("SQLite source — isValidSource via readLinkedDataTypes", () => {
+  it("accepts a valid sqlite source in a snapshot", () => {
+    const snap = {
+      _cocoDataTypes: { sources: [makeSqliteSource()] },
+    };
+    const model = readLinkedDataTypes(snap);
+    expect(model.sources).toHaveLength(1);
+    const src = model.sources[0];
+    expect(src.kind).toBe("sqlite");
+    expect(src.sqliteTable).toBe("stocks");
+  });
+
+  it("rejects a sqlite source with invalid kind value", () => {
+    const snap = {
+      _cocoDataTypes: {
+        sources: [makeSqliteSource({ kind: "excel" as unknown as "sqlite" })],
+      },
+    };
+    const model = readLinkedDataTypes(snap);
+    expect(model.sources).toHaveLength(0);
+  });
+
+  it("rejects a sqlite source with non-string sqliteTable", () => {
+    const snap = {
+      _cocoDataTypes: {
+        sources: [makeSqliteSource({ sqliteTable: 42 as unknown as string })],
+      },
+    };
+    const model = readLinkedDataTypes(snap);
+    expect(model.sources).toHaveLength(0);
+  });
+
+  it("survives write → read round-trip for a sqlite source", () => {
+    const src = makeSqliteSource();
+    const model: CocoLinkedDataTypes = { sources: [src] };
+    const snap = writeLinkedDataTypes({}, model);
+    const recovered = readLinkedDataTypes(snap);
+    expect(recovered.sources).toHaveLength(1);
+    expect(recovered.sources[0].kind).toBe("sqlite");
+    expect(recovered.sources[0].sqliteTable).toBe("stocks");
+  });
+
+  it("legacy source (no kind) passes isValidSource and can be normalized", () => {
+    const legacyRaw = {
+      id: "legacy-1",
+      name: "旧ソース",
+      sourcePath: "/old/data.csv",
+      keyColumn: "ID",
+      columns: ["ID", "Name"],
+      updatedAt: "2025-01-01T00:00:00.000Z",
+      // no kind field
+    };
+    const snap = { _cocoDataTypes: { sources: [legacyRaw] } };
+    const model = readLinkedDataTypes(snap);
+    expect(model.sources).toHaveLength(1);
+    // Apply normalize.
+    const normalized = normalizeSource(model.sources[0]);
+    expect(normalized.kind).toBe("csv");
   });
 });

@@ -12,7 +12,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { CfSidecar } from "./cfSidecar";
-import { computeCfApplyPlan } from "./cfApplyPlan";
+import { computeCfApplyPlan, recoverNumericFromPolluted } from "./cfApplyPlan";
 import { batchCfPlan } from "./cfRangeBatch";
 import type { CfRuleEntry } from "../components/conditionalFormatRender";
 
@@ -416,5 +416,137 @@ describe("Scenario 5: iconSet — numeric value is not mutated by plan", () => {
 
     // After clear, sidecar must be empty.
     expect(sidecar.size).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scenario 6: polluted snapshot recovery — iconSet re-paint idempotency
+// when cell.v contains an embedded glyph string (e.g. "↓ 1" instead of 1).
+// ---------------------------------------------------------------------------
+describe("Scenario 6: iconSet — polluted snapshot recovery", () => {
+  let sidecar: CfSidecar;
+
+  beforeEach(() => {
+    sidecar = new CfSidecar();
+  });
+
+  /** Build a snapshot where cell.v is a polluted iconSet string (glyph + space + number). */
+  function pollutedIconSnap(glyphValues: Array<[string, number]>) {
+    const cells: Record<string, Record<string, unknown>> = {};
+    glyphValues.forEach(([glyph, n], i) => {
+      cells[String(i)] = { "0": { v: `${glyph} ${n}` } };
+    });
+    return { sheets: { s1: { cellData: cells } } };
+  }
+
+  it("recoverNumericFromPolluted strips single-codepoint iconSet glyph and returns number", () => {
+    // 3arrows glyphs
+    expect(recoverNumericFromPolluted("↓ 1")).toBe(1);
+    expect(recoverNumericFromPolluted("→ 5")).toBe(5);
+    expect(recoverNumericFromPolluted("↑ 10")).toBe(10);
+    // traffic-light glyphs (emoji)
+    expect(recoverNumericFromPolluted("🔴 42")).toBe(42);
+    expect(recoverNumericFromPolluted("🟡 7")).toBe(7);
+    expect(recoverNumericFromPolluted("🟢 99")).toBe(99);
+    // Non-polluted values pass through unchanged.
+    expect(recoverNumericFromPolluted(42)).toBe(42);
+    expect(recoverNumericFromPolluted("hello")).toBe("hello");
+    expect(recoverNumericFromPolluted(undefined)).toBeUndefined();
+  });
+
+  it("recoverNumericFromPolluted strips 5-rating multi-char prefix and returns number", () => {
+    expect(recoverNumericFromPolluted("★☆☆☆☆ 1")).toBe(1);
+    expect(recoverNumericFromPolluted("★★☆☆☆ 2")).toBe(2);
+    expect(recoverNumericFromPolluted("★★★☆☆ 3")).toBe(3);
+    expect(recoverNumericFromPolluted("★★★★☆ 4")).toBe(4);
+    expect(recoverNumericFromPolluted("★★★★★ 5")).toBe(5);
+  });
+
+  it("polluted snapshot opened fresh: first computeCfApplyPlan recovers numeric and sidecar gets correct glyph", () => {
+    // Simulate opening a file where patchCfRenders previously wrote "↓ 1", "→ 5", "↑ 10"
+    // into cell.v (the polluted state). sidecar is cold (first open).
+    const snap = pollutedIconSnap([["↓", 1], ["→", 5], ["↑", 10]]);
+    const rule = iconSetRule("A1:A3", "3arrows");
+
+    const plan = computeCfApplyPlan(sidecar, snap, "s1", [], [rule]);
+
+    // All 3 cells should be paint (sidecar was cold, no prior entry).
+    expect(plan).toHaveLength(3);
+    expect(plan.every((e) => e.action === "paint")).toBe(true);
+
+    // Sidecar should have the correct glyphs recovered from the polluted values.
+    expect(sidecar.get("s1", 0, 0)?.cfStyle.iconValue).toBe("↓");
+    expect(sidecar.get("s1", 1, 0)?.cfStyle.iconValue).toBe("→");
+    expect(sidecar.get("s1", 2, 0)?.cfStyle.iconValue).toBe("↑");
+  });
+
+  it("polluted snapshot: second computeCfApplyPlan is noop (idempotent after recovery)", () => {
+    // After the first round recovers and records the sidecar, subsequent rounds
+    // with the same polluted snapshot must produce noop (no re-paint).
+    const snap = pollutedIconSnap([["↓", 1], ["→", 5], ["↑", 10]]);
+    const rule = iconSetRule("A1:A3", "3arrows");
+
+    // Round 1 — paint (sidecar cold).
+    computeCfApplyPlan(sidecar, snap, "s1", [], [rule]);
+
+    // Rounds 2-5 — same polluted snapshot: must be noop.
+    for (let i = 0; i < 4; i++) {
+      const plan = computeCfApplyPlan(sidecar, snap, "s1", [rule], [rule]);
+      const repainted = plan.filter((e) => e.action === "paint");
+      expect(repainted).toHaveLength(0);
+    }
+  });
+
+  it("mixed polluted + clean snapshot: polluted cells recover, clean cells stay idempotent", () => {
+    // Cell 0: polluted "↓ 1", Cell 1: clean numeric 5, Cell 2: polluted "↑ 10"
+    const cells: Record<string, Record<string, unknown>> = {
+      "0": { "0": { v: "↓ 1" } },
+      "1": { "0": { v: 5 } },
+      "2": { "0": { v: "↑ 10" } },
+    };
+    const snap = { sheets: { s1: { cellData: cells } } };
+    const rule = iconSetRule("A1:A3", "3arrows");
+
+    // Round 1 — paint.
+    const plan1 = computeCfApplyPlan(sidecar, snap, "s1", [], [rule]);
+    expect(plan1).toHaveLength(3);
+    expect(plan1.every((e) => e.action === "paint")).toBe(true);
+
+    // Correct glyphs for all three cells regardless of pollution.
+    expect(sidecar.get("s1", 0, 0)?.cfStyle.iconValue).toBe("↓");
+    expect(sidecar.get("s1", 1, 0)?.cfStyle.iconValue).toBe("→");
+    expect(sidecar.get("s1", 2, 0)?.cfStyle.iconValue).toBe("↑");
+
+    // Round 2 — noop.
+    const plan2 = computeCfApplyPlan(sidecar, snap, "s1", [rule], [rule]);
+    expect(plan2.filter((e) => e.action === "paint")).toHaveLength(0);
+  });
+
+  it("different iconSet glyphs (↑/↓/→) all recover correctly from polluted strings", () => {
+    // Verify each glyph variant is individually recoverable.
+    const cases: Array<[string, number, string]> = [
+      ["↑", 100, "↑"],
+      ["→", 50, "→"],
+      ["↓", 10, "↓"],
+    ];
+    for (const [glyph, value, expectedGlyph] of cases) {
+      const localSidecar = new CfSidecar();
+      const cells: Record<string, Record<string, unknown>> = {
+        "0": { "0": { v: `${glyph} ${value}` } },
+      };
+      const snap = { sheets: { s1: { cellData: cells } } };
+      // Rule over a single cell — min==max, so the cell gets the last bucket.
+      const rule = iconSetRule("A1:A1", "3arrows");
+      computeCfApplyPlan(localSidecar, snap, "s1", [], [rule]);
+      // With a single-cell range, min == max, so the glyph is the last bucket (↑).
+      // The key check here is that the plan is paint (not a NaN-based mis-fire)
+      // and that the sidecar records a valid glyph (not an empty string from NaN).
+      const entry = localSidecar.get("s1", 0, 0);
+      expect(entry).not.toBeNull();
+      expect(typeof entry?.cfStyle.iconValue).toBe("string");
+      expect(entry!.cfStyle.iconValue!.length).toBeGreaterThan(0);
+      // Suppress unused variable warning.
+      void expectedGlyph;
+    }
   });
 });

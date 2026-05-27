@@ -65,6 +65,13 @@ None.
 
 ## Medium — round-trip / power-user features
 
+### medium-form-control-byte-preserve (closed)
+
+- **Title**: Form Control OOXML round-trip — byte-preserve `ctrlProps` + `vmlDrawing` on xlsx save (#194 MVP)
+- **Refs**: `src-tauri/src/commands/xlsx_io.rs` (`PRESERVED_PREFIXES` — `"xl/ctrlProps/"` and `"xl/drawings/"` entries), `src-tauri/tests/xlsx_form_control_round_trip.rs`
+- **Resolution**: No new implementation was required. `xl/ctrlProps/` was already added to `PRESERVED_PREFIXES` in a prior commit (#194 Step 1 comment at line 6437). `xl/drawings/` (which covers `vmlDrawing*.vml` and its `_rels/`) was already present. The `merge_content_type_overrides` pass also re-adds Override entries for these prefixes so Excel recognises the parts on re-open. This means Excel-authored form controls (CheckBox, Radio, Spinner, ScrollBar) survive a Coco round-trip byte-for-byte without any additional code changes. 8 regression tests added in `xlsx_form_control_round_trip.rs`: ctrlProp byte equality, vmlDrawing byte equality, vmlDrawing _rels snapshot capture, vml rels in parts snapshot, ctrl+vml co-existence, Content_Types Override presence, double-round-trip idempotency, plain-workbook unaffected guard.
+- **Out of scope** (separate issue): Emitting `<formControlPr>` / `xl/ctrlProps/` XML from scratch for Coco-authored form controls; `<legacyDrawing>` / VML authoring; per-objectType (Radio / Spinner / ScrollBar) native render.
+
 ### medium-cf-dxf-emit (closed)
 - **Title**: Emit dxf-referenced visual format on CF export
 - **Refs**: `src-tauri/src/commands/xlsx_io.rs:3361` (parse), `src-tauri/src/commands/xlsx_io.rs:3595` (build_cf_rule_format), `src-tauri/src/commands/xlsx_io.rs:3697` (apply)

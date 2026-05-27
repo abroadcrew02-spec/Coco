@@ -201,6 +201,8 @@ import {
 import { toDataModel, applyCalculatedColumns } from "../store/cocoDataModel";
 import ChartCanvasPanel from "./ChartCanvasPanel";
 import InGridChartLayer from "./InGridChartLayer";
+import InGridImageLayer from "./InGridImageLayer";
+import type { ImageEntry } from "../store/inGridImage";
 import InsertSlicerDialog from "./InsertSlicerDialog";
 import SlicerPanel from "./SlicerPanel";
 import {
@@ -6253,6 +6255,47 @@ export default function EditorScreen() {
     [getSnapshotForTool, applyMutatedSnapshot],
   );
 
+  // Persist drag/resize result back to the workbook snapshot for images (#312).
+  // Called by InGridImageLayer on every pointerup that moved/resized an image.
+  const handleImageAnchorChange = useCallback(
+    (sheetId: string, imageIndex: number, updated: ImageEntry) => {
+      const snapshot = getSnapshotForTool("画像移動");
+      if (!snapshot) return;
+      const sheets = (snapshot.sheets as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const sheetObj = sheets[sheetId];
+      if (!sheetObj) return;
+      const existing = Array.isArray(sheetObj._images)
+        ? (sheetObj._images as Array<Record<string, unknown>>)
+        : [];
+      if (imageIndex < 0 || imageIndex >= existing.length) return;
+      const next = existing.map((img, i) => (i === imageIndex ? { ...img, ...(updated as unknown as Record<string, unknown>) } : img));
+      sheetObj._images = next;
+      applyMutatedSnapshot(JSON.stringify(snapshot));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
+  // Remove an image from the active sheet. Wired to InGridImageLayer's
+  // onImageDelete prop (Delete / Backspace key on a focused image frame).
+  const deleteInGridImage = useCallback(
+    (sheetId: string, imageIndex: number) => {
+      const snapshot = getSnapshotForTool("画像削除");
+      if (!snapshot) return;
+      const sheets = (snapshot.sheets as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const sheetObj = sheets[sheetId];
+      if (!sheetObj) return;
+      const existing = Array.isArray(sheetObj._images)
+        ? (sheetObj._images as Array<Record<string, unknown>>)
+        : [];
+      if (imageIndex < 0 || imageIndex >= existing.length) return;
+      const next = [...existing];
+      next.splice(imageIndex, 1);
+      sheetObj._images = next;
+      applyMutatedSnapshot(JSON.stringify(snapshot));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
   // Number-format dialog plumbing. Captures the active selection's bounding
   // rows/cols + the anchor cell's existing `_fmt` (so the dialog can pre-select
   // a preset) and stashes them in state. We pin coords at open time so the
@@ -6543,162 +6586,42 @@ export default function EditorScreen() {
     return { col: col - 1, row: parseInt(m[2], 10) - 1 };
   };
 
-  // Apply the new image by mutating the snapshot's `_preservedParts`.
-  // Returns null on success, or a user-visible error string on rejection
-  // (#50: surface failures back to the dialog instead of silently closing it).
+  // Apply the new image by appending an ImageEntry to sheets[id]._images
+  // (#312). Returns null on success, or a user-visible error string on rejection.
+  // Replaces the legacy _preservedParts write path — per #312 design, _images
+  // and _preservedParts are exclusive per sheet for Coco-authored images.
   const applyImage = useCallback(
     (value: ImageFormValue): string | null => {
       if (!imageDialog) return "ダイアログの状態が無効です";
-      const fUniver = fUniverRef.current;
-      if (!fUniver) return "ワークブックがまだ準備できていません";
-      const workbook = fUniver.getActiveWorkbook();
-      if (!workbook) return "アクティブなワークブックがありません";
-      const snapshot = workbook.save() as unknown as Record<string, unknown>;
-      const sheetOrder = (snapshot.sheetOrder as string[] | undefined) ?? [];
-      const sheetIdx = sheetOrder.indexOf(imageDialog.sheetId);
-      if (sheetIdx < 0) return "対象シートが見つかりません";
+      const snapshot = getSnapshotForTool("画像挿入");
+      if (!snapshot) return "ワークブックがまだ準備できていません";
       const pos = a1ToColRow(value.cell);
       if (!pos) return "アンカーセルの解析に失敗しました";
 
-      type PreservedPart = string;
-      type SheetRef = {
-        drawingRid?: string | null;
-        drawingTarget?: string | null;
-        pivotRels?: Array<{ rid: string; target: string }>;
-      } | null;
-      const preserved = (snapshot._preservedParts as
-        | {
-            parts?: Record<string, PreservedPart>;
-            sheetRefs?: SheetRef[];
-            contentTypes?: string;
-          }
-        | undefined) ?? {};
-      const parts: Record<string, PreservedPart> = { ...(preserved.parts ?? {}) };
-      const sheetRefs: SheetRef[] = (preserved.sheetRefs ?? []).slice();
+      const sheets = (snapshot.sheets as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const sheetObj = sheets[imageDialog.sheetId];
+      if (!sheetObj) return "対象シートが見つかりません";
 
-      const existing = sheetRefs[sheetIdx];
-      if (existing && existing.drawingRid) {
-        // #50: previously silently logged + returned. Surface the limitation
-        // so the user understands why their insert was rejected.
-        return "このシートには既に図形/画像があります。現状は1シートに1つまで挿入できます。";
-      }
+      const existing = Array.isArray(sheetObj._images)
+        ? (sheetObj._images as Array<Record<string, unknown>>)
+        : [];
 
-      const usedImageNums = new Set<number>();
-      const usedDrawingNums = new Set<number>();
-      for (const key of Object.keys(parts)) {
-        const mImg = /^xl\/media\/image(\d+)\.[a-zA-Z]+$/.exec(key);
-        if (mImg) usedImageNums.add(parseInt(mImg[1], 10));
-        const mDr = /^xl\/drawings\/drawing(\d+)\.xml$/.exec(key);
-        if (mDr) usedDrawingNums.add(parseInt(mDr[1], 10));
-      }
-      let imgN = 1;
-      while (usedImageNums.has(imgN)) imgN++;
-      let drN = 1;
-      while (usedDrawingNums.has(drN)) drN++;
-
-      const mediaName = `xl/media/image${imgN}.${value.ext}`;
-      const drawingName = `xl/drawings/drawing${drN}.xml`;
-      const drawingRelsName = `xl/drawings/_rels/drawing${drN}.xml.rels`;
-
-      const fromCol = pos.col;
-      const fromRow = pos.row;
-      const toCol = fromCol + 4;
-      const toRow = fromRow + 10;
-      const drawingXml =
-        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-        `<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"` +
-        ` xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"` +
-        ` xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
-        `<xdr:twoCellAnchor editAs="oneCell">` +
-        `<xdr:from><xdr:col>${fromCol}</xdr:col><xdr:colOff>0</xdr:colOff>` +
-        `<xdr:row>${fromRow}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>` +
-        `<xdr:to><xdr:col>${toCol}</xdr:col><xdr:colOff>0</xdr:colOff>` +
-        `<xdr:row>${toRow}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>` +
-        `<xdr:pic>` +
-        `<xdr:nvPicPr>` +
-        `<xdr:cNvPr id="2" name="Picture 1"/>` +
-        `<xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr>` +
-        `</xdr:nvPicPr>` +
-        `<xdr:blipFill>` +
-        `<a:blip r:embed="rId1"/>` +
-        `<a:stretch><a:fillRect/></a:stretch>` +
-        `</xdr:blipFill>` +
-        `<xdr:spPr>` +
-        `<a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></a:xfrm>` +
-        `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>` +
-        `</xdr:spPr>` +
-        `</xdr:pic>` +
-        `<xdr:clientData/>` +
-        `</xdr:twoCellAnchor>` +
-        `</xdr:wsDr>`;
-
-      const drawingRelsXml =
-        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-        `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
-        `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"` +
-        ` Target="../media/image${imgN}.${value.ext}"/>` +
-        `</Relationships>`;
-
-      const xmlToB64 = (s: string): string => {
-        const bytes = new TextEncoder().encode(s);
-        let bin = "";
-        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-        return btoa(bin);
+      const ext = value.ext.toLowerCase() as "png" | "jpg" | "jpeg" | "gif" | "bmp";
+      const newEntry = {
+        base64: value.base64,
+        ext,
+        anchorRow: pos.row,
+        anchorCol: pos.col,
+        widthPx: 320,
+        heightPx: 200,
+        name: value.name,
       };
 
-      parts[mediaName] = value.base64;
-      parts[drawingName] = xmlToB64(drawingXml);
-      parts[drawingRelsName] = xmlToB64(drawingRelsXml);
-
-      while (sheetRefs.length <= sheetIdx) sheetRefs.push(null);
-      sheetRefs[sheetIdx] = {
-        drawingRid: "rId1",
-        drawingTarget: `../drawings/drawing${drN}.xml`,
-        pivotRels: existing?.pivotRels ?? [],
-      };
-
-      (snapshot as Record<string, unknown>)._preservedParts = {
-        ...preserved,
-        parts,
-        sheetRefs,
-      };
-
+      sheetObj._images = [...existing, newEntry];
       applyMutatedSnapshot(JSON.stringify(snapshot));
-
-      // Phase 4d (#high-image-live): the snapshot mutation alone doesn't
-      // re-mount Univer, so the image wouldn't appear in-grid until the user
-      // saves and reopens (when the xlsx import bridge re-emits
-      // `resources[SHEET_DRAWING_PLUGIN]` from `_preservedParts`). Fire a
-      // facade `insertImage` so the image renders immediately in-session.
-      // Fire-and-forget: if the facade rejects, the export round-trip still
-      // works via `_preservedParts` and the image will appear on next reopen.
-      const ext = value.ext.toLowerCase();
-      const mime =
-        ext === "jpg" || ext === "jpeg" ? "image/jpeg" :
-        ext === "png" ? "image/png" :
-        ext === "gif" ? "image/gif" :
-        ext === "bmp" ? "image/bmp" :
-        ext === "webp" ? "image/webp" :
-        `image/${ext}`;
-      const dataUrl = `data:${mime};base64,${value.base64}`;
-      try {
-        const fSheet = workbook.getActiveSheet();
-        const fSheetWithImage = fSheet as unknown as {
-          insertImage?: (url: string, col: number, row: number) => Promise<boolean>;
-        } | null;
-        if (fSheetWithImage?.insertImage) {
-          void fSheetWithImage
-            .insertImage(dataUrl, pos.col, pos.row)
-            .catch((err: unknown) => {
-              console.warn("[Coco] in-grid image render failed:", err);
-            });
-        }
-      } catch (err) {
-        console.warn("[Coco] facade insertImage threw synchronously:", err);
-      }
       return null;
     },
-    [imageDialog, applyMutatedSnapshot],
+    [imageDialog, getSnapshotForTool, applyMutatedSnapshot],
   );
 
   // #146 / #188 — Insert-shape dialog plumbing. Snapshots the active sheet +
@@ -9396,6 +9319,12 @@ export default function EditorScreen() {
           onChartChange={handleChartAnchorChange}
           onChartEdit={openChartEditor}
           onChartDelete={deleteInGridChart}
+        />
+        <InGridImageLayer
+          workbookSnapshotJson={currentSnapshotJson}
+          activeSheetId={activeSheetId}
+          onImageChange={handleImageAnchorChange}
+          onImageDelete={deleteInGridImage}
         />
         <CommentIndicatorsPanel
           indicators={commentIndicators}

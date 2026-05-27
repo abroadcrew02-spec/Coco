@@ -4,8 +4,11 @@ import {
   computePivot,
   generatePivotName,
   inferFieldNames,
+  replacePivotInSheet,
   type PivotConfig,
+  type PivotEntry,
   type PivotRange,
+  type WorkbookPivotSnapshot,
 } from "./pivots";
 
 // #237 — Regression suite for the pre-existing pivot engine. The
@@ -228,5 +231,109 @@ describe("computePivot", () => {
     const flat = result.output.flat();
     expect(flat).toContain(100);
     expect(flat).toContain(200);
+  });
+});
+
+describe("replacePivotInSheet", () => {
+  function makeWorkbook(): WorkbookPivotSnapshot {
+    return {
+      sheetOrder: ["s1"],
+      sheets: {
+        s1: {
+          name: "Sheet1",
+          cellData: {
+            // Old pivot output at destination row=10, col=0 (3 rows × 2 cols)
+            "10": { "0": { v: "Old header" }, "1": { v: "Total" } },
+            "11": { "0": { v: "East" }, "1": { v: 100 } },
+            "12": { "0": { v: "Total" }, "1": { v: 100 } },
+          },
+          _pivots: [
+            {
+              name: "Pivot1",
+              source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
+              destination: { row: 10, col: 0 },
+              rows: ["Year"],
+              cols: [],
+              values: [{ field: "Sales", agg: "SUM" }],
+              filters: [],
+              hasHeader: true,
+              lastOutputRows: 3,
+              lastOutputCols: 2,
+            } satisfies PivotEntry,
+          ],
+        },
+      },
+    };
+  }
+
+  it("replaces the entry in _pivots", () => {
+    const wb = makeWorkbook();
+    const newEntry: PivotEntry = {
+      name: "Pivot1",
+      source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
+      destination: { row: 10, col: 0 },
+      rows: ["Region"],
+      cols: [],
+      values: [{ field: "Sales", agg: "AVERAGE" }],
+      hasHeader: true,
+      lastOutputRows: 2,
+      lastOutputCols: 2,
+    };
+    const result = replacePivotInSheet(wb, newEntry);
+    expect(result.ok).toBe(true);
+    const pivots = wb.sheets!["s1"]!._pivots!;
+    expect(pivots).toHaveLength(1);
+    expect(pivots[0].rows).toEqual(["Region"]);
+    expect(pivots[0].values[0].agg).toBe("AVERAGE");
+  });
+
+  it("wipes the old output footprint from cellData", () => {
+    const wb = makeWorkbook();
+    const newEntry: PivotEntry = {
+      name: "Pivot1",
+      source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
+      destination: { row: 10, col: 0 },
+      rows: ["Region"],
+      cols: [],
+      values: [{ field: "Sales", agg: "SUM" }],
+      hasHeader: true,
+      lastOutputRows: 2,
+      lastOutputCols: 2,
+    };
+    replacePivotInSheet(wb, newEntry);
+    // Old cells at rows 10-12 cols 0-1 should be deleted.
+    const cellData = wb.sheets!["s1"]!.cellData!;
+    expect(cellData["10"]?.["0"]).toBeUndefined();
+    expect(cellData["10"]?.["1"]).toBeUndefined();
+    expect(cellData["11"]?.["0"]).toBeUndefined();
+    expect(cellData["12"]?.["0"]).toBeUndefined();
+  });
+
+  it("returns { ok: false } when the pivot name is not found", () => {
+    const wb = makeWorkbook();
+    const newEntry: PivotEntry = {
+      name: "NonExistent",
+      source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
+      destination: { row: 0, col: 0 },
+      rows: [],
+      cols: [],
+      values: [{ field: "Sales", agg: "SUM" }],
+      hasHeader: true,
+    };
+    const result = replacePivotInSheet(wb, newEntry);
+    expect(result.ok).toBe(false);
+  });
+
+  it("returns { ok: false } for an empty workbook", () => {
+    const result = replacePivotInSheet({}, {
+      name: "Pivot1",
+      source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 1, c2: 1 } },
+      destination: { row: 0, col: 0 },
+      rows: [],
+      cols: [],
+      values: [{ field: "Sales", agg: "SUM" }],
+      hasHeader: true,
+    } satisfies PivotEntry);
+    expect(result.ok).toBe(false);
   });
 });

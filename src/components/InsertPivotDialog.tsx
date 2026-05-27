@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { PivotAggregator, PivotConfig, PivotValueField } from "../store/pivots";
+import type { PivotAggregator, PivotConfig, PivotEntry, PivotValueField } from "../store/pivots";
 import { parseA1Cell, parseA1Range } from "../store/pivots";
 import "./InsertPivotDialog.css";
 
@@ -26,6 +26,12 @@ interface Props {
   sourceFieldNames: string[];
   /** Source sheet id — threaded in by the caller and re-emitted on apply. */
   sourceSheetId: string;
+  /**
+   * When provided, the dialog opens in "edit" mode: all fields are
+   * pre-populated from the existing entry, the title reads
+   * "ピボットの編集", and the primary button reads "更新".
+   */
+  initialEntry?: PivotEntry;
   onApply: (config: PivotConfig) => void;
   onClose: () => void;
 }
@@ -35,20 +41,49 @@ export default function InsertPivotDialog({
   initialDestination,
   sourceFieldNames,
   sourceSheetId,
+  initialEntry,
   onApply,
   onClose,
 }: Props) {
+  const isEditMode = initialEntry !== undefined;
+
   const [sourceRange, setSourceRange] = useState(initialSourceRange);
   const [destination, setDestination] = useState(initialDestination);
-  const [hasHeader, setHasHeader] = useState(true);
-  const [fields, setFields] = useState<FieldDraft[]>(() =>
-    sourceFieldNames.map((n) => ({
+  const [hasHeader, setHasHeader] = useState(initialEntry?.hasHeader ?? true);
+  const [fields, setFields] = useState<FieldDraft[]>(() => {
+    if (initialEntry) {
+      // Pre-populate roles from the existing entry.
+      return sourceFieldNames.map((n) => {
+        let role: FieldRole = null;
+        let agg: PivotAggregator = "SUM";
+        let filterValues = "";
+        if (initialEntry.rows.includes(n)) {
+          role = "rows";
+        } else if (initialEntry.cols.includes(n)) {
+          role = "cols";
+        } else {
+          const vf = initialEntry.values.find((v) => v.field === n);
+          if (vf) {
+            role = "values";
+            agg = vf.agg;
+          } else {
+            const ff = initialEntry.filters?.find((f) => f.field === n);
+            if (ff) {
+              role = "filters";
+              filterValues = ff.values.join(", ");
+            }
+          }
+        }
+        return { name: n, role, agg, filterValues };
+      });
+    }
+    return sourceFieldNames.map((n) => ({
       name: n,
-      role: null,
+      role: null as FieldRole,
       agg: "SUM" as PivotAggregator,
       filterValues: "",
-    })),
-  );
+    }));
+  });
   const [error, setError] = useState<string | null>(null);
 
   // ESC to close — same convention as SubtotalDialog.
@@ -152,7 +187,9 @@ export default function InsertPivotDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <header className="ipd-header">
-          <h2 id="ipd-title" className="ipd-title">ピボットテーブルの作成</h2>
+          <h2 id="ipd-title" className="ipd-title">
+            {isEditMode ? "ピボットの編集" : "ピボットテーブルの作成"}
+          </h2>
           <button type="button" className="ipd-close" onClick={onClose} aria-label="閉じる">
             ×
           </button>
@@ -281,7 +318,7 @@ export default function InsertPivotDialog({
               キャンセル
             </button>
             <button type="button" className="ipd-btn ipd-btn--primary" onClick={submit}>
-              作成
+              {isEditMode ? "更新" : "作成"}
             </button>
           </div>
         </footer>

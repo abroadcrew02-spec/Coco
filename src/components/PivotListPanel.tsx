@@ -15,6 +15,8 @@ interface Props {
   onRefresh: (name: string) => void;
   onDelete: (sheetId: string, name: string) => void;
   onJumpTo: (sheetId: string, cell: string) => void;
+  /** When provided, an "edit" button is rendered for each pivot row. */
+  onEdit?: (sheetId: string, pivot: PivotEntry) => void;
 }
 
 export default function PivotListPanel({
@@ -22,6 +24,7 @@ export default function PivotListPanel({
   onRefresh,
   onDelete,
   onJumpTo,
+  onEdit,
 }: Props) {
   const rows = useMemo<PanelRow[]>(() => {
     if (!workbookSnapshotJson) return [];
@@ -86,6 +89,17 @@ export default function PivotListPanel({
               >
                 ⟳
               </button>
+              {onEdit && (
+                <button
+                  type="button"
+                  className="pvlp-edit"
+                  onClick={() => onEdit(row.sheetId, row.pivot)}
+                  aria-label={`${row.pivot.name} を編集`}
+                  title="編集"
+                >
+                  ✎
+                </button>
+              )}
               <button
                 type="button"
                 className="pvlp-delete"

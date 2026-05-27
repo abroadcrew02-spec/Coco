@@ -92,6 +92,7 @@
 }
 
 .pvlp-refresh,
+.pvlp-edit,
 .pvlp-delete {
   background: none;
   border: none;
@@ -104,6 +105,11 @@
 }
 
 .pvlp-refresh:hover {
+  color: var(--coco-accent);
+  background-color: var(--coco-accent-subtle);
+}
+
+.pvlp-edit:hover {
   color: var(--coco-accent);
   background-color: var(--coco-accent-subtle);
 }

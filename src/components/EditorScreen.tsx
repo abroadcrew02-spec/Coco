@@ -191,7 +191,9 @@ import {
   computePivot,
   addPivot as addPivotToSheet,
   refreshPivot as refreshPivotInSheet,
+  replacePivotInSheet,
   parseA1Range as parsePivotA1Range,
+  rangeToA1 as pivotRangeToA1,
   cellToA1 as pivotCellToA1,
 } from "../store/pivots";
 import ChartCanvasPanel from "./ChartCanvasPanel";
@@ -909,6 +911,7 @@ export default function EditorScreen() {
     sourceRange: string;
     destCell: string;
     fieldNames: string[];
+    initialEntry?: PivotEntry;
   } | null>(null);
   const [pivotsPanelOpen, setPivotsPanelOpen] = useState(false);
   const [chartsCanvasPanelOpen, setChartsCanvasPanelOpen] = useState(false);
@@ -2697,6 +2700,23 @@ export default function EditorScreen() {
     setPivotDialog({ sheetId, sourceRange, destCell, fieldNames });
   }, [getReadyWorkbook]);
 
+  const openPivotEditor = useCallback(
+    (sourceSheetId: string, entry: PivotEntry) => {
+      const fUniver = fUniverRef.current;
+      const workbook = fUniver?.getActiveWorkbook();
+      if (!workbook) return;
+      const snap = workbook.save() as unknown as {
+        sheets?: Record<string, { cellData?: Record<string, Record<string, { v?: unknown; s?: unknown } | undefined> | undefined> }>;
+      };
+      const sourceRange = pivotRangeToA1(entry.source.range);
+      const destCell = pivotCellToA1(entry.destination.row, entry.destination.col);
+      const cellData = snap.sheets?.[sourceSheetId]?.cellData;
+      const fieldNames = inferFieldNames(cellData, entry.source.range, entry.hasHeader);
+      setPivotDialog({ sheetId: sourceSheetId, sourceRange, destCell, fieldNames, initialEntry: entry });
+    },
+    [],
+  );
+
   const applyPivot = useCallback(
     (config: PivotConfig) => {
       const fUniver = fUniverRef.current;
@@ -2707,6 +2727,10 @@ export default function EditorScreen() {
       };
       const src = fresh.sheets?.[config.source.sheetId];
       if (!src) return;
+
+      const editingEntry = pivotDialog?.initialEntry;
+      const isEdit = editingEntry !== undefined;
+
       // Slice source cells into a 2-D array
       const sourceCells: Array<Array<unknown>> = [];
       const cellData = (src.cellData ?? {}) as Record<string, Record<string, { v?: unknown }>>;
@@ -2718,8 +2742,16 @@ export default function EditorScreen() {
         sourceCells.push(row);
       }
       const result = computePivot(sourceCells, config);
-      const name = generatePivotName(collectAllPivotNames(fresh));
-      const entry: PivotEntry = { ...config, name };
+
+      // Determine the pivot name: reuse existing name in edit mode, generate new in insert mode.
+      const name = isEdit ? editingEntry!.name : generatePivotName(collectAllPivotNames(fresh));
+      const entry: PivotEntry = { ...config, name, lastOutputRows: result.rowCount, lastOutputCols: result.colCount };
+
+      if (isEdit) {
+        // replacePivotInSheet wipes the old output footprint and splices the old entry out.
+        replacePivotInSheet(fresh, entry);
+      }
+
       // Write output to destination
       const destSheet = src;
       if (!destSheet.cellData) destSheet.cellData = {};
@@ -2732,10 +2764,15 @@ export default function EditorScreen() {
           (destSheet.cellData[rowKey] as Record<string, unknown>)[String(config.destination.col + c)] = { v: row[c] };
         }
       }
-      addPivotToSheet(fresh, entry);
+
+      if (!isEdit) {
+        addPivotToSheet(fresh, entry);
+      } else {
+        // replacePivotInSheet already pushed entry into _pivots — nothing more to do.
+      }
       applyMutatedSnapshot(JSON.stringify(fresh));
     },
-    [applyMutatedSnapshot],
+    [applyMutatedSnapshot, pivotDialog],
   );
 
   const refreshPivotByName = useCallback(
@@ -9262,6 +9299,7 @@ export default function EditorScreen() {
             onRefresh={refreshPivotByName}
             onDelete={deletePivot}
             onJumpTo={jumpToA1OnSheet}
+            onEdit={openPivotEditor}
           />
         )}
         {savedQueriesPanelOpen && currentSnapshotJson && (
@@ -9740,6 +9778,7 @@ export default function EditorScreen() {
           initialDestination={pivotDialog.destCell}
           sourceFieldNames={pivotDialog.fieldNames}
           sourceSheetId={pivotDialog.sheetId}
+          initialEntry={pivotDialog.initialEntry}
           onApply={(config) => {
             applyPivot(config);
             setPivotDialog(null);

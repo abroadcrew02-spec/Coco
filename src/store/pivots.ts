@@ -710,6 +710,79 @@ export function refreshPivot(
   return { ok: true };
 }
 
+/**
+ * Replace an existing pivot entry (identified by `newEntry.name`) in-place on
+ * its source sheet. The old output footprint is wiped from destination cellData
+ * before the new entry is registered and the output is left for the caller to
+ * rewrite (use `refreshPivot` after calling this, or write cells manually).
+ *
+ * Steps:
+ *  1. Locate the old entry by `newEntry.name` on its source sheet.
+ *  2. Wipe the old output footprint (lastOutputRows × lastOutputCols from
+ *     `entry.destination`) using the same delete-cell strategy as `refreshPivot`.
+ *  3. Splice the old entry out of `_pivots` and push the new one.
+ *
+ * Returns `{ ok: true }` on success, `{ ok: false }` when the pivot name is
+ * not found or the source sheet is missing.
+ */
+export function replacePivotInSheet(
+  workbook: WorkbookPivotSnapshot,
+  newEntry: PivotEntry,
+): { ok: boolean } {
+  const sheets = workbook?.sheets;
+  if (!sheets || typeof sheets !== "object") return { ok: false };
+
+  // Find the old entry — it lives on the source sheet.
+  let foundSheetId: string | null = null;
+  let oldEntry: PivotEntry | null = null;
+  for (const sid of Object.keys(sheets)) {
+    const list = sheets[sid]?._pivots;
+    if (!Array.isArray(list)) continue;
+    for (const p of list) {
+      if (p && p.name === newEntry.name) {
+        foundSheetId = sid;
+        oldEntry = p;
+        break;
+      }
+    }
+    if (foundSheetId) break;
+  }
+  if (!foundSheetId || !oldEntry) return { ok: false };
+
+  const sheet = sheets[foundSheetId];
+  if (!sheet) return { ok: false };
+
+  // Wipe old output footprint.
+  const prevRows = typeof oldEntry.lastOutputRows === "number" ? oldEntry.lastOutputRows : 0;
+  const prevCols = typeof oldEntry.lastOutputCols === "number" ? oldEntry.lastOutputCols : 0;
+  if (prevRows > 0 && prevCols > 0) {
+    const cellData = (sheet.cellData ?? {}) as Record<
+      string,
+      Record<string, unknown> | undefined
+    >;
+    for (let r = 0; r < prevRows; r++) {
+      const absRow = oldEntry.destination.row + r;
+      const rowObj = cellData[String(absRow)];
+      if (!rowObj) continue;
+      for (let c = 0; c < prevCols; c++) {
+        const absCol = oldEntry.destination.col + c;
+        delete rowObj[String(absCol)];
+      }
+    }
+    sheet.cellData = cellData as SheetWithPivots["cellData"];
+  }
+
+  // Splice old entry out, push new entry.
+  const list = Array.isArray(sheet._pivots) ? sheet._pivots.slice() : [];
+  const idx = list.findIndex((p) => p && p.name === newEntry.name);
+  if (idx >= 0) {
+    list.splice(idx, 1);
+  }
+  list.push(newEntry);
+  sheet._pivots = list;
+  return { ok: true };
+}
+
 // ---------- A1 helpers (shared with dialog / panel) ----------
 
 export function colIndexToLetters(col: number): string {

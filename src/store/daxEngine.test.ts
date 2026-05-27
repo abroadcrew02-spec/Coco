@@ -10,6 +10,7 @@ import {
   CALC_COLUMN_ERROR,
   MEASURE_ERROR,
   parseDax,
+  DAX_FUNCTION_REFERENCE,
   type DataModel,
   type CalculatedColumnDef,
   type MeasureDef,
@@ -1130,5 +1131,21 @@ describe("evaluateAllMeasures", () => {
     const results = evaluateAllMeasures(m, ms, filterCtx);
     expect(results.get("Total")).toBe(250);
     expect(results.get("Count")).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DAX_FUNCTION_REFERENCE integrity
+// ---------------------------------------------------------------------------
+
+describe("DAX_FUNCTION_REFERENCE", () => {
+  it("contains exactly 17 entries", () => {
+    expect(DAX_FUNCTION_REFERENCE).toHaveLength(17);
+  });
+
+  it("every name is in IMPLEMENTED_FUNCTIONS", () => {
+    for (const fn of DAX_FUNCTION_REFERENCE) {
+      expect(IMPLEMENTED_FUNCTIONS.has(fn.name.toUpperCase())).toBe(true);
+    }
   });
 });

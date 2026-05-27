@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { StoredMeasure } from "../store/cocoDataModel";
+import DaxFunctionChips from "./DaxFunctionChips";
 import "./MeasureEditorDialog.css";
 
 interface Props {
@@ -30,6 +31,24 @@ export default function MeasureEditorDialog({
   const [format, setFormat] = useState(initialMeasure?.format ?? "");
   const [description, setDescription] = useState(initialMeasure?.description ?? "");
   const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleChipInsert = (insertText: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart ?? expression.length;
+    const textWithoutCaret = insertText.replace("|", "");
+    const caretOffset = insertText.indexOf("|");
+    const newExpression =
+      expression.slice(0, start) + textWithoutCaret + expression.slice(start);
+    setExpression(newExpression);
+    // Restore focus and set caret position after React re-render.
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const newPos = start + (caretOffset >= 0 ? caretOffset : textWithoutCaret.length);
+      textarea.setSelectionRange(newPos, newPos);
+    });
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -132,6 +151,7 @@ export default function MeasureEditorDialog({
           <label className="med-field">
             <span className="med-field-label">DAX 式</span>
             <textarea
+              ref={textareaRef}
               className="med-textarea"
               rows={5}
               value={expression}
@@ -139,6 +159,7 @@ export default function MeasureEditorDialog({
               placeholder="例: SUM(Sales[Amount])"
               aria-required="true"
             />
+            <DaxFunctionChips onInsert={handleChipInsert} />
           </label>
           <label className="med-field">
             <span className="med-field-label">書式コード（省略可）</span>

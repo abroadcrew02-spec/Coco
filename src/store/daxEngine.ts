@@ -1002,3 +1002,44 @@ export function evaluateAllMeasures(
   }
   return results;
 }
+
+// ---------------------------------------------------------------------------
+// DAX Function Reference (UI helper — not part of the evaluator)
+// ---------------------------------------------------------------------------
+
+export interface DaxFunctionRef {
+  /** Function name (case-insensitive at runtime; UI uses uppercase). */
+  name: string;
+  /** Display signature, e.g. "SUM(table[column])". */
+  signature: string;
+  /** One-line Japanese description. */
+  description: string;
+  /** Text inserted when the chip is clicked. Caret position hint is `|` (single char). */
+  insertText: string;
+  /** Category for grouping in the UI. */
+  category: "aggregate" | "row-context" | "filter" | "logical";
+}
+
+export const DAX_FUNCTION_REFERENCE: DaxFunctionRef[] = [
+  // aggregate
+  { name: "SUM", signature: "SUM(table[column])", description: "列の合計", insertText: "SUM(|)", category: "aggregate" },
+  { name: "AVERAGE", signature: "AVERAGE(table[column])", description: "列の平均", insertText: "AVERAGE(|)", category: "aggregate" },
+  { name: "MIN", signature: "MIN(table[column])", description: "列の最小値", insertText: "MIN(|)", category: "aggregate" },
+  { name: "MAX", signature: "MAX(table[column])", description: "列の最大値", insertText: "MAX(|)", category: "aggregate" },
+  { name: "COUNT", signature: "COUNT(table[column])", description: "非空セル数", insertText: "COUNT(|)", category: "aggregate" },
+  { name: "DISTINCTCOUNT", signature: "DISTINCTCOUNT(table[column])", description: "ユニーク値数", insertText: "DISTINCTCOUNT(|)", category: "aggregate" },
+  { name: "COUNTROWS", signature: "COUNTROWS(table)", description: "行数", insertText: "COUNTROWS(|)", category: "aggregate" },
+  // row-context (X functions)
+  { name: "SUMX", signature: "SUMX(table, expression)", description: "各行で式評価 → 合計", insertText: "SUMX(|, )", category: "row-context" },
+  { name: "AVERAGEX", signature: "AVERAGEX(table, expression)", description: "各行で式評価 → 平均", insertText: "AVERAGEX(|, )", category: "row-context" },
+  { name: "MINX", signature: "MINX(table, expression)", description: "各行で式評価 → 最小値", insertText: "MINX(|, )", category: "row-context" },
+  { name: "MAXX", signature: "MAXX(table, expression)", description: "各行で式評価 → 最大値", insertText: "MAXX(|, )", category: "row-context" },
+  { name: "COUNTX", signature: "COUNTX(table, expression)", description: "各行で式評価 → 非空数", insertText: "COUNTX(|, )", category: "row-context" },
+  { name: "RELATED", signature: "RELATED(otherTable[column])", description: "リレーション経由で値取得", insertText: "RELATED(|)", category: "row-context" },
+  // filter
+  { name: "FILTER", signature: "FILTER(table, condition)", description: "条件にマッチする行のみ返す", insertText: "FILTER(|, )", category: "filter" },
+  { name: "CALCULATE", signature: "CALCULATE(expression, filter)", description: "filter context を変更して式評価", insertText: "CALCULATE(|, )", category: "filter" },
+  { name: "ALL", signature: "ALL(table)", description: "全行 (フィルター無視)", insertText: "ALL(|)", category: "filter" },
+  // logical
+  { name: "IF", signature: "IF(condition, then, else)", description: "条件分岐", insertText: "IF(|, , )", category: "logical" },
+];

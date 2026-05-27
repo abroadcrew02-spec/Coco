@@ -1,0 +1,56 @@
+.dfc-root {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 4px;
+}
+
+.dfc-group {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.dfc-category-label {
+  flex-shrink: 0;
+  width: 80px;
+  font-size: 11px;
+  color: #888;
+  padding-top: 3px;
+  white-space: nowrap;
+}
+
+.dfc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.dfc-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-family: monospace;
+  background: #f0f4ff;
+  border: 1px solid #c4cfed;
+  border-radius: 3px;
+  color: #2a4bbf;
+  cursor: pointer;
+  line-height: 1.6;
+  white-space: nowrap;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.dfc-chip:hover {
+  background: #dde6ff;
+  border-color: #3b60e8;
+}
+
+.dfc-chip:active {
+  background: #c8d6ff;
+}
+
+.dfc-chip:focus-visible {
+  outline: 2px solid #3b60e8;
+  outline-offset: 1px;
+}

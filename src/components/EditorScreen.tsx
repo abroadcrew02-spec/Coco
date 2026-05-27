@@ -2708,10 +2708,10 @@ export default function EditorScreen() {
       const snap = workbook.save() as unknown as {
         sheets?: Record<string, { cellData?: Record<string, Record<string, { v?: unknown; s?: unknown } | undefined> | undefined> }>;
       };
-      const sourceRange = pivotRangeToA1(entry.source.range);
+      const sourceRange = entry.source.kind === "sheet" ? pivotRangeToA1(entry.source.range) : "";
       const destCell = pivotCellToA1(entry.destination.row, entry.destination.col);
       const cellData = snap.sheets?.[sourceSheetId]?.cellData;
-      const fieldNames = inferFieldNames(cellData, entry.source.range, entry.hasHeader);
+      const fieldNames = entry.source.kind === "sheet" ? inferFieldNames(cellData, entry.source.range, entry.hasHeader) : [];
       setPivotDialog({ sheetId: sourceSheetId, sourceRange, destCell, fieldNames, initialEntry: entry });
     },
     [],
@@ -2725,6 +2725,7 @@ export default function EditorScreen() {
       const fresh = workbook.save() as unknown as WorkbookPivotSnapshot & {
         sheets?: Record<string, { cellData?: Record<string, Record<string, unknown>> }>;
       };
+      if (config.source.kind !== "sheet") return;
       const src = fresh.sheets?.[config.source.sheetId];
       if (!src) return;
 
@@ -2988,7 +2989,7 @@ export default function EditorScreen() {
       const sh = sheets[sid];
       if (!Array.isArray(sh?._pivots)) continue;
       for (const p of sh!._pivots!) {
-        if (!p?.name || !p.source) continue;
+        if (!p?.name || !p.source || p.source.kind !== "sheet") continue;
         const srcSheet = sheets[p.source.sheetId];
         const columns = inferFieldNames(srcSheet?.cellData, p.source.range, p.hasHeader);
         out.push({ name: p.name, sheetId: sid, columns });

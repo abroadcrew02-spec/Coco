@@ -62,8 +62,8 @@ export default function InsertPivotDialog({
         } else if (initialEntry.cols.includes(n)) {
           role = "cols";
         } else {
-          const vf = initialEntry.values.find((v) => v.field === n);
-          if (vf) {
+          const vf = initialEntry.values.find((v) => v.kind === "column" && v.field === n);
+          if (vf && vf.kind === "column") {
             role = "values";
             agg = vf.agg;
           } else {
@@ -144,7 +144,7 @@ export default function InsertPivotDialog({
     const cols = fields.filter((f) => f.role === "cols").map((f) => f.name);
     const values: PivotValueField[] = fields
       .filter((f) => f.role === "values")
-      .map((f) => ({ field: f.name, agg: f.agg }));
+      .map((f) => ({ kind: "column" as const, field: f.name, agg: f.agg }));
     const filters = fields
       .filter((f) => f.role === "filters")
       .map((f) => ({
@@ -166,7 +166,7 @@ export default function InsertPivotDialog({
     }
     setError(null);
     onApply({
-      source: { sheetId: sourceSheetId, range: parsedSource.range },
+      source: { kind: "sheet" as const, sheetId: sourceSheetId, range: parsedSource.range },
       destination: { row: parsedDest.row, col: parsedDest.col },
       rows,
       cols,

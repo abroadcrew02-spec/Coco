@@ -257,6 +257,7 @@ function listDistinctValuesForPivot(
   }
   if (!pivot) return [];
 
+  if (pivot.source.kind !== "sheet") return [];
   const srcSheet = sheets[pivot.source.sheetId];
   const cellData = srcSheet?.cellData;
   const { r1, r2, c1, c2 } = pivot.source.range;

@@ -263,11 +263,11 @@ describe("applySlicerFiltersToPivots", () => {
   function pivotFixture(): WorkbookSlicerPivotSnapshot {
     const pivotEntry: PivotEntry = {
       name: "Pivot1",
-      source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
+      source: { kind: "sheet" as const, sheetId: "s1", range: { r1: 0, c1: 0, r2: 4, c2: 2 } },
       destination: { row: 10, col: 0 },
       rows: ["Region"],
       cols: [],
-      values: [{ field: "Sales", agg: "SUM" }],
+      values: [{ kind: "column" as const, field: "Sales", agg: "SUM" as const }],
       filters: [],
       hasHeader: true,
     };
@@ -482,11 +482,11 @@ describe("listDistinctValues (pivot kind)", () => {
           _pivots: [
             {
               name: "Pivot1",
-              source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 3, c2: 1 } },
+              source: { kind: "sheet" as const, sheetId: "s1", range: { r1: 0, c1: 0, r2: 3, c2: 1 } },
               destination: { row: 10, col: 0 },
               rows: ["Region"],
               cols: [],
-              values: [{ field: "Sales", agg: "SUM" }],
+              values: [{ kind: "column" as const, field: "Sales", agg: "SUM" as const }],
               filters: [],
               hasHeader: true,
             },
@@ -511,10 +511,10 @@ describe("listDistinctValues (pivot kind)", () => {
           _pivots: [
             {
               name: "Pivot1",
-              source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 1, c2: 0 } },
+              source: { kind: "sheet" as const, sheetId: "s1", range: { r1: 0, c1: 0, r2: 1, c2: 0 } },
               destination: { row: 5, col: 0 },
               rows: [], cols: [],
-              values: [{ field: "A", agg: "SUM" }],
+              values: [{ kind: "column" as const, field: "A", agg: "SUM" as const }],
               filters: [],
               hasHeader: true,
             },
@@ -656,10 +656,10 @@ describe("invertSlicerSelection", () => {
           },
           _pivots: [{
             name: "Pivot1",
-            source: { sheetId: "s1", range: { r1: 0, c1: 0, r2: 2, c2: 0 } },
+            source: { kind: "sheet" as const, sheetId: "s1", range: { r1: 0, c1: 0, r2: 2, c2: 0 } },
             destination: { row: 5, col: 0 },
             rows: [], cols: [],
-            values: [{ field: "Region", agg: "COUNT" }],
+            values: [{ kind: "column" as const, field: "Region", agg: "COUNT" as const }],
             filters: [],
             hasHeader: true,
           }],

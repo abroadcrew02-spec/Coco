@@ -7,7 +7,7 @@
 //
 // No external API calls: fully local / serverless per Coco's policy.
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -80,6 +80,13 @@ export default function LinkedDataTypesPanel({
   const [lookupData, setLookupData] = useState<Array<Record<string, string>> | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupSourceId, setLookupSourceId] = useState<string | null>(null);
+
+  // #310 — In-memory CSV cache to avoid re-reading the same source on every
+  // lookup. Keyed by source.id; entries are evicted when the source is removed
+  // or when CACHE_TTL_MS has elapsed since the last fetch.
+  const csvCacheRef = useRef<
+    Map<string, { ts: number; rows: Array<Record<string, string>> }>
+  >(new Map());
 
   const sources = listSources(model);
 
@@ -159,6 +166,7 @@ export default function LinkedDataTypesPanel({
   const handleRemove = useCallback(
     (id: string) => {
       onModelChange(removeSource(model, id));
+      csvCacheRef.current.delete(id);
       if (lookupSourceId === id) {
         setLookupData(null);
         setLookupSourceId(null);
@@ -174,15 +182,25 @@ export default function LinkedDataTypesPanel({
       const key = activeCellValue.trim();
       if (!key) return;
 
-      setLookupLoading(true);
       setLookupSourceId(source.id);
       setFormError("");
+
+      // #310 — Hit the in-memory cache first when the entry is fresh.
+      const CACHE_TTL_MS = 5 * 60 * 1000;
+      const cached = csvCacheRef.current.get(source.id);
+      if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+        setLookupData(cached.rows);
+        return;
+      }
+
+      setLookupLoading(true);
       try {
         // Read the full CSV via Tauri.
         const rows = await invoke<Array<Record<string, string>>>("read_csv_rows", {
           path: source.sourcePath,
           maxRows: 1000,
         });
+        csvCacheRef.current.set(source.id, { ts: Date.now(), rows });
         setLookupData(rows);
       } catch (err) {
         setLookupData(null);

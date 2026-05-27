@@ -1,11 +1,12 @@
 // #244 — Local Linked Data Types (CSV-based, serverless).
+// #310 — SQLite source support added.
 //
 // Excel's Stock/Geography types rely on cloud APIs (Bing, Refinitiv) which
 // conflict with Coco's serverless-first policy. This module provides a
-// local alternative: the user registers a CSV file as a "data type source",
-// specifying a key column. Selecting a cell and opening the LinkedDataTypes
-// panel performs a case-insensitive lookup and displays matching rows as a
-// data card.
+// local alternative: the user registers a CSV or SQLite file as a "data type
+// source", specifying a key column. Selecting a cell and opening the
+// LinkedDataTypes panel performs a case-insensitive lookup and displays
+// matching rows as a data card.
 //
 // Persistence: the `_cocoDataTypes` key is added to the Coco snapshot JSON,
 // following the same pattern as `_cocoDataModel` in cocoDataModel.ts.
@@ -17,14 +18,37 @@ export interface LinkedDataTypeSource {
   id: string;
   /** Display name shown in the panel (e.g. "株価データ"). */
   name: string;
-  /** Absolute path to the local CSV file. */
+  /** Absolute path to the local CSV or SQLite file. */
   sourcePath: string;
   /** Column name used for lookup (case-insensitive match against cell value). */
   keyColumn: string;
-  /** All column names (header row). Used to build the data card. */
+  /** All column names (header row / table columns). Used to build the data card. */
   columns: string[];
   /** ISO 8601 timestamp of last registration / update. */
   updatedAt: string;
+  /**
+   * Source file type. "csv" (default when absent) reads via read_csv_rows.
+   * "sqlite" reads via read_sqlite_rows and requires sqliteTable.
+   * Legacy sources without this field are treated as "csv".
+   */
+  kind?: "csv" | "sqlite";
+  /**
+   * For kind === "sqlite": the table name to query.
+   * Absent / undefined for CSV sources.
+   */
+  sqliteTable?: string;
+}
+
+/**
+ * Normalize a source loaded from a snapshot so that `kind` is always present.
+ * Legacy sources persisted before #310 have no `kind` field — they are CSV
+ * by convention.
+ */
+export function normalizeSource(source: LinkedDataTypeSource): LinkedDataTypeSource {
+  if (source.kind === undefined) {
+    return { ...source, kind: "csv" };
+  }
+  return source;
 }
 
 export interface CocoLinkedDataTypes {
@@ -60,14 +84,19 @@ export function readLinkedDataTypes(snapshot: unknown): CocoLinkedDataTypes {
 function isValidSource(v: unknown): v is LinkedDataTypeSource {
   if (!v || typeof v !== "object") return false;
   const s = v as Record<string, unknown>;
-  return (
+  const baseValid =
     typeof s.id === "string" &&
     typeof s.name === "string" &&
     typeof s.sourcePath === "string" &&
     typeof s.keyColumn === "string" &&
     Array.isArray(s.columns) &&
-    typeof s.updatedAt === "string"
-  );
+    typeof s.updatedAt === "string";
+  if (!baseValid) return false;
+  // kind is optional; when present must be "csv" or "sqlite".
+  if (s.kind !== undefined && s.kind !== "csv" && s.kind !== "sqlite") return false;
+  // sqliteTable when present must be a string.
+  if (s.sqliteTable !== undefined && typeof s.sqliteTable !== "string") return false;
+  return true;
 }
 
 /**

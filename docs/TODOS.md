@@ -185,6 +185,12 @@ here only so a future contributor doesn't reopen them by accident.
 - **Effort**: N/A
 - **Why**: External links are preserved as warnings + cached-value blob only; refresh-on-open is explicitly not implemented (offline-first per §5.2).
 
+### wontfix-chart-style-colors-xml
+- **Title**: Emit `xl/charts/colorsN.xml` (CT_ColorStyle) + `styleN.xml` (CT_ChartStyle) for Coco-authored charts
+- **Refs**: `src-tauri/src/commands/xlsx_io.rs` (`inject_charts_to_xlsx`), issue #332
+- **Effort**: M (style.xml is a ~48-entry CT_ChartStyle template)
+- **Why**: Decided wontfix 2026-05-28 (Architect assessment + user confirmation). Three reasons: (1) no Excel on the dev host, so a malformed `style.xml` → Excel "repair" → chart loss cannot be caught by CI (which only validates ZIP structure, not whether Excel opens the file); (2) near-zero added value — #334 already emits explicit per-series `<c:ser><c:spPr><a:solidFill>` colors, so `colors.xml`'s auto-color-cycle is moot and without `style.xml` the look is unchanged; (3) asymmetric risk — success = marginal cosmetic gain, failure = chart disappears for every user via auto-update. Charts already render correctly under Excel's default theme today. Re-open only when a real-Excel verification path exists AND the full Excel-emitted ~48-entry style.xml template is ported verbatim.
+
 ---
 
 ## Maintenance notes

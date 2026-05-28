@@ -6876,9 +6876,28 @@ fn parse_anchor_cell(block: &str) -> Option<DrawingAnchorCell> {
 /// from anchor. The `kind` is the canonical source-of-truth for which
 /// Excel anchor element this came from, used downstream to map to Univer's
 /// `SheetDrawingAnchorType` ("0" Position vs "1" Both).
+/// Parse the `rot` attribute of the first `<a:xfrm>` element inside an anchor
+/// block. OOXML stores rotation in 1/60000 degree units (clockwise). Returns 0
+/// when the attribute is absent or unparseable.
+fn parse_xfrm_rot(block: &str) -> i64 {
+    for prefix in ["<a:xfrm", "<xfrm"] {
+        if let Some(pos) = block.find(prefix) {
+            let after = &block[pos..];
+            // The `rot` attribute lives on the opening <a:xfrm> tag, before `>`.
+            let tag_end = after.find('>').unwrap_or(after.len());
+            let tag = &after[..tag_end];
+            if let Some(v) = parse_attr(tag, "rot") {
+                return v.parse::<i64>().unwrap_or(0);
+            }
+            return 0;
+        }
+    }
+    0
+}
+
 fn parse_drawing_anchors(
     xml: &str,
-) -> Vec<(DrawingAnchorKind, DrawingAnchorRange, String)> {
+) -> Vec<(DrawingAnchorKind, DrawingAnchorRange, String, i64)> {
     let mut out = Vec::new();
 
     // We accept both prefixed (`xdr:twoCellAnchor`) and bare forms, which
@@ -6964,7 +6983,8 @@ fn parse_drawing_anchors(
                     continue;
                 };
 
-                out.push((kind, DrawingAnchorRange { from, to }, rid));
+                let rot_emu = parse_xfrm_rot(block);
+                out.push((kind, DrawingAnchorRange { from, to }, rid, rot_emu));
             }
         }
     }
@@ -7066,7 +7086,7 @@ pub(crate) fn build_sheet_drawing_resource<R: Read + Seek>(
         let mut order_ids: Vec<Value> = Vec::new();
         let mut data_map: Map<String, Value> = Map::new();
 
-        for (anchor_idx, (anchor_kind, range, embed_rid)) in anchors.iter().enumerate() {
+        for (anchor_idx, (anchor_kind, range, embed_rid, _rot_emu)) in anchors.iter().enumerate() {
             let Some(media_target_rel) = drawing_rels.get(embed_rid) else {
                 continue;
             };
@@ -7234,6 +7254,12 @@ pub(crate) struct ImageEntry {
     height_px: i32,
     name: Option<String>,
     media_path: Option<String>,
+    /// Clockwise rotation in degrees (0 / 90 / 180 / 270 or arbitrary).
+    /// Stored as i32; OOXML unit is 1/60000 degree (rot = rotationDeg * 60000).
+    rotation_deg: i32,
+    /// Drawing z-order: index position in the drawing XML (0 = bottom-most).
+    /// Higher values render on top of lower values.
+    z_index: i32,
 }
 
 impl ImageEntry {
@@ -7250,6 +7276,12 @@ impl ImageEntry {
         }
         if let Some(p) = &self.media_path {
             obj.insert("mediaPath".into(), Value::String(p.clone()));
+        }
+        if self.rotation_deg != 0 {
+            obj.insert("rotationDeg".into(), json!(self.rotation_deg));
+        }
+        if self.z_index != 0 {
+            obj.insert("zIndex".into(), json!(self.z_index));
         }
         Value::Object(obj)
     }
@@ -7343,7 +7375,7 @@ pub(crate) fn parse_xlsx_images<R: Read + Seek>(
         let mut sheet_media: Vec<String> = Vec::new();
         let mut all_ok = true;
 
-        for (_anchor_kind, range, embed_rid) in &anchors {
+        for (z_idx, (_anchor_kind, range, embed_rid, rot_emu)) in anchors.iter().enumerate() {
             let Some(media_target_rel) = drawing_rels.get(embed_rid) else {
                 all_ok = false;
                 continue;
@@ -7404,6 +7436,10 @@ pub(crate) fn parse_xlsx_images<R: Read + Seek>(
             let width_emu = (range.to.col_off_emu - range.from.col_off_emu).max(0);
             let height_emu = (range.to.row_off_emu - range.from.row_off_emu).max(0);
 
+            // Convert OOXML rotation (1/60000 degree) to degrees.
+            // Round to nearest integer; typically 0/90/180/270.
+            let rotation_deg = ((*rot_emu as f64) / 60_000.0).round() as i32;
+
             entries.push(ImageEntry {
                 base64: b64_encode(&media_bytes),
                 ext: ext.to_string(),
@@ -7413,6 +7449,8 @@ pub(crate) fn parse_xlsx_images<R: Read + Seek>(
                 height_px: emu_to_px(height_emu),
                 name: None,
                 media_path: Some(media_path.clone()),
+                rotation_deg,
+                z_index: z_idx as i32,
             });
 
             sheet_media.push(media_path);
@@ -7585,7 +7623,14 @@ pub(crate) fn inject_images_to_xlsx(
 
         let mut local_rid_n = 1u32;
 
-        for img_json in images {
+        // Sort images by zIndex ascending so lower values render behind higher
+        // ones (OOXML drawing order: earlier elements are further back).
+        let mut sorted_images = images.clone();
+        sorted_images.sort_by_key(|img| {
+            img.get("zIndex").and_then(|v| v.as_i64()).unwrap_or(0)
+        });
+
+        for img_json in &sorted_images {
             let img_n = global_img_n;
             global_img_n += 1;
 
@@ -7597,6 +7642,9 @@ pub(crate) fn inject_images_to_xlsx(
             let h = img_json.get("heightPx").and_then(|v| v.as_i64()).unwrap_or(96);
             let w_emu = w.max(1) * 9525;
             let h_emu = h.max(1) * 9525;
+            // rotationDeg → OOXML 1/60000 degree units (clockwise).
+            let rotation_deg = img_json.get("rotationDeg").and_then(|v| v.as_i64()).unwrap_or(0);
+            let rot_emu = rotation_deg * 60_000;
             let local_rid = format!("rId{local_rid_n}");
             local_rid_n += 1;
 
@@ -7612,6 +7660,12 @@ pub(crate) fn inject_images_to_xlsx(
 
             let pic_name = img_json.get("name").and_then(|v| v.as_str()).unwrap_or("Picture");
             let safe_name = encode_xml_text(pic_name);
+            // Emit rot attribute on <a:xfrm> only when non-zero.
+            let xfrm_open = if rot_emu != 0 {
+                format!("<a:xfrm rot=\"{rot_emu}\">")
+            } else {
+                "<a:xfrm>".to_string()
+            };
             dwg_xml.push_str(&format!(
                 "  <xdr:oneCellAnchor>\n\
                      <xdr:from><xdr:col>{col}</xdr:col><xdr:colOff>0</xdr:colOff>\
@@ -7622,7 +7676,7 @@ pub(crate) fn inject_images_to_xlsx(
                  <xdr:cNvPicPr/></xdr:nvPicPr>\n\
                        <xdr:blipFill><a:blip r:embed=\"{local_rid}\"/>\
                  <a:stretch><a:fillRect/></a:stretch></xdr:blipFill>\n\
-                       <xdr:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/>\
+                       <xdr:spPr>{xfrm_open}<a:off x=\"0\" y=\"0\"/>\
                  <a:ext cx=\"{w_emu}\" cy=\"{h_emu}\"/></a:xfrm>\
                  <a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr>\n\
                      </xdr:pic>\n\

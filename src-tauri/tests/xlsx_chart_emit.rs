@@ -714,6 +714,52 @@ fn bar_chart_no_color_no_sppr() {
 }
 
 // --------------------------------------------------------------------------
+// #332 — invalid hex (3-digit shorthand / malformed) must NOT emit a broken
+// <a:srgbClr> (ST_HexColorRGB is 6 hex digits); the series falls back to the
+// Excel default color instead of tripping File Repair.
+// --------------------------------------------------------------------------
+
+#[test]
+fn bar_chart_invalid_hex_color_skipped() {
+    let tmp = TempDir::new().unwrap();
+    let (_, snap_json) = base_snapshot(&tmp, "Sheet1");
+    let chart = json!({
+        "range": "Sheet1!A1:B4",
+        "type": "bar",
+        "hasHeaderRow": true,
+        "hasHeaderCol": true,
+        "anchorRow": 0,
+        "anchorCol": 5,
+        "widthPx": 380,
+        "heightPx": 280,
+        // 3-digit CSS shorthand — invalid for OOXML ST_HexColorRGB
+        "seriesColors": ["#F00"]
+    });
+    let snap_with_chart = inject_charts(&snap_json, json!([chart]));
+    let out = tmp.path().join("invalid_hex.xlsx");
+    export_xlsx_core(path_str(&out), snap_with_chart).expect("export").success.then(|| ()).expect("success");
+
+    let bytes = std::fs::read(&out).unwrap();
+    let mut zip = ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let names: Vec<String> = (0..zip.len())
+        .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
+        .collect();
+    let chart_part = names
+        .iter()
+        .find(|n| n.starts_with("xl/charts/chart9") && n.ends_with(".xml"))
+        .unwrap();
+    let xml = read_zip_entry_str(&mut zip, chart_part).unwrap();
+    assert!(
+        !xml.contains("<a:srgbClr"),
+        "invalid 3-digit hex must not emit srgbClr, got: {xml}"
+    );
+    assert!(
+        !xml.contains("<c:spPr>"),
+        "invalid hex → no spPr fallback, got: {xml}"
+    );
+}
+
+// --------------------------------------------------------------------------
 // Test 15: pie chart — dPt color entries emitted per data point
 // --------------------------------------------------------------------------
 

@@ -10093,11 +10093,27 @@ fn build_chart_xml(chart: &Value, series_data: &ChartSeriesData) -> String {
 
 /// Build the OOXML `<c:spPr>` element for a solid-fill series color.
 /// `hex` must be in `#RRGGBB` or `RRGGBB` format; leading `#` is stripped.
-fn series_sppr_xml(hex: &str) -> String {
+/// Normalise a hex color to OOXML's ST_HexColorRGB (exactly 6 uppercase hex
+/// digits, no leading `#`). Returns None for anything else — 3-digit CSS
+/// shorthand (`#F00`), named colors, malformed input — so callers omit the
+/// fill and fall back to Excel's default theme color rather than emit an
+/// invalid `<a:srgbClr>` that trips Excel's File Repair.
+fn normalize_srgb(hex: &str) -> Option<String> {
     let h = hex.trim_start_matches('#').to_ascii_uppercase();
-    format!(
-        "          <c:spPr><a:solidFill><a:srgbClr val=\"{h}\"/></a:solidFill></c:spPr>\n"
-    )
+    if h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Some(h)
+    } else {
+        None
+    }
+}
+
+fn series_sppr_xml(hex: &str) -> String {
+    match normalize_srgb(hex) {
+        Some(h) => format!(
+            "          <c:spPr><a:solidFill><a:srgbClr val=\"{h}\"/></a:solidFill></c:spPr>\n"
+        ),
+        None => String::new(),
+    }
 }
 
 /// Build the OOXML `<c:dLbls>` element (data labels shown as values).
@@ -10116,7 +10132,9 @@ fn data_labels_xml() -> &'static str {
 fn pie_dpt_xml(series_colors: &[String]) -> String {
     let mut out = String::new();
     for (i, hex) in series_colors.iter().enumerate() {
-        let h = hex.trim_start_matches('#').to_ascii_uppercase();
+        // Skip invalid colors — the data point keeps Excel's default slice
+        // color. idx stays aligned with the data point index via enumerate.
+        let Some(h) = normalize_srgb(hex) else { continue };
         out.push_str(&format!(
             "          <c:dPt><c:idx val=\"{i}\"/><c:bubble3D val=\"0\"/>\
 <c:spPr><a:solidFill><a:srgbClr val=\"{h}\"/></a:solidFill></c:spPr></c:dPt>\n"

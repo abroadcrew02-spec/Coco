@@ -1,5 +1,6 @@
 // #244 — LinkedDataTypesPanel
 // #310 — SQLite source type added.
+// #323 — Multi-key range lookup + selectable expand columns.
 //
 // Ribbon panel for local CSV / SQLite linked data types. Three sections:
 //   1. Registered source list (name, key column, column count, delete)
@@ -7,6 +8,7 @@
 //      CSV:    file picker → read_csv_header → key column selector
 //      SQLite: file picker → read_sqlite_tables → table selector → read_sqlite_columns → key column selector
 //   3. Cell lookup card — shows data for the currently selected cell value
+//      + "範囲を一括展開" button for multi-row selections
 //
 // No external API calls: fully local / serverless per Coco's policy.
 
@@ -18,6 +20,7 @@ import {
   type LinkedDataTypeSource,
   addSource,
   removeSource,
+  updateSource,
   listSources,
   lookupInSource,
 } from "../store/linkedDataTypes";
@@ -44,6 +47,15 @@ interface Props {
    * `result` is the full matched row; `source` provides column ordering.
    */
   onExpandToCells: (result: LookupResult) => void;
+  /**
+   * #323 — Called when the user clicks "範囲を一括展開".
+   * Caller reads the current selection range, bulk-looks up each key, and
+   * writes results into adjacent cells.
+   */
+  onExpandRangeToCells: (
+    sourceRows: Array<Record<string, string>>,
+    source: LinkedDataTypeSource,
+  ) => void;
   /** Close the panel. */
   onClose: () => void;
 }
@@ -86,6 +98,7 @@ export default function LinkedDataTypesPanel({
   onModelChange,
   activeCellValue,
   onExpandToCells,
+  onExpandRangeToCells,
   onClose,
 }: Props) {
   const [showForm, setShowForm] = useState(false);
@@ -94,6 +107,8 @@ export default function LinkedDataTypesPanel({
   const [lookupData, setLookupData] = useState<Array<Record<string, string>> | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupSourceId, setLookupSourceId] = useState<string | null>(null);
+  // #323 — Track which source's expand-column editor is open.
+  const [expandColsEditId, setExpandColsEditId] = useState<string | null>(null);
 
   // #310 — In-memory CSV cache to avoid re-reading the same source on every
   // lookup. Keyed by source.id; entries are evicted when the source is removed
@@ -249,6 +264,67 @@ export default function LinkedDataTypesPanel({
     [model, onModelChange, lookupSourceId],
   );
 
+  // ---- #323 expand-columns editor ------------------------------------------
+
+  /** Toggle a column in source.expandColumns. Persists via onModelChange. */
+  const handleToggleExpandColumn = useCallback(
+    (source: LinkedDataTypeSource, col: string, checked: boolean) => {
+      const current = source.expandColumns ?? [];
+      const next = checked
+        ? current.includes(col) ? current : [...current, col]
+        : current.filter((c) => c !== col);
+      onModelChange(updateSource(model, source.id, { expandColumns: next.length > 0 ? next : [] }));
+    },
+    [model, onModelChange],
+  );
+
+  // ---- #323 range bulk-expand ----------------------------------------------
+
+  /**
+   * Load source data (using cache) then invoke the caller's range handler.
+   * The caller (EditorScreen) reads the active selection and writes results.
+   */
+  const handleExpandRange = useCallback(
+    async (source: LinkedDataTypeSource) => {
+      setFormError("");
+      const CACHE_TTL_MS = 5 * 60 * 1000;
+      const cached = csvCacheRef.current.get(source.id);
+      let rows: Array<Record<string, string>>;
+
+      if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+        rows = cached.rows;
+      } else {
+        setLookupLoading(true);
+        try {
+          const effectiveKind = source.kind ?? "csv";
+          if (effectiveKind === "sqlite") {
+            rows = await invoke<Array<Record<string, string>>>("read_sqlite_rows", {
+              path: source.sourcePath,
+              table: source.sqliteTable ?? "",
+              maxRows: 1000,
+            });
+          } else {
+            rows = await invoke<Array<Record<string, string>>>("read_csv_rows", {
+              path: source.sourcePath,
+              maxRows: 1000,
+            });
+          }
+          csvCacheRef.current.set(source.id, { ts: Date.now(), rows });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          setFormError(`ソース "${source.name}" の読込に失敗しました: ${msg}`);
+          setLookupLoading(false);
+          return;
+        } finally {
+          setLookupLoading(false);
+        }
+      }
+
+      onExpandRangeToCells(rows, source);
+    },
+    [onExpandRangeToCells],
+  );
+
   // ---- lookup active cell against all sources ------------------------------
 
   const handleLookup = useCallback(
@@ -347,29 +423,102 @@ export default function LinkedDataTypesPanel({
                 <div className="ldtp-source-name">{src.name}</div>
                 <div className="ldtp-source-meta">
                   キー列: {src.keyColumn} / {src.columns.length} 列
+                  {src.expandColumns && src.expandColumns.length > 0
+                    ? ` / 展開列: ${src.expandColumns.length} 列選択中`
+                    : " / 全列展開"}
                 </div>
               </div>
-              {activeCellValue.trim() && (
+              <div className="ldtp-source-actions">
+                {activeCellValue.trim() && (
+                  <button
+                    type="button"
+                    className="ldtp-form-btn"
+                    onClick={() => handleLookup(src)}
+                    aria-label={`${src.name} で検索`}
+                    title="このソースで検索"
+                    disabled={lookupLoading}
+                  >
+                    検索
+                  </button>
+                )}
+                {/* #323 — Bulk expand button: available regardless of activeCellValue */}
                 <button
                   type="button"
                   className="ldtp-form-btn"
-                  onClick={() => handleLookup(src)}
-                  aria-label={`${src.name} で検索`}
-                  title="このソースで検索"
+                  onClick={() => handleExpandRange(src)}
+                  aria-label={`${src.name} で範囲を一括展開`}
+                  title="選択範囲の各行をこのソースで一括展開"
                   disabled={lookupLoading}
                 >
-                  検索
+                  範囲を一括展開
                 </button>
+                {/* #323 — Toggle expand-columns editor */}
+                <button
+                  type="button"
+                  className="ldtp-form-btn"
+                  onClick={() =>
+                    setExpandColsEditId(expandColsEditId === src.id ? null : src.id)
+                  }
+                  aria-label={`${src.name} の展開列を設定`}
+                  title="展開する列を選択"
+                >
+                  展開列設定
+                </button>
+                <button
+                  type="button"
+                  className="ldtp-remove-btn"
+                  onClick={() => handleRemove(src.id)}
+                  aria-label={`${src.name} を削除`}
+                  title="削除"
+                >
+                  ×
+                </button>
+              </div>
+              {/* #323 — Expand-columns editor (inline, shown when toggled) */}
+              {expandColsEditId === src.id && (
+                <div className="ldtp-expand-cols-editor">
+                  <div className="ldtp-expand-cols-label">
+                    展開する列（未選択 = 全列展開）
+                  </div>
+                  <ul className="ldtp-expand-cols-list">
+                    {src.columns
+                      .filter((c) => c !== src.keyColumn)
+                      .map((col) => {
+                        // When expandColumns is empty/absent (all columns mode), show all checked.
+                        const isExplicitlySelected =
+                          src.expandColumns &&
+                          src.expandColumns.length > 0
+                            ? src.expandColumns.includes(col)
+                            : true;
+                        return (
+                          <li key={col} className="ldtp-expand-cols-item">
+                            <label className="ldtp-expand-cols-check-label">
+                              <input
+                                type="checkbox"
+                                checked={isExplicitlySelected}
+                                onChange={(e) =>
+                                  handleToggleExpandColumn(src, col, e.target.checked)
+                                }
+                              />
+                              {col}
+                            </label>
+                          </li>
+                        );
+                      })}
+                  </ul>
+                  {src.expandColumns && src.expandColumns.length > 0 && (
+                    <button
+                      type="button"
+                      className="ldtp-form-btn"
+                      onClick={() =>
+                        onModelChange(updateSource(model, src.id, { expandColumns: [] }))
+                      }
+                    >
+                      全列に戻す
+                    </button>
+                  )}
+                </div>
               )}
-              <button
-                type="button"
-                className="ldtp-remove-btn"
-                onClick={() => handleRemove(src.id)}
-                aria-label={`${src.name} を削除`}
-                title="削除"
-              >
-                ×
-              </button>
             </li>
           ))}
         </ul>

@@ -5132,6 +5132,10 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                         if let Some(rest) = k.strip_prefix("xl/charts/chart") {
                             let stem = rest.strip_suffix(".xml").unwrap_or(rest);
                             stem.parse::<u32>().map(|n| n >= 9001).unwrap_or(false)
+                        } else if let Some(rest) = k.strip_prefix("xl/drawings/_rels/drawing") {
+                            // Coco-emitted drawing rels: xl/drawings/_rels/drawing9xxx.xml.rels
+                            let stem = rest.strip_suffix(".xml.rels").unwrap_or(rest);
+                            stem.parse::<u32>().map(|n| n >= 9001).unwrap_or(false)
                         } else if let Some(rest) = k.strip_prefix("xl/drawings/drawing") {
                             // Also strip Coco-emitted drawing9xxx.xml parts (chart-only drawings)
                             let stem = rest.strip_suffix(".xml").unwrap_or(
@@ -10104,16 +10108,18 @@ fn build_series_xml(idx: usize, ser: &ChartSeries, _chart_type: &str) -> String 
         ));
     }
 
-    // Values
+    // Values. Emit every point so ptCount always equals the number of
+    // <c:pt> elements (ECMA-376 numCache must keep them consistent, else
+    // Excel raises a "File Repair" prompt). Non-numeric / NaN / Inf cells are
+    // substituted with 0 rather than left as a sparse gap. For a contiguous
+    // numeric range (the normal case) this is identical to the raw values;
+    // true blank-as-gap handling is a follow-up.
     {
         let pt_count = ser.values.len();
         let mut val_pts = String::new();
         for (i, &v) in ser.values.iter().enumerate() {
-            if v.is_nan() || v.is_infinite() {
-                // omit bad values — ptCount stays accurate
-            } else {
-                val_pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{v}</c:v></c:pt>"));
-            }
+            let safe = if v.is_nan() || v.is_infinite() { 0.0 } else { v };
+            val_pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{safe}</c:v></c:pt>"));
         }
         xml.push_str(&format!(
             "          <c:val><c:numRef><c:f>{}</c:f>\
@@ -10144,14 +10150,15 @@ fn build_scatter_series_xml(idx: usize, ser: &ChartSeries) -> String {
             encode_xml_text(&ser.name_addr)
         ));
     }
-    // X values (categories used as x-axis)
+    // X values (categories used as x-axis). Emit every point (non-numeric → 0)
+    // so ptCount matches the <c:pt> count — see build_series_xml for rationale.
     if !ser.cat_addr.is_empty() && !ser.cat_labels.is_empty() {
         let pt_count = ser.cat_labels.len();
         let mut pts = String::new();
         for (i, label) in ser.cat_labels.iter().enumerate() {
-            if let Ok(v) = label.parse::<f64>() {
-                pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{v}</c:v></c:pt>"));
-            }
+            let v = label.parse::<f64>().unwrap_or(0.0);
+            let safe = if v.is_nan() || v.is_infinite() { 0.0 } else { v };
+            pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{safe}</c:v></c:pt>"));
         }
         xml.push_str(&format!(
             "          <c:xVal><c:numRef><c:f>{}</c:f>\
@@ -10166,9 +10173,8 @@ fn build_scatter_series_xml(idx: usize, ser: &ChartSeries) -> String {
         let pt_count = ser.values.len();
         let mut val_pts = String::new();
         for (i, &v) in ser.values.iter().enumerate() {
-            if !v.is_nan() && !v.is_infinite() {
-                val_pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{v}</c:v></c:pt>"));
-            }
+            let safe = if v.is_nan() || v.is_infinite() { 0.0 } else { v };
+            val_pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{safe}</c:v></c:pt>"));
         }
         xml.push_str(&format!(
             "          <c:yVal><c:numRef><c:f>{}</c:f>\

@@ -9911,6 +9911,16 @@ fn build_chart_xml(chart: &Value, series_data: &ChartSeriesData) -> String {
     let title = chart.get("title").and_then(|v| v.as_str()).unwrap_or("");
     let show_legend = chart.get("showLegend").and_then(|v| v.as_bool()).unwrap_or(true);
     let stacked = chart.get("stacked").and_then(|v| v.as_bool()).unwrap_or(false);
+    let show_data_labels = chart.get("showDataLabels").and_then(|v| v.as_bool()).unwrap_or(false);
+    let series_colors: Vec<String> = chart
+        .get("seriesColors")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     let mut xml = String::new();
     xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
@@ -9935,6 +9945,11 @@ fn build_chart_xml(chart: &Value, series_data: &ChartSeriesData) -> String {
     xml.push_str("    <c:plotArea>\n");
     xml.push_str("      <c:layout/>\n");
 
+    // Helper: resolve color for a given series index (None = no override).
+    let color_for = |idx: usize| -> Option<&str> {
+        series_colors.get(idx).map(|s| s.as_str()).filter(|s| !s.is_empty())
+    };
+
     // Chart type element
     match chart_type {
         "bar" => {
@@ -9947,7 +9962,7 @@ fn build_chart_xml(chart: &Value, series_data: &ChartSeriesData) -> String {
             }
             xml.push_str("        <c:varyColors val=\"0\"/>\n");
             for (idx, ser) in series_data.series.iter().enumerate() {
-                xml.push_str(&build_series_xml(idx, ser, chart_type));
+                xml.push_str(&build_series_xml(idx, ser, chart_type, color_for(idx), show_data_labels, None));
             }
             if stacked {
                 xml.push_str("        <c:overlap val=\"100\"/>\n");
@@ -9974,7 +9989,7 @@ fn build_chart_xml(chart: &Value, series_data: &ChartSeriesData) -> String {
             }
             xml.push_str("        <c:varyColors val=\"0\"/>\n");
             for (idx, ser) in series_data.series.iter().enumerate() {
-                xml.push_str(&build_series_xml(idx, ser, chart_type));
+                xml.push_str(&build_series_xml(idx, ser, chart_type, color_for(idx), show_data_labels, None));
             }
             xml.push_str("        <c:axId val=\"9001\"/>\n");
             xml.push_str("        <c:axId val=\"9002\"/>\n");
@@ -9992,8 +10007,10 @@ fn build_chart_xml(chart: &Value, series_data: &ChartSeriesData) -> String {
             let tag = if chart_type == "doughnut" { "c:doughnutChart" } else { "c:pieChart" };
             xml.push_str(&format!("      <{tag}>\n"));
             xml.push_str("        <c:varyColors val=\"1\"/>\n");
+            // Pie/doughnut: colors go per data point (dPt), not per series
+            let dpt_colors = if series_colors.is_empty() { None } else { Some(series_colors.as_slice()) };
             for (idx, ser) in series_data.series.iter().enumerate() {
-                xml.push_str(&build_series_xml(idx, ser, chart_type));
+                xml.push_str(&build_series_xml(idx, ser, chart_type, None, show_data_labels, dpt_colors));
             }
             xml.push_str(&format!("      </{tag}>\n"));
             // Pie/doughnut: NO catAx/valAx (Excel breaks if axes are present)
@@ -10007,7 +10024,7 @@ fn build_chart_xml(chart: &Value, series_data: &ChartSeriesData) -> String {
             }
             xml.push_str("        <c:varyColors val=\"0\"/>\n");
             for (idx, ser) in series_data.series.iter().enumerate() {
-                xml.push_str(&build_series_xml(idx, ser, chart_type));
+                xml.push_str(&build_series_xml(idx, ser, chart_type, color_for(idx), show_data_labels, None));
             }
             xml.push_str("        <c:axId val=\"9001\"/>\n");
             xml.push_str("        <c:axId val=\"9002\"/>\n");
@@ -10026,7 +10043,7 @@ fn build_chart_xml(chart: &Value, series_data: &ChartSeriesData) -> String {
             xml.push_str("        <c:scatterStyle val=\"lineMarker\"/>\n");
             xml.push_str("        <c:varyColors val=\"0\"/>\n");
             for (idx, ser) in series_data.series.iter().enumerate() {
-                xml.push_str(&build_scatter_series_xml(idx, ser));
+                xml.push_str(&build_scatter_series_xml(idx, ser, color_for(idx), show_data_labels));
             }
             xml.push_str("        <c:axId val=\"9001\"/>\n");
             xml.push_str("        <c:axId val=\"9002\"/>\n");
@@ -10047,7 +10064,7 @@ fn build_chart_xml(chart: &Value, series_data: &ChartSeriesData) -> String {
             xml.push_str("        <c:grouping val=\"clustered\"/>\n");
             xml.push_str("        <c:varyColors val=\"0\"/>\n");
             for (idx, ser) in series_data.series.iter().enumerate() {
-                xml.push_str(&build_series_xml(idx, ser, "bar"));
+                xml.push_str(&build_series_xml(idx, ser, "bar", color_for(idx), show_data_labels, None));
             }
             xml.push_str("        <c:axId val=\"9001\"/>\n");
             xml.push_str("        <c:axId val=\"9002\"/>\n");
@@ -10074,7 +10091,48 @@ fn build_chart_xml(chart: &Value, series_data: &ChartSeriesData) -> String {
     xml
 }
 
-fn build_series_xml(idx: usize, ser: &ChartSeries, _chart_type: &str) -> String {
+/// Build the OOXML `<c:spPr>` element for a solid-fill series color.
+/// `hex` must be in `#RRGGBB` or `RRGGBB` format; leading `#` is stripped.
+fn series_sppr_xml(hex: &str) -> String {
+    let h = hex.trim_start_matches('#').to_ascii_uppercase();
+    format!(
+        "          <c:spPr><a:solidFill><a:srgbClr val=\"{h}\"/></a:solidFill></c:spPr>\n"
+    )
+}
+
+/// Build the OOXML `<c:dLbls>` element (data labels shown as values).
+fn data_labels_xml() -> &'static str {
+    "          <c:dLbls>\
+<c:showLegendKey val=\"0\"/>\
+<c:showVal val=\"1\"/>\
+<c:showCatName val=\"0\"/>\
+<c:showSerName val=\"0\"/>\
+<c:showPercent val=\"0\"/>\
+<c:showBubbleSize val=\"0\"/>\
+</c:dLbls>\n"
+}
+
+/// Build `<c:dPt>` elements for pie/doughnut data-point colors.
+fn pie_dpt_xml(series_colors: &[String]) -> String {
+    let mut out = String::new();
+    for (i, hex) in series_colors.iter().enumerate() {
+        let h = hex.trim_start_matches('#').to_ascii_uppercase();
+        out.push_str(&format!(
+            "          <c:dPt><c:idx val=\"{i}\"/><c:bubble3D val=\"0\"/>\
+<c:spPr><a:solidFill><a:srgbClr val=\"{h}\"/></a:solidFill></c:spPr></c:dPt>\n"
+        ));
+    }
+    out
+}
+
+fn build_series_xml(
+    idx: usize,
+    ser: &ChartSeries,
+    _chart_type: &str,
+    color: Option<&str>,
+    show_data_labels: bool,
+    dpt_colors: Option<&[String]>,
+) -> String {
     let mut xml = String::new();
     xml.push_str("        <c:ser>\n");
     xml.push_str(&format!("          <c:idx val=\"{idx}\"/>\n"));
@@ -10090,6 +10148,25 @@ fn build_series_xml(idx: usize, ser: &ChartSeries, _chart_type: &str) -> String 
              </c:strCache></c:strRef></c:tx>\n",
             encode_xml_text(&ser.name_addr)
         ));
+    }
+
+    // Series color (bar/line/area/scatter — single spPr per series)
+    if let Some(hex) = color {
+        if !hex.is_empty() {
+            xml.push_str(&series_sppr_xml(hex));
+        }
+    }
+
+    // Data-point colors for pie/doughnut (dPt per category)
+    if let Some(colors) = dpt_colors {
+        if !colors.is_empty() {
+            xml.push_str(&pie_dpt_xml(colors));
+        }
+    }
+
+    // Data labels
+    if show_data_labels {
+        xml.push_str(data_labels_xml());
     }
 
     // Categories
@@ -10108,18 +10185,18 @@ fn build_series_xml(idx: usize, ser: &ChartSeries, _chart_type: &str) -> String 
         ));
     }
 
-    // Values. Emit every point so ptCount always equals the number of
-    // <c:pt> elements (ECMA-376 numCache must keep them consistent, else
-    // Excel raises a "File Repair" prompt). Non-numeric / NaN / Inf cells are
-    // substituted with 0 rather than left as a sparse gap. For a contiguous
-    // numeric range (the normal case) this is identical to the raw values;
-    // true blank-as-gap handling is a follow-up.
+    // Values — sparse numCache (ECMA-376 §21.2.2.177).
+    // ptCount = logical length (= values.len()). NaN/Inf points are skipped
+    // (no <c:pt> emitted for that idx) so Excel treats them as gaps, not zeros.
+    // All emitted idx values are guaranteed to be < ptCount.
     {
         let pt_count = ser.values.len();
         let mut val_pts = String::new();
         for (i, &v) in ser.values.iter().enumerate() {
-            let safe = if v.is_nan() || v.is_infinite() { 0.0 } else { v };
-            val_pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{safe}</c:v></c:pt>"));
+            if v.is_nan() || v.is_infinite() {
+                continue; // skip → gap in chart (blank-as-gap)
+            }
+            val_pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{v}</c:v></c:pt>"));
         }
         xml.push_str(&format!(
             "          <c:val><c:numRef><c:f>{}</c:f>\
@@ -10134,7 +10211,12 @@ fn build_series_xml(idx: usize, ser: &ChartSeries, _chart_type: &str) -> String 
     xml
 }
 
-fn build_scatter_series_xml(idx: usize, ser: &ChartSeries) -> String {
+fn build_scatter_series_xml(
+    idx: usize,
+    ser: &ChartSeries,
+    color: Option<&str>,
+    show_data_labels: bool,
+) -> String {
     // Scatter uses xVal/yVal instead of cat/val
     let mut xml = String::new();
     xml.push_str("        <c:ser>\n");
@@ -10150,15 +10232,29 @@ fn build_scatter_series_xml(idx: usize, ser: &ChartSeries) -> String {
             encode_xml_text(&ser.name_addr)
         ));
     }
-    // X values (categories used as x-axis). Emit every point (non-numeric → 0)
-    // so ptCount matches the <c:pt> count — see build_series_xml for rationale.
+
+    // Series color
+    if let Some(hex) = color {
+        if !hex.is_empty() {
+            xml.push_str(&series_sppr_xml(hex));
+        }
+    }
+
+    // Data labels
+    if show_data_labels {
+        xml.push_str(data_labels_xml());
+    }
+
+    // X values (categories used as x-axis). Sparse: NaN/Inf skipped → gap.
     if !ser.cat_addr.is_empty() && !ser.cat_labels.is_empty() {
         let pt_count = ser.cat_labels.len();
         let mut pts = String::new();
         for (i, label) in ser.cat_labels.iter().enumerate() {
-            let v = label.parse::<f64>().unwrap_or(0.0);
-            let safe = if v.is_nan() || v.is_infinite() { 0.0 } else { v };
-            pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{safe}</c:v></c:pt>"));
+            let v = label.parse::<f64>().unwrap_or(f64::NAN);
+            if v.is_nan() || v.is_infinite() {
+                continue;
+            }
+            pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{v}</c:v></c:pt>"));
         }
         xml.push_str(&format!(
             "          <c:xVal><c:numRef><c:f>{}</c:f>\
@@ -10168,13 +10264,15 @@ fn build_scatter_series_xml(idx: usize, ser: &ChartSeries) -> String {
             encode_xml_text(&ser.cat_addr)
         ));
     }
-    // Y values
+    // Y values — sparse numCache
     {
         let pt_count = ser.values.len();
         let mut val_pts = String::new();
         for (i, &v) in ser.values.iter().enumerate() {
-            let safe = if v.is_nan() || v.is_infinite() { 0.0 } else { v };
-            val_pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{safe}</c:v></c:pt>"));
+            if v.is_nan() || v.is_infinite() {
+                continue;
+            }
+            val_pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{v}</c:v></c:pt>"));
         }
         xml.push_str(&format!(
             "          <c:yVal><c:numRef><c:f>{}</c:f>\

@@ -634,3 +634,274 @@ fn doughnut_chart_has_no_axes() {
     assert!(!xml.contains("<c:catAx>"), "doughnut must not have catAx");
     assert!(!xml.contains("<c:valAx>"), "doughnut must not have valAx");
 }
+
+// --------------------------------------------------------------------------
+// Test 13: seriesColors — bar chart series gets <c:spPr><a:srgbClr>
+// --------------------------------------------------------------------------
+
+#[test]
+fn bar_chart_series_color_emitted() {
+    let tmp = TempDir::new().unwrap();
+    let (_, snap_json) = base_snapshot(&tmp, "Sheet1");
+    let chart = json!({
+        "range": "Sheet1!A1:B4",
+        "type": "bar",
+        "hasHeaderRow": true,
+        "hasHeaderCol": true,
+        "anchorRow": 0,
+        "anchorCol": 5,
+        "widthPx": 380,
+        "heightPx": 280,
+        "seriesColors": ["#4472C4"]
+    });
+    let snap_with_chart = inject_charts(&snap_json, json!([chart]));
+    let out = tmp.path().join("series_color.xlsx");
+    export_xlsx_core(path_str(&out), snap_with_chart).expect("export").success.then(|| ()).expect("success");
+
+    let bytes = std::fs::read(&out).unwrap();
+    let mut zip = ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let names: Vec<String> = (0..zip.len())
+        .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
+        .collect();
+    let chart_part = names
+        .iter()
+        .find(|n| n.starts_with("xl/charts/chart9") && n.ends_with(".xml"))
+        .unwrap();
+    let xml = read_zip_entry_str(&mut zip, chart_part).unwrap();
+    assert!(
+        xml.contains("<a:srgbClr val=\"4472C4\"/>"),
+        "series color srgbClr not found in: {xml}"
+    );
+}
+
+// --------------------------------------------------------------------------
+// Test 14: seriesColors — color missing for a series → no spPr for that series
+// --------------------------------------------------------------------------
+
+#[test]
+fn bar_chart_no_color_no_sppr() {
+    let tmp = TempDir::new().unwrap();
+    let (_, snap_json) = base_snapshot(&tmp, "Sheet1");
+    // No seriesColors key at all
+    let chart = json!({
+        "range": "Sheet1!A1:B4",
+        "type": "bar",
+        "hasHeaderRow": true,
+        "hasHeaderCol": true,
+        "anchorRow": 0,
+        "anchorCol": 5,
+        "widthPx": 380,
+        "heightPx": 280
+    });
+    let snap_with_chart = inject_charts(&snap_json, json!([chart]));
+    let out = tmp.path().join("no_color.xlsx");
+    export_xlsx_core(path_str(&out), snap_with_chart).expect("export").success.then(|| ()).expect("success");
+
+    let bytes = std::fs::read(&out).unwrap();
+    let mut zip = ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let names: Vec<String> = (0..zip.len())
+        .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
+        .collect();
+    let chart_part = names
+        .iter()
+        .find(|n| n.starts_with("xl/charts/chart9") && n.ends_with(".xml"))
+        .unwrap();
+    let xml = read_zip_entry_str(&mut zip, chart_part).unwrap();
+    assert!(
+        !xml.contains("<c:spPr>"),
+        "no seriesColors → spPr must not appear, but found it in: {xml}"
+    );
+}
+
+// --------------------------------------------------------------------------
+// Test 15: pie chart — dPt color entries emitted per data point
+// --------------------------------------------------------------------------
+
+#[test]
+fn pie_chart_dpt_colors_emitted() {
+    let tmp = TempDir::new().unwrap();
+    let (_, snap_json) = base_snapshot(&tmp, "Sheet1");
+    let chart = json!({
+        "range": "Sheet1!A1:B4",
+        "type": "pie",
+        "hasHeaderRow": true,
+        "hasHeaderCol": true,
+        "anchorRow": 0,
+        "anchorCol": 5,
+        "widthPx": 380,
+        "heightPx": 280,
+        "seriesColors": ["#FF0000", "#00FF00", "#0000FF"]
+    });
+    let snap_with_chart = inject_charts(&snap_json, json!([chart]));
+    let out = tmp.path().join("pie_dpt.xlsx");
+    export_xlsx_core(path_str(&out), snap_with_chart).expect("export").success.then(|| ()).expect("success");
+
+    let bytes = std::fs::read(&out).unwrap();
+    let mut zip = ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let names: Vec<String> = (0..zip.len())
+        .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
+        .collect();
+    let chart_part = names
+        .iter()
+        .find(|n| n.starts_with("xl/charts/chart9") && n.ends_with(".xml"))
+        .unwrap();
+    let xml = read_zip_entry_str(&mut zip, chart_part).unwrap();
+    assert!(xml.contains("<c:dPt>"), "dPt elements missing for pie colors");
+    assert!(xml.contains("<a:srgbClr val=\"FF0000\"/>"), "red dPt missing");
+    assert!(xml.contains("<a:srgbClr val=\"00FF00\"/>"), "green dPt missing");
+    assert!(xml.contains("<a:srgbClr val=\"0000FF\"/>"), "blue dPt missing");
+}
+
+// --------------------------------------------------------------------------
+// Test 16: showDataLabels=true → <c:dLbls><c:showVal val="1"/> in XML
+// --------------------------------------------------------------------------
+
+#[test]
+fn show_data_labels_true_emits_dlbls() {
+    let tmp = TempDir::new().unwrap();
+    let (_, snap_json) = base_snapshot(&tmp, "Sheet1");
+    let chart = json!({
+        "range": "Sheet1!A1:B4",
+        "type": "bar",
+        "hasHeaderRow": true,
+        "hasHeaderCol": true,
+        "anchorRow": 0,
+        "anchorCol": 5,
+        "widthPx": 380,
+        "heightPx": 280,
+        "showDataLabels": true
+    });
+    let snap_with_chart = inject_charts(&snap_json, json!([chart]));
+    let out = tmp.path().join("dlbls_true.xlsx");
+    export_xlsx_core(path_str(&out), snap_with_chart).expect("export").success.then(|| ()).expect("success");
+
+    let bytes = std::fs::read(&out).unwrap();
+    let mut zip = ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let names: Vec<String> = (0..zip.len())
+        .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
+        .collect();
+    let chart_part = names
+        .iter()
+        .find(|n| n.starts_with("xl/charts/chart9") && n.ends_with(".xml"))
+        .unwrap();
+    let xml = read_zip_entry_str(&mut zip, chart_part).unwrap();
+    assert!(xml.contains("<c:dLbls>"), "dLbls element missing when showDataLabels=true");
+    assert!(xml.contains("<c:showVal val=\"1\"/>"), "showVal val=1 missing");
+}
+
+// --------------------------------------------------------------------------
+// Test 17: showDataLabels=false (or absent) → no <c:dLbls>
+// --------------------------------------------------------------------------
+
+#[test]
+fn show_data_labels_false_no_dlbls() {
+    let tmp = TempDir::new().unwrap();
+    let (_, snap_json) = base_snapshot(&tmp, "Sheet1");
+    let chart = json!({
+        "range": "Sheet1!A1:B4",
+        "type": "bar",
+        "hasHeaderRow": true,
+        "hasHeaderCol": true,
+        "anchorRow": 0,
+        "anchorCol": 5,
+        "widthPx": 380,
+        "heightPx": 280,
+        "showDataLabels": false
+    });
+    let snap_with_chart = inject_charts(&snap_json, json!([chart]));
+    let out = tmp.path().join("dlbls_false.xlsx");
+    export_xlsx_core(path_str(&out), snap_with_chart).expect("export").success.then(|| ()).expect("success");
+
+    let bytes = std::fs::read(&out).unwrap();
+    let mut zip = ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let names: Vec<String> = (0..zip.len())
+        .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
+        .collect();
+    let chart_part = names
+        .iter()
+        .find(|n| n.starts_with("xl/charts/chart9") && n.ends_with(".xml"))
+        .unwrap();
+    let xml = read_zip_entry_str(&mut zip, chart_part).unwrap();
+    assert!(
+        !xml.contains("<c:dLbls>"),
+        "dLbls must not appear when showDataLabels=false, but found it"
+    );
+}
+
+// --------------------------------------------------------------------------
+// Test 18: numCache sparse — NaN values produce gap (no pt), ptCount = logical len
+// --------------------------------------------------------------------------
+
+#[test]
+fn num_cache_sparse_nan_as_gap() {
+    // Build a sheet with a blank cell (no value) in row 2 col 1
+    let tmp = TempDir::new().unwrap();
+    let plain = tmp.path().join("sparse.xlsx");
+    {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name("Data").unwrap();
+        ws.write_string(0, 0, "Cat").unwrap();
+        ws.write_string(0, 1, "Val").unwrap();
+        ws.write_string(1, 0, "A").unwrap();
+        ws.write_number(1, 1, 10.0).unwrap();
+        ws.write_string(2, 0, "B").unwrap();
+        // Row 2 col 1 intentionally left blank (no write_number call)
+        ws.write_string(3, 0, "C").unwrap();
+        ws.write_number(3, 1, 30.0).unwrap();
+        wb.save(&plain).unwrap();
+    }
+    let import = import_xlsx_core(path_str(&plain)).expect("import ok");
+    let snap_json = import.handle.snapshot_json.expect("snap");
+    let chart = json!({
+        "range": "Data!A1:B4",
+        "type": "bar",
+        "hasHeaderRow": true,
+        "hasHeaderCol": true,
+        "anchorRow": 0,
+        "anchorCol": 5,
+        "widthPx": 380,
+        "heightPx": 280
+    });
+    let snap_with_chart = inject_charts(&snap_json, json!([chart]));
+    let out = tmp.path().join("sparse_out.xlsx");
+    export_xlsx_core(path_str(&out), snap_with_chart).expect("export").success.then(|| ()).expect("success");
+
+    let bytes = std::fs::read(&out).unwrap();
+    let mut zip = ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let names: Vec<String> = (0..zip.len())
+        .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
+        .collect();
+    let chart_part = names
+        .iter()
+        .find(|n| n.starts_with("xl/charts/chart9") && n.ends_with(".xml"))
+        .unwrap();
+    let xml = read_zip_entry_str(&mut zip, chart_part).unwrap();
+
+    // ptCount must equal logical length (3 data rows)
+    assert!(
+        xml.contains("<c:ptCount val=\"3\"/>"),
+        "ptCount should be 3 (logical length), got: {xml}"
+    );
+    // Values 10 and 30 present
+    assert!(xml.contains("<c:v>10</c:v>"), "value 10 missing");
+    assert!(xml.contains("<c:v>30</c:v>"), "value 30 missing");
+
+    // Blank row B must NOT produce a numeric pt (sparse gap).
+    // The numCache section is inside <c:val><c:numRef><c:numCache>...</c:numCache>.
+    // We find that section and verify only 2 <c:pt> tags appear inside it.
+    let num_cache_start = xml.find("<c:numCache>").expect("<c:numCache> missing");
+    let num_cache_end = xml.find("</c:numCache>").expect("</c:numCache> missing");
+    let num_cache_section = &xml[num_cache_start..num_cache_end];
+    // Count actual <c:pt idx= entries (excludes <c:ptCount which also starts with "<c:pt")
+    let pt_count_in_cache = num_cache_section.matches("<c:pt idx=").count();
+    assert_eq!(
+        pt_count_in_cache, 2,
+        "numCache should have exactly 2 sparse pts (not 3), but found {pt_count_in_cache} in:\n{num_cache_section}"
+    );
+    // Also verify idx=1 is absent (blank row B → gap)
+    assert!(
+        !num_cache_section.contains("idx=\"1\""),
+        "blank row B must be absent from numCache (gap), but idx=1 found in:\n{num_cache_section}"
+    );
+}

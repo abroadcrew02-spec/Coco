@@ -5098,6 +5098,59 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     // InGridImageLayer reads _images directly; @univerjs/sheets-drawing stays dormant.
     merge_coco_extensions_into_snapshot(&mut snapshot, &coco_extensions);
 
+    // #330: Remove Coco-emitted chart parts (9001+) from _preservedParts so they
+    // are not double-taken on the next import. Coco-authored charts round-trip via
+    // xl/cocoExtensions/charts.json; the xl/charts/chart9xxx.xml files emitted by
+    // inject_charts_to_xlsx are regenerated each export and must not accumulate in
+    // _preservedParts. Only strip parts whose numeric suffix >= 9001 to avoid
+    // disturbing Excel-origin chart1.xml etc.
+    {
+        let has_coco_charts = snapshot
+            .get("sheets")
+            .and_then(|s| s.as_object())
+            .map(|sheets| {
+                sheets.values().any(|sheet| {
+                    sheet
+                        .get("_charts")
+                        .and_then(|v| v.as_array())
+                        .map(|a| !a.is_empty())
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+
+        if has_coco_charts {
+            if let Some(parts) = snapshot
+                .get_mut("_preservedParts")
+                .and_then(|pp| pp.get_mut("parts"))
+                .and_then(|v| v.as_object_mut())
+            {
+                let coco_chart_keys: Vec<String> = parts
+                    .keys()
+                    .filter(|k| {
+                        // Matches xl/charts/chart9NNN.xml (Coco-emitted 9001+ space)
+                        if let Some(rest) = k.strip_prefix("xl/charts/chart") {
+                            let stem = rest.strip_suffix(".xml").unwrap_or(rest);
+                            stem.parse::<u32>().map(|n| n >= 9001).unwrap_or(false)
+                        } else if let Some(rest) = k.strip_prefix("xl/drawings/drawing") {
+                            // Also strip Coco-emitted drawing9xxx.xml parts (chart-only drawings)
+                            let stem = rest.strip_suffix(".xml").unwrap_or(
+                                rest.strip_suffix(".xml.rels").unwrap_or(rest)
+                            );
+                            stem.parse::<u32>().map(|n| n >= 9001).unwrap_or(false)
+                        } else {
+                            false
+                        }
+                    })
+                    .cloned()
+                    .collect();
+                for k in coco_chart_keys {
+                    parts.remove(&k);
+                }
+            }
+        }
+    }
+
     let snapshot_json = serde_json::to_string(&snapshot).map_err(|e| e.to_string())?;
 
     let mut warnings: Vec<CompatibilityWarning> = prepended_warnings;
@@ -6231,6 +6284,23 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                 affected_sheets: None,
             }],
             error: Some(format!("XLSX_FORM_CONTROL_EMIT_FAILED: {e}")),
+        });
+    }
+
+    // #330: Emit OOXML chart parts for Coco-authored charts (_charts).
+    // Runs after inject_images_to_xlsx so image drawings can be extended in-place.
+    if let Err(e) = inject_charts_to_xlsx(&tmp_path, &snapshot, &sheet_order) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Ok(ExportResult {
+            success: false,
+            path: path.clone(),
+            warnings: vec![CompatibilityWarning {
+                severity: "blocking".to_string(),
+                code: "XLSX_CHART_EMIT_FAILED".to_string(),
+                message: format!("Coco-authored chart emit failed: {e}"),
+                affected_sheets: None,
+            }],
+            error: Some(format!("XLSX_CHART_EMIT_FAILED: {e}")),
         });
     }
 
@@ -9591,6 +9661,990 @@ Target=\"../drawings/vmlDrawing{vml_n}.vml\"/>"
             out.start_file("[Content_Types].xml", opts).map_err(|e| e.to_string())?;
             std::io::Write::write_all(&mut out, ct_xml.as_bytes()).map_err(|e| e.to_string())?;
         }
+
+        out.finish().map_err(|e| e.to_string())?;
+    }
+
+    fs::write(tmp_path, &out_buf).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ============================================================================
+// #330: inject_charts_to_xlsx — emit Coco-authored _charts as OOXML parts.
+// Runs after inject_images_to_xlsx so that when image+chart share a sheet,
+// this function reads the drawing file written by images and extends it with
+// graphicFrame anchors rather than creating a conflicting second drawing.
+// ============================================================================
+
+/// Parse a range string like "Sheet1!$A$1:$C$3" into (sheet_name, r0, c0, r1, c1).
+/// Sheet name may be absent (uses the sheet the chart is on).
+/// Returns None if unparseable.
+fn parse_chart_range(range: &str) -> Option<(Option<String>, usize, usize, usize, usize)> {
+    let range = range.trim();
+    // Strip outer quotes from sheet name e.g. 'Sheet Name'!A1:B2
+    let (sheet_part, cell_part) = if let Some(idx) = range.rfind('!') {
+        let s = &range[..idx];
+        let s = s.trim_matches('\'');
+        (Some(s.to_string()), &range[idx + 1..])
+    } else {
+        (None, range)
+    };
+
+    // Strip $ signs
+    let cell_part = cell_part.replace('$', "");
+    // Split by ':'
+    let parts: Vec<&str> = cell_part.splitn(2, ':').collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    fn parse_cell(s: &str) -> Option<(usize, usize)> {
+        let s = s.trim();
+        let col_end = s.find(|c: char| c.is_ascii_digit())?;
+        if col_end == 0 {
+            return None;
+        }
+        let col_str = &s[..col_end];
+        let row_str = &s[col_end..];
+        let row: usize = row_str.parse::<usize>().ok()?.saturating_sub(1);
+        let col = col_str.chars().fold(0usize, |acc, c| {
+            acc * 26 + (c.to_ascii_uppercase() as usize - 'A' as usize + 1)
+        }).saturating_sub(1);
+        Some((row, col))
+    }
+
+    let (r0, c0) = parse_cell(parts[0])?;
+    let (r1, c1) = if parts.len() > 1 {
+        parse_cell(parts[1])?
+    } else {
+        (r0, c0)
+    };
+
+    Some((sheet_part, r0.min(r1), c0.min(c1), r0.max(r1), c0.max(c1)))
+}
+
+/// Column index (0-based) to Excel letter notation.
+fn col_to_letter(col: usize) -> String {
+    let mut n = col + 1;
+    let mut s = String::new();
+    while n > 0 {
+        let rem = (n - 1) % 26;
+        s = format!("{}{s}", char::from(b'A' + rem as u8));
+        n = (n - 1) / 26;
+    }
+    s
+}
+
+/// Read a cell value from snapshot cellData (row/col are 0-based).
+fn read_snapshot_cell<'a>(cell_data: &'a serde_json::Map<String, Value>, row: usize, col: usize) -> Option<&'a Value> {
+    let row_obj = cell_data.get(&row.to_string())?.as_object()?;
+    let cell = row_obj.get(&col.to_string())?;
+    Some(cell)
+}
+
+
+/// Build the series/category data for a chart from the snapshot.
+/// Returns (series_names, categories, series_values, sheet_name_for_range, range_str).
+///
+/// Layout convention (matching chartRender.ts):
+///   hasHeaderRow=true → first row is series names
+///   hasHeaderCol=true → first col is category labels
+///   remaining grid → series values
+struct ChartSeriesData {
+    /// One entry per data series. (series_name, cat_range_addr, val_range_addr, cat_labels, values)
+    series: Vec<ChartSeries>,
+    #[allow(dead_code)]
+    sheet_name: String,
+}
+
+struct ChartSeries {
+    name: String,
+    /// Excel-style range address for series name, e.g. "Sheet1!$B$1"
+    name_addr: String,
+    /// Excel-style range address for categories, e.g. "Sheet1!$A$2:$A$4"
+    cat_addr: String,
+    /// Excel-style range address for values, e.g. "Sheet1!$B$2:$B$4"
+    val_addr: String,
+    /// Category label strings
+    cat_labels: Vec<String>,
+    /// Numeric values (NaN-safe; empty string emitted for NaN)
+    values: Vec<f64>,
+}
+
+fn extract_chart_series(chart: &Value, sheets_obj: &serde_json::Map<String, Value>, current_sheet_name: &str) -> ChartSeriesData {
+    let range = chart.get("range").and_then(|v| v.as_str()).unwrap_or("");
+    let has_header_row = chart.get("hasHeaderRow").and_then(|v| v.as_bool()).unwrap_or(true);
+    let has_header_col = chart.get("hasHeaderCol").and_then(|v| v.as_bool()).unwrap_or(true);
+
+    let empty = ChartSeriesData { series: vec![], sheet_name: current_sheet_name.to_string() };
+
+    let parsed = match parse_chart_range(range) {
+        Some(p) => p,
+        None => return empty,
+    };
+
+    let (sheet_name_opt, r0, c0, r1, c1) = parsed;
+    let sheet_name = sheet_name_opt.unwrap_or_else(|| current_sheet_name.to_string());
+
+    // Find sheet by name
+    let cell_data_opt: Option<&serde_json::Map<String, Value>> = sheets_obj.values()
+        .find(|s| {
+            s.as_object()
+                .and_then(|o| o.get("name"))
+                .and_then(|n| n.as_str())
+                == Some(sheet_name.as_str())
+        })
+        .and_then(|s| s.as_object())
+        .and_then(|o| o.get("cellData"))
+        .and_then(|v| v.as_object());
+
+    // Determine data region
+    let data_r0 = if has_header_row { r0 + 1 } else { r0 };
+    let data_c0 = if has_header_col { c0 + 1 } else { c0 };
+
+    if data_r0 > r1 || data_c0 > c1 {
+        return ChartSeriesData { series: vec![], sheet_name };
+    }
+
+    // Build series (one per data column)
+    let n_data_rows = r1 - data_r0 + 1;
+    let n_series = c1 - data_c0 + 1;
+
+    // Category labels (from first col if hasHeaderCol)
+    let cat_labels: Vec<String> = if has_header_col {
+        (data_r0..=r1).map(|row| {
+            cell_data_opt
+                .and_then(|cd| read_snapshot_cell(cd, row, c0))
+                .map(|cell| {
+                    if let Some(v) = cell.get("v") {
+                        match v {
+                            Value::String(s) => s.clone(),
+                            Value::Number(n) => n.to_string(),
+                            _ => String::new(),
+                        }
+                    } else { String::new() }
+                })
+                .unwrap_or_default()
+        }).collect()
+    } else {
+        (1..=n_data_rows).map(|i| i.to_string()).collect()
+    };
+
+    let cat_col = if has_header_col { c0 } else { data_c0 };
+    // Only build cat_addr when hasHeaderCol is true (first col is labels)
+    let cat_addr = if has_header_col {
+        format!(
+            "{}!${}${}:${}${}",
+            sheet_name,
+            col_to_letter(cat_col), data_r0 + 1,
+            col_to_letter(cat_col), r1 + 1
+        )
+    } else {
+        String::new()
+    };
+
+    let mut series_vec = Vec::new();
+    for s_idx in 0..n_series {
+        let s_col = data_c0 + s_idx;
+
+        // Series name: from header row if hasHeaderRow
+        let series_name = if has_header_row {
+            cell_data_opt
+                .and_then(|cd| read_snapshot_cell(cd, r0, s_col))
+                .and_then(|cell| cell.get("v"))
+                .map(|v| match v {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    _ => format!("Series{}", s_idx + 1),
+                })
+                .unwrap_or_else(|| format!("Series{}", s_idx + 1))
+        } else {
+            format!("Series{}", s_idx + 1)
+        };
+
+        let name_addr = if has_header_row {
+            format!("{}!${}${}", sheet_name, col_to_letter(s_col), r0 + 1)
+        } else {
+            String::new()
+        };
+
+        let val_addr = format!(
+            "{}!${}${}:${}${}",
+            sheet_name,
+            col_to_letter(s_col), data_r0 + 1,
+            col_to_letter(s_col), r1 + 1
+        );
+
+        // Values
+        let values: Vec<f64> = (data_r0..=r1).map(|row| {
+            cell_data_opt
+                .and_then(|cd| read_snapshot_cell(cd, row, s_col))
+                .and_then(|cell| cell.get("v"))
+                .and_then(|v| match v {
+                    Value::Number(n) => n.as_f64(),
+                    Value::String(s) => s.parse::<f64>().ok(),
+                    _ => None,
+                })
+                .unwrap_or(f64::NAN)
+        }).collect();
+
+        series_vec.push(ChartSeries {
+            name: series_name,
+            name_addr,
+            cat_addr: cat_addr.clone(),
+            val_addr,
+            cat_labels: cat_labels.clone(),
+            values,
+        });
+    }
+
+    ChartSeriesData { series: series_vec, sheet_name }
+}
+
+/// Build chart XML for a Coco chart entry. Returns the XML string.
+fn build_chart_xml(chart: &Value, series_data: &ChartSeriesData) -> String {
+    let chart_type = chart.get("type").and_then(|v| v.as_str()).unwrap_or("bar");
+    let title = chart.get("title").and_then(|v| v.as_str()).unwrap_or("");
+    let show_legend = chart.get("showLegend").and_then(|v| v.as_bool()).unwrap_or(true);
+    let stacked = chart.get("stacked").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    let mut xml = String::new();
+    xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
+    xml.push_str("<c:chartSpace xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" \
+                  xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" \
+                  xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">\n");
+    xml.push_str("  <c:chart>\n");
+
+    // Title
+    if !title.is_empty() {
+        let safe_title = encode_xml_text(title);
+        xml.push_str(&format!(
+            "    <c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/>\
+             <a:p><a:r><a:t>{safe_title}</a:t></a:r></a:p></c:rich></c:tx>\
+             <c:overlay val=\"0\"/></c:title>\n"
+        ));
+        xml.push_str("    <c:autoTitleDeleted val=\"0\"/>\n");
+    } else {
+        xml.push_str("    <c:autoTitleDeleted val=\"1\"/>\n");
+    }
+
+    xml.push_str("    <c:plotArea>\n");
+    xml.push_str("      <c:layout/>\n");
+
+    // Chart type element
+    match chart_type {
+        "bar" => {
+            xml.push_str("      <c:barChart>\n");
+            xml.push_str("        <c:barDir val=\"col\"/>\n");
+            if stacked {
+                xml.push_str("        <c:grouping val=\"stacked\"/>\n");
+            } else {
+                xml.push_str("        <c:grouping val=\"clustered\"/>\n");
+            }
+            xml.push_str("        <c:varyColors val=\"0\"/>\n");
+            for (idx, ser) in series_data.series.iter().enumerate() {
+                xml.push_str(&build_series_xml(idx, ser, chart_type));
+            }
+            if stacked {
+                xml.push_str("        <c:overlap val=\"100\"/>\n");
+            }
+            xml.push_str("        <c:axId val=\"9001\"/>\n");
+            xml.push_str("        <c:axId val=\"9002\"/>\n");
+            xml.push_str("      </c:barChart>\n");
+            // Axes (bar/line/area need both catAx + valAx)
+            xml.push_str(
+                "      <c:catAx><c:axId val=\"9001\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>\
+                 <c:delete val=\"0\"/><c:axPos val=\"b\"/><c:crossAx val=\"9002\"/></c:catAx>\n"
+            );
+            xml.push_str(
+                "      <c:valAx><c:axId val=\"9002\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>\
+                 <c:delete val=\"0\"/><c:axPos val=\"l\"/><c:crossAx val=\"9001\"/></c:valAx>\n"
+            );
+        }
+        "line" => {
+            xml.push_str("      <c:lineChart>\n");
+            if stacked {
+                xml.push_str("        <c:grouping val=\"stacked\"/>\n");
+            } else {
+                xml.push_str("        <c:grouping val=\"standard\"/>\n");
+            }
+            xml.push_str("        <c:varyColors val=\"0\"/>\n");
+            for (idx, ser) in series_data.series.iter().enumerate() {
+                xml.push_str(&build_series_xml(idx, ser, chart_type));
+            }
+            xml.push_str("        <c:axId val=\"9001\"/>\n");
+            xml.push_str("        <c:axId val=\"9002\"/>\n");
+            xml.push_str("      </c:lineChart>\n");
+            xml.push_str(
+                "      <c:catAx><c:axId val=\"9001\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>\
+                 <c:delete val=\"0\"/><c:axPos val=\"b\"/><c:crossAx val=\"9002\"/></c:catAx>\n"
+            );
+            xml.push_str(
+                "      <c:valAx><c:axId val=\"9002\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>\
+                 <c:delete val=\"0\"/><c:axPos val=\"l\"/><c:crossAx val=\"9001\"/></c:valAx>\n"
+            );
+        }
+        "pie" | "doughnut" => {
+            let tag = if chart_type == "doughnut" { "c:doughnutChart" } else { "c:pieChart" };
+            xml.push_str(&format!("      <{tag}>\n"));
+            xml.push_str("        <c:varyColors val=\"1\"/>\n");
+            for (idx, ser) in series_data.series.iter().enumerate() {
+                xml.push_str(&build_series_xml(idx, ser, chart_type));
+            }
+            xml.push_str(&format!("      </{tag}>\n"));
+            // Pie/doughnut: NO catAx/valAx (Excel breaks if axes are present)
+        }
+        "area" => {
+            xml.push_str("      <c:areaChart>\n");
+            if stacked {
+                xml.push_str("        <c:grouping val=\"stacked\"/>\n");
+            } else {
+                xml.push_str("        <c:grouping val=\"standard\"/>\n");
+            }
+            xml.push_str("        <c:varyColors val=\"0\"/>\n");
+            for (idx, ser) in series_data.series.iter().enumerate() {
+                xml.push_str(&build_series_xml(idx, ser, chart_type));
+            }
+            xml.push_str("        <c:axId val=\"9001\"/>\n");
+            xml.push_str("        <c:axId val=\"9002\"/>\n");
+            xml.push_str("      </c:areaChart>\n");
+            xml.push_str(
+                "      <c:catAx><c:axId val=\"9001\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>\
+                 <c:delete val=\"0\"/><c:axPos val=\"b\"/><c:crossAx val=\"9002\"/></c:catAx>\n"
+            );
+            xml.push_str(
+                "      <c:valAx><c:axId val=\"9002\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>\
+                 <c:delete val=\"0\"/><c:axPos val=\"l\"/><c:crossAx val=\"9001\"/></c:valAx>\n"
+            );
+        }
+        "scatter" => {
+            xml.push_str("      <c:scatterChart>\n");
+            xml.push_str("        <c:scatterStyle val=\"lineMarker\"/>\n");
+            xml.push_str("        <c:varyColors val=\"0\"/>\n");
+            for (idx, ser) in series_data.series.iter().enumerate() {
+                xml.push_str(&build_scatter_series_xml(idx, ser));
+            }
+            xml.push_str("        <c:axId val=\"9001\"/>\n");
+            xml.push_str("        <c:axId val=\"9002\"/>\n");
+            xml.push_str("      </c:scatterChart>\n");
+            xml.push_str(
+                "      <c:valAx><c:axId val=\"9001\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>\
+                 <c:delete val=\"0\"/><c:axPos val=\"b\"/><c:crossAx val=\"9002\"/></c:valAx>\n"
+            );
+            xml.push_str(
+                "      <c:valAx><c:axId val=\"9002\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>\
+                 <c:delete val=\"0\"/><c:axPos val=\"l\"/><c:crossAx val=\"9001\"/></c:valAx>\n"
+            );
+        }
+        _ => {
+            // Fallback: bar
+            xml.push_str("      <c:barChart>\n");
+            xml.push_str("        <c:barDir val=\"col\"/>\n");
+            xml.push_str("        <c:grouping val=\"clustered\"/>\n");
+            xml.push_str("        <c:varyColors val=\"0\"/>\n");
+            for (idx, ser) in series_data.series.iter().enumerate() {
+                xml.push_str(&build_series_xml(idx, ser, "bar"));
+            }
+            xml.push_str("        <c:axId val=\"9001\"/>\n");
+            xml.push_str("        <c:axId val=\"9002\"/>\n");
+            xml.push_str("      </c:barChart>\n");
+            xml.push_str(
+                "      <c:catAx><c:axId val=\"9001\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>\
+                 <c:delete val=\"0\"/><c:axPos val=\"b\"/><c:crossAx val=\"9002\"/></c:catAx>\n"
+            );
+            xml.push_str(
+                "      <c:valAx><c:axId val=\"9002\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>\
+                 <c:delete val=\"0\"/><c:axPos val=\"l\"/><c:crossAx val=\"9001\"/></c:valAx>\n"
+            );
+        }
+    }
+
+    xml.push_str("    </c:plotArea>\n");
+
+    if show_legend {
+        xml.push_str("    <c:legend><c:legendPos val=\"r\"/><c:overlay val=\"0\"/></c:legend>\n");
+    }
+    xml.push_str("    <c:plotVisOnly val=\"1\"/>\n");
+    xml.push_str("  </c:chart>\n");
+    xml.push_str("</c:chartSpace>");
+    xml
+}
+
+fn build_series_xml(idx: usize, ser: &ChartSeries, _chart_type: &str) -> String {
+    let mut xml = String::new();
+    xml.push_str("        <c:ser>\n");
+    xml.push_str(&format!("          <c:idx val=\"{idx}\"/>\n"));
+    xml.push_str(&format!("          <c:order val=\"{idx}\"/>\n"));
+
+    // Series name
+    if !ser.name_addr.is_empty() {
+        let safe_name = encode_xml_text(&ser.name);
+        xml.push_str(&format!(
+            "          <c:tx><c:strRef><c:f>{}</c:f>\
+             <c:strCache><c:ptCount val=\"1\"/>\
+             <c:pt idx=\"0\"><c:v>{safe_name}</c:v></c:pt>\
+             </c:strCache></c:strRef></c:tx>\n",
+            encode_xml_text(&ser.name_addr)
+        ));
+    }
+
+    // Categories
+    if !ser.cat_addr.is_empty() && !ser.cat_labels.is_empty() {
+        let pt_count = ser.cat_labels.len();
+        let mut cat_pts = String::new();
+        for (i, label) in ser.cat_labels.iter().enumerate() {
+            let safe = encode_xml_text(label);
+            cat_pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{safe}</c:v></c:pt>"));
+        }
+        xml.push_str(&format!(
+            "          <c:cat><c:strRef><c:f>{}</c:f>\
+             <c:strCache><c:ptCount val=\"{pt_count}\"/>{cat_pts}</c:strCache>\
+             </c:strRef></c:cat>\n",
+            encode_xml_text(&ser.cat_addr)
+        ));
+    }
+
+    // Values
+    {
+        let pt_count = ser.values.len();
+        let mut val_pts = String::new();
+        for (i, &v) in ser.values.iter().enumerate() {
+            if v.is_nan() || v.is_infinite() {
+                // omit bad values — ptCount stays accurate
+            } else {
+                val_pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{v}</c:v></c:pt>"));
+            }
+        }
+        xml.push_str(&format!(
+            "          <c:val><c:numRef><c:f>{}</c:f>\
+             <c:numCache><c:formatCode>General</c:formatCode>\
+             <c:ptCount val=\"{pt_count}\"/>{val_pts}</c:numCache>\
+             </c:numRef></c:val>\n",
+            encode_xml_text(&ser.val_addr)
+        ));
+    }
+
+    xml.push_str("        </c:ser>\n");
+    xml
+}
+
+fn build_scatter_series_xml(idx: usize, ser: &ChartSeries) -> String {
+    // Scatter uses xVal/yVal instead of cat/val
+    let mut xml = String::new();
+    xml.push_str("        <c:ser>\n");
+    xml.push_str(&format!("          <c:idx val=\"{idx}\"/>\n"));
+    xml.push_str(&format!("          <c:order val=\"{idx}\"/>\n"));
+    if !ser.name_addr.is_empty() {
+        let safe_name = encode_xml_text(&ser.name);
+        xml.push_str(&format!(
+            "          <c:tx><c:strRef><c:f>{}</c:f>\
+             <c:strCache><c:ptCount val=\"1\"/>\
+             <c:pt idx=\"0\"><c:v>{safe_name}</c:v></c:pt>\
+             </c:strCache></c:strRef></c:tx>\n",
+            encode_xml_text(&ser.name_addr)
+        ));
+    }
+    // X values (categories used as x-axis)
+    if !ser.cat_addr.is_empty() && !ser.cat_labels.is_empty() {
+        let pt_count = ser.cat_labels.len();
+        let mut pts = String::new();
+        for (i, label) in ser.cat_labels.iter().enumerate() {
+            if let Ok(v) = label.parse::<f64>() {
+                pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{v}</c:v></c:pt>"));
+            }
+        }
+        xml.push_str(&format!(
+            "          <c:xVal><c:numRef><c:f>{}</c:f>\
+             <c:numCache><c:formatCode>General</c:formatCode>\
+             <c:ptCount val=\"{pt_count}\"/>{pts}</c:numCache>\
+             </c:numRef></c:xVal>\n",
+            encode_xml_text(&ser.cat_addr)
+        ));
+    }
+    // Y values
+    {
+        let pt_count = ser.values.len();
+        let mut val_pts = String::new();
+        for (i, &v) in ser.values.iter().enumerate() {
+            if !v.is_nan() && !v.is_infinite() {
+                val_pts.push_str(&format!("<c:pt idx=\"{i}\"><c:v>{v}</c:v></c:pt>"));
+            }
+        }
+        xml.push_str(&format!(
+            "          <c:yVal><c:numRef><c:f>{}</c:f>\
+             <c:numCache><c:formatCode>General</c:formatCode>\
+             <c:ptCount val=\"{pt_count}\"/>{val_pts}</c:numCache>\
+             </c:numRef></c:yVal>\n",
+            encode_xml_text(&ser.val_addr)
+        ));
+    }
+    xml.push_str("        </c:ser>\n");
+    xml
+}
+
+/// Build the graphicFrame XML block for embedding a chart in a drawing part.
+/// `chart_rid` is the rId in the drawing rels that points to the chart XML.
+fn build_chart_graphic_frame(chart: &Value, chart_n: u32, chart_rid: &str) -> String {
+    let row = chart.get("anchorRow").and_then(|v| v.as_i64()).unwrap_or(0);
+    let col = chart.get("anchorCol").and_then(|v| v.as_i64()).unwrap_or(0);
+    let w = chart.get("widthPx").and_then(|v| v.as_i64()).unwrap_or(400);
+    let h = chart.get("heightPx").and_then(|v| v.as_i64()).unwrap_or(300);
+    let w_emu = w.max(1) * 9525;
+    let h_emu = h.max(1) * 9525;
+    let chart_name = format!("Chart {chart_n}");
+
+    format!(
+        "  <xdr:oneCellAnchor>\n\
+           <xdr:from><xdr:col>{col}</xdr:col><xdr:colOff>0</xdr:colOff>\
+         <xdr:row>{row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>\n\
+           <xdr:ext cx=\"{w_emu}\" cy=\"{h_emu}\"/>\n\
+           <xdr:graphicFrame macro=\"\">\n\
+             <xdr:nvGraphicFramePr>\
+         <xdr:cNvPr id=\"{chart_n}\" name=\"{chart_name}\"/>\
+         <xdr:cNvGraphicFramePr/>\
+         </xdr:nvGraphicFramePr>\n\
+             <xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>\n\
+             <a:graphic>\
+         <a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">\
+           <c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" \
+         xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" \
+         r:id=\"{chart_rid}\"/>\
+         </a:graphicData>\
+         </a:graphic>\n\
+           </xdr:graphicFrame>\n\
+           <xdr:clientData/>\n\
+         </xdr:oneCellAnchor>\n"
+    )
+}
+
+/// Re-generate xl/charts + extend xl/drawings from sheets[id]._charts in the snapshot.
+/// Runs after inject_images_to_xlsx; reuses that function's drawing files when image+chart
+/// share the same sheet (one drawing per sheet rule).
+pub(crate) fn inject_charts_to_xlsx(
+    tmp_path: &std::path::Path,
+    snapshot: &Value,
+    sheet_order: &[Value],
+) -> Result<(), String> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::{write::FileOptions, ZipArchive, ZipWriter};
+
+    let sheets_obj = match snapshot.get("sheets").and_then(|v| v.as_object()) {
+        Some(o) => o,
+        None => return Ok(()),
+    };
+
+    // Collect per-sheet chart arrays (sheet_idx, sheet_id, chart_array)
+    let mut per_sheet: Vec<(usize, String, Vec<Value>)> = Vec::new();
+    for (idx, sheet_id_val) in sheet_order.iter().enumerate() {
+        let sheet_id = match sheet_id_val.as_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        let charts = sheets_obj
+            .get(sheet_id)
+            .and_then(|s| s.get("_charts"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.to_vec())
+            .unwrap_or_default();
+        if !charts.is_empty() {
+            per_sheet.push((idx, sheet_id.to_string(), charts));
+        }
+    }
+
+    if per_sheet.is_empty() {
+        return Ok(());
+    }
+
+    let original_bytes = fs::read(tmp_path).map_err(|e| e.to_string())?;
+
+    // Scan existing zip for max drawing number and chart number (9000+ space)
+    let mut max_drw_n: u32 = 0;
+    let mut max_chart_n: u32 = 0;
+    {
+        let mut src = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+        for i in 0..src.len() {
+            if let Ok(e) = src.by_index(i) {
+                let name = e.name();
+                if name.starts_with("xl/drawings/drawing") && name.ends_with(".xml") && !name.contains("_rels") {
+                    if let Some(rest) = name.strip_prefix("xl/drawings/drawing") {
+                        if let Ok(n) = rest.strip_suffix(".xml").unwrap_or("").parse::<u32>() {
+                            if n > max_drw_n { max_drw_n = n; }
+                        }
+                    }
+                }
+                if name.starts_with("xl/charts/chart") && name.ends_with(".xml") && !name.contains("_rels") {
+                    if let Some(rest) = name.strip_prefix("xl/charts/chart") {
+                        if let Ok(n) = rest.strip_suffix(".xml").unwrap_or("").parse::<u32>() {
+                            if n > max_chart_n { max_chart_n = n; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Charts use 9001+ space; drawings reuse shared 9001+ space (images already claimed some)
+    let mut global_chart_n = max_chart_n.max(9000) + 1;
+    let mut global_drw_n = max_drw_n.max(9000) + 1;
+
+    struct NewPart {
+        name: String,
+        bytes: Vec<u8>,
+    }
+    let mut new_parts: Vec<NewPart> = Vec::new();
+
+    // sheet_idx → (drawing_part_name, drawing_rels_part_name, drawing_target_for_sheet_rels)
+    // For sheets that already have a drawing (from image emit), we EXTEND that drawing.
+    // For sheets without a drawing, we create one.
+    let mut sheet_drawing_inject: HashMap<usize, (String, String, String)> = HashMap::new();
+
+    for (sheet_idx, sheet_id, charts) in &per_sheet {
+        let n = sheet_idx + 1;
+        let _sheet_xml_name = format!("xl/worksheets/sheet{n}.xml");
+        let rels_name = format!("xl/worksheets/_rels/sheet{n}.xml.rels");
+
+        // Check if a drawing already exists for this sheet in the current zip
+        // (written by inject_images_to_xlsx or original xlsx).
+        // We detect by looking for a drawing relationship in the sheet rels.
+        let (existing_drawing_part, existing_drawing_rels_part) = {
+            let mut src = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+            let mut found: Option<(String, String)> = None;
+            if let Ok(mut e) = src.by_name(&rels_name) {
+                let mut rels_xml = String::new();
+                let _ = std::io::Read::read_to_string(&mut e, &mut rels_xml);
+                // Look for a drawing rel target
+                const DRW_TYPE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
+                for rel_el in extract_self_closing_or_paired(&rels_xml, "Relationship") {
+                    if parse_attr(&rel_el, "Type").as_deref() == Some(DRW_TYPE) {
+                        if let Some(target) = parse_attr(&rel_el, "Target") {
+                            // target is like "../drawings/drawing9001.xml"
+                            let part_name = target.replace("../", "xl/");
+                            let rels_part_name = if let Some((dir, file)) = part_name.rsplit_once('/') {
+                                format!("{dir}/_rels/{file}.rels")
+                            } else {
+                                format!("_rels/{}.rels", &part_name)
+                            };
+                            found = Some((part_name, rels_part_name));
+                            break;
+                        }
+                    }
+                }
+            }
+            found.unwrap_or_default()
+        };
+
+        // Read existing drawing XML + rels (if any) so we can extend them
+        let (base_drawing_xml, base_drawing_rels_xml, drawing_part, drawing_rels_part, drawing_target) =
+            if !existing_drawing_part.is_empty() {
+                let mut src = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+                let mut dwg_xml = String::new();
+                let mut dwg_rels = String::new();
+                if let Ok(mut e) = src.by_name(&existing_drawing_part) {
+                    let _ = std::io::Read::read_to_string(&mut e, &mut dwg_xml);
+                }
+                if let Ok(mut e) = src.by_name(&existing_drawing_rels_part) {
+                    let _ = std::io::Read::read_to_string(&mut e, &mut dwg_rels);
+                }
+                let tgt = format!("../{}", existing_drawing_part.trim_start_matches("xl/"));
+                (dwg_xml, dwg_rels, existing_drawing_part, existing_drawing_rels_part, tgt)
+            } else {
+                // Create new drawing
+                let drw_n = global_drw_n;
+                global_drw_n += 1;
+                let dp = format!("xl/drawings/drawing{drw_n}.xml");
+                let drp = format!("xl/drawings/_rels/drawing{drw_n}.xml.rels");
+                let tgt = format!("../drawings/drawing{drw_n}.xml");
+                let empty_dwg = String::new();
+                let empty_rels = String::new();
+                (empty_dwg, empty_rels, dp, drp, tgt)
+            };
+
+        // Parse existing drawing rels to find max rId
+        let mut existing_drawing_rels: Vec<PreservedSheetRel> =
+            extract_self_closing_or_paired(&base_drawing_rels_xml, "Relationship")
+                .into_iter()
+                .filter_map(|el| PreservedSheetRel::from_xml(&el))
+                .collect();
+        let mut used_rids: HashSet<String> = existing_drawing_rels.iter().map(|r| r.id.clone()).collect();
+
+        // Build drawing XML: keep existing content, append graphicFrames
+        let mut dwg_anchors = String::new();
+
+        // Extract existing anchor content from drawing XML (everything between root open and close tags)
+        let drawing_namespace_header = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n\
+             <xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" \
+             xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" \
+             xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" \
+             xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">\n";
+
+        // Extract existing anchor body from the old drawing
+        let existing_anchors = if !base_drawing_xml.is_empty() {
+            // Strip <?xml ...?> header and root element wrapper; preserve interior
+            let inner = base_drawing_xml
+                .trim()
+                .trim_start_matches(|c: char| c == '<')
+                .to_string();
+            // Find the body between root element open > and </xdr:wsDr>
+            if let Some(root_close) = base_drawing_xml.find('>') {
+                let after_root = &base_drawing_xml[root_close + 1..];
+                if let Some(close_pos) = after_root.rfind("</xdr:wsDr>") {
+                    after_root[..close_pos].to_string()
+                } else {
+                    let _ = inner; // suppress unused warning
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        // Emit charts
+        let current_sheet_obj = sheets_obj.get(sheet_id.as_str());
+        let current_sheet_name = current_sheet_obj
+            .and_then(|s| s.get("name"))
+            .and_then(|n| n.as_str())
+            .unwrap_or("Sheet1");
+
+        for chart_json in charts.iter() {
+            let chart_n = global_chart_n;
+            global_chart_n += 1;
+
+            let chart_part = format!("xl/charts/chart{chart_n}.xml");
+            let chart_target = format!("../charts/chart{chart_n}.xml");
+
+            // Assign rId in drawing rels
+            let chart_rid = next_available_rid(&used_rids);
+            used_rids.insert(chart_rid.clone());
+            existing_drawing_rels.push(PreservedSheetRel::new(
+                chart_rid.clone(),
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart",
+                chart_target.clone(),
+            ));
+
+            // Build chart XML
+            let series_data = extract_chart_series(chart_json, sheets_obj, current_sheet_name);
+            let chart_xml = build_chart_xml(chart_json, &series_data);
+            new_parts.push(NewPart { name: chart_part, bytes: chart_xml.into_bytes() });
+
+            // Append graphicFrame to drawing
+            dwg_anchors.push_str(&build_chart_graphic_frame(chart_json, chart_n, &chart_rid));
+        }
+
+        // Build final drawing XML
+        let mut final_dwg_xml = String::new();
+        final_dwg_xml.push_str(drawing_namespace_header);
+        final_dwg_xml.push_str(&existing_anchors);
+        final_dwg_xml.push_str(&dwg_anchors);
+        final_dwg_xml.push_str("</xdr:wsDr>");
+
+        // Build final drawing rels XML
+        let mut final_rels = String::new();
+        final_rels.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
+        final_rels.push_str("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n");
+        for rel in &existing_drawing_rels {
+            final_rels.push_str(&rel.raw);
+            final_rels.push('\n');
+        }
+        final_rels.push_str("</Relationships>");
+
+        new_parts.push(NewPart { name: drawing_part.clone(), bytes: final_dwg_xml.into_bytes() });
+        new_parts.push(NewPart { name: drawing_rels_part.clone(), bytes: final_rels.into_bytes() });
+
+        sheet_drawing_inject.insert(*sheet_idx, (drawing_part, drawing_rels_part, drawing_target));
+    }
+
+    // Build skip set: parts we are replacing
+    let mut skip_names: HashSet<String> = HashSet::new();
+    skip_names.insert("[Content_Types].xml".to_string());
+    for (idx, _) in sheet_drawing_inject.iter() {
+        let n = idx + 1;
+        // Only skip sheet XML/rels for sheets that don't already have a drawing
+        // (for sheets with existing drawing, we skip the drawing part itself via new_parts)
+        let _ = n;
+    }
+    for p in &new_parts {
+        skip_names.insert(p.name.clone());
+    }
+    // Also skip the original drawing rels we're replacing
+    // (already handled via new_parts since drawing_rels_part is in new_parts)
+
+    let opts: FileOptions =
+        FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let mut out_buf: Vec<u8> = Vec::with_capacity(original_bytes.len() + 128 * 1024);
+    {
+        let mut out = ZipWriter::new(Cursor::new(&mut out_buf));
+        let mut src = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+
+        let mut ct_xml = String::new();
+
+        for i in 0..src.len() {
+            let mut entry = src.by_index(i).map_err(|e| e.to_string())?;
+            let name = entry.name().to_string();
+            if name == "[Content_Types].xml" {
+                let _ = std::io::Read::read_to_string(&mut entry, &mut ct_xml);
+                continue;
+            }
+            if skip_names.contains(&name) {
+                let mut _buf = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut entry, &mut _buf);
+                continue;
+            }
+            // For sheets that need a NEW drawing (no existing drawing),
+            // inject the drawing reference into sheet XML and rels.
+            let is_sheet_needing_new_drawing = sheet_drawing_inject
+                .iter()
+                .any(|(idx, (_, _, _target))| {
+                    let n = idx + 1;
+                    let sn = format!("xl/worksheets/sheet{n}.xml");
+                    name == sn
+                });
+
+            if is_sheet_needing_new_drawing {
+                // Check if this sheet already had a drawing (existing_drawing_part was non-empty)
+                // We detect: if this sheet's drawing target is a newly allocated number (>= pre-existing max_drw_n+1)
+                // Simpler: check if the existing rels had a drawing rel BEFORE our run
+                let sheet_idx_for_name = sheet_drawing_inject
+                    .iter()
+                    .find(|(idx, _)| format!("xl/worksheets/sheet{}.xml", **idx + 1) == name)
+                    .map(|(idx, _)| *idx);
+
+                let needs_new_drawing_ref = if let Some(sidx) = sheet_idx_for_name {
+                    // Did this sheet have an existing drawing before our run?
+                    let had_drawing = {
+                        let mut src2 = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+                        let rn = format!("xl/worksheets/_rels/sheet{}.xml.rels", sidx + 1);
+                        let mut had = false;
+                        if let Ok(mut e) = src2.by_name(&rn) {
+                            let mut s = String::new();
+                            let _ = std::io::Read::read_to_string(&mut e, &mut s);
+                            had = s.contains("relationships/drawing");
+                        }
+                        had
+                    };
+                    !had_drawing
+                } else {
+                    false
+                };
+
+                if needs_new_drawing_ref {
+                    // Read and patch sheet XML to inject <drawing r:id="..."/>
+                    let mut sheet_xml = String::new();
+                    std::io::Read::read_to_string(&mut entry, &mut sheet_xml).map_err(|e| e.to_string())?;
+                    let sheet_xml_stripped = strip_drawing_elements(&sheet_xml);
+
+                    let (_, drw_target) = sheet_drawing_inject
+                        .iter()
+                        .find(|(idx, _)| format!("xl/worksheets/sheet{}.xml", **idx + 1) == name)
+                        .map(|(_, (_, _, t))| ((), t.clone()))
+                        .unwrap();
+
+                    // The rId for drawing: use format rId9<sheet_n>
+                    let sidx = sheet_drawing_inject
+                        .iter()
+                        .find(|(_, (_, _, t))| t == &drw_target)
+                        .map(|(idx, _)| *idx)
+                        .unwrap_or(0);
+                    let preferred_rid = format!("rId{}", 9000 + sidx);
+                    let sheet_out = if let Some(pos) = sheet_xml_stripped.rfind("</worksheet>") {
+                        let mut s = String::with_capacity(sheet_xml_stripped.len() + 64);
+                        s.push_str(&sheet_xml_stripped[..pos]);
+                        s.push_str(&format!("<drawing r:id=\"{preferred_rid}\"/>"));
+                        s.push_str(&sheet_xml_stripped[pos..]);
+                        s
+                    } else {
+                        sheet_xml_stripped
+                    };
+                    out.start_file(&name, opts).map_err(|e| e.to_string())?;
+                    std::io::Write::write_all(&mut out, sheet_out.as_bytes()).map_err(|e| e.to_string())?;
+                    continue;
+                }
+            }
+
+            // Copy unchanged
+            let mut buf = Vec::with_capacity(entry.size() as usize);
+            std::io::Read::read_to_end(&mut entry, &mut buf).map_err(|e| e.to_string())?;
+            out.start_file(&name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, &buf).map_err(|e| e.to_string())?;
+        }
+
+        // Write sheet rels for sheets needing NEW drawings (no existing drawing before our run)
+        let mut src2 = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+        for (idx, (_, _, drawing_target)) in &sheet_drawing_inject {
+            let n = idx + 1;
+            let rels_path = format!("xl/worksheets/_rels/sheet{n}.xml.rels");
+
+            // Did this sheet already have a drawing?
+            let had_drawing = {
+                let mut s = String::new();
+                if let Ok(mut e) = src2.by_name(&rels_path) {
+                    let _ = std::io::Read::read_to_string(&mut e, &mut s);
+                }
+                s.contains("relationships/drawing")
+            };
+
+            if !had_drawing {
+                // Build/extend rels
+                let mut existing_rels = String::new();
+                if let Ok(mut e) = src2.by_name(&rels_path) {
+                    let _ = std::io::Read::read_to_string(&mut e, &mut existing_rels);
+                }
+                let preferred_rid = format!("rId{}", 9000 + idx);
+                let (new_rels, _) = merge_sheet_rels(
+                    &existing_rels,
+                    Some(&(preferred_rid, drawing_target.clone())),
+                    &[],
+                );
+                // Only write if it wasn't already written (skip_names covers drawings but not rels)
+                if !skip_names.contains(&rels_path) {
+                    out.start_file(&rels_path, opts).map_err(|e| e.to_string())?;
+                    std::io::Write::write_all(&mut out, new_rels.as_bytes()).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+
+        // Write new parts (chart XMLs, new drawing XMLs, drawing rels)
+        for p in &new_parts {
+            out.start_file(&p.name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, &p.bytes).map_err(|e| e.to_string())?;
+        }
+
+        // Update [Content_Types].xml
+        let mut ct_adds = String::new();
+        for p in &new_parts {
+            if p.name.starts_with("xl/drawings/drawing") && p.name.ends_with(".xml") && !p.name.contains("_rels") {
+                let part_name = format!("/{}", p.name);
+                if !ct_xml.contains(&format!("PartName=\"{part_name}\"")) {
+                    ct_adds.push_str(&format!(
+                        "<Override PartName=\"{part_name}\" \
+                         ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>"
+                    ));
+                }
+            }
+            if p.name.starts_with("xl/charts/chart") && p.name.ends_with(".xml") && !p.name.contains("_rels") {
+                let part_name = format!("/{}", p.name);
+                if !ct_xml.contains(&format!("PartName=\"{part_name}\"")) {
+                    ct_adds.push_str(&format!(
+                        "<Override PartName=\"{part_name}\" \
+                         ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>"
+                    ));
+                }
+            }
+        }
+
+        let merged_ct = if ct_adds.is_empty() {
+            ct_xml
+        } else {
+            let close_pos = ct_xml.rfind("</Types>").unwrap_or(ct_xml.len());
+            let mut s = String::with_capacity(ct_xml.len() + ct_adds.len());
+            s.push_str(&ct_xml[..close_pos]);
+            s.push_str(&ct_adds);
+            s.push_str(&ct_xml[close_pos..]);
+            s
+        };
+        out.start_file("[Content_Types].xml", opts).map_err(|e| e.to_string())?;
+        std::io::Write::write_all(&mut out, merged_ct.as_bytes()).map_err(|e| e.to_string())?;
 
         out.finish().map_err(|e| e.to_string())?;
     }

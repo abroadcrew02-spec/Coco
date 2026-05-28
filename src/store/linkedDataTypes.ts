@@ -37,6 +37,12 @@ export interface LinkedDataTypeSource {
    * Absent / undefined for CSV sources.
    */
   sqliteTable?: string;
+  /**
+   * #323 — Optional subset of non-key columns to write when expanding to cells.
+   * When absent or empty, all non-key columns are expanded (legacy behavior).
+   * Column names must be members of `columns`; unknown names are silently ignored.
+   */
+  expandColumns?: string[];
 }
 
 /**
@@ -49,6 +55,22 @@ export function normalizeSource(source: LinkedDataTypeSource): LinkedDataTypeSou
     return { ...source, kind: "csv" };
   }
   return source;
+}
+
+/**
+ * #323 — Resolve the effective list of columns to expand for a given source.
+ *
+ * When `expandColumns` is specified and non-empty, returns only those column
+ * names that also appear in `source.columns` and are not the key column.
+ * Otherwise returns all non-key columns in their original order (legacy behavior).
+ */
+export function resolveExpandColumns(source: LinkedDataTypeSource): string[] {
+  const nonKey = source.columns.filter((c) => c !== source.keyColumn);
+  if (source.expandColumns && source.expandColumns.length > 0) {
+    const allowed = new Set(nonKey);
+    return source.expandColumns.filter((c) => allowed.has(c));
+  }
+  return nonKey;
 }
 
 export interface CocoLinkedDataTypes {
@@ -96,6 +118,11 @@ function isValidSource(v: unknown): v is LinkedDataTypeSource {
   if (s.kind !== undefined && s.kind !== "csv" && s.kind !== "sqlite") return false;
   // sqliteTable when present must be a string.
   if (s.sqliteTable !== undefined && typeof s.sqliteTable !== "string") return false;
+  // expandColumns when present must be an array of strings.
+  if (s.expandColumns !== undefined) {
+    if (!Array.isArray(s.expandColumns)) return false;
+    if ((s.expandColumns as unknown[]).some((c) => typeof c !== "string")) return false;
+  }
   return true;
 }
 
@@ -186,4 +213,55 @@ export function lookupInSource(
     }
   }
   return null;
+}
+
+/**
+ * #323 — Bulk lookup for multiple key values in a single pass over `sourceData`.
+ *
+ * Returns a `Map` whose keys are the original `keyValues` entries (preserving
+ * order and case) and whose values are the first matching row or `null` when no
+ * match was found. Empty / whitespace keys always map to `null`.
+ *
+ * The lookup is case-insensitive, matching the behavior of `lookupInSource`.
+ * Scanning is O(n × m) where n = sourceData.length and m = keyValues.length;
+ * for large ranges consider pre-building an index externally.
+ */
+export function lookupManyInSource(
+  sourceData: Array<Record<string, string>>,
+  keyValues: string[],
+  source: LinkedDataTypeSource,
+): Map<string, Record<string, string> | null> {
+  const result = new Map<string, Record<string, string> | null>();
+
+  // Pre-normalise the look-up keys for O(1) set membership checks.
+  const lowerToOriginal = new Map<string, string>();
+  for (const kv of keyValues) {
+    const trimmed = kv.trim();
+    if (trimmed) {
+      lowerToOriginal.set(trimmed.toLowerCase(), kv);
+    }
+    // Always initialise — blank keys get null immediately.
+    if (!result.has(kv)) {
+      result.set(kv, null);
+    }
+  }
+
+  if (lowerToOriginal.size === 0) {
+    return result;
+  }
+
+  const col = source.keyColumn;
+  for (const row of sourceData) {
+    const cellVal = row[col];
+    if (typeof cellVal !== "string") continue;
+    const normalised = cellVal.trim().toLowerCase();
+    const original = lowerToOriginal.get(normalised);
+    if (original !== undefined && result.get(original) === null) {
+      result.set(original, row);
+      lowerToOriginal.delete(normalised);
+      if (lowerToOriginal.size === 0) break; // All keys satisfied.
+    }
+  }
+
+  return result;
 }

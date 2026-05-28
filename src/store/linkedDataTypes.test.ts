@@ -1,4 +1,5 @@
 // #244 — Tests for linkedDataTypes.ts (local CSV linked data types).
+// #323 — lookupManyInSource + resolveExpandColumns tests added.
 
 import { describe, it, expect } from "vitest";
 import {
@@ -12,6 +13,8 @@ import {
   updateSource,
   listSources,
   lookupInSource,
+  lookupManyInSource,
+  resolveExpandColumns,
   normalizeSource,
 } from "./linkedDataTypes";
 
@@ -248,6 +251,163 @@ describe("normalizeSource", () => {
     const normalized = normalizeSource(src);
     expect(normalized.kind).toBe("sqlite");
     expect(normalized.sqliteTable).toBe("stocks");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #323 — lookupManyInSource tests
+// ---------------------------------------------------------------------------
+
+describe("lookupManyInSource", () => {
+  const source = makeSource();
+
+  it("returns hits for all matched keys", () => {
+    const result = lookupManyInSource(SAMPLE_CSV_DATA, ["MSFT", "AAPL"], source);
+    expect(result.get("MSFT")).not.toBeNull();
+    expect(result.get("MSFT")?.Industry).toBe("Technology");
+    expect(result.get("AAPL")).not.toBeNull();
+    expect(result.get("AAPL")?.Price).toBe("185");
+  });
+
+  it("returns null for unmatched keys (partial miss)", () => {
+    const result = lookupManyInSource(SAMPLE_CSV_DATA, ["MSFT", "GOOG"], source);
+    expect(result.get("MSFT")).not.toBeNull();
+    expect(result.get("GOOG")).toBeNull();
+  });
+
+  it("returns all nulls for an empty-match set", () => {
+    const result = lookupManyInSource(SAMPLE_CSV_DATA, ["GOOG", "META"], source);
+    expect(result.get("GOOG")).toBeNull();
+    expect(result.get("META")).toBeNull();
+  });
+
+  it("returns an empty Map for an empty keyValues array", () => {
+    const result = lookupManyInSource(SAMPLE_CSV_DATA, [], source);
+    expect(result.size).toBe(0);
+  });
+
+  it("is case-insensitive for all keys", () => {
+    const result = lookupManyInSource(SAMPLE_CSV_DATA, ["msft", "toyota"], source);
+    expect(result.get("msft")).not.toBeNull();
+    expect(result.get("toyota")?.Industry).toBe("Automotive");
+  });
+
+  it("maps blank / whitespace-only keys to null", () => {
+    const result = lookupManyInSource(SAMPLE_CSV_DATA, ["  ", ""], source);
+    expect(result.get("  ")).toBeNull();
+    expect(result.get("")).toBeNull();
+  });
+
+  it("handles 5+ keys with a mix of hits and misses", () => {
+    const result = lookupManyInSource(
+      SAMPLE_CSV_DATA,
+      ["MSFT", "AAPL", "Toyota", "GOOG", "META"],
+      source,
+    );
+    expect(result.get("MSFT")).not.toBeNull();
+    expect(result.get("AAPL")).not.toBeNull();
+    expect(result.get("Toyota")).not.toBeNull();
+    expect(result.get("GOOG")).toBeNull();
+    expect(result.get("META")).toBeNull();
+  });
+
+  it("returns only the first matching row for a duplicate key value", () => {
+    const data = [
+      { Ticker: "DUP", Price: "100", Industry: "A" },
+      { Ticker: "DUP", Price: "200", Industry: "B" },
+    ];
+    const result = lookupManyInSource(data, ["DUP"], source);
+    expect(result.get("DUP")?.Price).toBe("100");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #323 — resolveExpandColumns tests
+// ---------------------------------------------------------------------------
+
+describe("resolveExpandColumns", () => {
+  it("returns all non-key columns when expandColumns is absent", () => {
+    const src = makeSource(); // no expandColumns field
+    expect(resolveExpandColumns(src)).toEqual(["Price", "Industry"]);
+  });
+
+  it("returns all non-key columns when expandColumns is an empty array", () => {
+    const src = makeSource({ expandColumns: [] });
+    expect(resolveExpandColumns(src)).toEqual(["Price", "Industry"]);
+  });
+
+  it("returns only the specified columns when expandColumns is set", () => {
+    const src = makeSource({ expandColumns: ["Industry"] });
+    expect(resolveExpandColumns(src)).toEqual(["Industry"]);
+  });
+
+  it("preserves the order given in expandColumns", () => {
+    const src = makeSource({ expandColumns: ["Industry", "Price"] });
+    expect(resolveExpandColumns(src)).toEqual(["Industry", "Price"]);
+  });
+
+  it("silently ignores column names not in source.columns", () => {
+    const src = makeSource({ expandColumns: ["Price", "NonExistent"] });
+    expect(resolveExpandColumns(src)).toEqual(["Price"]);
+  });
+
+  it("silently ignores the key column if listed in expandColumns", () => {
+    const src = makeSource({ expandColumns: ["Ticker", "Price"] });
+    // "Ticker" is the keyColumn — should be excluded.
+    expect(resolveExpandColumns(src)).toEqual(["Price"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #323 — expandColumns snapshot validation tests
+// ---------------------------------------------------------------------------
+
+describe("expandColumns — isValidSource via readLinkedDataTypes", () => {
+  it("accepts a source with a valid expandColumns array", () => {
+    const snap = {
+      _cocoDataTypes: {
+        sources: [makeSource({ expandColumns: ["Price", "Industry"] })],
+      },
+    };
+    const model = readLinkedDataTypes(snap);
+    expect(model.sources).toHaveLength(1);
+    expect(model.sources[0].expandColumns).toEqual(["Price", "Industry"]);
+  });
+
+  it("accepts a source with an empty expandColumns array", () => {
+    const snap = {
+      _cocoDataTypes: { sources: [makeSource({ expandColumns: [] })] },
+    };
+    const model = readLinkedDataTypes(snap);
+    expect(model.sources).toHaveLength(1);
+    expect(model.sources[0].expandColumns).toEqual([]);
+  });
+
+  it("rejects a source where expandColumns is not an array", () => {
+    const snap = {
+      _cocoDataTypes: {
+        sources: [makeSource({ expandColumns: "Price" as unknown as string[] })],
+      },
+    };
+    const model = readLinkedDataTypes(snap);
+    expect(model.sources).toHaveLength(0);
+  });
+
+  it("rejects a source where expandColumns contains a non-string element", () => {
+    const snap = {
+      _cocoDataTypes: {
+        sources: [makeSource({ expandColumns: [42 as unknown as string] })],
+      },
+    };
+    const model = readLinkedDataTypes(snap);
+    expect(model.sources).toHaveLength(0);
+  });
+
+  it("survives write → read round-trip with expandColumns intact", () => {
+    const src = makeSource({ expandColumns: ["Industry"] });
+    const snap = writeLinkedDataTypes({}, { sources: [src] });
+    const recovered = readLinkedDataTypes(snap);
+    expect(recovered.sources[0].expandColumns).toEqual(["Industry"]);
   });
 });
 

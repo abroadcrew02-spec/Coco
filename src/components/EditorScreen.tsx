@@ -386,6 +386,8 @@ import {
   readLinkedDataTypes,
   writeLinkedDataTypes,
   EMPTY_LINKED_DATA_TYPES,
+  resolveExpandColumns,
+  lookupManyInSource,
 } from "../store/linkedDataTypes";
 import { excelTableToModelTable } from "../store/dataModelTableImport";
 import {
@@ -2990,8 +2992,9 @@ export default function EditorScreen() {
 
   /**
    * Expand a lookup result into adjacent cells.
-   * Writes each non-key column value into the cell to the right of the
-   * active cell, then one column further right for each subsequent column.
+   * Writes each non-key column value (respecting source.expandColumns when set)
+   * into the cell to the right of the active cell, one column further right per
+   * subsequent column.
    */
   const expandLookupToCells = useCallback(
     (result: LookupResult) => {
@@ -3007,7 +3010,8 @@ export default function EditorScreen() {
         if (!range) return;
         const row = range.getRow();
         const col = range.getColumn();
-        const cols = result.source.columns.filter((c) => c !== result.source.keyColumn);
+        // #323: respect expandColumns when set; fall back to all non-key columns.
+        const cols = resolveExpandColumns(result.source);
         cols.forEach((colName, idx) => {
           const val = result.row[colName] ?? "";
           const targetRange = sheet.getRange(row, col + 1 + idx);
@@ -3015,6 +3019,66 @@ export default function EditorScreen() {
             targetRange.setValue(val);
           }
         });
+      } catch {
+        // Best-effort: ignore facade errors.
+      }
+    },
+    [],
+  );
+
+  /**
+   * #323 — Expand a multi-row selection by bulk-looking up each cell in the
+   * key column against the given source, then writing matched values into the
+   * adjacent columns to the right of each key cell.
+   *
+   * `sourceRows` — pre-loaded source data (the caller caches this via the panel).
+   * `source`     — the registered LinkedDataTypeSource to look up against.
+   */
+  const expandRangeToCells = useCallback(
+    (
+      sourceRows: Array<Record<string, string>>,
+      source: import("../store/linkedDataTypes").LinkedDataTypeSource,
+    ) => {
+      const fUniver = fUniverRef.current;
+      if (!fUniver) return;
+      try {
+        const workbook = fUniver.getActiveWorkbook();
+        if (!workbook) return;
+        const sheet = workbook.getActiveSheet();
+        if (!sheet) return;
+        const sel = sheet.getSelection();
+        const activeRange = sel?.getActiveRange();
+        if (!activeRange) return;
+
+        const startRow = activeRange.getRow();
+        const startCol = activeRange.getColumn();
+        const rowCount =
+          (activeRange as unknown as { getHeight?: () => number }).getHeight?.() ?? 1;
+
+        // Collect key values from each row in the selection (the leftmost column
+        // of the selection is treated as the key column).
+        const keyValues: string[] = [];
+        for (let r = 0; r < rowCount; r++) {
+          const cellRange = sheet.getRange(startRow + r, startCol);
+          const val = cellRange?.getValue();
+          keyValues.push(typeof val === "string" ? val : String(val ?? ""));
+        }
+
+        const resultMap = lookupManyInSource(sourceRows, keyValues, source);
+        const expandCols = resolveExpandColumns(source);
+
+        for (let r = 0; r < rowCount; r++) {
+          const key = keyValues[r];
+          const matchedRow = resultMap.get(key);
+          if (!matchedRow) continue; // Miss: leave the row as-is.
+          expandCols.forEach((colName, idx) => {
+            const val = matchedRow[colName] ?? "";
+            const targetRange = sheet.getRange(startRow + r, startCol + 1 + idx);
+            if (targetRange) {
+              targetRange.setValue(val);
+            }
+          });
+        }
       } catch {
         // Best-effort: ignore facade errors.
       }
@@ -9419,6 +9483,7 @@ export default function EditorScreen() {
             onModelChange={updateLinkedDataTypes}
             activeCellValue={activeCellValue}
             onExpandToCells={expandLookupToCells}
+            onExpandRangeToCells={expandRangeToCells}
             onClose={() => setLinkedDataTypesPanelOpen(false)}
           />
         )}

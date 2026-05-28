@@ -172,3 +172,14 @@
   color: var(--coco-danger);
   border-color: var(--coco-danger);
 }
+
+.cced-parse-error {
+  margin-top: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--coco-danger);
+  border-radius: 3px;
+  font-family: var(--coco-font-mono, monospace);
+  font-size: 12px;
+  color: var(--coco-danger);
+  background-color: var(--coco-surface);
+}

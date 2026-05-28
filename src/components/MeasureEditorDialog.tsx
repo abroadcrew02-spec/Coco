@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CocoDataModel, StoredMeasure } from "../store/cocoDataModel";
 import { evaluateTransientMeasure } from "../store/cocoDataModel";
-import { DAX_FUNCTION_REFERENCE, MEASURE_ERROR } from "../store/daxEngine";
+import { DAX_FUNCTION_REFERENCE, MEASURE_ERROR, parseDaxSafe } from "../store/daxEngine";
 import { useDaxAutocomplete } from "./useDaxAutocomplete";
 import DaxColumnRefChips from "./DaxColumnRefChips";
 import DaxFunctionChips from "./DaxFunctionChips";
@@ -39,7 +39,18 @@ export default function MeasureEditorDialog({
   const [description, setDescription] = useState(initialMeasure?.description ?? "");
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ value: unknown; error: string | null } | null>(null);
+  const [parseError, setParseError] = useState<{ message: string; offset?: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Parse-error tracking — runs synchronously in an effect on every expression change.
+  useEffect(() => {
+    if (!expression.trim()) {
+      setParseError(null);
+      return;
+    }
+    const result = parseDaxSafe(expression.trim());
+    setParseError(result.error ?? null);
+  }, [expression]);
 
   const handleChipInsert = (insertText: string) => {
     const textarea = textareaRef.current;
@@ -224,9 +235,16 @@ export default function MeasureEditorDialog({
               tables={cocoModel?.tables ?? []}
               onInsert={handleChipInsert}
             />
+            {parseError !== null && (
+              <div className="med-parse-error" role="alert">
+                {`構文エラー${parseError.offset !== undefined ? ` (${parseError.offset + 1} 文字目付近)` : ""}: ${parseError.message}`}
+              </div>
+            )}
             {preview !== null && (
               preview.error !== null ? (
-                <div className="med-preview med-preview--error">{preview.error}</div>
+                parseError === null ? (
+                  <div className="med-preview med-preview--error">{preview.error}</div>
+                ) : null
               ) : (
                 <div className="med-preview">
                   プレビュー: <strong>

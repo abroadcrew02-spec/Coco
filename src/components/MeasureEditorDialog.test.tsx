@@ -209,8 +209,9 @@ describe("MeasureEditorDialog — live preview", () => {
     await act(async () => {
       vi.advanceTimersByTime(300);
     });
-    const errEl = document.querySelector(".med-preview--error");
-    expect(errEl).not.toBeNull();
+    // SUM( is a parse error — shows inline parse error div (not the preview error div)
+    const parseErrEl = document.querySelector(".med-parse-error");
+    expect(parseErrEl).not.toBeNull();
     vi.useRealTimers();
   });
 });

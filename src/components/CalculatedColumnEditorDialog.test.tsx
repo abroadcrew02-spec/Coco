@@ -303,8 +303,9 @@ describe("CalculatedColumnEditorDialog — live preview", () => {
     await act(async () => {
       vi.advanceTimersByTime(300);
     });
-    const errEl = document.querySelector(".cced-preview--error");
-    expect(errEl).not.toBeNull();
+    // "* +" is a parse error — shows inline parse error div (not the preview error div)
+    const parseErrEl = document.querySelector(".cced-parse-error");
+    expect(parseErrEl).not.toBeNull();
     vi.useRealTimers();
   });
 });

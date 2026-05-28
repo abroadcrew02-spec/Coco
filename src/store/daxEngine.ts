@@ -74,11 +74,11 @@ export type BinaryOp =
 // ---------------------------------------------------------------------------
 
 type Token =
-  | { kind: "num"; value: number }
-  | { kind: "str"; value: string }
-  | { kind: "ident"; value: string }
-  | { kind: "bracketIdent"; value: string }
-  | { kind: "punct"; value: string };
+  | { kind: "num"; value: number; pos: number }
+  | { kind: "str"; value: string; pos: number }
+  | { kind: "ident"; value: string; pos: number }
+  | { kind: "bracketIdent"; value: string; pos: number }
+  | { kind: "punct"; value: string; pos: number };
 
 function tokenize(src: string): Token[] {
   const out: Token[] = [];
@@ -93,6 +93,7 @@ function tokenize(src: string): Token[] {
     // String literal — single OR double quotes; doubled-quote = escape.
     if (ch === '"' || ch === "'") {
       const quote = ch;
+      const pos = i;
       i++;
       let acc = "";
       while (i < n) {
@@ -108,20 +109,22 @@ function tokenize(src: string): Token[] {
         acc += src[i];
         i++;
       }
-      out.push({ kind: "str", value: acc });
+      out.push({ kind: "str", value: acc, pos });
       continue;
     }
     // Number literal.
     if ((ch >= "0" && ch <= "9") || (ch === "." && src[i + 1] >= "0" && src[i + 1] <= "9")) {
+      const pos = i;
       let j = i;
       while (j < n && ((src[j] >= "0" && src[j] <= "9") || src[j] === ".")) j++;
       const numStr = src.slice(i, j);
-      out.push({ kind: "num", value: Number.parseFloat(numStr) });
+      out.push({ kind: "num", value: Number.parseFloat(numStr), pos });
       i = j;
       continue;
     }
     // Identifier (table or function name).
     if ((ch >= "A" && ch <= "Z") || (ch >= "a" && ch <= "z") || ch === "_") {
+      const pos = i;
       let j = i;
       while (
         j < n &&
@@ -131,7 +134,7 @@ function tokenize(src: string): Token[] {
           src[j] === "_" ||
           src[j] === ".")
       ) j++;
-      out.push({ kind: "ident", value: src.slice(i, j) });
+      out.push({ kind: "ident", value: src.slice(i, j), pos });
       i = j;
       continue;
     }
@@ -139,6 +142,7 @@ function tokenize(src: string): Token[] {
     // names (may contain spaces and other non-ident characters). Consumed as a
     // single token so the parser can decide context (columnRef vs measureRef).
     if (ch === "[") {
+      const pos = i;
       i++;
       let acc = "";
       while (i < n && src[i] !== "]") {
@@ -146,12 +150,12 @@ function tokenize(src: string): Token[] {
         i++;
       }
       i++; // consume ']'
-      out.push({ kind: "bracketIdent", value: acc });
+      out.push({ kind: "bracketIdent", value: acc, pos });
       continue;
     }
     // Multi-char punctuation.
     if (src.startsWith("<>", i) || src.startsWith("<=", i) || src.startsWith(">=", i)) {
-      out.push({ kind: "punct", value: src.slice(i, i + 2) });
+      out.push({ kind: "punct", value: src.slice(i, i + 2), pos: i });
       i += 2;
       continue;
     }
@@ -161,7 +165,7 @@ function tokenize(src: string): Token[] {
       ch === "," || ch === "+" || ch === "-" || ch === "*" ||
       ch === "/" || ch === "&" || ch === "=" || ch === "<" || ch === ">"
     ) {
-      out.push({ kind: "punct", value: ch });
+      out.push({ kind: "punct", value: ch, pos: i });
       i++;
       continue;
     }
@@ -175,11 +179,21 @@ function tokenize(src: string): Token[] {
 // Parser
 // ---------------------------------------------------------------------------
 
-class ParseError extends Error {}
+export class ParseError extends Error {
+  /** Source offset (0-based character index) where the error was detected. */
+  offset?: number;
+  constructor(message: string, offset?: number) {
+    super(message);
+    this.name = "ParseError";
+    this.offset = offset;
+  }
+}
 
 interface ParseState {
   tokens: Token[];
   pos: number;
+  /** Length of the source string, used for end-of-input offset. */
+  srcLen: number;
 }
 
 function peek(s: ParseState): Token | null {
@@ -188,10 +202,15 @@ function peek(s: ParseState): Token | null {
 function consume(s: ParseState): Token | null {
   return s.pos < s.tokens.length ? s.tokens[s.pos++] : null;
 }
+/** Current source offset: position of the next token, or end of source. */
+function currentOffset(s: ParseState): number {
+  return s.pos < s.tokens.length ? s.tokens[s.pos].pos : s.srcLen;
+}
 function expectPunct(s: ParseState, p: string): void {
+  const offset = currentOffset(s);
   const t = consume(s);
   if (!t || t.kind !== "punct" || t.value !== p) {
-    throw new ParseError(`expected '${p}'`);
+    throw new ParseError(`expected '${p}'`, offset);
   }
 }
 
@@ -214,8 +233,9 @@ function isBinaryOp(value: string): value is BinaryOp {
 }
 
 function parsePrimary(s: ParseState): DaxAst {
+  const offset = currentOffset(s);
   const t = consume(s);
-  if (!t) throw new ParseError("unexpected end of input");
+  if (!t) throw new ParseError("unexpected end of input", offset);
   if (t.kind === "num") return { kind: "number", value: t.value };
   if (t.kind === "str") return { kind: "string", value: t.value };
   if (t.kind === "punct" && t.value === "(") {
@@ -262,7 +282,7 @@ function parsePrimary(s: ParseState): DaxAst {
     // Bare identifier = tableRef.
     return { kind: "tableRef", table: t.value };
   }
-  throw new ParseError(`unexpected token: ${JSON.stringify(t)}`);
+  throw new ParseError(`unexpected token: ${JSON.stringify(t)}`, t.pos);
 }
 
 function parseExpression(s: ParseState, minPrec: number): DaxAst {
@@ -284,12 +304,32 @@ function parseExpression(s: ParseState, minPrec: number): DaxAst {
 export function parseDax(src: string): DaxAst {
   const trimmed = src.trim().startsWith("=") ? src.trim().slice(1) : src;
   const tokens = tokenize(trimmed);
-  const state: ParseState = { tokens, pos: 0 };
+  const state: ParseState = { tokens, pos: 0, srcLen: trimmed.length };
   const ast = parseExpression(state, 0);
   if (state.pos < state.tokens.length) {
-    throw new ParseError(`trailing tokens after expression: ${JSON.stringify(state.tokens[state.pos])}`);
+    const tok = state.tokens[state.pos];
+    throw new ParseError(`trailing tokens after expression: ${JSON.stringify(tok)}`, tok.pos);
   }
   return ast;
+}
+
+/**
+ * Non-throwing variant of parseDax. Returns either the parsed AST or an error
+ * object with a human-readable message and an optional character offset.
+ *
+ * Use this when the caller wants to show inline error UI without a try/catch.
+ */
+export function parseDaxSafe(
+  src: string,
+): { ast: DaxAst; error?: never } | { ast?: never; error: { message: string; offset?: number } } {
+  try {
+    return { ast: parseDax(src) };
+  } catch (err) {
+    if (err instanceof ParseError) {
+      return { error: { message: err.message, offset: err.offset } };
+    }
+    return { error: { message: err instanceof Error ? err.message : String(err) } };
+  }
 }
 
 // ---------------------------------------------------------------------------

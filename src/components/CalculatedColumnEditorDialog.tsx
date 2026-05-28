@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CocoDataModel, StoredCalculatedColumn } from "../store/cocoDataModel";
 import { evaluateTransientCalculatedColumn } from "../store/cocoDataModel";
-import { CALC_COLUMN_ERROR, DAX_FUNCTION_REFERENCE } from "../store/daxEngine";
+import { CALC_COLUMN_ERROR, DAX_FUNCTION_REFERENCE, parseDaxSafe } from "../store/daxEngine";
 import { useDaxAutocomplete } from "./useDaxAutocomplete";
 import DaxColumnRefChips from "./DaxColumnRefChips";
 import DaxFunctionChips from "./DaxFunctionChips";
@@ -45,7 +45,18 @@ export default function CalculatedColumnEditorDialog({
   const [description, setDescription] = useState(initialColumn?.description ?? "");
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ values: unknown[]; hasError: boolean } | null>(null);
+  const [parseError, setParseError] = useState<{ message: string; offset?: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Parse-error tracking — runs on every expression change.
+  useEffect(() => {
+    if (!expression.trim()) {
+      setParseError(null);
+      return;
+    }
+    const result = parseDaxSafe(expression.trim());
+    setParseError(result.error ?? null);
+  }, [expression]);
 
   const handleChipInsert = (insertText: string) => {
     const textarea = textareaRef.current;
@@ -259,9 +270,16 @@ export default function CalculatedColumnEditorDialog({
               tables={cocoModel?.tables ?? []}
               onInsert={handleChipInsert}
             />
+            {parseError !== null && (
+              <div className="cced-parse-error" role="alert">
+                {`構文エラー${parseError.offset !== undefined ? ` (${parseError.offset + 1} 文字目付近)` : ""}: ${parseError.message}`}
+              </div>
+            )}
             {preview !== null && (
               preview.hasError ? (
-                <div className="cced-preview cced-preview--error">{CALC_COLUMN_ERROR}</div>
+                parseError === null ? (
+                  <div className="cced-preview cced-preview--error">{CALC_COLUMN_ERROR}</div>
+                ) : null
               ) : (
                 <div className="cced-preview">
                   プレビュー: <strong>[{preview.values.map((v) => String(v)).join(", ")}]</strong>

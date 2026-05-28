@@ -10,6 +10,8 @@ import {
   CALC_COLUMN_ERROR,
   MEASURE_ERROR,
   parseDax,
+  parseDaxSafe,
+  ParseError,
   DAX_FUNCTION_REFERENCE,
   type DataModel,
   type CalculatedColumnDef,
@@ -1257,5 +1259,66 @@ describe("evaluateMeasure — cross-measure references", () => {
     const results = evaluateAllMeasures(m, ms);
     expect(results.get("Base")).toBe(700);
     expect(results.get("Ratio")).toBe(175); // 700 / 4
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ParseError offset tracking (#321)
+// ---------------------------------------------------------------------------
+
+describe("ParseError — offset tracking", () => {
+  it("carries offset when a closing paren is missing", () => {
+    // "SUM(Sales[Amount]" — the `)` is missing at end of string (offset 17)
+    expect(() => parseDax("SUM(Sales[Amount]")).toThrow(ParseError);
+    try {
+      parseDax("SUM(Sales[Amount]");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ParseError);
+      const pe = err as ParseError;
+      expect(typeof pe.offset).toBe("number");
+      // offset should point near the end of the string
+      expect(pe.offset).toBeGreaterThanOrEqual(0);
+      expect(pe.offset).toBeLessThanOrEqual("SUM(Sales[Amount]".length);
+    }
+  });
+
+  it("carries offset for unexpected trailing token", () => {
+    // "42 43" — trailing token '43' after complete expression "42"
+    expect(() => parseDax("42 43")).toThrow(ParseError);
+    try {
+      parseDax("42 43");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ParseError);
+      const pe = err as ParseError;
+      expect(typeof pe.offset).toBe("number");
+      // "43" starts at offset 3 in "42 43"
+      expect(pe.offset).toBe(3);
+    }
+  });
+
+  it("carries offset for unexpected end of input", () => {
+    expect(() => parseDax("")).toThrow(ParseError);
+    try {
+      parseDax("");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ParseError);
+      const pe = err as ParseError;
+      expect(pe.offset).toBe(0);
+    }
+  });
+
+  it("parseDaxSafe returns error object instead of throwing", () => {
+    const result = parseDaxSafe("SUM(Sales[Amount]");
+    expect(result.error).toBeDefined();
+    expect(result.ast).toBeUndefined();
+    expect(result.error!.message).toContain("expected ')'");
+    expect(typeof result.error!.offset).toBe("number");
+  });
+
+  it("parseDaxSafe returns ast for valid expression", () => {
+    const result = parseDaxSafe("SUM(Sales[Amount])");
+    expect(result.ast).toBeDefined();
+    expect(result.error).toBeUndefined();
+    expect(result.ast!.kind).toBe("funcCall");
   });
 });

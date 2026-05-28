@@ -660,3 +660,376 @@ fn mixed_non_provenance_and_coco_new() {
         "ctrlProp9001.xml must NOT exist (only one coco-new checkbox)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// #322: Radio / Spinner / ScrollBar OOXML emit tests
+// ---------------------------------------------------------------------------
+
+fn snapshot_with_radio(checked: bool, first_button: bool, fmla_link: Option<&str>) -> String {
+    let checked_val = if checked { "true" } else { "false" };
+    let first_val = if first_button { "true" } else { "false" };
+    let fmla_field = fmla_link
+        .map(|l| format!(r#", "fmlaLink": "{l}""#))
+        .unwrap_or_default();
+    format!(
+        r#"{{"sheetOrder":["s1"],"sheets":{{"s1":{{"id":"s1","name":"S1","rowData":{{}},"_formControls":[{{"_provenance":"coco-new","kind":"radio","cell":"A1","label":"Option 1","checked":{checked_val},"firstButton":{first_val}{fmla_field}}}]}}}}}}"#
+    )
+}
+
+fn snapshot_with_spinner(min: i64, max: i64, step: i64, page: i64, fmla_link: Option<&str>) -> String {
+    let fmla_field = fmla_link
+        .map(|l| format!(r#", "fmlaLink": "{l}""#))
+        .unwrap_or_default();
+    format!(
+        r#"{{"sheetOrder":["s1"],"sheets":{{"s1":{{"id":"s1","name":"S1","rowData":{{}},"_formControls":[{{"_provenance":"coco-new","kind":"spin","cell":"B2","min":{min},"max":{max},"step":{step},"page":{page}{fmla_field}}}]}}}}}}"#
+    )
+}
+
+fn snapshot_with_scrollbar(min: i64, max: i64, step: i64, page: i64, horiz: bool, fmla_link: Option<&str>) -> String {
+    let horiz_val = if horiz { "true" } else { "false" };
+    let fmla_field = fmla_link
+        .map(|l| format!(r#", "fmlaLink": "{l}""#))
+        .unwrap_or_default();
+    format!(
+        r#"{{"sheetOrder":["s1"],"sheets":{{"s1":{{"id":"s1","name":"S1","rowData":{{}},"_formControls":[{{"_provenance":"coco-new","kind":"scroll","cell":"C3","min":{min},"max":{max},"step":{step},"page":{page},"horiz":{horiz_val}{fmla_field}}}]}}}}}}"#
+    )
+}
+
+#[test]
+fn coco_new_radio_emits_ctrl_prop_and_vml() {
+    let tmp = TempDir::new().unwrap();
+    let out_path = tmp.path().join("out.xlsx");
+    let snap = snapshot_with_radio(false, true, None);
+
+    let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
+    assert!(export.success, "export must succeed: {:?}", export.error);
+
+    let out_bytes = std::fs::read(&out_path).expect("read output");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(out_bytes)).expect("zip");
+
+    assert!(
+        zip.by_name("xl/ctrlProps/ctrlProp9000.xml").is_ok(),
+        "ctrlProp9000.xml must be emitted for Radio"
+    );
+    assert!(
+        zip.by_name("xl/drawings/vmlDrawing9000.vml").is_ok(),
+        "vmlDrawing9000.vml must be emitted for Radio"
+    );
+}
+
+#[test]
+fn coco_new_radio_ctrl_prop_has_object_type_radio() {
+    let tmp = TempDir::new().unwrap();
+    let out_path = tmp.path().join("out.xlsx");
+    let snap = snapshot_with_radio(true, false, Some("Sheet1!$B$1"));
+
+    let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
+    assert!(export.success);
+
+    let out_bytes = std::fs::read(&out_path).expect("read output");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(out_bytes)).expect("zip");
+    let mut buf = Vec::new();
+    zip.by_name("xl/ctrlProps/ctrlProp9000.xml")
+        .unwrap()
+        .read_to_end(&mut buf)
+        .unwrap();
+    let ctrl_xml = String::from_utf8_lossy(&buf);
+
+    assert!(
+        ctrl_xml.contains("objectType=\"Radio\""),
+        "ctrlProp must have objectType=Radio: {ctrl_xml}"
+    );
+    assert!(
+        ctrl_xml.contains("checked=\"Checked\""),
+        "checked radio must have checked=Checked: {ctrl_xml}"
+    );
+    assert!(
+        ctrl_xml.contains("Sheet1!$B$1"),
+        "fmlaLink must appear in ctrlProp: {ctrl_xml}"
+    );
+}
+
+#[test]
+fn coco_new_radio_vml_client_data_type() {
+    let tmp = TempDir::new().unwrap();
+    let out_path = tmp.path().join("out.xlsx");
+    let snap = snapshot_with_radio(false, true, None);
+
+    let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
+    assert!(export.success);
+
+    let out_bytes = std::fs::read(&out_path).expect("read output");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(out_bytes)).expect("zip");
+    let mut buf = Vec::new();
+    zip.by_name("xl/drawings/vmlDrawing9000.vml")
+        .unwrap()
+        .read_to_end(&mut buf)
+        .unwrap();
+    let vml = String::from_utf8_lossy(&buf);
+
+    assert!(
+        vml.contains("ObjectType=\"Radio\""),
+        "VML ClientData must have ObjectType=Radio: {vml}"
+    );
+    assert!(
+        vml.contains("x:FirstButton"),
+        "firstButton=true must produce <x:FirstButton/>: {vml}"
+    );
+}
+
+#[test]
+fn coco_new_spinner_ctrl_prop_ranges() {
+    let tmp = TempDir::new().unwrap();
+    let out_path = tmp.path().join("out.xlsx");
+    let snap = snapshot_with_spinner(5, 50, 2, 10, Some("Sheet1!$C$1"));
+
+    let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
+    assert!(export.success, "export must succeed: {:?}", export.error);
+
+    let out_bytes = std::fs::read(&out_path).expect("read output");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(out_bytes)).expect("zip");
+    let mut buf = Vec::new();
+    zip.by_name("xl/ctrlProps/ctrlProp9000.xml")
+        .unwrap()
+        .read_to_end(&mut buf)
+        .unwrap();
+    let ctrl_xml = String::from_utf8_lossy(&buf);
+
+    assert!(
+        ctrl_xml.contains("objectType=\"Spinner\""),
+        "ctrlProp must have objectType=Spinner: {ctrl_xml}"
+    );
+    assert!(ctrl_xml.contains("min=\"5\""), "min must be 5: {ctrl_xml}");
+    assert!(ctrl_xml.contains("max=\"50\""), "max must be 50: {ctrl_xml}");
+    assert!(ctrl_xml.contains("inc=\"2\""), "inc must be 2: {ctrl_xml}");
+    assert!(ctrl_xml.contains("page=\"10\""), "page must be 10: {ctrl_xml}");
+    assert!(
+        ctrl_xml.contains("Sheet1!$C$1"),
+        "fmlaLink must appear: {ctrl_xml}"
+    );
+}
+
+#[test]
+fn coco_new_spinner_vml_client_data() {
+    let tmp = TempDir::new().unwrap();
+    let out_path = tmp.path().join("out.xlsx");
+    let snap = snapshot_with_spinner(0, 100, 1, 10, None);
+
+    let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
+    assert!(export.success);
+
+    let out_bytes = std::fs::read(&out_path).expect("read output");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(out_bytes)).expect("zip");
+    let mut buf = Vec::new();
+    zip.by_name("xl/drawings/vmlDrawing9000.vml")
+        .unwrap()
+        .read_to_end(&mut buf)
+        .unwrap();
+    let vml = String::from_utf8_lossy(&buf);
+
+    assert!(
+        vml.contains("ObjectType=\"Spin\""),
+        "VML ClientData must have ObjectType=Spin: {vml}"
+    );
+    assert!(vml.contains("<x:Min>0</x:Min>"), "VML must have Min element: {vml}");
+    assert!(vml.contains("<x:Max>100</x:Max>"), "VML must have Max element: {vml}");
+    assert!(vml.contains("<x:Inc>1</x:Inc>"), "VML must have Inc element: {vml}");
+    assert!(vml.contains("<x:Page>10</x:Page>"), "VML must have Page element: {vml}");
+}
+
+#[test]
+fn coco_new_scrollbar_ctrl_prop_horiz() {
+    let tmp = TempDir::new().unwrap();
+    let out_path = tmp.path().join("out.xlsx");
+    let snap = snapshot_with_scrollbar(0, 200, 5, 20, true, Some("Sheet1!$D$1"));
+
+    let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
+    assert!(export.success, "export must succeed: {:?}", export.error);
+
+    let out_bytes = std::fs::read(&out_path).expect("read output");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(out_bytes)).expect("zip");
+    let mut buf = Vec::new();
+    zip.by_name("xl/ctrlProps/ctrlProp9000.xml")
+        .unwrap()
+        .read_to_end(&mut buf)
+        .unwrap();
+    let ctrl_xml = String::from_utf8_lossy(&buf);
+
+    assert!(
+        ctrl_xml.contains("objectType=\"Scroll\""),
+        "ctrlProp must have objectType=Scroll: {ctrl_xml}"
+    );
+    assert!(ctrl_xml.contains("min=\"0\""), "min must be 0: {ctrl_xml}");
+    assert!(ctrl_xml.contains("max=\"200\""), "max must be 200: {ctrl_xml}");
+    assert!(ctrl_xml.contains("inc=\"5\""), "inc must be 5: {ctrl_xml}");
+    assert!(ctrl_xml.contains("page=\"20\""), "page must be 20: {ctrl_xml}");
+    assert!(
+        ctrl_xml.contains("horiz=\"1\""),
+        "horiz=true must produce horiz=1: {ctrl_xml}"
+    );
+    assert!(
+        ctrl_xml.contains("Sheet1!$D$1"),
+        "fmlaLink must appear: {ctrl_xml}"
+    );
+}
+
+#[test]
+fn coco_new_scrollbar_vml_client_data() {
+    let tmp = TempDir::new().unwrap();
+    let out_path = tmp.path().join("out.xlsx");
+    let snap = snapshot_with_scrollbar(10, 90, 3, 15, true, None);
+
+    let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
+    assert!(export.success);
+
+    let out_bytes = std::fs::read(&out_path).expect("read output");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(out_bytes)).expect("zip");
+    let mut buf = Vec::new();
+    zip.by_name("xl/drawings/vmlDrawing9000.vml")
+        .unwrap()
+        .read_to_end(&mut buf)
+        .unwrap();
+    let vml = String::from_utf8_lossy(&buf);
+
+    assert!(
+        vml.contains("ObjectType=\"Scroll\""),
+        "VML ClientData must have ObjectType=Scroll: {vml}"
+    );
+    assert!(vml.contains("<x:Min>10</x:Min>"), "VML must have Min=10: {vml}");
+    assert!(vml.contains("<x:Max>90</x:Max>"), "VML must have Max=90: {vml}");
+    assert!(vml.contains("<x:Inc>3</x:Inc>"), "VML must have Inc=3: {vml}");
+    assert!(vml.contains("<x:Page>15</x:Page>"), "VML must have Page=15: {vml}");
+    assert!(vml.contains("<x:Horiz/>"), "horizontal ScrollBar must have <x:Horiz/>: {vml}");
+}
+
+#[test]
+fn coco_new_scrollbar_vertical_no_horiz_element() {
+    let tmp = TempDir::new().unwrap();
+    let out_path = tmp.path().join("out.xlsx");
+    let snap = snapshot_with_scrollbar(0, 100, 1, 10, false, None);
+
+    let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
+    assert!(export.success);
+
+    let out_bytes = std::fs::read(&out_path).expect("read output");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(out_bytes)).expect("zip");
+    let mut buf = Vec::new();
+    zip.by_name("xl/drawings/vmlDrawing9000.vml")
+        .unwrap()
+        .read_to_end(&mut buf)
+        .unwrap();
+    let vml = String::from_utf8_lossy(&buf);
+
+    assert!(
+        !vml.contains("<x:Horiz/>"),
+        "vertical ScrollBar must NOT have <x:Horiz/>: {vml}"
+    );
+}
+
+#[test]
+fn mixed_all_four_control_types_no_shapeid_collision() {
+    let tmp = TempDir::new().unwrap();
+    let out_path = tmp.path().join("out.xlsx");
+    let snap = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "id": "s1",
+                "name": "S1",
+                "rowData": {},
+                "_checkboxes": [
+                    {"_provenance": "coco-new", "row": 0, "col": 0, "label": "CB", "checked": false}
+                ],
+                "_formControls": [
+                    {"_provenance": "coco-new", "kind": "radio",  "cell": "A2", "label": "R1", "checked": false, "firstButton": true},
+                    {"_provenance": "coco-new", "kind": "spin",   "cell": "A3", "min": 0, "max": 10, "step": 1, "page": 2},
+                    {"_provenance": "coco-new", "kind": "scroll", "cell": "A4", "min": 0, "max": 50, "step": 5, "page": 10, "horiz": false}
+                ]
+            }
+        }
+    }"#.to_string();
+
+    let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
+    assert!(export.success, "mixed export must succeed: {:?}", export.error);
+
+    let out_bytes = std::fs::read(&out_path).expect("read output");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(out_bytes)).expect("zip");
+
+    for n in 0..4u32 {
+        let name = format!("xl/ctrlProps/ctrlProp{}.xml", 9000 + n);
+        assert!(
+            zip.by_name(&name).is_ok(),
+            "expected zip entry '{name}' for mixed controls"
+        );
+    }
+    assert!(
+        zip.by_name("xl/ctrlProps/ctrlProp9004.xml").is_err(),
+        "ctrlProp9004.xml must not exist (only 4 controls)"
+    );
+
+    let mut buf = Vec::new();
+    zip.by_name("xl/drawings/vmlDrawing9000.vml")
+        .expect("vmlDrawing9000.vml must exist")
+        .read_to_end(&mut buf)
+        .unwrap();
+    let vml = String::from_utf8_lossy(&buf);
+
+    assert!(vml.contains("ObjectType=\"Checkbox\""), "Checkbox must be in VML: {vml}");
+    assert!(vml.contains("ObjectType=\"Radio\""), "Radio must be in VML: {vml}");
+    assert!(vml.contains("ObjectType=\"Spin\""), "Spin must be in VML: {vml}");
+    assert!(vml.contains("ObjectType=\"Scroll\""), "Scroll must be in VML: {vml}");
+
+    for n in 0..4u32 {
+        let sid = format!("_x0000_s{}", 9000 + n);
+        assert!(
+            vml.contains(&sid),
+            "shape id '{sid}' must be present in VML: {vml}"
+        );
+    }
+}
+
+#[test]
+fn form_control_without_provenance_emits_nothing() {
+    let tmp = TempDir::new().unwrap();
+    let out_path = tmp.path().join("out.xlsx");
+    let snap = r#"{"sheetOrder":["s1"],"sheets":{"s1":{"id":"s1","name":"S1","rowData":{},"_formControls":[{"kind":"radio","cell":"A1","label":"X","checked":false}]}}}"#.to_string();
+
+    let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
+    assert!(export.success, "export must succeed");
+
+    let out_bytes = std::fs::read(&out_path).expect("read output");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(out_bytes)).expect("zip");
+
+    assert!(
+        zip.by_name("xl/ctrlProps/ctrlProp9000.xml").is_err(),
+        "no ctrlProp should be emitted without _provenance=coco-new"
+    );
+}
+
+#[test]
+fn coco_new_spinner_cell_a1_ref_parsed() {
+    let tmp = TempDir::new().unwrap();
+    let out_path = tmp.path().join("out.xlsx");
+    let snap = r#"{"sheetOrder":["s1"],"sheets":{"s1":{"id":"s1","name":"S1","rowData":{},"_formControls":[{"_provenance":"coco-new","kind":"spin","cell":"D5","min":1,"max":20,"step":1,"page":5}]}}}"#.to_string();
+
+    let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
+    assert!(export.success, "export must succeed: {:?}", export.error);
+
+    let out_bytes = std::fs::read(&out_path).expect("read output");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(out_bytes)).expect("zip");
+
+    assert!(
+        zip.by_name("xl/ctrlProps/ctrlProp9000.xml").is_ok(),
+        "ctrlProp must be emitted when cell ref is A1-style"
+    );
+    let mut buf = Vec::new();
+    zip.by_name("xl/ctrlProps/ctrlProp9000.xml")
+        .unwrap()
+        .read_to_end(&mut buf)
+        .unwrap();
+    let ctrl_xml = String::from_utf8_lossy(&buf);
+    assert!(
+        ctrl_xml.contains("objectType=\"Spinner\""),
+        "objectType must be Spinner: {ctrl_xml}"
+    );
+}

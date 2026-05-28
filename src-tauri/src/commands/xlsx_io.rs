@@ -8980,86 +8980,250 @@ mod freeze_projection_tests {
 // #309: Coco-new CheckBox OOXML emit
 // ============================================================================
 
-struct CocoNewCheckbox {
-    row: u32,
-    col: u32,
-    label: String,
-    checked: bool,
-    fmla_link: Option<String>,
+/// Unified form control entry for OOXML emit. Covers CheckBox (#309) as well
+/// as Radio, Spinner, and ScrollBar (#322).
+#[derive(Debug)]
+enum CocoNewFormControl {
+    CheckBox {
+        row: u32,
+        col: u32,
+        label: String,
+        checked: bool,
+        fmla_link: Option<String>,
+    },
+    Radio {
+        row: u32,
+        col: u32,
+        label: String,
+        checked: bool,
+        first_button: bool,
+        fmla_link: Option<String>,
+    },
+    Spinner {
+        row: u32,
+        col: u32,
+        min: i64,
+        max: i64,
+        inc: i64,
+        page: i64,
+        fmla_link: Option<String>,
+    },
+    ScrollBar {
+        row: u32,
+        col: u32,
+        min: i64,
+        max: i64,
+        inc: i64,
+        page: i64,
+        horiz: bool,
+        fmla_link: Option<String>,
+    },
+}
+
+impl CocoNewFormControl {
+    fn row(&self) -> u32 {
+        match self {
+            Self::CheckBox { row, .. } | Self::Radio { row, .. }
+            | Self::Spinner { row, .. } | Self::ScrollBar { row, .. } => *row,
+        }
+    }
+    fn col(&self) -> u32 {
+        match self {
+            Self::CheckBox { col, .. } | Self::Radio { col, .. }
+            | Self::Spinner { col, .. } | Self::ScrollBar { col, .. } => *col,
+        }
+    }
 }
 
 fn collect_coco_new_checkboxes(
     snapshot: &Value,
     sheet_order: &[Value],
-) -> Vec<(usize, Vec<CocoNewCheckbox>)> {
-    let mut result: Vec<(usize, Vec<CocoNewCheckbox>)> = Vec::new();
+) -> Vec<(usize, Vec<CocoNewFormControl>)> {
+    let mut result: Vec<(usize, Vec<CocoNewFormControl>)> = Vec::new();
     let Some(sheets_obj) = snapshot.get("sheets").and_then(|v| v.as_object()) else {
         return result;
     };
     for (sheet_idx, sid_val) in sheet_order.iter().enumerate() {
         let Some(sid) = sid_val.as_str() else { continue };
         let Some(sheet) = sheets_obj.get(sid) else { continue };
-        let Some(arr) = sheet.get("_checkboxes").and_then(|v| v.as_array()) else {
-            continue;
-        };
-        let mut coco_new: Vec<CocoNewCheckbox> = Vec::new();
-        for cb_val in arr {
-            let Some(obj) = cb_val.as_object() else { continue };
-            let provenance = obj.get("_provenance").and_then(|v| v.as_str()).unwrap_or("");
-            if provenance != "coco-new" {
-                continue;
+
+        let mut controls: Vec<CocoNewFormControl> = Vec::new();
+
+        // --- _checkboxes (CheckBox, #309) ---
+        if let Some(arr) = sheet.get("_checkboxes").and_then(|v| v.as_array()) {
+            for cb_val in arr {
+                let Some(obj) = cb_val.as_object() else { continue };
+                let provenance = obj.get("_provenance").and_then(|v| v.as_str()).unwrap_or("");
+                if provenance != "coco-new" {
+                    continue;
+                }
+                controls.push(CocoNewFormControl::CheckBox {
+                    row: obj.get("row").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    col: obj.get("col").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    label: obj
+                        .get("label")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("CheckBox")
+                        .to_string(),
+                    checked: obj.get("checked").and_then(|v| v.as_bool()).unwrap_or(false),
+                    fmla_link: obj
+                        .get("fmlaLink")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                });
             }
-            coco_new.push(CocoNewCheckbox {
-                row: obj.get("row").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-                col: obj.get("col").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-                label: obj
-                    .get("label")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("CheckBox")
-                    .to_string(),
-                checked: obj.get("checked").and_then(|v| v.as_bool()).unwrap_or(false),
-                fmla_link: obj
-                    .get("fmlaLink")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-            });
         }
-        if !coco_new.is_empty() {
-            result.push((sheet_idx, coco_new));
+
+        // --- _formControls (Radio / Spinner / ScrollBar, #322) ---
+        if let Some(arr) = sheet.get("_formControls").and_then(|v| v.as_array()) {
+            for fc_val in arr {
+                let Some(obj) = fc_val.as_object() else { continue };
+                let provenance = obj.get("_provenance").and_then(|v| v.as_str()).unwrap_or("");
+                if provenance != "coco-new" {
+                    continue;
+                }
+                let kind = obj.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+                // Resolve (row, col): prefer explicit fields, else parse `cell` A1 ref.
+                let (row, col) = if let (Some(r), Some(c)) = (
+                    obj.get("row").and_then(|v| v.as_u64()),
+                    obj.get("col").and_then(|v| v.as_u64()),
+                ) {
+                    (r as u32, c as u32)
+                } else if let Some(cell_str) = obj.get("cell").and_then(|v| v.as_str()) {
+                    match parse_a1(cell_str) {
+                        Some((r, c)) => (r, c),
+                        None => continue,
+                    }
+                } else {
+                    continue;
+                };
+                let fmla_link = obj
+                    .get("fmlaLink")
+                    .or_else(|| obj.get("linkedCell"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                match kind {
+                    "radio" => {
+                        controls.push(CocoNewFormControl::Radio {
+                            row,
+                            col,
+                            label: obj.get("label").and_then(|v| v.as_str())
+                                .unwrap_or("Option").to_string(),
+                            checked: obj.get("checked").and_then(|v| v.as_bool()).unwrap_or(false),
+                            first_button: obj.get("firstButton").and_then(|v| v.as_bool()).unwrap_or(false),
+                            fmla_link,
+                        });
+                    }
+                    "spin" => {
+                        controls.push(CocoNewFormControl::Spinner {
+                            row,
+                            col,
+                            min: obj.get("min").and_then(|v| v.as_i64()).unwrap_or(0),
+                            max: obj.get("max").and_then(|v| v.as_i64()).unwrap_or(100),
+                            inc: obj.get("step").and_then(|v| v.as_i64()).unwrap_or(1),
+                            page: obj.get("page").and_then(|v| v.as_i64()).unwrap_or(10),
+                            fmla_link,
+                        });
+                    }
+                    "scroll" => {
+                        controls.push(CocoNewFormControl::ScrollBar {
+                            row,
+                            col,
+                            min: obj.get("min").and_then(|v| v.as_i64()).unwrap_or(0),
+                            max: obj.get("max").and_then(|v| v.as_i64()).unwrap_or(100),
+                            inc: obj.get("step").and_then(|v| v.as_i64()).unwrap_or(1),
+                            page: obj.get("page").and_then(|v| v.as_i64()).unwrap_or(10),
+                            horiz: obj.get("horiz").and_then(|v| v.as_bool()).unwrap_or(false),
+                            fmla_link,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if !controls.is_empty() {
+            result.push((sheet_idx, controls));
         }
     }
     result
 }
 
-fn build_ctrl_prop_xml_309(cb: &CocoNewCheckbox) -> String {
-    let checked_attr = if cb.checked { "Checked" } else { "Unchecked" };
-    let fmla_link_attr = if let Some(ref link) = cb.fmla_link {
-        format!(" fmlaLink=\"{}\"", encode_xml_text(link))
-    } else {
-        String::new()
-    };
-    format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+fn build_ctrl_prop_xml_309(fc: &CocoNewFormControl) -> String {
+    match fc {
+        CocoNewFormControl::CheckBox { checked, fmla_link, .. } => {
+            let checked_attr = if *checked { "Checked" } else { "Unchecked" };
+            let fmla_link_attr = fmla_link
+                .as_deref()
+                .map(|l| format!(" fmlaLink=\"{}\"", encode_xml_text(l)))
+                .unwrap_or_default();
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
 \n<formControlPr xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2009/9/main\" \
 objectType=\"CheckBox\" checked=\"{checked_attr}\"{fmla_link_attr} \
 lockText=\"1\" defaultSize=\"0\" noThreeD=\"1\"/>\n"
-    )
+            )
+        }
+        CocoNewFormControl::Radio { checked, first_button, fmla_link, .. } => {
+            let checked_attr = if *checked { "Checked" } else { "Unchecked" };
+            let first_attr = if *first_button { " firstButton=\"1\"" } else { "" };
+            let fmla_link_attr = fmla_link
+                .as_deref()
+                .map(|l| format!(" fmlaLink=\"{}\"", encode_xml_text(l)))
+                .unwrap_or_default();
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+\n<formControlPr xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2009/9/main\" \
+objectType=\"Radio\" checked=\"{checked_attr}\"{first_attr}{fmla_link_attr} \
+lockText=\"1\" defaultSize=\"0\" noThreeD=\"1\"/>\n"
+            )
+        }
+        CocoNewFormControl::Spinner { min, max, inc, page, fmla_link, .. } => {
+            let fmla_link_attr = fmla_link
+                .as_deref()
+                .map(|l| format!(" fmlaLink=\"{}\"", encode_xml_text(l)))
+                .unwrap_or_default();
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+\n<formControlPr xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2009/9/main\" \
+objectType=\"Spinner\" min=\"{min}\" max=\"{max}\" inc=\"{inc}\" page=\"{page}\"{fmla_link_attr} \
+lockText=\"1\" defaultSize=\"0\"/>\n"
+            )
+        }
+        CocoNewFormControl::ScrollBar { min, max, inc, page, horiz, fmla_link, .. } => {
+            let horiz_attr = if *horiz { " horiz=\"1\"" } else { "" };
+            let fmla_link_attr = fmla_link
+                .as_deref()
+                .map(|l| format!(" fmlaLink=\"{}\"", encode_xml_text(l)))
+                .unwrap_or_default();
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+\n<formControlPr xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2009/9/main\" \
+objectType=\"Scroll\" min=\"{min}\" max=\"{max}\" inc=\"{inc}\" page=\"{page}\"{horiz_attr}{fmla_link_attr} \
+lockText=\"1\" defaultSize=\"0\"/>\n"
+            )
+        }
+    }
 }
 
-fn build_vml_shape_309(shape_id: u32, cb: &CocoNewCheckbox) -> String {
-    let right_col = cb.col + 2;
-    let bottom_row = cb.row + 1;
-    let anchor = format!("{}, 0, {}, 0, {right_col}, 0, {bottom_row}, 0", cb.col, cb.row);
-    let checked_el = if cb.checked { "<x:Checked>1</x:Checked>\n      " } else { "" };
-    let fmla_link_el = if let Some(ref link) = cb.fmla_link {
-        format!("<x:FmlaLink>{}</x:FmlaLink>\n      ", encode_xml_text(link))
-    } else {
-        String::new()
-    };
-    let label_escaped = encode_xml_text(&cb.label);
+fn build_vml_shape_309(shape_id: u32, fc: &CocoNewFormControl) -> String {
+    let row = fc.row();
+    let col = fc.col();
+    let right_col = col + 2;
+    let bottom_row = row + 1;
+    let anchor = format!("{col}, 0, {row}, 0, {right_col}, 0, {bottom_row}, 0");
     let shape_id_str = format!("_x0000_s{shape_id}");
-    format!(
-        "  <v:shape id=\"{shape_id_str}\" type=\"#_x0000_t201\" \
+
+    match fc {
+        CocoNewFormControl::CheckBox { checked, fmla_link, label, .. } => {
+            let checked_el = if *checked { "<x:Checked>1</x:Checked>\n      " } else { "" };
+            let fmla_link_el = fmla_link
+                .as_deref()
+                .map(|l| format!("<x:FmlaLink>{}</x:FmlaLink>\n      ", encode_xml_text(l)))
+                .unwrap_or_default();
+            let label_escaped = encode_xml_text(label);
+            format!(
+                "  <v:shape id=\"{shape_id_str}\" type=\"#_x0000_t201\" \
 style=\"position:absolute;margin-left:36pt;margin-top:3pt;\
 width:108pt;height:14.25pt;z-index:1\" \
 fillcolor=\"window\" strokecolor=\"windowText\" filled=\"f\" stroked=\"f\">\n\
@@ -9073,13 +9237,85 @@ fillcolor=\"window\" strokecolor=\"windowText\" filled=\"f\" stroked=\"f\">\n\
       {checked_el}{fmla_link_el}<x:NoThreeD/>\n\
     </x:ClientData>\n\
   </v:shape>\n"
-    )
+            )
+        }
+        CocoNewFormControl::Radio { checked, first_button, fmla_link, label, .. } => {
+            let checked_el = if *checked { "<x:Checked>1</x:Checked>\n      " } else { "" };
+            let first_el = if *first_button { "<x:FirstButton/>\n      " } else { "" };
+            let fmla_link_el = fmla_link
+                .as_deref()
+                .map(|l| format!("<x:FmlaLink>{}</x:FmlaLink>\n      ", encode_xml_text(l)))
+                .unwrap_or_default();
+            let label_escaped = encode_xml_text(label);
+            format!(
+                "  <v:shape id=\"{shape_id_str}\" type=\"#_x0000_t204\" \
+style=\"position:absolute;margin-left:36pt;margin-top:3pt;\
+width:108pt;height:14.25pt;z-index:1\" \
+fillcolor=\"window\" strokecolor=\"windowText\" filled=\"f\" stroked=\"f\">\n\
+    <v:path shadowok=\"f\" o:connecttype=\"none\"/>\n\
+    <v:textbox style=\"mso-direction-alt:auto\">\
+<div style=\"text-align:left\"><span>{label_escaped}</span></div></v:textbox>\n\
+    <x:ClientData ObjectType=\"Radio\">\n\
+      <x:Anchor>{anchor}</x:Anchor>\n\
+      <x:PrintObject/>\n\
+      <x:AutoFill>False</x:AutoFill>\n\
+      {checked_el}{first_el}{fmla_link_el}<x:NoThreeD/>\n\
+    </x:ClientData>\n\
+  </v:shape>\n"
+            )
+        }
+        CocoNewFormControl::Spinner { min, max, inc, page, fmla_link, .. } => {
+            let fmla_link_el = fmla_link
+                .as_deref()
+                .map(|l| format!("<x:FmlaLink>{}</x:FmlaLink>\n      ", encode_xml_text(l)))
+                .unwrap_or_default();
+            format!(
+                "  <v:shape id=\"{shape_id_str}\" type=\"#_x0000_t172\" \
+style=\"position:absolute;margin-left:36pt;margin-top:3pt;\
+width:12pt;height:20pt;z-index:1\" filled=\"f\" stroked=\"f\">\n\
+    <v:path shadowok=\"f\" o:connecttype=\"none\"/>\n\
+    <x:ClientData ObjectType=\"Spin\">\n\
+      <x:Anchor>{anchor}</x:Anchor>\n\
+      <x:PrintObject/>\n\
+      <x:AutoFill>False</x:AutoFill>\n\
+      <x:Min>{min}</x:Min>\n\
+      <x:Max>{max}</x:Max>\n\
+      <x:Inc>{inc}</x:Inc>\n\
+      <x:Page>{page}</x:Page>\n\
+      {fmla_link_el}</x:ClientData>\n\
+  </v:shape>\n"
+            )
+        }
+        CocoNewFormControl::ScrollBar { min, max, inc, page, horiz, fmla_link, .. } => {
+            let horiz_el = if *horiz { "<x:Horiz/>\n      " } else { "" };
+            let fmla_link_el = fmla_link
+                .as_deref()
+                .map(|l| format!("<x:FmlaLink>{}</x:FmlaLink>\n      ", encode_xml_text(l)))
+                .unwrap_or_default();
+            format!(
+                "  <v:shape id=\"{shape_id_str}\" type=\"#_x0000_t173\" \
+style=\"position:absolute;margin-left:36pt;margin-top:3pt;\
+width:108pt;height:12pt;z-index:1\" filled=\"f\" stroked=\"f\">\n\
+    <v:path shadowok=\"f\" o:connecttype=\"none\"/>\n\
+    <x:ClientData ObjectType=\"Scroll\">\n\
+      <x:Anchor>{anchor}</x:Anchor>\n\
+      <x:PrintObject/>\n\
+      <x:AutoFill>False</x:AutoFill>\n\
+      <x:Min>{min}</x:Min>\n\
+      <x:Max>{max}</x:Max>\n\
+      <x:Inc>{inc}</x:Inc>\n\
+      <x:Page>{page}</x:Page>\n\
+      {horiz_el}{fmla_link_el}</x:ClientData>\n\
+  </v:shape>\n"
+            )
+        }
+    }
 }
 
-fn build_vml_drawing_xml_309(shape_base: u32, checkboxes: &[CocoNewCheckbox]) -> String {
+fn build_vml_drawing_xml_309(shape_base: u32, controls: &[CocoNewFormControl]) -> String {
     let mut shapes = String::new();
-    for (i, cb) in checkboxes.iter().enumerate() {
-        shapes.push_str(&build_vml_shape_309(shape_base + i as u32, cb));
+    for (i, fc) in controls.iter().enumerate() {
+        shapes.push_str(&build_vml_shape_309(shape_base + i as u32, fc));
     }
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n\

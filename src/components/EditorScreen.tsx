@@ -6180,13 +6180,13 @@ export default function EditorScreen() {
     }
   }, []);
 
-  // TODO(chart): live in-grid chart rendering for newly authored charts (see docs/TODOS.md#high-chart-live)
   // Open the chart dialog targeting the active sheet's current selection.
-  // The Univer @univerjs/sheets-chart plugin isn't in this build, so the
-  // dialog persists into `sheets.<id>._charts` (snapshot-level). The xlsx
-  // round-trip preserves existing chart blobs byte-for-byte (xlsx_io.rs),
-  // but newly authored entries are data-only — re-emitting chart OOXML is
-  // out of scope here. Falls back to A1 if there's no live selection.
+  // Coco-authored charts persist into `sheets.<id>._charts` and render via
+  // InGridChartLayer (DOM overlay) — no @univerjs/sheets-chart Pro plugin.
+  // The xlsx round-trip preserves existing chart blobs byte-for-byte
+  // (xlsx_io.rs); re-emitting chart OOXML so Excel sees Coco-authored charts
+  // is a separate, untracked concern. Falls back to A1 if there's no live
+  // selection.
   const openChartDialog = useCallback(() => {
     const ready = getReadyWorkbook("グラフ");
     if (!ready) return;

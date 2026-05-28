@@ -20,19 +20,10 @@ None.
 
 ## High — visible UX gaps
 
-### high-cf-live-render (partial — live wiring REVERTED in v0.4.4)
+### high-cf-live-render (closed via #241)
 - **Title**: Conditional formatting in-grid live rendering
-- **Refs**: `src/components/conditionalFormatRender.ts:927` (`patchCfRenders`), `src/components/conditionalFormatRender.ts:1204` (`computeCfRepaint` — helper kept, unused), `src/components/EditorScreen.tsx` (`applyCfRules`)
-- **Status**: `patchCfRenders` evaluates all 8 rule types (cellIs / containsText / top10 / duplicateValues / uniqueValues / dataBar / colorScale / iconSet / expression) at `createUnit` time — CF rules render correctly on file open / reopen. **In-session live re-paint was attempted in PR #211 and reverted in v0.4.4** after a runtime audit found two show-stopper bugs:
-  1. **Data corruption on iconSet rules.** `range.setValue("↑ 42")` for the glyph display was persisted by the 300 ms `syncSnapshot` debounce → numeric cells became strings → `=A1+1` returned `#VALUE!`, xlsx export baked the glyph into the saved file, re-open double-prefixed to `↑ ↑ 42`.
-  2. **CF removal stuck.** First facade write of `bg=yellow` was persisted into `cellData.s.bg`. On removal, `computeCfRepaint` saw BASE / PREV / AFTER all yellow (the patched snapshot reflected the previous facade write), the diff produced no action, and the painted color stayed forever.
-- **Root cause of both**: facade writes pollute the canonical snapshot, so the next computeCfRepaint sees a polluted BASE.
-- **Remaining work**:
-  1. Track CF-imperative writes in a sidecar map keyed by (sheetId, row, col) so `computeCfRepaint` can use the truly user-authored style as BASE, instead of reading the snapshot that has CF colors already baked into cellData.
-  2. Render iconSet glyphs via a decoration channel that does NOT mutate `cell.v` (e.g. a per-cell overlay element, or a separate `cell.p` rich-text run that the render patch knows how to detect and roll back) — never `setValue` for a render-only glyph.
-  3. Batch per-cell facade calls into rectangular ranges to avoid the synchronous `commandService` storm on whole-column sqrefs.
-  4. Add live-loop integration tests that simulate the facade → syncSnapshot → next computeCfRepaint round-trip — the missing test layer that allowed PR #211 to ship.
-- **Blocker for closing**: design + implement (1)+(2)+(3)+(4) above. The unit-tested `computeCfRepaint` helper remains in the codebase as a starting point but its `value` action and BASE assumptions need to be reworked. Helper tests still pass (they cover the helper's local logic; the bugs were in how it interacted with the rest of the system).
+- **Refs**: `src/store/cfApplyPlan.ts` (`computeCfApplyPlan`, `recoverNumericFromPolluted`), `src/store/cfRangeBatch.ts` (`batchCfPlan`), `src/store/conditionalFormatLiveLoop.integration.test.ts`
+- **Resolution**: All four items of the original remaining-work list were delivered under #241 after the v0.4.4 revert: (1) a sidecar map keys CF-imperative writes by (sheetId, row, col) so the apply plan uses the user-authored style as BASE instead of a polluted snapshot; (2) iconSet glyphs render via a decoration channel that never `setValue`s — `cell.v` stays numeric, and #313 added `recoverNumericFromPolluted` so a snapshot that *was* polluted (legacy files) self-heals on the next plan; (3) `batchCfPlan` collapses per-cell facade writes into rectangular ranges; (4) `conditionalFormatLiveLoop.integration.test.ts` exercises the facade → syncSnapshot → next-plan round-trip (Scenarios 1–6). The two v0.4.4 show-stopper bugs (iconSet data corruption, stuck CF removal) are covered by regression tests.
 
 ### high-hyperlink-live (closed)
 - **Title**: Hyperlink in-grid live rendering after authoring (beyond `patchHyperlinkRenders` boot-time patch)
@@ -44,22 +35,15 @@ None.
 - **Refs**: `src/store/commentIndicators.ts`, `src/components/CommentIndicatorsPanel.tsx`, `src/components/showAllCommentsRender.ts`, `src/components/CommentsAllOverlay.tsx`, `src/components/ThreadedCommentDialog.tsx`
 - **Resolution**: `computeCommentIndicators` extracts `_comments` from the snapshot and drives `CommentIndicatorsPanel` — a DOM-overlay side panel showing a CSS red-triangle glyph, cell ref, and hover tooltip (author + text) for every commented cell, with click-to-jump to the source cell. Shift+F2 opens `ThreadedCommentDialog` (reply threads, resolve / reopen, inline edit, delete). A "Show All Comments" view toggle drives `patchShowAllCommentsView` (💬 prefix on the cell display value) + `CommentsAllOverlay` card stack. True per-cell canvas triangles remain infeasible in Univer 0.5.x (no pixel-position facade API), but the side-panel approach meets the stated user-visible goal. `commentIndicators` is covered by 8 unit tests in `src/store/commentIndicators.test.ts`. (Tests for `patchShowAllCommentsView`, `CommentsAllOverlay`, `ThreadedCommentDialog` are not yet added — file a separate issue if coverage is desired.)
 
-### high-chart-live (partial)
+### high-chart-live (closed via #236)
 - **Title**: Chart in-grid live rendering for newly authored charts
-- **Refs**: `src/components/ChartPreviewPanel.tsx`, `src/components/ChartCanvasPanel.tsx`, `src/components/chartPreviewData.ts`, `src/components/EditorScreen.tsx:5437` (inline TODO)
-- **Effort**: L
-- **Status**: Two floating sidebar panels shipped — `ChartPreviewPanel` (always-visible 220×120 list of inline SVG bar / line / pie thumbnails) and `ChartCanvasPanel` (ribbon-toggled 480×300 single-chart preview with a dropdown selector), both rendering directly from the `_charts` snapshot data without `@univerjs/sheets-chart`. Click-to-jump-to-source-range is wired. Existing chart blobs continue to round-trip byte-for-byte.
-- **Remaining work**: True in-grid rendering — chart anchored to its source cell inside the Univer canvas. Blocked by (a) `@univerjs/sheets-chart` not in `package.json` (architectural decision: add the plugin or wait), and (b) Univer 0.5.x facade exposes no pixel coordinates for an A1 range. Inline `TODO(chart)` remains at `EditorScreen.tsx:5437`.
+- **Refs**: `src/components/InGridChartLayer.tsx`, `src/store/inGridChart.ts`, `src/store/inGridChartLayout.ts`, `src/components/ChartPreviewPanel.tsx`
+- **Resolution**: #236 shipped `InGridChartLayer` — a DOM/canvas overlay that renders Coco-authored `_charts` entries anchored to their source cell, with drag-to-move, handle-resize, double-click edit, and Delete-key delete (6 chart types + legend / labels / stacked / header options). This is the self-rendered equivalent of in-grid rendering without the `@univerjs/sheets-chart` Pro plugin — same architectural call as #312's image overlay (render ourselves rather than add the paid/server-dependent plugin). `ChartPreviewPanel` is kept as a sidebar navigation aid for legacy blob `_charts`. **Still out of scope** (separate concern, not tracked here): re-emitting chart OOXML so Excel sees Coco-authored charts — existing Excel chart blobs round-trip byte-for-byte, but newly-authored `_charts` are Coco-only.
 
-### high-image-live (partial)
+### high-image-live (closed via #312)
 - **Title**: Image in-grid live rendering for newly authored images
-- **Refs**: `src/components/ImagePreviewPanel.tsx`, `src/components/InsertImageDialog.tsx`, `src/store/imagePreviews.ts`, `src/components/EditorScreen.tsx` (Mount-Univer effect), `src/components/cocoUniverLocale.ts`, COVERAGE.md "Image" row
-- **Effort**: L
-- **Status**: Phases 4b + 4c done. Plugin stack (`@univerjs/sheets-drawing` + `@univerjs/sheets-drawing-ui` + base `@univerjs/drawing` / `@univerjs/drawing-ui`, all Apache-2.0, 0.24.0) is registered in the Mount-Univer effect with EN_US / JA_JP locale bundles merged and facade side-effect imports wired. The import bridge is in place: `xlsx_io.rs` now emits `IWorkbookData.resources[SHEET_DRAWING_PLUGIN]` per sheet whose JSON value is `IDrawingSubunitMap<ISheetImage>` (drawingId, imageSourceType: BASE64, source `data:` URL, `sheetTransform` with EMU→px conversion at 96 DPI / `emu / 9525` half-up rounding). Test `drawing_bridge_emits_sheet_drawing_plugin_resource` in `src-tauri/tests/xlsx_image_drawing_bridge.rs` locks the resource shape; full Rust suite (incl. 10/10 xlsx_p0_compat) passes — no `_preservedParts` round-trip regression.
-- **Remaining work**:
-  1. **Visual smoke test**: confirm in `tauri dev` that an opened xlsx with images actually renders the images in-grid. Currently blocked on a WebView2 debug-port env conflict that prevents CDP-driven automation in this environment; manual / PowerShell-screenshot smoke is the alternative.
-  2. **New-image insert path**: `InsertImageDialog` still writes into `_preservedParts`. Migrating to `fWorksheet.newOverGridImage().setSource(...).buildAsync()` + `insertImages([...])` (facade now wired) gives in-grid render at insert time; the `_preservedParts` write can then drop on new-image while keeping it for export round-trip.
-- The `ImagePreviewPanel` sidebar is kept as a navigation utility (click-to-jump-to-anchor-cell) — it doesn't conflict with the in-grid render path and remains useful even once the bridges land. Retire it once the bridges land if usability testing flags it as redundant.
+- **Refs**: `src/components/InGridImageLayer.tsx`, `src/store/inGridImage.ts`, `src/store/inGridImageLayout.ts`, `src-tauri/src/commands/xlsx_io.rs` (`parse_xlsx_images` / `inject_images_to_xlsx`)
+- **Resolution**: #312 shipped `InGridImageLayer` — a DOM overlay rendering Coco's `_images` snapshot entries anchored to their cell, with drag / resize / delete (#324 added z-order + 90° rotation). xlsx round-trip is full: import normalises `xl/media` + `xl/drawings` into `_images` (XOR invariant against `_preservedParts`), export regenerates media + drawing XML (incl. rotation `rot` and z-order draw order). The earlier `SHEET_DRAWING_PLUGIN` bridge was retired in favour of the self-rendered overlay (Univer 0.5.x native drawing API proved unstable). `ImagePreviewPanel` sidebar is kept as a navigation aid and reads `_images` first, falling back to `_preservedParts` for legacy.
 
 ---
 

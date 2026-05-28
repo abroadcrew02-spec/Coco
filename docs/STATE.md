@@ -1,6 +1,6 @@
 # Coco — current state
 
-Snapshot 2026-05-28 against `main` (HEAD `f64f553`).
+Snapshot 2026-05-28 against `main` (HEAD `c382297`).
 
 ## Headline
 
@@ -13,7 +13,7 @@ Snapshot 2026-05-28 against `main` (HEAD `f64f553`).
 | Vitest test files | 134 | `npx vitest --run` |
 | Vitest tests passing | 2,844 | same run |
 | Cargo integration test files | 57 | `src-tauri/tests/` |
-| Cargo `#[test]` / `#[tokio::test]` annotations | 524 | grep across `src-tauri/tests/` + `src-tauri/src/` |
+| Cargo `#[test]` / `#[tokio::test]` annotations | 537 | grep across `src-tauri/tests/` + `src-tauri/src/` |
 | Distbin artifacts produced by `npm run pack` | Windows: `Coco.exe` + `.msi` + `.exe` (NSIS) + `SHA256SUMS.txt` + `manifest.json` + `README.md`; macOS: `.dmg` + raw `Coco` binary + same metadata; Linux: `.deb` / `.AppImage` / `.rpm` + same metadata | `scripts/pack-distbin.mjs` |
 | Phase 2 dialogs + toolbar tools | 10 + 2 | `docs/COVERAGE.md` Phase 2 table |
 
@@ -56,13 +56,15 @@ Snapshot 2026-05-28 against `main` (HEAD `f64f553`).
 
 - **Blocker**: none.
 - **Meta #248 (15 features)**: ✅ 全件クローズ済み (2026-05-28)。
-- **Open follow-up issues** (meta #248 完了後に切り出した残課題):
-  - DAX 構文エラーのインライン表示 + ホバーで関数シグネチャツールチップ (#311 残)
-  - Form Control: Radio / Spinner / ScrollBar の OOXML emit (#309 は CheckBox のみ)
-  - Image: フィルタ / トリミング / 回転 / SVG・WMF / z-order / 大量画像の base64 メモリ最適化 (#312 out-of-scope)
-  - Linked Data Types: セル自動展開の拡張 / 複数キー同時 lookup (#310 out-of-scope)
-- **Medium** (round-trip / power-user): CF dxf import-side reconstruction; more CF rule types (aboveAverage / timePeriod) on export; streaming `detect_unsupported_features`; promote number-formats + rich-text into `CellStyle`; concurrent open race token.
-- **Low** (polish): perf bench multi-fixture harness; CSV import edge-case tests; xlsx round-trip edge-case tests; verify + likely-remove the StrictMode×Univer deferred-dispose guard on Univer 0.24 (#232).
+- **Follow-up issues #321–#324** (meta #248 完了後に切り出した残課題): ✅ 全件クローズ済み (2026-05-28)。
+  - #321 DAX 構文エラーのインライン表示 + 関数シグネチャツールチップ → shipped
+  - #322 Form Control: Radio / Spinner / ScrollBar の OOXML emit → shipped
+  - #323 Linked Data Types: 複数キー同時 lookup + 展開列選択 → shipped
+  - #324 Image overlay: z-order + 90° 回転 → shipped
+- **Medium / Low**: `docs/TODOS.md` の Medium / Low は全項目 (closed)。
+- **Remaining out-of-scope (untracked / wontfix)**:
+  - Chart OOXML re-emit — Coco-authored `_charts` を Excel が認識する OOXML 出力 (image は #312 で対応済み、chart は未対応)
+  - Image: フィルタ / トリミング / SVG・WMF・EMF / 大量画像の base64 → IndexedDB 退避 (#324 で z-order + 回転は対応済み、これらは費用対効果低で wontfix)
 - **Wontfix / out of scope**: VBA execution; real-time collab; `.coco` encryption (DG-04); audit log (§5.3.5); automated signing / notarization (process-gated on credentials); external-link auto-fetch; Excel-compatible cloud Linked Data Types (Bing / Refinitiv — API-dependent).
 
 ## Build + install

@@ -180,75 +180,130 @@ fn build_image_fixture(tmp: &TempDir) -> PathBuf {
     fixture_path
 }
 
+// Find the first sheet object carrying a non-empty `_images` array.
+fn find_sheet_with_images(snapshot: &serde_json::Value) -> Option<&serde_json::Value> {
+    let sheets = snapshot.get("sheets")?.as_object()?;
+    for sheet in sheets.values() {
+        if sheet
+            .get("_images")
+            .and_then(|v| v.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false)
+        {
+            return Some(sheet);
+        }
+    }
+    None
+}
+
 #[test]
 fn image_blob_survives_roundtrip() {
     let tmp = TempDir::new().unwrap();
     let fixture = build_image_fixture(&tmp);
     let exported = tmp.path().join("out.xlsx");
 
-    // Import the fixture. Snapshot should contain `_preservedParts` with the
-    // media bytes captured under `xl/media/image1.png`.
+    // #312 changed the contract: an embedded `xl/media` image referenced by a
+    // drawing is normalised into the sheet's `_images` array on import (and
+    // removed from `_preservedParts` to keep the XOR invariant). On export it
+    // is regenerated from `_images` — drawing XML is *not* byte-preserved, but
+    // the image bytes still round-trip bit-exact.
     let import = import_xlsx_core(path_str(&fixture)).expect("import ok");
     let snapshot_json = import.handle.snapshot_json.expect("snapshot present");
     let snapshot: serde_json::Value = serde_json::from_str(&snapshot_json).expect("parse snapshot");
-    let preserved = snapshot
-        .get("_preservedParts")
-        .expect("_preservedParts should be on snapshot");
-    let parts = preserved
-        .get("parts")
-        .and_then(|v| v.as_object())
-        .expect("parts object");
-    assert!(
-        parts.contains_key("xl/media/image1.png"),
-        "media png should be preserved in snapshot, got keys: {:?}",
-        parts.keys().collect::<Vec<_>>()
+
+    // 1. The image is normalised into `_images`, not `_preservedParts`.
+    let sheet = find_sheet_with_images(&snapshot)
+        .expect("imported image should be normalised into a sheet's _images");
+    let images = sheet.get("_images").and_then(|v| v.as_array()).unwrap();
+    assert_eq!(images.len(), 1, "exactly one image expected");
+    let img = &images[0];
+    assert_eq!(
+        img.get("ext").and_then(|v| v.as_str()),
+        Some("png"),
+        "image ext should be png"
     );
     assert!(
-        parts.contains_key("xl/drawings/drawing1.xml"),
-        "drawing should be preserved in snapshot"
-    );
-    assert!(
-        parts.contains_key("xl/drawings/_rels/drawing1.xml.rels"),
-        "drawing rels should be preserved in snapshot"
+        img.get("base64")
+            .and_then(|v| v.as_str())
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
+        "image base64 payload should be present"
     );
 
-    // Export. The output must still carry the image bytes bit-exact.
+    // 2. XOR invariant: the media must NOT linger in `_preservedParts`.
+    if let Some(parts) = snapshot
+        .get("_preservedParts")
+        .and_then(|p| p.get("parts"))
+        .and_then(|v| v.as_object())
+    {
+        assert!(
+            !parts.contains_key("xl/media/image1.png"),
+            "media must be removed from _preservedParts after _images normalisation, got: {:?}",
+            parts.keys().collect::<Vec<_>>()
+        );
+    }
+
+    // Export. The output must carry the image bytes bit-exact, regenerated
+    // from `_images` by inject_images_to_xlsx.
     let export = export_xlsx_core(path_str(&exported), snapshot_json).expect("export ok");
     assert!(export.success, "export should succeed: {:?}", export.error);
 
     let out_bytes = std::fs::read(&exported).expect("read exported");
     let mut out_zip = ZipArchive::new(std::io::Cursor::new(&out_bytes)).expect("zip");
-    let mut image_bytes = Vec::new();
-    out_zip
-        .by_name("xl/media/image1.png")
-        .expect("media part must exist in output zip")
-        .read_to_end(&mut image_bytes)
-        .unwrap();
-    assert_eq!(
-        image_bytes, PNG_BYTES,
-        "image bytes should round-trip bit-exact"
+
+    // 3. Some xl/media/*.png in the output matches PNG_BYTES exactly. The exact
+    //    filename is regenerated, so scan rather than assume `image1.png`.
+    let mut media_names: Vec<String> = Vec::new();
+    for i in 0..out_zip.len() {
+        let name = out_zip.by_index(i).unwrap().name().to_string();
+        if name.starts_with("xl/media/") && name.ends_with(".png") {
+            media_names.push(name);
+        }
+    }
+    assert!(
+        !media_names.is_empty(),
+        "output should contain at least one xl/media/*.png"
+    );
+    let mut found_exact = false;
+    for name in &media_names {
+        let mut bytes = Vec::new();
+        out_zip
+            .by_name(name)
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+        if bytes == PNG_BYTES {
+            found_exact = true;
+            break;
+        }
+    }
+    assert!(
+        found_exact,
+        "image bytes should round-trip bit-exact across {media_names:?}"
     );
 
-    // Drawing part should also be preserved.
-    let mut drawing_bytes = Vec::new();
-    out_zip
-        .by_name("xl/drawings/drawing1.xml")
-        .expect("drawing part must exist in output zip")
-        .read_to_end(&mut drawing_bytes)
-        .unwrap();
-    assert_eq!(drawing_bytes, DRAWING_XML.as_bytes());
+    // 4. A drawing part referencing the picture is regenerated.
+    let mut drawing_xml = String::new();
+    for i in 0..out_zip.len() {
+        let name = out_zip.by_index(i).unwrap().name().to_string();
+        if name.starts_with("xl/drawings/drawing") && name.ends_with(".xml") {
+            out_zip
+                .by_name(&name)
+                .unwrap()
+                .read_to_string(&mut drawing_xml)
+                .unwrap();
+            if drawing_xml.contains("<xdr:pic") || drawing_xml.contains(":blip") {
+                break;
+            }
+            drawing_xml.clear();
+        }
+    }
+    assert!(
+        drawing_xml.contains("<xdr:pic") || drawing_xml.contains(":blip"),
+        "a regenerated drawing should embed the picture, got: {drawing_xml}"
+    );
 
-    // Drawing rels (with the image rel inside it) should be preserved verbatim.
-    let mut drawing_rels = Vec::new();
-    out_zip
-        .by_name("xl/drawings/_rels/drawing1.xml.rels")
-        .expect("drawing rels must exist in output zip")
-        .read_to_end(&mut drawing_rels)
-        .unwrap();
-    assert_eq!(drawing_rels, DRAWING_RELS.as_bytes());
-
-    // [Content_Types].xml should carry the PNG Default so Excel knows how
-    // to handle the image bytes.
+    // 5. [Content_Types].xml advertises PNG handling.
     let mut ct = String::new();
     out_zip
         .by_name("[Content_Types].xml")
@@ -256,11 +311,12 @@ fn image_blob_survives_roundtrip() {
         .read_to_string(&mut ct)
         .unwrap();
     assert!(
-        ct.contains(r#"Extension="png""#),
-        "[Content_Types].xml should carry PNG Default: {}",
-        ct
+        ct.contains(r#"Extension="png""#) || ct.contains("image/png"),
+        "[Content_Types].xml should carry PNG handling: {ct}"
     );
 
+    // 6. The rust_xlsxwriter hyperlink relationship still coexists with the
+    //    regenerated image drawing (no rel/relationship collision).
     let mut sheet_rels = String::new();
     out_zip
         .by_name("xl/worksheets/_rels/sheet1.xml.rels")
@@ -268,40 +324,11 @@ fn image_blob_survives_roundtrip() {
         .read_to_string(&mut sheet_rels)
         .unwrap();
     assert!(
-        sheet_rels.contains("/drawing") && sheet_rels.contains("../drawings/drawing1.xml"),
-        "sheet rels should keep the preserved drawing relationship: {}",
-        sheet_rels
-    );
-    assert!(
         sheet_rels.contains("/hyperlink") && sheet_rels.contains("https://example.com/pic"),
-        "sheet rels should keep rust_xlsxwriter hyperlink relationship: {}",
-        sheet_rels
+        "sheet rels should keep rust_xlsxwriter hyperlink relationship: {sheet_rels}"
     );
-
-    let mut sheet_xml = String::new();
-    out_zip
-        .by_name("xl/worksheets/sheet1.xml")
-        .expect("sheet xml must exist")
-        .read_to_string(&mut sheet_xml)
-        .unwrap();
-    let drawing_rid = sheet_xml
-        .find("<drawing")
-        .and_then(|start| {
-            sheet_xml[start..]
-                .find("r:id=\"")
-                .map(|rel| start + rel + 6)
-        })
-        .and_then(|start| {
-            sheet_xml[start..]
-                .find('"')
-                .map(|end| &sheet_xml[start..start + end])
-        })
-        .expect("sheet xml should contain drawing r:id");
     assert!(
-        sheet_rels.contains(&format!(r#"Id="{drawing_rid}""#))
-            && sheet_rels.contains("../drawings/drawing1.xml"),
-        "drawing r:id should point at the preserved drawing rel: sheet={}, rels={}",
-        sheet_xml,
-        sheet_rels
+        sheet_rels.contains("/drawing"),
+        "sheet rels should reference a drawing for the regenerated image: {sheet_rels}"
     );
 }

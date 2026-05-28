@@ -35,6 +35,8 @@ interface Candidate {
   description: string;
   /** Text inserted at caret. `|` marks cursor position after insert. */
   insertText: string;
+  /** Full tooltip shown on hover: "signature — description" for functions. */
+  tooltip?: string;
 }
 
 interface Props {
@@ -138,6 +140,7 @@ function buildCandidates(
       kind: "function" as const,
       description: fn.description,
       insertText: fn.insertText, // includes | caret hint e.g. "SUM(|)"
+      tooltip: `${fn.signature} — ${fn.description}`,
     }));
 
   const tableCandidates: Candidate[] = tables
@@ -339,6 +342,7 @@ export function useDaxAutocomplete({
             role="option"
             aria-selected={i === activeIndex ? "true" : "false"}
             className="dac-item"
+            title={c.tooltip}
             onMouseDown={(e) => {
               // Use mousedown to prevent the textarea from losing focus.
               e.preventDefault();

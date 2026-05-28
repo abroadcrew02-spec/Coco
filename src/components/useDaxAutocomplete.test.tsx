@@ -232,3 +232,38 @@ describe("useDaxAutocomplete — table suggestions", () => {
     expect(labels.some((l) => l.includes("Sales"))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #321 — function signature tooltip (title attribute)
+// ---------------------------------------------------------------------------
+
+describe("useDaxAutocomplete — function signature tooltip", () => {
+  it("function candidate items carry a title attribute with signature and description", () => {
+    render(<Harness />);
+    const ta = screen.getByTestId("expr-input") as HTMLTextAreaElement;
+    typeIntoTextarea(ta, "SU");
+
+    const options = screen.getAllByRole("option");
+    const sumOption = options.find((o) => o.textContent?.includes("SUM") && !o.textContent?.includes("SUMX"));
+    expect(sumOption).toBeDefined();
+    const title = sumOption!.getAttribute("title");
+    expect(title).toBeTruthy();
+    // Should contain the signature and description separated by " — "
+    expect(title).toContain("SUM(table[column])");
+    expect(title).toContain("—");
+    expect(title).toContain("列の合計");
+  });
+
+  it("column candidate items do not carry a title attribute", () => {
+    render(<Harness contextTableName="Sales" />);
+    const ta = screen.getByTestId("expr-input") as HTMLTextAreaElement;
+    typeIntoTextarea(ta, "Sales[Am", 8);
+
+    const options = screen.getAllByRole("option");
+    const amountOption = options.find((o) => o.textContent?.includes("Amount"));
+    expect(amountOption).toBeDefined();
+    // Columns have no tooltip defined, so title should be absent or empty
+    const title = amountOption!.getAttribute("title");
+    expect(title === null || title === "").toBe(true);
+  });
+});

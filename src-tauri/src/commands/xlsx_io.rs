@@ -7340,6 +7340,7 @@ pub(crate) fn parse_xlsx_images<R: Read + Seek>(
         }
 
         let mut entries: Vec<ImageEntry> = Vec::new();
+        let mut sheet_media: Vec<String> = Vec::new();
         let mut all_ok = true;
 
         for (_anchor_kind, range, embed_rid) in &anchors {
@@ -7414,13 +7415,20 @@ pub(crate) fn parse_xlsx_images<R: Read + Seek>(
                 media_path: Some(media_path.clone()),
             });
 
-            normalised_media.insert(media_path);
+            sheet_media.push(media_path);
         }
 
-        if !entries.is_empty() {
-            if all_ok {
-                normalised_drawings.insert(drawing_part_path.clone());
-                normalised_drawings.insert(drawing_rels_path);
+        // Only normalise this sheet's images when EVERY anchor parsed cleanly.
+        // On partial failure we leave the whole sheet's media + drawing XML in
+        // _preservedParts (byte-preserve) and do NOT stamp _images — this keeps
+        // the XOR invariant intact in both directions: no image ends up in both
+        // _images and _preservedParts, and no successfully-parsed image is
+        // dropped from _preservedParts without a home in _images.
+        if all_ok && !entries.is_empty() {
+            normalised_drawings.insert(drawing_part_path.clone());
+            normalised_drawings.insert(drawing_rels_path);
+            for media_path in sheet_media {
+                normalised_media.insert(media_path);
             }
             result.insert(sheet_id.clone(), entries);
         }

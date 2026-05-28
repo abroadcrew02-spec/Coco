@@ -1,31 +1,33 @@
 # Coco — current state
 
-Snapshot 2026-05-27 against `main` (HEAD `abb2c09`).
+Snapshot 2026-05-28 against `main` (HEAD `f64f553`).
 
 ## Headline
 
-**MVP-1 functionally complete; Phase 2 authoring UI delivered; Phase 3 "最強Excel" roadmap in flight.** All MVP-1 (FR-001..FR-014), MVP-2 import (FR-101..FR-105), MVP-3 export (FR-201..FR-204), and CSV (FR-301..FR-304) feature IDs verdict OK in `docs/COVERAGE.md`. Phase 3 (issues #236 / #238 / #239 / #241 under meta #248) ships in-grid chart CRUD, Power Query end-to-end, a DAX engine with measure / calculated-column authoring UI, **Pivot×DAX measure 統合 (Step 7)**, and CF live re-paint with sidecar + iconSet.
+**MVP-1/2/3 functionally complete; Phase 2 authoring UI delivered; Phase 3 "最強Excel" 15-feature roadmap (meta #248) fully closed.** All MVP-1 (FR-001..FR-014), MVP-2 import (FR-101..FR-105), MVP-3 export (FR-201..FR-204), and CSV (FR-301..FR-304) feature IDs verdict OK in `docs/COVERAGE.md`. **Meta #248 の 15 features は全件クローズ済み** — in-grid chart CRUD, Power Query end-to-end, DAX engine (Pivot×measure 統合 + autocomplete + cross-measure refs + rename cascade), CF live re-paint (sidecar + iconSet + polluted-snapshot recovery), Form Control OOXML round-trip (preserve + Coco-authored emit), local CSV/SQLite Linked Data Types, and in-grid **image** canvas overlay all shipped.
 
 ## Key counts
 
 | | Count | Source |
 |-|-|-|
-| Vitest test files | 125 | `npx vitest --run` |
-| Vitest tests passing | 2,641 | same run |
-| Cargo integration test files | 55 | `src-tauri/tests/` |
-| Cargo `#[test]` / `#[tokio::test]` annotations | 496 | grep across `src-tauri/tests/` + `src-tauri/src/` |
+| Vitest test files | 134 | `npx vitest --run` |
+| Vitest tests passing | 2,844 | same run |
+| Cargo integration test files | 57 | `src-tauri/tests/` |
+| Cargo `#[test]` / `#[tokio::test]` annotations | 524 | grep across `src-tauri/tests/` + `src-tauri/src/` |
 | Distbin artifacts produced by `npm run pack` | Windows: `Coco.exe` + `.msi` + `.exe` (NSIS) + `SHA256SUMS.txt` + `manifest.json` + `README.md`; macOS: `.dmg` + raw `Coco` binary + same metadata; Linux: `.deb` / `.AppImage` / `.rpm` + same metadata | `scripts/pack-distbin.mjs` |
 | Phase 2 dialogs + toolbar tools | 10 + 2 | `docs/COVERAGE.md` Phase 2 table |
-| Commits to main since 2026-05-14 snapshot | 276 | `git log --since="2026-05-14"` |
 
-## Phase 3 progress (issues #236 / #238 / #239 / #241)
+## Phase 3 — meta #248 全 15 features クローズ済み
 
 | Issue | Status |
 |---|---|
-| **#236 In-grid Chart** | Insert / move / resize / **double-click edit** / **Delete-key delete** all shipped (PRs #263, #273, #279, #284, #286, #288, #290–#292). InsertChartDialog exposes all 6 chart types + advanced options (legend / labels / stacked / header-row/col). |
-| **#238 Power Query** | Step 1-7 pipeline engine + 13 transforms, dialog UI with json / csv / sqlite / jsonl / tsv sources, snapshot storage, executor, and **SavedQueriesPanel** (list + refresh + delete, ribbon `クエリの管理`) shipped (PRs #264, #272, #281, #285, #289, #293). |
-| **#239 Power Pivot / DAX** | Engine: 17 DAX functions (SUM/AVG/MIN/MAX/COUNT/COUNTROWS/DISTINCTCOUNT/IF/ALL/RELATED/SUMX/AVERAGEX/MINX/MAXX/COUNTX/FILTER/CALCULATE), measure + calculated-column storage and evaluation. UI: **MeasureListPanel** with three sections (tables / measures / calc cols), **MeasureEditorDialog** + **CalculatedColumnEditorDialog** (author + edit + unique-name validation + DAX function/column chips + live preview), and **"📊 データモデルへ追加"** action on TableInfoPanel rows to populate the model from existing workbook tables (PRs #265-#267, #271, #283, #287, #294-#297, #298-#302). **Step 7 Pivot×Measure 統合**: `PivotSource` / `PivotValueField` を discriminated union 化、`computeModelPivot` でモデル table を source にして per-cell filter context で measure を評価。InsertPivotDialog に「データソース: シート範囲 / データモデル」モードトグル + measure 値フィールド追加 (新 PR). |
-| **#241 CF live re-paint** | Sidecar foundation, computeCfApplyPlan, range batching, iconSet decoration channel (numeric values intact), e2e integration test all shipped (PRs #262, #268, #269, #274, #282, #288). |
+| **#236 In-grid Chart** | ✅ closed. Insert / move / resize / double-click edit / Delete-key delete、6 chart types + 高度オプション (PRs #263–#292)。 |
+| **#238 Power Query** | ✅ closed. 13 transforms + json/csv/sqlite/jsonl/tsv source + SavedQueriesPanel (PRs #264–#293)。 |
+| **#239 Power Pivot / DAX** | ✅ closed. 17 DAX functions + measure/calc-col 編集 UI、**Step 7 Pivot×Measure 統合** (`computeModelPivot` + per-cell filter context, PR #303)、**DAX autocomplete** (`useDaxAutocomplete`) + **measure/calc-col rename cascade** (PR #308)、**cross-measure references** (`[MeasureName]` syntax, PR #317)。 |
+| **#241 CF live re-paint** | ✅ closed. Sidecar + computeCfApplyPlan + range batching + iconSet decoration channel + **polluted-snapshot recovery** (`recoverNumericFromPolluted`, PR #315) + live-loop integration test。 |
+| **#194 Form Control round-trip** | ✅ closed. Excel 由来は byte-preserve (PR #306)、**Coco 新規 CheckBox の OOXML ネイティブ emit** (ctrlProps + vmlDrawing + rels + Content_Types, PR #318)。 |
+| **#244 Linked Data Types** | ✅ closed. ローカル CSV/SQLite ベース (serverless)、lookup + カード + セル展開、in-memory cache、Shift_JIS 自動検出 (PRs #307 / #314 / #316)。 |
+| **#312 Image in-grid overlay** | ✅ closed. 自前 `_images` snapshot key + `InGridImageLayer` overlay (drag/resize/delete) + import 正規化 + export 再生成 (PR #319)。 |
 
 ## What works end-to-end
 
@@ -45,18 +47,22 @@ Snapshot 2026-05-27 against `main` (HEAD `abb2c09`).
 - Performance: 1 MB / 10% formulas xlsx import in 3,565 ms (under §5.1 5,000 ms p95 ceiling) — measured by `perf_smoke.rs`.
 - Cross-platform menu accelerators (Cmd vs Ctrl); macOS minimumSystemVersion = 12.0 declared.
 
-## What's sidebar-preview-only (round-trip safe, no canvas overlay)
+## In-grid canvas overlays (no longer sidebar-only)
 
-- **Excel-format chart blob preview** — `ChartPreviewPanel` shows SVG previews for legacy `_charts` blob entries in a left sidebar; clicking jumps to the source range. The in-grid `_charts` Coco-authored entries are rendered via `InGridChartLayer` (canvas overlay) since #236 Step 3.
-- Image in-grid rendering — `ImagePreviewPanel` shows thumbnails decoded from `xl/media/` in a left sidebar; click jumps to the anchor cell. Same Univer pixel-API limitation as charts had before #236.
+- **Chart** — Coco-authored `_charts` entries render via `InGridChartLayer` (canvas overlay) since #236 Step 3. `ChartPreviewPanel` (sidebar) kept for legacy `_charts` blob preview + click-to-jump.
+- **Image** — Coco's `_images` entries render via `InGridImageLayer` (canvas overlay) since #312, with drag / resize / delete. `ImagePreviewPanel` (sidebar) reads `_images` first, falls back to `_preservedParts` for legacy. xlsx round-trip via import normalisation (`_preservedParts` → `_images`, XOR invariant) + export regen.
 
 ## Outstanding TODOs (link → `docs/TODOS.md`)
 
 - **Blocker**: none.
-- **High** (visible UX gaps): image live in-grid canvas overlay (`high-image-live` — chart equivalent shipped via #236); DAX autocomplete in `MeasureEditorDialog` / `CalculatedColumnEditorDialog`; calculated column を Pivot rows/cols として直接扱う UI (Step 7 後の課題).
-- **Medium** (round-trip / power-user): CF dxf import-side reconstruction; more CF rule types (aboveAverage / timePeriod) on export; streaming `detect_unsupported_features`; promote number-formats + rich-text into `CellStyle`; concurrent open race token; Form Control OOXML native round-trip (#194).
+- **Meta #248 (15 features)**: ✅ 全件クローズ済み (2026-05-28)。
+- **Open follow-up issues** (meta #248 完了後に切り出した残課題):
+  - DAX 構文エラーのインライン表示 + ホバーで関数シグネチャツールチップ (#311 残)
+  - Form Control: Radio / Spinner / ScrollBar の OOXML emit (#309 は CheckBox のみ)
+  - Image: フィルタ / トリミング / 回転 / SVG・WMF / z-order / 大量画像の base64 メモリ最適化 (#312 out-of-scope)
+  - Linked Data Types: セル自動展開の拡張 / 複数キー同時 lookup (#310 out-of-scope)
+- **Medium** (round-trip / power-user): CF dxf import-side reconstruction; more CF rule types (aboveAverage / timePeriod) on export; streaming `detect_unsupported_features`; promote number-formats + rich-text into `CellStyle`; concurrent open race token.
 - **Low** (polish): perf bench multi-fixture harness; CSV import edge-case tests; xlsx round-trip edge-case tests; verify + likely-remove the StrictMode×Univer deferred-dispose guard on Univer 0.24 (#232).
-- **Open methodology questions**: ~~Stock / Geography Linked Data Types — server-dependent~~ → #244 resolved as local CSV-based MVP (shipped).
 - **Wontfix / out of scope**: VBA execution; real-time collab; `.coco` encryption (DG-04); audit log (§5.3.5); automated signing / notarization (process-gated on credentials); external-link auto-fetch; Excel-compatible cloud Linked Data Types (Bing / Refinitiv — API-dependent).
 
 ## Build + install

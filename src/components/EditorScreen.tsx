@@ -6360,6 +6360,76 @@ export default function EditorScreen() {
     [getSnapshotForTool, applyMutatedSnapshot],
   );
 
+  // Bring the target image to the front by setting its zIndex to max+1 (#324).
+  const bringImageToFront = useCallback(
+    (sheetId: string, imageIndex: number) => {
+      const snapshot = getSnapshotForTool("画像前面へ");
+      if (!snapshot) return;
+      const sheets = (snapshot.sheets as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const sheetObj = sheets[sheetId];
+      if (!sheetObj) return;
+      const existing = Array.isArray(sheetObj._images)
+        ? (sheetObj._images as Array<Record<string, unknown>>)
+        : [];
+      if (imageIndex < 0 || imageIndex >= existing.length) return;
+      const maxZ = existing.reduce(
+        (acc, img) => Math.max(acc, typeof img.zIndex === "number" ? img.zIndex : 0),
+        0,
+      );
+      sheetObj._images = existing.map((img, i) =>
+        i === imageIndex ? { ...img, zIndex: maxZ + 1 } : img,
+      );
+      applyMutatedSnapshot(JSON.stringify(snapshot));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
+  // Send the target image to the back by setting its zIndex to min-1 (#324).
+  const sendImageToBack = useCallback(
+    (sheetId: string, imageIndex: number) => {
+      const snapshot = getSnapshotForTool("画像背面へ");
+      if (!snapshot) return;
+      const sheets = (snapshot.sheets as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const sheetObj = sheets[sheetId];
+      if (!sheetObj) return;
+      const existing = Array.isArray(sheetObj._images)
+        ? (sheetObj._images as Array<Record<string, unknown>>)
+        : [];
+      if (imageIndex < 0 || imageIndex >= existing.length) return;
+      const minZ = existing.reduce(
+        (acc, img) => Math.min(acc, typeof img.zIndex === "number" ? img.zIndex : 0),
+        0,
+      );
+      sheetObj._images = existing.map((img, i) =>
+        i === imageIndex ? { ...img, zIndex: minZ - 1 } : img,
+      );
+      applyMutatedSnapshot(JSON.stringify(snapshot));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
+  // Rotate the target image by 90° clockwise, wrapping at 360 (#324).
+  const rotateImage = useCallback(
+    (sheetId: string, imageIndex: number) => {
+      const snapshot = getSnapshotForTool("画像回転");
+      if (!snapshot) return;
+      const sheets = (snapshot.sheets as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const sheetObj = sheets[sheetId];
+      if (!sheetObj) return;
+      const existing = Array.isArray(sheetObj._images)
+        ? (sheetObj._images as Array<Record<string, unknown>>)
+        : [];
+      if (imageIndex < 0 || imageIndex >= existing.length) return;
+      sheetObj._images = existing.map((img, i) => {
+        if (i !== imageIndex) return img;
+        const current = typeof img.rotationDeg === "number" ? img.rotationDeg : 0;
+        return { ...img, rotationDeg: (current + 90) % 360 };
+      });
+      applyMutatedSnapshot(JSON.stringify(snapshot));
+    },
+    [getSnapshotForTool, applyMutatedSnapshot],
+  );
+
   // Number-format dialog plumbing. Captures the active selection's bounding
   // rows/cols + the anchor cell's existing `_fmt` (so the dialog can pre-select
   // a preset) and stashes them in state. We pin coords at open time so the
@@ -9389,6 +9459,9 @@ export default function EditorScreen() {
           activeSheetId={activeSheetId}
           onImageChange={handleImageAnchorChange}
           onImageDelete={deleteInGridImage}
+          onImageBringToFront={bringImageToFront}
+          onImageSendToBack={sendImageToBack}
+          onImageRotate={rotateImage}
         />
         <CommentIndicatorsPanel
           indicators={commentIndicators}

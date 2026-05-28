@@ -683,3 +683,145 @@ fn export_produces_media_from_images() {
         "exported media bytes must match the original PNG"
     );
 }
+
+// =============================================================================
+// #324 — rotation and z-order tests
+// =============================================================================
+
+/// Export an image with rotationDeg=90, then re-import: rotationDeg must come
+/// back as 90. Verifies the OOXML rot round-trip (90 * 60000 = 5400000).
+#[test]
+fn rotation_round_trip_90_deg() {
+    let tmp = TempDir::new().unwrap();
+    let plain_path = tmp.path().join("plain_rot.xlsx");
+    {
+        let mut wb = Workbook::new();
+        wb.add_worksheet();
+        wb.save(&plain_path).unwrap();
+    }
+
+    let import = import_xlsx_core(path_str(&plain_path)).expect("import ok");
+    let mut snap: serde_json::Value =
+        serde_json::from_str(&import.handle.snapshot_json.unwrap()).unwrap();
+
+    let b64_png = base64_encode(PNG_BYTES);
+    let first_sheet_id = snap["sheetOrder"][0].as_str().unwrap().to_string();
+
+    snap["sheets"][&first_sheet_id]["_images"] = serde_json::json!([{
+        "base64": b64_png,
+        "ext": "png",
+        "anchorRow": 0,
+        "anchorCol": 0,
+        "widthPx": 100,
+        "heightPx": 100,
+        "rotationDeg": 90
+    }]);
+
+    let export_path = tmp.path().join("rotated.xlsx");
+    let result = export_xlsx_core(
+        path_str(&export_path),
+        serde_json::to_string(&snap).unwrap(),
+    )
+    .expect("export ok");
+    assert!(result.success, "export should succeed");
+
+    // Verify the drawing XML contains the OOXML rotation value (5400000).
+    let exported_bytes = std::fs::read(&export_path).unwrap();
+    let mut zip = ZipArchive::new(std::io::Cursor::new(&exported_bytes)).unwrap();
+    let mut found_rot = false;
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).unwrap();
+        if entry.name().starts_with("xl/drawings/drawing") && entry.name().ends_with(".xml") {
+            let mut xml = String::new();
+            entry.read_to_string(&mut xml).unwrap();
+            if xml.contains("rot=\"5400000\"") {
+                found_rot = true;
+                break;
+            }
+        }
+    }
+    assert!(found_rot, "drawing XML must contain rot=\"5400000\" for 90° rotation");
+
+    // Re-import: rotationDeg must be 90.
+    let import2 = import_xlsx_core(path_str(&export_path)).expect("re-import ok");
+    let snap2: serde_json::Value =
+        serde_json::from_str(&import2.handle.snapshot_json.unwrap()).unwrap();
+
+    let rot = snap2["sheets"][&first_sheet_id]["_images"][0]["rotationDeg"]
+        .as_i64()
+        .unwrap_or(0);
+    assert_eq!(rot, 90, "rotationDeg must survive export → re-import round-trip");
+}
+
+/// Export two images with different zIndex values. The drawing XML must list
+/// the lower-zIndex image first (earlier elements render behind later ones).
+#[test]
+fn z_order_export_draws_lower_zindex_first() {
+    let tmp = TempDir::new().unwrap();
+    let plain_path = tmp.path().join("plain_zorder.xlsx");
+    {
+        let mut wb = Workbook::new();
+        wb.add_worksheet();
+        wb.save(&plain_path).unwrap();
+    }
+
+    let import = import_xlsx_core(path_str(&plain_path)).expect("import ok");
+    let mut snap: serde_json::Value =
+        serde_json::from_str(&import.handle.snapshot_json.unwrap()).unwrap();
+
+    let b64_png = base64_encode(PNG_BYTES);
+    let first_sheet_id = snap["sheetOrder"][0].as_str().unwrap().to_string();
+
+    // Image A has zIndex=10 (front), image B has zIndex=1 (back).
+    // After sorting, B should appear first in the drawing XML, A second.
+    snap["sheets"][&first_sheet_id]["_images"] = serde_json::json!([
+        {
+            "base64": b64_png,
+            "ext": "png",
+            "anchorRow": 0,
+            "anchorCol": 0,
+            "widthPx": 100,
+            "heightPx": 100,
+            "name": "ImageA",
+            "zIndex": 10
+        },
+        {
+            "base64": b64_png,
+            "ext": "png",
+            "anchorRow": 2,
+            "anchorCol": 2,
+            "widthPx": 100,
+            "heightPx": 100,
+            "name": "ImageB",
+            "zIndex": 1
+        }
+    ]);
+
+    let export_path = tmp.path().join("zorder.xlsx");
+    let result = export_xlsx_core(
+        path_str(&export_path),
+        serde_json::to_string(&snap).unwrap(),
+    )
+    .expect("export ok");
+    assert!(result.success, "export should succeed");
+
+    // In the drawing XML, ImageB (zIndex=1) must appear before ImageA (zIndex=10).
+    let exported_bytes = std::fs::read(&export_path).unwrap();
+    let mut zip = ZipArchive::new(std::io::Cursor::new(&exported_bytes)).unwrap();
+    let mut order_ok = false;
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).unwrap();
+        if entry.name().starts_with("xl/drawings/drawing") && entry.name().ends_with(".xml") {
+            let mut xml = String::new();
+            entry.read_to_string(&mut xml).unwrap();
+            let pos_a = xml.find("ImageA");
+            let pos_b = xml.find("ImageB");
+            if let (Some(pa), Some(pb)) = (pos_a, pos_b) {
+                // B (zIndex=1) must come before A (zIndex=10).
+                order_ok = pb < pa;
+            }
+            break;
+        }
+    }
+    assert!(order_ok, "drawing XML must list ImageB (zIndex=1) before ImageA (zIndex=10)");
+}

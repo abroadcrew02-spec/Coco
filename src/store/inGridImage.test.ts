@@ -220,6 +220,56 @@ describe("IMAGE_MIN_WIDTH_PX / IMAGE_MIN_HEIGHT_PX constants", () => {
 });
 
 // ---------------------------------------------------------------------------
+// zIndex and rotationDeg defaults (#324)
+// ---------------------------------------------------------------------------
+describe("ImageEntry zIndex and rotationDeg", () => {
+  it("entry without zIndex is accepted by makeEntry (optional field)", () => {
+    const entry = makeEntry();
+    expect(entry.zIndex).toBeUndefined();
+  });
+
+  it("entry without rotationDeg is accepted by makeEntry (optional field)", () => {
+    const entry = makeEntry();
+    expect(entry.rotationDeg).toBeUndefined();
+  });
+
+  it("zIndex is preserved through moveImageAnchor", () => {
+    const entry = makeEntry({ zIndex: 5 });
+    const moved = moveImageAnchor(entry, 1, 1);
+    expect(moved.zIndex).toBe(5);
+  });
+
+  it("rotationDeg is preserved through moveImageAnchor", () => {
+    const entry = makeEntry({ rotationDeg: 90 });
+    const moved = moveImageAnchor(entry, 1, 1);
+    expect(moved.rotationDeg).toBe(90);
+  });
+
+  it("zIndex is preserved through resizeImageAnchor", () => {
+    const entry = makeEntry({ zIndex: 3 });
+    const resized = resizeImageAnchor(entry, 200, 150);
+    expect(resized.zIndex).toBe(3);
+  });
+
+  it("rotationDeg is preserved through resizeImageAnchor", () => {
+    const entry = makeEntry({ rotationDeg: 180 });
+    const resized = resizeImageAnchor(entry, 200, 150);
+    expect(resized.rotationDeg).toBe(180);
+  });
+
+  it("explicit zIndex=0 is stored as 0, not undefined", () => {
+    const entry = makeEntry({ zIndex: 0 });
+    expect(entry.zIndex).toBe(0);
+  });
+
+  it("rotationDeg of 270 round-trips through JSON", () => {
+    const entry = makeEntry({ rotationDeg: 270 });
+    const json = JSON.parse(JSON.stringify(entry)) as typeof entry;
+    expect(json.rotationDeg).toBe(270);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Snapshot persistence logic — unit tests for the pure transform that
 // handleImageAnchorChange performs inside EditorScreen.
 // ---------------------------------------------------------------------------

@@ -48,6 +48,16 @@ export interface ImageEntry {
   name?: string;
   /** Original xl/media path — diagnostic only; not required for rendering. */
   mediaPath?: string;
+  /**
+   * Z-order stacking index. Higher values appear in front of lower values.
+   * Omitted or 0 means default stacking order.
+   */
+  zIndex?: number;
+  /**
+   * Clockwise rotation in degrees. Typically 0 / 90 / 180 / 270 but any
+   * value is accepted. Omitted or 0 means no rotation.
+   */
+  rotationDeg?: number;
 }
 
 // ---------------------------------------------------------------------------

@@ -99,6 +99,21 @@ interface Props {
    * Called when the user presses Delete or Backspace on a focused image frame.
    */
   onImageDelete?: (sheetId: string, imageIndex: number) => void;
+  /**
+   * Called when the user clicks "Bring to Front". The handler should set
+   * zIndex to max(all images' zIndex) + 1 for the given image.
+   */
+  onImageBringToFront?: (sheetId: string, imageIndex: number) => void;
+  /**
+   * Called when the user clicks "Send to Back". The handler should set
+   * zIndex to min(all images' zIndex) - 1 for the given image.
+   */
+  onImageSendToBack?: (sheetId: string, imageIndex: number) => void;
+  /**
+   * Called when the user clicks "Rotate 90°". The handler should increment
+   * rotationDeg by 90, wrapping at 360.
+   */
+  onImageRotate?: (sheetId: string, imageIndex: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +126,9 @@ export default function InGridImageLayer({
   onImageChange,
   onImageEdit,
   onImageDelete,
+  onImageBringToFront,
+  onImageSendToBack,
+  onImageRotate,
 }: Props) {
   const drag = useRef<DragState | null>(null);
   // Tracks live (uncommitted) box positions during drag so we can preview
@@ -317,6 +335,8 @@ export default function InGridImageLayer({
       {items.map((placement) => {
         const { index, box, entry } = placement;
         const src = imageDataUrl(entry);
+        const zIdx = entry.zIndex ?? 0;
+        const rotDeg = entry.rotationDeg ?? 0;
         return (
           <div
             key={placement.key}
@@ -330,9 +350,56 @@ export default function InGridImageLayer({
                 "--if-top": `${box.top}px`,
                 "--if-width": `${box.width}px`,
                 "--if-height": `${box.height}px`,
+                zIndex: zIdx,
               } as React.CSSProperties
             }
           >
+            {/* Controls toolbar: z-order + rotate */}
+            <div className="ingrid-image-controls">
+              <button
+                type="button"
+                className="ingrid-image-ctrl-btn"
+                title="Bring to Front"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onImageBringToFront && activeSheetId) {
+                    onImageBringToFront(activeSheetId, index);
+                  }
+                }}
+              >
+                &#9650;Front
+              </button>
+              <button
+                type="button"
+                className="ingrid-image-ctrl-btn"
+                title="Send to Back"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onImageSendToBack && activeSheetId) {
+                    onImageSendToBack(activeSheetId, index);
+                  }
+                }}
+              >
+                &#9660;Back
+              </button>
+              <button
+                type="button"
+                className="ingrid-image-ctrl-btn"
+                title="Rotate 90°"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onImageRotate && activeSheetId) {
+                    onImageRotate(activeSheetId, index);
+                  }
+                }}
+              >
+                &#8635;90°
+              </button>
+            </div>
+
             {/* Image body — drag moves the image */}
             <div
               className="ingrid-image-body"
@@ -351,6 +418,7 @@ export default function InGridImageLayer({
                 src={src}
                 alt={entry.name ?? ""}
                 draggable={false}
+                style={rotDeg !== 0 ? { transform: `rotate(${rotDeg}deg)` } : undefined}
               />
             </div>
 

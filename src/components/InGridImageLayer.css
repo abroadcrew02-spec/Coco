@@ -77,3 +77,41 @@
 .ingrid-image-handle[data-dir="s"]  { cursor: s-resize;  }
 .ingrid-image-handle[data-dir="sw"] { cursor: sw-resize; }
 .ingrid-image-handle[data-dir="w"]  { cursor: w-resize;  }
+
+/* ── Image controls toolbar (z-order + rotate) ──────────────────────────── */
+.ingrid-image-controls {
+  position: absolute;
+  top: -28px;
+  left: 0;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: auto;
+  transition: opacity 0.1s;
+  white-space: nowrap;
+}
+
+.ingrid-image-frame:hover .ingrid-image-controls,
+.ingrid-image-frame:focus-within .ingrid-image-controls {
+  opacity: 1;
+}
+
+.ingrid-image-ctrl-btn {
+  padding: 2px 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  border: 1px solid #aaa;
+  border-radius: 3px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  pointer-events: auto;
+}
+
+.ingrid-image-ctrl-btn:hover {
+  background: #e8f0fe;
+  border-color: #1a73e8;
+  color: #1a73e8;
+}

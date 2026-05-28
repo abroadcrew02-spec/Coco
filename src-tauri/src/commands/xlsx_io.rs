@@ -5040,20 +5040,19 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
 
     // Chart-preservation: capture chart/drawing/theme parts byte-for-byte so
     // they survive a save round-trip even though we don't render them.
-    let preserved_parts =
+    let mut preserved_parts =
         parse_xlsx_preserved_parts(&mut archive, &sheet_paths, &sheet_drawing_rids);
 
-    // Phase 4c bridge: surface embedded images to Univer's render layer via
-    // `resources[SHEET_DRAWING_PLUGIN]`. This is ADDITIVE — `_preservedParts`
-    // remains the byte-perfect export channel; this entry only exists so the
-    // `@univerjs/sheets-drawing` plugin can draw the images in the grid.
-    let (drawing_resource, drawing_warnings) = build_sheet_drawing_resource(
+    // #312 Step 6: normalise embedded images from _preservedParts into _images.
+    // Successfully parsed images are removed from _preservedParts.parts to enforce
+    // the XOR invariant: _images XOR _preservedParts.parts[xl/media|drawings/*].
+    let (image_entries_by_sheet, image_warnings) = parse_xlsx_images(
         &mut archive,
         &sheet_order,
         &sheet_names,
         &sheet_paths,
         &sheet_drawing_rids,
-        &workbook_id,
+        preserved_parts.as_mut(),
     );
 
     // #105: re-hydrate any `xl/cocoExtensions/*.json` parts a previous Coco
@@ -5085,24 +5084,25 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     if let Some(pp) = preserved_parts {
         snapshot["_preservedParts"] = pp;
     }
-    // Phase 4c: append the SHEET_DRAWING_PLUGIN entry to the top-level
-    // `resources` array (IResources shape on IWorkbookData). Univer's
-    // ResourceManagerService.loadResources reads this on workbook create.
-    if let Some(entry) = drawing_resource {
-        let arr = snapshot
-            .as_object_mut()
-            .and_then(|m| m.entry("resources").or_insert_with(|| Value::Array(Vec::new())).as_array_mut());
-        if let Some(arr) = arr {
-            arr.push(entry);
+    // #312 Step 6: stamp normalised _images into each sheet's snapshot.
+    if let Some(sheets_obj) = snapshot.get_mut("sheets").and_then(|v| v.as_object_mut()) {
+        for (sheet_id, images) in &image_entries_by_sheet {
+            if let Some(sheet) = sheets_obj.get_mut(sheet_id) {
+                sheet["_images"] = Value::Array(
+                    images.iter().map(|img| img.to_json()).collect::<Vec<_>>(),
+                );
+            }
         }
     }
+    // #312 Step 8: SHEET_DRAWING_PLUGIN resource bridge disabled.
+    // InGridImageLayer reads _images directly; @univerjs/sheets-drawing stays dormant.
     merge_coco_extensions_into_snapshot(&mut snapshot, &coco_extensions);
 
     let snapshot_json = serde_json::to_string(&snapshot).map_err(|e| e.to_string())?;
 
     let mut warnings: Vec<CompatibilityWarning> = prepended_warnings;
     warnings.extend(feature_warnings);
-    warnings.extend(drawing_warnings);
+    warnings.extend(image_warnings);
     warnings.push(CompatibilityWarning {
         severity: "info".to_string(),
         code: "XLSX_POC_IMPORT".to_string(),
@@ -6200,6 +6200,24 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
         }
     }
 
+    // #312 Step 7: re-generate xl/drawings + xl/media from _images entries.
+    // Runs after inject_preserved_parts so image numbering avoids collisions
+    // with _preservedParts media (floor at 9001).
+    if let Err(e) = inject_images_to_xlsx(&tmp_path, &snapshot, &sheet_order) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Ok(ExportResult {
+            success: false,
+            path: path.clone(),
+            warnings: vec![CompatibilityWarning {
+                severity: "blocking".to_string(),
+                code: "XLSX_IMAGE_INJECT_FAILED".to_string(),
+                message: format!("image injection failed: {e}"),
+                affected_sheets: None,
+            }],
+            error: Some(format!("XLSX_IMAGE_INJECT_FAILED: {e}")),
+        });
+    }
+
     // #309: Emit OOXML ctrlProp / vmlDrawing for Coco-new checkboxes.
     if let Err(e) = inject_coco_form_controls(&tmp_path, &snapshot, &sheet_order) {
         let _ = std::fs::remove_file(&tmp_path);
@@ -6736,6 +6754,7 @@ fn emu_to_px(emu: i64) -> i32 {
 }
 
 /// Pick a `data:` URL MIME type from a media file extension.
+#[allow(dead_code)]
 fn media_ext_to_mime(ext: &str) -> &'static str {
     match ext.to_ascii_lowercase().as_str() {
         "png" => "image/png",
@@ -6961,6 +6980,8 @@ fn parse_drawing_anchors(
 /// than threading parsed state through because the parse cost is trivial
 /// (drawings are tens of bytes per anchor, media is already in memory once
 /// we touch it) and the duplication keeps `_preservedParts` byte-exact.
+// #312 Step 8: kept for reference; no longer called. See parse_xlsx_images.
+#[allow(dead_code)]
 pub(crate) fn build_sheet_drawing_resource<R: Read + Seek>(
     archive: &mut zip::ZipArchive<R>,
     sheet_order: &[String],
@@ -7196,6 +7217,554 @@ pub(crate) fn build_sheet_drawing_resource<R: Read + Seek>(
         })),
         warnings,
     )
+}
+
+// ============================================================================
+// #312: _images normalisation (import) and regeneration (export)
+// ============================================================================
+
+/// One embedded image, mirroring the `ImageEntry` TS interface.
+#[derive(Debug, Clone)]
+pub(crate) struct ImageEntry {
+    base64: String,
+    ext: String,                // "png" | "jpg" | "gif" | "bmp"
+    anchor_row: i32,
+    anchor_col: i32,
+    width_px: i32,
+    height_px: i32,
+    name: Option<String>,
+    media_path: Option<String>,
+}
+
+impl ImageEntry {
+    fn to_json(&self) -> Value {
+        let mut obj = Map::new();
+        obj.insert("base64".into(), Value::String(self.base64.clone()));
+        obj.insert("ext".into(), Value::String(self.ext.clone()));
+        obj.insert("anchorRow".into(), json!(self.anchor_row));
+        obj.insert("anchorCol".into(), json!(self.anchor_col));
+        obj.insert("widthPx".into(), json!(self.width_px));
+        obj.insert("heightPx".into(), json!(self.height_px));
+        if let Some(n) = &self.name {
+            obj.insert("name".into(), Value::String(n.clone()));
+        }
+        if let Some(p) = &self.media_path {
+            obj.insert("mediaPath".into(), Value::String(p.clone()));
+        }
+        Value::Object(obj)
+    }
+}
+
+/// Walk every sheet's drawing XML and normalise embedded images into ImageEntry
+/// values keyed by sheet id.  Successfully parsed images are removed from
+/// _preservedParts.parts (XOR invariant: _images XOR parts[xl/media|drawings/*]).
+/// Failures (absoluteAnchor, unsupported MIME, oversized media) are left in
+/// _preservedParts and surfaced as warnings.
+pub(crate) fn parse_xlsx_images<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    sheet_order: &[String],
+    sheet_names_in_order: &[String],
+    sheet_paths: &HashMap<String, String>,
+    sheet_drawing_rids: &HashMap<String, String>,
+    preserved_parts: Option<&mut Value>,
+) -> (HashMap<String, Vec<ImageEntry>>, Vec<CompatibilityWarning>) {
+    let mut warnings: Vec<CompatibilityWarning> = Vec::new();
+    let mut result: HashMap<String, Vec<ImageEntry>> = HashMap::new();
+
+    if sheet_order.len() != sheet_names_in_order.len() {
+        return (result, warnings);
+    }
+
+    let mut normalised_media: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    let mut normalised_drawings: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+
+    for (i, sheet_id) in sheet_order.iter().enumerate() {
+        let sheet_name = &sheet_names_in_order[i];
+        let Some(sheet_part) = sheet_paths.get(sheet_name) else {
+            continue;
+        };
+        let Some(drawing_rid) = sheet_drawing_rids.get(sheet_name) else {
+            continue;
+        };
+
+        let sheet_rels_path = sheet_part_to_rels_path(sheet_part);
+        let mut sheet_rels_xml = String::new();
+        if let Ok(mut e) = archive.by_name(&sheet_rels_path) {
+            let _ = std::io::Read::read_to_string(&mut e, &mut sheet_rels_xml);
+        }
+        let sheet_rels = parse_rels(&sheet_rels_xml);
+        let Some(drawing_target_rel) = sheet_rels.get(drawing_rid) else {
+            continue;
+        };
+        let drawing_part_path =
+            resolve_rel_media_path("xl/worksheets/sheet.xml", drawing_target_rel);
+        if drawing_part_path.is_empty() {
+            continue;
+        }
+
+        let mut drawing_xml = String::new();
+        if archive
+            .by_name(&drawing_part_path)
+            .ok()
+            .and_then(|mut e| std::io::Read::read_to_string(&mut e, &mut drawing_xml).ok())
+            .is_none()
+        {
+            continue;
+        }
+
+        // absoluteAnchor: skip normalisation, leave in _preservedParts.
+        if drawing_xml.contains("<xdr:absoluteAnchor") || drawing_xml.contains("<absoluteAnchor") {
+            warnings.push(CompatibilityWarning {
+                severity: "warning".to_string(),
+                code: "XLSX_DRAWING_ABSOLUTE_ANCHOR_UNSUPPORTED".to_string(),
+                message: format!(
+                    "Sheet '{sheet_name}' contains drawings with absoluteAnchor positioning; skipped from _images. Bytes preserved via _preservedParts."
+                ),
+                affected_sheets: Some(vec![sheet_name.clone()]),
+            });
+            continue;
+        }
+
+        let drawing_rels_path = sheet_part_to_rels_path(&drawing_part_path);
+        let mut drawing_rels_xml = String::new();
+        if let Ok(mut e) = archive.by_name(&drawing_rels_path) {
+            let _ = std::io::Read::read_to_string(&mut e, &mut drawing_rels_xml);
+        }
+        let drawing_rels = parse_rels(&drawing_rels_xml);
+
+        let anchors = parse_drawing_anchors(&drawing_xml);
+        if anchors.is_empty() {
+            continue;
+        }
+
+        let mut entries: Vec<ImageEntry> = Vec::new();
+        let mut sheet_media: Vec<String> = Vec::new();
+        let mut all_ok = true;
+
+        for (_anchor_kind, range, embed_rid) in &anchors {
+            let Some(media_target_rel) = drawing_rels.get(embed_rid) else {
+                all_ok = false;
+                continue;
+            };
+            let media_path = resolve_rel_media_path(&drawing_part_path, media_target_rel);
+            if media_path.is_empty() {
+                all_ok = false;
+                continue;
+            }
+
+            let media_size = archive
+                .by_name(&media_path)
+                .ok()
+                .map(|e| e.size() as usize)
+                .unwrap_or(0);
+            if media_size > PRESERVED_PART_SIZE_CAP {
+                let mb = (media_size as f64) / (1024.0 * 1024.0);
+                let cap_mb = (PRESERVED_PART_SIZE_CAP as f64) / (1024.0 * 1024.0);
+                warnings.push(CompatibilityWarning {
+                    severity: "warning".to_string(),
+                    code: "XLSX_DRAWING_MEDIA_TOO_LARGE".to_string(),
+                    message: format!(
+                        "Embedded image at {media_path} is {mb:.1} MB; _images normalisation skipped (cap {cap_mb:.0} MB). Bytes preserved via _preservedParts."
+                    ),
+                    affected_sheets: Some(vec![sheet_name.clone()]),
+                });
+                all_ok = false;
+                continue;
+            }
+
+            let mut media_bytes: Vec<u8> = Vec::new();
+            if archive
+                .by_name(&media_path)
+                .ok()
+                .and_then(|mut e| std::io::Read::read_to_end(&mut e, &mut media_bytes).ok())
+                .is_none()
+            {
+                all_ok = false;
+                continue;
+            }
+
+            let ext_raw = media_path
+                .rsplit('.')
+                .next()
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            let ext = match ext_raw.as_str() {
+                "png" => "png",
+                "jpg" | "jpeg" => "jpg",
+                "gif" => "gif",
+                "bmp" => "bmp",
+                _ => {
+                    all_ok = false;
+                    continue;
+                }
+            };
+
+            let width_emu = (range.to.col_off_emu - range.from.col_off_emu).max(0);
+            let height_emu = (range.to.row_off_emu - range.from.row_off_emu).max(0);
+
+            entries.push(ImageEntry {
+                base64: b64_encode(&media_bytes),
+                ext: ext.to_string(),
+                anchor_row: range.from.row,
+                anchor_col: range.from.col,
+                width_px: emu_to_px(width_emu),
+                height_px: emu_to_px(height_emu),
+                name: None,
+                media_path: Some(media_path.clone()),
+            });
+
+            sheet_media.push(media_path);
+        }
+
+        // Only normalise this sheet's images when EVERY anchor parsed cleanly.
+        // On partial failure we leave the whole sheet's media + drawing XML in
+        // _preservedParts (byte-preserve) and do NOT stamp _images — this keeps
+        // the XOR invariant intact in both directions: no image ends up in both
+        // _images and _preservedParts, and no successfully-parsed image is
+        // dropped from _preservedParts without a home in _images.
+        if all_ok && !entries.is_empty() {
+            normalised_drawings.insert(drawing_part_path.clone());
+            normalised_drawings.insert(drawing_rels_path);
+            for media_path in sheet_media {
+                normalised_media.insert(media_path);
+            }
+            result.insert(sheet_id.clone(), entries);
+        }
+    }
+
+    // Remove normalised entries from _preservedParts.parts (XOR invariant).
+    if let Some(pp) = preserved_parts {
+        if let Some(parts) = pp.get_mut("parts").and_then(|v| v.as_object_mut()) {
+            for key in normalised_media.iter().chain(normalised_drawings.iter()) {
+                parts.remove(key);
+            }
+        }
+    }
+
+    (result, warnings)
+}
+
+/// Remove all `<drawing .../>` self-closing elements from a worksheet XML
+/// string so that `inject_images_to_xlsx` can replace them with a single
+/// up-to-date reference without creating duplicates.
+fn strip_drawing_elements(sheet_xml: &str) -> String {
+    // Match <drawing .../> (self-closing, arbitrary attributes).
+    let mut result = String::with_capacity(sheet_xml.len());
+    let mut rest = sheet_xml;
+    while let Some(start) = rest.find("<drawing ") {
+        result.push_str(&rest[..start]);
+        // Find the closing '/>' of the self-closing tag.
+        let after = &rest[start..];
+        if let Some(end_rel) = after.find("/>") {
+            rest = &after[end_rel + 2..];
+        } else {
+            // Malformed: give up and keep the remainder as-is.
+            result.push_str(after);
+            return result;
+        }
+    }
+    result.push_str(rest);
+    result
+}
+
+/// Remove all `<Relationship ...>` elements whose `Type` is the drawing
+/// relationship type from a sheet rels XML string.  Used by
+/// `inject_images_to_xlsx` to avoid leaving dangling drawing references
+/// (from the original import) after _images normalisation has removed those
+/// drawing files from the zip.
+fn strip_drawing_rels(rels_xml: &str) -> String {
+    const DRAWING_TYPE: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
+    let rels: Vec<PreservedSheetRel> =
+        extract_self_closing_or_paired(rels_xml, "Relationship")
+            .into_iter()
+            .filter_map(|el| PreservedSheetRel::from_xml(&el))
+            .filter(|rel| rel.ty != DRAWING_TYPE)
+            .collect();
+    let mut xml = String::new();
+    xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
+    xml.push_str(
+        "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n",
+    );
+    for rel in rels {
+        xml.push_str(&rel.raw);
+        xml.push('\n');
+    }
+    xml.push_str("</Relationships>");
+    xml
+}
+
+/// Re-generate xl/drawings + xl/media from sheets[id]._images in the snapshot.
+/// Runs after inject_preserved_parts; uses 9001+ numbering to avoid collision.
+pub(crate) fn inject_images_to_xlsx(
+    tmp_path: &std::path::Path,
+    snapshot: &Value,
+    sheet_order: &[Value],
+) -> Result<(), String> {
+    use std::fs;
+    use std::io::Cursor;
+    use zip::{write::FileOptions, ZipArchive, ZipWriter};
+
+    let sheets_obj = match snapshot.get("sheets").and_then(|v| v.as_object()) {
+        Some(o) => o,
+        None => return Ok(()),
+    };
+
+    let mut per_sheet: Vec<(usize, Vec<Value>)> = Vec::new();
+    for (idx, sheet_id_val) in sheet_order.iter().enumerate() {
+        let sheet_id = match sheet_id_val.as_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        let images = sheets_obj
+            .get(sheet_id)
+            .and_then(|s| s.get("_images"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.to_vec())
+            .unwrap_or_default();
+        if !images.is_empty() {
+            per_sheet.push((idx, images));
+        }
+    }
+
+    if per_sheet.is_empty() {
+        return Ok(());
+    }
+
+    let original_bytes = fs::read(tmp_path).map_err(|e| e.to_string())?;
+    let mut src = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+
+    let mut max_img_n: u32 = 0;
+    let mut max_drw_n: u32 = 0;
+    for i in 0..src.len() {
+        if let Ok(e) = src.by_index(i) {
+            let name = e.name();
+            if let Some(rest) = name.strip_prefix("xl/media/image") {
+                if let Ok(n) = rest.split('.').next().unwrap_or("").parse::<u32>() {
+                    if n > max_img_n { max_img_n = n; }
+                }
+            }
+            if name.starts_with("xl/drawings/drawing") && name.ends_with(".xml") && !name.contains("_rels") {
+                if let Some(rest) = name.strip_prefix("xl/drawings/drawing") {
+                    if let Ok(n) = rest.strip_suffix(".xml").unwrap_or("").parse::<u32>() {
+                        if n > max_drw_n { max_drw_n = n; }
+                    }
+                }
+            }
+        }
+    }
+    let mut global_img_n = max_img_n.max(9000) + 1;
+    let mut global_drw_n = max_drw_n.max(9000) + 1;
+
+    struct NewPart {
+        name: String,
+        bytes: Vec<u8>,
+    }
+    let mut new_parts: Vec<NewPart> = Vec::new();
+    let mut sheet_drawing_inject: HashMap<usize, (String, String)> = HashMap::new();
+
+    for (sheet_idx, images) in &per_sheet {
+        let drawing_n = global_drw_n;
+        global_drw_n += 1;
+
+        let drawing_part = format!("xl/drawings/drawing{drawing_n}.xml");
+        let drawing_rels_part = format!("xl/drawings/_rels/drawing{drawing_n}.xml.rels");
+        let drawing_target = format!("../drawings/drawing{drawing_n}.xml");
+
+        let mut dwg_xml = String::new();
+        dwg_xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n\
+             <xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" \
+             xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" \
+             xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">\n");
+
+        let mut dwg_rels = String::new();
+        dwg_rels.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n\
+             <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n");
+
+        let mut local_rid_n = 1u32;
+
+        for img_json in images {
+            let img_n = global_img_n;
+            global_img_n += 1;
+
+            let base64 = img_json.get("base64").and_then(|v| v.as_str()).unwrap_or("");
+            let ext = img_json.get("ext").and_then(|v| v.as_str()).unwrap_or("png");
+            let row = img_json.get("anchorRow").and_then(|v| v.as_i64()).unwrap_or(0);
+            let col = img_json.get("anchorCol").and_then(|v| v.as_i64()).unwrap_or(0);
+            let w = img_json.get("widthPx").and_then(|v| v.as_i64()).unwrap_or(96);
+            let h = img_json.get("heightPx").and_then(|v| v.as_i64()).unwrap_or(96);
+            let w_emu = w.max(1) * 9525;
+            let h_emu = h.max(1) * 9525;
+            let local_rid = format!("rId{local_rid_n}");
+            local_rid_n += 1;
+
+            if let Some(bytes) = b64_decode(base64) {
+                new_parts.push(NewPart { name: format!("xl/media/image{img_n}.{ext}"), bytes });
+            }
+
+            dwg_rels.push_str(&format!(
+                "<Relationship Id=\"{local_rid}\" \
+                 Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" \
+                 Target=\"../media/image{img_n}.{ext}\"/>\n"
+            ));
+
+            let pic_name = img_json.get("name").and_then(|v| v.as_str()).unwrap_or("Picture");
+            let safe_name = encode_xml_text(pic_name);
+            dwg_xml.push_str(&format!(
+                "  <xdr:oneCellAnchor>\n\
+                     <xdr:from><xdr:col>{col}</xdr:col><xdr:colOff>0</xdr:colOff>\
+                 <xdr:row>{row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>\n\
+                     <xdr:ext cx=\"{w_emu}\" cy=\"{h_emu}\"/>\n\
+                     <xdr:pic>\n\
+                       <xdr:nvPicPr><xdr:cNvPr id=\"{img_n}\" name=\"{safe_name}\"/>\
+                 <xdr:cNvPicPr/></xdr:nvPicPr>\n\
+                       <xdr:blipFill><a:blip r:embed=\"{local_rid}\"/>\
+                 <a:stretch><a:fillRect/></a:stretch></xdr:blipFill>\n\
+                       <xdr:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/>\
+                 <a:ext cx=\"{w_emu}\" cy=\"{h_emu}\"/></a:xfrm>\
+                 <a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr>\n\
+                     </xdr:pic>\n\
+                     <xdr:clientData/>\n\
+                   </xdr:oneCellAnchor>\n"
+            ));
+        }
+
+        dwg_xml.push_str("</xdr:wsDr>");
+        dwg_rels.push_str("</Relationships>");
+
+        new_parts.push(NewPart { name: drawing_part, bytes: dwg_xml.into_bytes() });
+        new_parts.push(NewPart { name: drawing_rels_part, bytes: dwg_rels.into_bytes() });
+
+        let preferred_rid = format!("rId{}", 9000 + sheet_idx);
+        sheet_drawing_inject.insert(*sheet_idx, (preferred_rid, drawing_target));
+    }
+
+    let mut skip_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    skip_names.insert("[Content_Types].xml".to_string());
+    for idx in sheet_drawing_inject.keys() {
+        let n = idx + 1;
+        skip_names.insert(format!("xl/worksheets/sheet{n}.xml"));
+        skip_names.insert(format!("xl/worksheets/_rels/sheet{n}.xml.rels"));
+    }
+    for p in &new_parts {
+        skip_names.insert(p.name.clone());
+    }
+
+    let opts: FileOptions =
+        FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let mut out_buf: Vec<u8> = Vec::with_capacity(original_bytes.len() + 64 * 1024);
+    {
+        let mut out = ZipWriter::new(Cursor::new(&mut out_buf));
+
+        let mut src2 = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+        for i in 0..src2.len() {
+            let mut entry = src2.by_index(i).map_err(|e| e.to_string())?;
+            let name = entry.name().to_string();
+            if skip_names.contains(&name) { continue; }
+            let mut buf = Vec::with_capacity(entry.size() as usize);
+            std::io::Read::read_to_end(&mut entry, &mut buf).map_err(|e| e.to_string())?;
+            out.start_file(&name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, &buf).map_err(|e| e.to_string())?;
+        }
+
+        let mut src3 = ZipArchive::new(Cursor::new(&original_bytes)).map_err(|e| e.to_string())?;
+        for (idx, (preferred_rid, drawing_target)) in &sheet_drawing_inject {
+            let n = idx + 1;
+            let sheet_entry = format!("xl/worksheets/sheet{n}.xml");
+            let rels_entry = format!("xl/worksheets/_rels/sheet{n}.xml.rels");
+
+            let mut sheet_xml = String::new();
+            if let Ok(mut e) = src3.by_name(&sheet_entry) {
+                let _ = std::io::Read::read_to_string(&mut e, &mut sheet_xml);
+            }
+            let mut existing_rels = String::new();
+            if let Ok(mut e) = src3.by_name(&rels_entry) {
+                let _ = std::io::Read::read_to_string(&mut e, &mut existing_rels);
+            }
+
+            // Strip any existing drawing rels so the old xl/drawings/drawingN.xml
+            // reference (from the original import fixture) is not left dangling
+            // after _images normalisation removes those drawing files from the zip.
+            let stripped_rels = strip_drawing_rels(&existing_rels);
+
+            let (new_rels, drawing_rid) = merge_sheet_rels(
+                &stripped_rels,
+                Some(&(preferred_rid.clone(), drawing_target.clone())),
+                &[],
+            );
+
+            // Strip any existing <drawing .../> elements so the old import-time
+            // reference is replaced rather than duplicated.
+            let sheet_xml_stripped = strip_drawing_elements(&sheet_xml);
+            let sheet_out = if let Some(rid) = &drawing_rid {
+                if let Some(pos) = sheet_xml_stripped.rfind("</worksheet>") {
+                    let mut s = String::with_capacity(sheet_xml_stripped.len() + 64);
+                    s.push_str(&sheet_xml_stripped[..pos]);
+                    s.push_str(&format!("<drawing r:id=\"{rid}\"/>"));
+                    s.push_str(&sheet_xml_stripped[pos..]);
+                    s
+                } else { sheet_xml_stripped }
+            } else { sheet_xml_stripped };
+
+            out.start_file(&sheet_entry, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, sheet_out.as_bytes()).map_err(|e| e.to_string())?;
+            out.start_file(&rels_entry, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, new_rels.as_bytes()).map_err(|e| e.to_string())?;
+        }
+
+        for p in &new_parts {
+            out.start_file(&p.name, opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut out, &p.bytes).map_err(|e| e.to_string())?;
+        }
+
+        let mut new_ct = String::new();
+        if let Ok(mut e) = src.by_name("[Content_Types].xml") {
+            let _ = std::io::Read::read_to_string(&mut e, &mut new_ct);
+        }
+        let close_pos = new_ct.rfind("</Types>").unwrap_or(new_ct.len());
+        let mut ct_adds = String::new();
+
+        for p in &new_parts {
+            if p.name.starts_with("xl/drawings/drawing") && p.name.ends_with(".xml") && !p.name.contains("_rels") {
+                let part_name = format!("/{}", p.name);
+                if !new_ct.contains(&format!("PartName=\"{part_name}\"")) {
+                    ct_adds.push_str(&format!(
+                        "<Override PartName=\"{part_name}\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>"
+                    ));
+                }
+            }
+        }
+        const IMG_CT: &[(&str, &str)] = &[
+            ("png", "image/png"), ("jpg", "image/jpeg"), ("jpeg", "image/jpeg"),
+            ("gif", "image/gif"), ("bmp", "image/bmp"),
+        ];
+        for (ext, ct) in IMG_CT {
+            if !new_ct.contains(&format!("Extension=\"{ext}\""))
+                && !new_ct.contains(&format!("Extension=\"{}\"", ext.to_uppercase()))
+            {
+                ct_adds.push_str(&format!("<Default Extension=\"{ext}\" ContentType=\"{ct}\"/>"));
+            }
+        }
+
+        let merged_ct = if ct_adds.is_empty() {
+            new_ct
+        } else {
+            let mut s = String::with_capacity(new_ct.len() + ct_adds.len());
+            s.push_str(&new_ct[..close_pos]);
+            s.push_str(&ct_adds);
+            s.push_str(&new_ct[close_pos..]);
+            s
+        };
+        out.start_file("[Content_Types].xml", opts).map_err(|e| e.to_string())?;
+        std::io::Write::write_all(&mut out, merged_ct.as_bytes()).map_err(|e| e.to_string())?;
+
+        out.finish().map_err(|e| e.to_string())?;
+    }
+
+    fs::write(tmp_path, &out_buf).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Map a worksheet entry path to its sibling `_rels` path.

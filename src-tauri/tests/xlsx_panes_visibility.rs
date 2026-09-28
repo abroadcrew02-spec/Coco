@@ -6,7 +6,7 @@
 //! export side re-emits via rust_xlsxwriter, and we assert the resulting XML
 //! still carries the same frozen-pane / visibility data.
 
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use serde_json::Value;
 use std::io::{Read, Write};
 use tempfile::TempDir;

@@ -5,7 +5,7 @@
 //! reads back the exact values we expect to assert on without rust_xlsxwriter
 //! defaults muddying the assertions.
 
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use serde_json::Value;
 use std::io::{Read, Write};
 use tempfile::TempDir;

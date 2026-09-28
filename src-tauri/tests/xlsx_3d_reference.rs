@@ -12,14 +12,14 @@
 //! by Univer. What the Rust xlsx layer IS responsible for is *not corrupting the
 //! formula text*: both import (`worksheet_formula` -> `cell["f"]`) and export
 //! (`write_formula`) treat the formula as an opaque string, so a 3D reference
-//! must survive a full Coco round-trip (import xlsx -> export xlsx -> re-import)
+//! must survive a full Nicel round-trip (import xlsx -> export xlsx -> re-import)
 //! verbatim, exactly like every other formula in `xlsx_p0_formulas.rs`.
 //!
 //! This test asserts that text-preservation guarantee for the canonical 3D
 //! reference forms.
 
 use calamine::{open_workbook, Reader, Xlsx};
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use serde_json::Value;
 use std::path::Path;
@@ -30,7 +30,7 @@ fn path_str(p: &Path) -> String {
 }
 
 /// (row, col, formula text written verbatim to xlsx, marker fragments that must
-/// appear in the round-tripped text on the Coco snapshot and the re-exported
+/// appear in the round-tripped text on the Nicel snapshot and the re-exported
 /// xlsx).
 struct FormulaCase {
     row: u32,
@@ -120,7 +120,7 @@ fn three_d_reference_text_round_trips() {
         wb.save(&fixture).expect("save fixture");
     }
 
-    // ---- Import via Coco ----
+    // ---- Import via Nicel ----
     let imported = import_xlsx_core(path_str(&fixture)).expect("import fixture");
     let snapshot_json = imported
         .handle
@@ -156,7 +156,7 @@ fn three_d_reference_text_round_trips() {
         import_failures.join("\n  - ")
     );
 
-    // ---- Export via Coco ----
+    // ---- Export via Nicel ----
     let export = export_xlsx_core(path_str(&exported), snapshot_json).expect("export call");
     assert!(
         export.success,

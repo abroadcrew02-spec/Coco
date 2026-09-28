@@ -1,7 +1,7 @@
 .cp-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -10,9 +10,9 @@
 }
 
 .cp-modal {
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 12px 36px var(--coco-shadow);
+  box-shadow: 0 12px 36px var(--nicel-shadow);
   width: 100%;
   max-width: 560px;
   max-height: 70vh;
@@ -23,8 +23,8 @@
 
 .cp-search {
   padding: 12px 14px 8px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .cp-input {
@@ -32,15 +32,15 @@
   box-sizing: border-box;
   padding: 8px 10px;
   font-size: 14px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   font-family: inherit;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
 }
 
 .cp-input:focus {
   outline: none;
-  border-color: var(--coco-accent);
+  border-color: var(--nicel-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
 }
 
@@ -59,14 +59,14 @@
   gap: 12px;
   padding: 7px 14px;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   cursor: pointer;
   user-select: none;
 }
 
 .cp-row--active {
-  background-color: var(--coco-accent-subtle);
-  color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-subtle);
+  color: var(--nicel-accent-hover);
 }
 
 .cp-row-label {
@@ -86,7 +86,7 @@
 
 .cp-row-category {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -95,9 +95,9 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   font-weight: 600;
-  color: var(--coco-text-muted);
-  background-color: var(--coco-surface-hover);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-text-muted);
+  background-color: var(--nicel-surface-hover);
+  border: 1px solid var(--nicel-border-strong);
   border-bottom-width: 2px;
   border-radius: 3px;
   padding: 1px 6px;
@@ -108,16 +108,16 @@
   padding: 24px 14px;
   text-align: center;
   font-size: 13px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .cp-footer {
   padding: 8px 14px;
-  border-top: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-top: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .cp-hint {
   font-size: 11px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
 }

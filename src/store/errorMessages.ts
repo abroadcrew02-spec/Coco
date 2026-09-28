@@ -67,7 +67,7 @@ const PREFIX_FRIENDLY: Record<Locale, Array<[string, PrefixFormatter]>> = {
     ["security scan failed:", (rest) => `セキュリティ検査に失敗しました（${rest.trim()}）`],
     // "backup rotation failed: <detail>"
     ["backup rotation failed:", (rest) => `バックアップのローテーションに失敗しました（${rest.trim()}）`],
-    // "File not found: <path>" — open_coco_core when the .coco path is missing
+    // "File not found: <path>" — open_nicel_core when the .coco path is missing
     ["File not found:", (rest) => `ファイルが見つかりません（${rest.trim()}）`],
     // "Recovery file is missing: <path>" — restore_backup_core when the temp .coco was wiped
     ["Recovery file is missing:", (rest) => `復元ファイルが見つかりません（${rest.trim()}）。候補一覧から自動的に取り除きました。`],

@@ -123,7 +123,7 @@ export default function MacroDialog({ executor, onClose }: Props) {
     };
   }, []);
 
-  // Escape to dismiss — matches the rest of Coco's modals.
+  // Escape to dismiss — matches the rest of Nicel's modals.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {

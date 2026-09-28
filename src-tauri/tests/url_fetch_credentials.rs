@@ -5,7 +5,7 @@
 // CRUD round-trip, host matching, and that listed summaries never carry the
 // secret value.
 
-use coco_lib::commands::url_fetch_credentials::{
+use nicel_lib::commands::url_fetch_credentials::{
     best_match, delete_credential_core, list_credentials_core, parse_index, resolve_credential,
     set_credential_core, CredentialIndexEntry, CredentialInput, CredentialKind, InMemoryStore,
 };

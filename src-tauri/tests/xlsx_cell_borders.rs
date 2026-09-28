@@ -1,4 +1,4 @@
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::{Color, Format, FormatBorder, Workbook};
 use serde_json::Value;
 use std::path::PathBuf;

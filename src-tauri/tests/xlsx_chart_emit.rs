@@ -1,11 +1,11 @@
-//! Tests for #330: Coco-authored chart OOXML emit via inject_charts_to_xlsx.
+//! Tests for #330: Nicel-authored chart OOXML emit via inject_charts_to_xlsx.
 //! Each test builds a snapshot with _charts entries, exports to xlsx, then
 //! inspects the produced zip for correct chart/drawing/rels structure.
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -385,7 +385,7 @@ fn multi_series_chart_emits_two_series() {
 // --------------------------------------------------------------------------
 
 #[test]
-fn charts_round_trip_via_coco_extensions() {
+fn charts_round_trip_via_nicel_extensions() {
     let tmp = TempDir::new().unwrap();
     let (_, snap_json) = base_snapshot(&tmp, "Sheet1");
     let chart = json!({
@@ -425,11 +425,11 @@ fn charts_round_trip_via_coco_extensions() {
 }
 
 // --------------------------------------------------------------------------
-// Test 9: no double-take — Coco-emitted charts should NOT land in _preservedParts
+// Test 9: no double-take — Nicel-emitted charts should NOT land in _preservedParts
 // --------------------------------------------------------------------------
 
 #[test]
-fn coco_emitted_charts_not_in_preserved_parts() {
+fn nicel_emitted_charts_not_in_preserved_parts() {
     let tmp = TempDir::new().unwrap();
     let (_, snap_json) = base_snapshot(&tmp, "Sheet1");
     let chart = json!({
@@ -451,17 +451,17 @@ fn coco_emitted_charts_not_in_preserved_parts() {
     let re_snap_json = re_import.handle.snapshot_json.expect("snap");
     let re_snap: Value = serde_json::from_str(&re_snap_json).expect("parse");
 
-    // Coco-emitted chart parts (9001+) should not be in _preservedParts
+    // Nicel-emitted chart parts (9001+) should not be in _preservedParts
     if let Some(preserved) = re_snap.get("_preservedParts") {
         if let Some(parts) = preserved.get("parts").and_then(|v| v.as_object()) {
-            let coco_charts: Vec<&String> = parts
+            let nicel_charts: Vec<&String> = parts
                 .keys()
                 .filter(|k| k.starts_with("xl/charts/chart9"))
                 .collect();
             assert!(
-                coco_charts.is_empty(),
-                "Coco-emitted chart parts should not be in _preservedParts, found: {:?}",
-                coco_charts
+                nicel_charts.is_empty(),
+                "Nicel-emitted chart parts should not be in _preservedParts, found: {:?}",
+                nicel_charts
             );
         }
     }
@@ -526,10 +526,10 @@ fn excel_origin_chart_blob_preserved() {
         out.finish().unwrap();
     }
 
-    // Import → add a Coco chart → export
+    // Import → add a Nicel chart → export
     let import = import_xlsx_core(path_str(&fixture)).expect("import");
     let snap_json = import.handle.snapshot_json.expect("snap");
-    let coco_chart = json!({
+    let nicel_chart = json!({
         "range": "S1!A1:A1",
         "type": "bar",
         "hasHeaderRow": false,
@@ -539,10 +539,10 @@ fn excel_origin_chart_blob_preserved() {
         "widthPx": 380,
         "heightPx": 280
     });
-    let snap_with_coco = inject_charts(&snap_json, json!([coco_chart]));
+    let snap_with_nicel = inject_charts(&snap_json, json!([nicel_chart]));
 
     let out = tmp.path().join("with_both.xlsx");
-    export_xlsx_core(path_str(&out), snap_with_coco).expect("export").success.then(|| ()).expect("success");
+    export_xlsx_core(path_str(&out), snap_with_nicel).expect("export").success.then(|| ()).expect("success");
 
     // chart1.xml must still be present and verbatim
     let bytes = std::fs::read(&out).unwrap();

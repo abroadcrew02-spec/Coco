@@ -10,7 +10,7 @@
 // already understand. No Univer / React imports — kept side-effect free so it
 // can be unit-tested without the editor harness.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension) consumed here:
+// Snapshot shape (Univer 0.5.x + Nicel extension) consumed here:
 //   {
 //     sheets: {
 //       <sheetId>: {

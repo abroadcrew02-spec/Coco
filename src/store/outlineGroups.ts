@@ -1,6 +1,6 @@
 // Pure helpers for Excel-style row/column outline grouping.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension):
+// Snapshot shape (Univer 0.5.x + Nicel extension):
 //   {
 //     sheets: {
 //       <sheetId>: {

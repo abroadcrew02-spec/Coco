@@ -2,7 +2,7 @@
 // every comment across every sheet into a flat listing for table render,
 // bulk actions (resolve / delete), and export to Markdown / CSV.
 //
-// Reads the same Coco-extended snapshot shape used by commentIndicators.ts
+// Reads the same Nicel-extended snapshot shape used by commentIndicators.ts
 // and threadedComments.ts:
 //
 //   {

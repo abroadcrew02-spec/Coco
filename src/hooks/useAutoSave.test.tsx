@@ -84,7 +84,7 @@ describe("useAutoSave", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
-    const call = invokeMock.mock.calls.find((c) => c[0] === "workbook_autosave_coco");
+    const call = invokeMock.mock.calls.find((c) => c[0] === "workbook_autosave_nicel");
     expect(call).toBeTruthy();
   });
 
@@ -95,9 +95,9 @@ describe("useAutoSave", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
-    // xlsx path → autosave_temp (not autosave_coco)
+    // xlsx path → autosave_temp (not autosave_nicel)
     expect(invokeMock.mock.calls.find((c) => c[0] === "workbook_autosave_temp")).toBeTruthy();
-    expect(invokeMock.mock.calls.find((c) => c[0] === "workbook_autosave_coco")).toBeFalsy();
+    expect(invokeMock.mock.calls.find((c) => c[0] === "workbook_autosave_nicel")).toBeFalsy();
     expect(useWorkbookStore.getState().saveStatus).toBe("unsaved");
   });
 

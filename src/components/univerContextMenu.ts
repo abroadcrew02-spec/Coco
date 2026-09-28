@@ -1,4 +1,4 @@
-// Wires Coco-specific entries (Insert Comment / Hyperlink / Number Format)
+// Wires Nicel-specific entries (Insert Comment / Hyperlink / Number Format)
 // into Univer's cell context menu. Power users have keyboard shortcuts
 // (Shift+F2 / Ctrl+K / Ctrl+1); right-click is the discovery path for the
 // rest. We piggy-back on Univer's IMenuManagerService schema so our entries
@@ -33,12 +33,12 @@ import {
   type IMenuButtonItem,
 } from "@univerjs/ui";
 
-export const COCO_INSERT_COMMENT_COMMAND_ID = "coco.command.insert-comment";
-export const COCO_INSERT_HYPERLINK_COMMAND_ID = "coco.command.insert-hyperlink";
-export const COCO_OPEN_NUMBER_FORMAT_COMMAND_ID = "coco.command.open-number-format";
-export const COCO_CAMERA_CAPTURE_COMMAND_ID = "coco.command.camera-capture";
+export const NICEL_INSERT_COMMENT_COMMAND_ID = "nicel.command.insert-comment";
+export const NICEL_INSERT_HYPERLINK_COMMAND_ID = "nicel.command.insert-hyperlink";
+export const NICEL_OPEN_NUMBER_FORMAT_COMMAND_ID = "nicel.command.open-number-format";
+export const NICEL_CAMERA_CAPTURE_COMMAND_ID = "nicel.command.camera-capture";
 
-export interface CocoContextMenuCallbacks {
+export interface NicelContextMenuCallbacks {
   openCommentDialog: () => void;
   openHyperlinkDialog: () => void;
   openNumberFormatDialog: () => void;
@@ -69,7 +69,7 @@ function makeCommand(
           // bubble into Univer's command service and surface as a red error
           // toast. Real bugs in the openers will still show up via React.
           // eslint-disable-next-line no-console
-          console.error(`coco context-menu handler ${id} threw`, err);
+          console.error(`nicel context-menu handler ${id} threw`, err);
           return false;
         }
       }
@@ -79,12 +79,12 @@ function makeCommand(
 }
 
 // Three IMenuButtonItem factories. `title` is a plain JA string (not a
-// locale key) because Coco hasn't introduced i18n yet — the surrounding
+// locale key) because Nicel hasn't introduced i18n yet — the surrounding
 // Univer UI runs en-US but our dialogs and labels are all Japanese, so we
 // match that convention. label === undefined means Univer renders `title`.
 function commentMenuItemFactory(): IMenuButtonItem {
   return {
-    id: COCO_INSERT_COMMENT_COMMAND_ID,
+    id: NICEL_INSERT_COMMENT_COMMAND_ID,
     type: MenuItemType.BUTTON,
     title: "コメントを挿入...",
     tooltip: "選択セルにコメントを挿入 (Shift+F2)",
@@ -93,7 +93,7 @@ function commentMenuItemFactory(): IMenuButtonItem {
 
 function hyperlinkMenuItemFactory(): IMenuButtonItem {
   return {
-    id: COCO_INSERT_HYPERLINK_COMMAND_ID,
+    id: NICEL_INSERT_HYPERLINK_COMMAND_ID,
     type: MenuItemType.BUTTON,
     title: "ハイパーリンク...",
     tooltip: "選択セルにハイパーリンクを挿入 (Ctrl+K)",
@@ -102,7 +102,7 @@ function hyperlinkMenuItemFactory(): IMenuButtonItem {
 
 function numberFormatMenuItemFactory(): IMenuButtonItem {
   return {
-    id: COCO_OPEN_NUMBER_FORMAT_COMMAND_ID,
+    id: NICEL_OPEN_NUMBER_FORMAT_COMMAND_ID,
     type: MenuItemType.BUTTON,
     title: "表示形式...",
     tooltip: "選択範囲の表示形式を変更 (Ctrl+1)",
@@ -111,7 +111,7 @@ function numberFormatMenuItemFactory(): IMenuButtonItem {
 
 function cameraCaptureMenuItemFactory(): IMenuButtonItem {
   return {
-    id: COCO_CAMERA_CAPTURE_COMMAND_ID,
+    id: NICEL_CAMERA_CAPTURE_COMMAND_ID,
     type: MenuItemType.BUTTON,
     title: "カメラ撮影",
     tooltip: "選択範囲のスナップショット画像を作成 (ソース更新に追従)",
@@ -123,23 +123,23 @@ function cameraCaptureMenuItemFactory(): IMenuButtonItem {
 // at the bottom of the right-click menu, after Univer's stock groups
 // (FORMAT / LAYOUT / DATA). Order numbers are large (100/101/102) so
 // future Univer additions to OTHERS sort before us.
-export function buildCocoContextMenuSchema() {
+export function buildNicelContextMenuSchema() {
   return {
     [ContextMenuPosition.MAIN_AREA]: {
       [ContextMenuGroup.OTHERS]: {
-        [COCO_INSERT_COMMENT_COMMAND_ID]: {
+        [NICEL_INSERT_COMMENT_COMMAND_ID]: {
           order: 100,
           menuItemFactory: commentMenuItemFactory,
         },
-        [COCO_INSERT_HYPERLINK_COMMAND_ID]: {
+        [NICEL_INSERT_HYPERLINK_COMMAND_ID]: {
           order: 101,
           menuItemFactory: hyperlinkMenuItemFactory,
         },
-        [COCO_OPEN_NUMBER_FORMAT_COMMAND_ID]: {
+        [NICEL_OPEN_NUMBER_FORMAT_COMMAND_ID]: {
           order: 102,
           menuItemFactory: numberFormatMenuItemFactory,
         },
-        [COCO_CAMERA_CAPTURE_COMMAND_ID]: {
+        [NICEL_CAMERA_CAPTURE_COMMAND_ID]: {
           order: 103,
           menuItemFactory: cameraCaptureMenuItemFactory,
         },
@@ -148,9 +148,9 @@ export function buildCocoContextMenuSchema() {
   };
 }
 
-// Disposable bundle returned from registerCocoContextMenu so the caller can
+// Disposable bundle returned from registerNicelContextMenu so the caller can
 // tear everything down on unmount in the right order.
-export interface CocoContextMenuRegistration {
+export interface NicelContextMenuRegistration {
   dispose(): void;
 }
 
@@ -159,10 +159,10 @@ export interface CocoContextMenuRegistration {
 // menu manager doesn't expose an "unmerge" — that's fine in practice since
 // the whole Univer instance disposes on EditorScreen unmount, taking the
 // schema with it).
-export function registerCocoContextMenu(
+export function registerNicelContextMenu(
   univer: Univer,
-  callbacks: CocoContextMenuCallbacks,
-): CocoContextMenuRegistration {
+  callbacks: NicelContextMenuCallbacks,
+): NicelContextMenuRegistration {
   const injector = univer.__getInjector();
   const commandService = injector.get(ICommandService);
   const menuManagerService = injector.get(IMenuManagerService);
@@ -178,20 +178,20 @@ export function registerCocoContextMenu(
 
   const disposables: IDisposable[] = [
     commandService.registerCommand(
-      makeCommand(COCO_INSERT_COMMENT_COMMAND_ID, commentRef),
+      makeCommand(NICEL_INSERT_COMMENT_COMMAND_ID, commentRef),
     ),
     commandService.registerCommand(
-      makeCommand(COCO_INSERT_HYPERLINK_COMMAND_ID, hyperlinkRef),
+      makeCommand(NICEL_INSERT_HYPERLINK_COMMAND_ID, hyperlinkRef),
     ),
     commandService.registerCommand(
-      makeCommand(COCO_OPEN_NUMBER_FORMAT_COMMAND_ID, numFmtRef),
+      makeCommand(NICEL_OPEN_NUMBER_FORMAT_COMMAND_ID, numFmtRef),
     ),
     commandService.registerCommand(
-      makeCommand(COCO_CAMERA_CAPTURE_COMMAND_ID, cameraRef),
+      makeCommand(NICEL_CAMERA_CAPTURE_COMMAND_ID, cameraRef),
     ),
   ];
 
-  menuManagerService.mergeMenu(buildCocoContextMenuSchema());
+  menuManagerService.mergeMenu(buildNicelContextMenuSchema());
 
   return {
     dispose(): void {

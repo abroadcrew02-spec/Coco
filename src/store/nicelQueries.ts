@@ -1,4 +1,4 @@
-// #238 Step 5 — Coco-native Get & Transform query storage.
+// #238 Step 5 — Nicel-native Get & Transform query storage.
 //
 // A SavedQuery captures a data source (csv / json / sqlite / static rows)
 // + a transform pipeline (selectColumns / dropColumns / filterRows / sort /
@@ -8,8 +8,8 @@
 // destination).
 //
 // Distinct from `xl/queryTables/` (Excel's Power Query connection metadata,
-// which we byte-preserve via _preservedParts). Coco queries are a separate
-// JSON-typed layer; Excel won't see them, but Coco round-trips them.
+// which we byte-preserve via _preservedParts). Nicel queries are a separate
+// JSON-typed layer; Excel won't see them, but Nicel round-trips them.
 //
 // Pure / framework-free.
 

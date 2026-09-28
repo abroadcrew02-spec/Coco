@@ -9,9 +9,9 @@ Date: 2026-05-21. Univer: 0.5.x (`@univerjs/engine-formula`).
 
 **Evaluation: not supported (Univer 0.5.x limitation). Text preservation: supported and tested.**
 
-Coco preserves 3D-reference formula *text* losslessly through xlsx
+Nicel preserves 3D-reference formula *text* losslessly through xlsx
 import/export, but Univer's formula engine cannot *evaluate* a 3D reference —
-it resolves to `#REF!`/empty. This is a Univer engine limitation, not a Coco
+it resolves to `#REF!`/empty. This is a Univer engine limitation, not a Nicel
 bug, and `patch-package`-ing the engine to add sheet-range expansion was
 judged too risky (touches the core lexer + reference-resolution path).
 
@@ -66,8 +66,8 @@ The renderer uses Univer's stock `UniverFormulaEnginePlugin` +
 (`src/components/EditorScreen.tsx`). Typing `=SUM(Sheet1:Sheet3!A1)` into the
 formula bar is *accepted* (no syntax error — the lexer tolerates it per
 finding 1), but the cell shows `#REF!`/empty because resolution fails per
-finding 2. Coco adds no custom formula wiring, so there is nothing on the
-Coco side to change.
+finding 2. Nicel adds no custom formula wiring, so there is nothing on the
+Nicel side to change.
 
 ## xlsx I/O findings
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { CocoDataModel, StoredCalculatedColumn } from "../store/cocoDataModel";
-import { evaluateTransientCalculatedColumn } from "../store/cocoDataModel";
+import type { NicelDataModel, StoredCalculatedColumn } from "../store/nicelDataModel";
+import { evaluateTransientCalculatedColumn } from "../store/nicelDataModel";
 import { CALC_COLUMN_ERROR, DAX_FUNCTION_REFERENCE, parseDaxSafe } from "../store/daxEngine";
 import { useDaxAutocomplete } from "./useDaxAutocomplete";
 import DaxColumnRefChips from "./DaxColumnRefChips";
@@ -20,7 +20,7 @@ interface Props {
   /** Existing (tableId, columnName) pairs for uniqueness validation. */
   existingPairs: ExistingPair[];
   /** Full data model — used for the live-preview evaluation. */
-  cocoModel?: CocoDataModel;
+  nicelModel?: NicelDataModel;
   onApply: (col: StoredCalculatedColumn) => void;
   onClose: () => void;
 }
@@ -29,7 +29,7 @@ export default function CalculatedColumnEditorDialog({
   initialColumn,
   tables,
   existingPairs,
-  cocoModel,
+  nicelModel,
   onApply,
   onClose,
 }: Props) {
@@ -77,7 +77,7 @@ export default function CalculatedColumnEditorDialog({
   // Resolve the currently selected table name for column suggestions.
   const selectedTableName = tables.find((t) => t.id === tableId)?.name;
 
-  const autocompleteTables = (cocoModel?.tables ?? []).map((t) => ({
+  const autocompleteTables = (nicelModel?.tables ?? []).map((t) => ({
     name: t.name,
     columns: t.columns.map((c) => ({ name: c.name })),
   }));
@@ -101,14 +101,14 @@ export default function CalculatedColumnEditorDialog({
 
   // Live preview — debounced 300 ms.
   useEffect(() => {
-    if (!expression.trim() || !cocoModel || !tableId) {
+    if (!expression.trim() || !nicelModel || !tableId) {
       setPreview(null);
       return;
     }
     const colPreviewName = columnName.trim() || "_preview_";
     const tid = setTimeout(() => {
       try {
-        const values = evaluateTransientCalculatedColumn(cocoModel, {
+        const values = evaluateTransientCalculatedColumn(nicelModel, {
           tableId,
           columnName: colPreviewName,
           expression: expression.trim(),
@@ -124,7 +124,7 @@ export default function CalculatedColumnEditorDialog({
       }
     }, 300);
     return () => clearTimeout(tid);
-  }, [expression, tableId, columnName, cocoModel]);
+  }, [expression, tableId, columnName, nicelModel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -267,7 +267,7 @@ export default function CalculatedColumnEditorDialog({
             </div>
             <DaxFunctionChips onInsert={handleChipInsert} />
             <DaxColumnRefChips
-              tables={cocoModel?.tables ?? []}
+              tables={nicelModel?.tables ?? []}
               onInsert={handleChipInsert}
             />
             {parseError !== null && (

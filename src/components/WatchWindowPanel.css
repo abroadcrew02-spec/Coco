@@ -11,10 +11,10 @@
   max-height: 50vh;
   display: flex;
   flex-direction: column;
-  background: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  background: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 6px;
-  box-shadow: 0 4px 12px var(--coco-shadow);
+  box-shadow: 0 4px 12px var(--nicel-shadow);
   font-size: 12px;
   overflow: hidden;
 }
@@ -65,8 +65,8 @@
 
 .wwp-add-form {
   padding: 8px 10px;
-  background: var(--coco-surface);
-  border-bottom: 1px solid var(--coco-border);
+  background: var(--nicel-surface);
+  border-bottom: 1px solid var(--nicel-border);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -81,17 +81,17 @@
 .wwp-add-label {
   width: 48px;
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .wwp-add-select,
 .wwp-add-input {
   flex: 1;
   padding: 3px 6px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   font-size: 12px;
-  background: var(--coco-bg-elevated);
+  background: var(--nicel-bg-elevated);
 }
 
 .wwp-add-input {
@@ -99,7 +99,7 @@
 }
 
 .wwp-add-error {
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
   font-size: 11px;
 }
 
@@ -115,8 +115,8 @@
   font-size: 11px;
   border-radius: 4px;
   cursor: pointer;
-  border: 1px solid var(--coco-border-strong);
-  background: var(--coco-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
+  background: var(--nicel-bg-elevated);
 }
 
 .wwp-add-submit {
@@ -130,12 +130,12 @@
 }
 
 .wwp-add-cancel:hover {
-  background: var(--coco-surface-hover);
+  background: var(--nicel-surface-hover);
 }
 
 .wwp-empty {
   padding: 16px 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   text-align: center;
   font-size: 11px;
 }
@@ -154,17 +154,17 @@
 .wwp-table thead th {
   position: sticky;
   top: 0;
-  background: var(--coco-surface);
-  color: var(--coco-text-muted);
+  background: var(--nicel-surface);
+  color: var(--nicel-text-muted);
   font-weight: 600;
   text-align: left;
   padding: 4px 6px;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .wwp-row td {
   padding: 4px 6px;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
   vertical-align: middle;
   max-width: 120px;
   overflow: hidden;
@@ -184,12 +184,12 @@
 
 .wwp-cell-value {
   font-family: "Consolas", "Menlo", monospace;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .wwp-cell-formula {
   font-family: "Consolas", "Menlo", monospace;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .wwp-cell-remove {
@@ -198,7 +198,7 @@
 }
 
 .wwp-empty-cell {
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
 }
 
 .wwp-jump {
@@ -226,7 +226,7 @@
   background: transparent;
   border: 0;
   cursor: pointer;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   font-size: 14px;
   line-height: 1;
   padding: 2px 4px;
@@ -234,8 +234,8 @@
 }
 
 .wwp-remove:hover {
-  color: var(--coco-danger);
-  background: var(--coco-danger-bg);
+  color: var(--nicel-danger);
+  background: var(--nicel-danger-bg);
 }
 
 /* Collapsed badge — sized to match eip-badge so the two collapsed pills
@@ -245,7 +245,7 @@
   top: 8px;
   right: 158px;
   z-index: 25;
-  background: var(--coco-bg-elevated);
+  background: var(--nicel-bg-elevated);
   border: 1px solid #c7d2fe;
   border-radius: 999px;
   padding: 4px 10px;
@@ -254,7 +254,7 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  box-shadow: 0 2px 6px var(--coco-shadow);
+  box-shadow: 0 2px 6px var(--nicel-shadow);
 }
 
 .wwp-badge:hover,

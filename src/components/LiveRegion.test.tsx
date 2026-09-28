@@ -86,6 +86,6 @@ describe("LiveRegion", () => {
     render(<LiveRegion />);
     expect(
       screen.getByTestId("live-region-polite").className,
-    ).toContain("coco-visually-hidden");
+    ).toContain("nicel-visually-hidden");
   });
 });

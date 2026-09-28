@@ -4,7 +4,7 @@
 // comment without opening the InsertComment dialog. Kept side-effect free
 // so it can be unit-tested without standing up Univer.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension; mirrors xlsx_io.rs):
+// Snapshot shape (Univer 0.5.x + Nicel extension; mirrors xlsx_io.rs):
 //   {
 //     sheetOrder?: string[],
 //     sheets: {

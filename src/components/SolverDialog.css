@@ -1,7 +1,7 @@
 .slv-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .slv-modal {
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
   width: 100%;
   max-width: 420px;
   max-height: 80vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .slv-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .slv-close:hover {
-  color: var(--coco-text);
-  background-color: var(--coco-surface-hover);
+  color: var(--nicel-text);
+  background-color: var(--nicel-surface-hover);
 }
 
 .slv-body {
@@ -69,32 +69,32 @@
 
 .slv-field-label {
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .slv-input {
   padding: 6px 8px;
   font-size: 13px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
   font-family: inherit;
 }
 
 .slv-input:focus {
   outline: none;
-  border-color: var(--coco-accent);
+  border-color: var(--nicel-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
 }
 
 .slv-input:disabled {
-  background-color: var(--coco-bg);
-  color: var(--coco-text-muted);
+  background-color: var(--nicel-bg);
+  color: var(--nicel-text-muted);
 }
 
 .slv-error {
   margin: 0;
   font-size: 12px;
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
 }
 
 .slv-status {
@@ -102,18 +102,18 @@
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   padding: 8px 10px;
-  background-color: var(--coco-accent-subtle);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-accent-subtle);
+  border: 1px solid var(--nicel-border);
   border-radius: 4px;
 }
 
 .slv-spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid var(--coco-border-strong);
-  border-top-color: var(--coco-accent);
+  border: 2px solid var(--nicel-border-strong);
+  border-top-color: var(--nicel-accent);
   border-radius: 50%;
   animation: slv-spin 0.8s linear infinite;
   display: inline-block;
@@ -133,7 +133,7 @@
   align-items: center;
   gap: 4px;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   cursor: pointer;
 }
 
@@ -153,20 +153,20 @@
 }
 
 .slv-result--ok {
-  background-color: var(--coco-accent-subtle);
-  border-color: var(--coco-border);
+  background-color: var(--nicel-accent-subtle);
+  border-color: var(--nicel-border);
 }
 
 .slv-result--bad {
-  background-color: var(--coco-danger-bg);
-  border-color: var(--coco-border);
+  background-color: var(--nicel-danger-bg);
+  border-color: var(--nicel-border);
 }
 
 .slv-result-headline {
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .slv-result-grid {
@@ -178,20 +178,20 @@
 }
 
 .slv-result-grid dt {
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .slv-result-grid dd {
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   word-break: break-all;
 }
 
 .slv-footer {
   padding: 12px 20px;
-  background-color: var(--coco-surface);
-  border-top: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border-top: 1px solid var(--nicel-border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -200,7 +200,7 @@
 .slv-hint {
   margin: 0;
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   line-height: 1.5;
 }
 
@@ -214,16 +214,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .slv-btn:hover:not(:disabled) {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-border-strong);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-border-strong);
 }
 
 .slv-btn:disabled {
@@ -232,12 +232,12 @@
 }
 
 .slv-btn--primary {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .slv-btn--primary:hover:not(:disabled) {
-  background-color: var(--coco-accent-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
 }

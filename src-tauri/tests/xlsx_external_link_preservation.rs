@@ -1,7 +1,7 @@
 //! Round-trip test for external-link "blob-level" preservation. Verifies
 //! that a source xlsx with `xl/externalLinks/*` parts survives import →
 //! export with the link bytes intact in the output zip and the cached value
-//! cell unchanged. Per req 5.3.2, Coco never auto-fetches the external
+//! cell unchanged. Per req 5.3.2, Nicel never auto-fetches the external
 //! workbook — only the structure + cached values are preserved.
 //!
 //! rust_xlsxwriter has no external-link API, so we hand-craft a fixture by
@@ -11,7 +11,7 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use tempfile::TempDir;
 use zip::write::FileOptions;

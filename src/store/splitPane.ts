@@ -7,7 +7,7 @@
 //     row/col, and EACH viewport scrolls independently. The split bar can be
 //     dragged. There is no "locked" top-left region.
 //
-// Coco's xlsx I/O layer (`src-tauri/src/commands/xlsx_io.rs`) already
+// Nicel's xlsx I/O layer (`src-tauri/src/commands/xlsx_io.rs`) already
 // round-trips both states via `sheets.<id>._freezePane = { row, col, state,
 // topLeft? }`. This module wraps that snapshot field with split-pane-specific
 // helpers and a `mode` discriminator so the UI can offer 2 / 4 split modes
@@ -49,9 +49,9 @@ export interface SplitSnapshotShape {
           state?: string;
           topLeft?: string;
         };
-        // Univer's native IWorksheetData.freeze. Coco mirrors `_freezePane`
+        // Univer's native IWorksheetData.freeze. Nicel mirrors `_freezePane`
         // onto this field at write time so a Univer remount (e.g. after
-        // cocoUndo, which bumps editorRevision and re-creates the unit) keeps
+        // nicelUndo, which bumps editorRevision and re-creates the unit) keeps
         // the multi-viewport layout visible. xlsx round-trip is still driven
         // by `_freezePane` (carries the `state` discriminator); `freeze` is
         // recomputed on every write.
@@ -210,7 +210,7 @@ export function writeSplitPaneInto(
   if (entry.topLeft && entry.topLeft.trim()) out.topLeft = entry.topLeft.trim();
   sheet._freezePane = out;
   // Mirror onto Univer's native freeze so the renderer picks it up after
-  // a remount (cocoUndo / cocoRedo bumps editorRevision → createUnit). For a
+  // a remount (nicelUndo / nicelRedo bumps editorRevision → createUnit). For a
   // horizontal-only split (col=0), startColumn stays at -1 (Univer's "no
   // freeze in this axis" sentinel); same for vertical-only (startRow=-1).
   sheet.freeze = {

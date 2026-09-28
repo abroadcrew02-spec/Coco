@@ -5,7 +5,7 @@
 //! `<dataValidations>` block on plain files, and the detection warning is
 //! suppressed once we know we'll preserve the rules.
 
-use coco_lib::commands::xlsx_io::{
+use nicel_lib::commands::xlsx_io::{
     detect_unsupported_features, export_xlsx_core, import_xlsx_core,
 };
 use rust_xlsxwriter::{DataValidation, DataValidationRule, Workbook};

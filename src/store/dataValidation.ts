@@ -5,7 +5,7 @@
 // for every mutation that writes a cell value; if a rule rejects the value
 // the hook throws CustomCommandExecutionError to politely cancel.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension):
+// Snapshot shape (Univer 0.5.x + Nicel extension):
 //   {
 //     sheets: {
 //       <sheetId>: {

@@ -7,19 +7,19 @@ Date: 2026-05-21. Univer: 0.5.x (`@univerjs/engine-formula`).
 
 ## Verdict
 
-**Live evaluation: not supported (Coco is a single-workbook editor). Text +
+**Live evaluation: not supported (Nicel is a single-workbook editor). Text +
 cached-value preservation: supported and tested.**
 
-Coco preserves an external-reference formula's *text* and its *cached value*
+Nicel preserves an external-reference formula's *text* and its *cached value*
 losslessly through xlsx import/export. It does **not** live-evaluate external
-references, because Coco edits exactly one workbook per session — the
+references, because Nicel edits exactly one workbook per session — the
 referenced book is never loaded as a second Univer unit, so there is no data
 for the engine to read. This is an architectural constraint, not a Univer
 limitation: the engine *could* resolve a cross-unit reference if the second
-unit were registered (see below), but Coco's design never registers one.
+unit were registered (see below), but Nicel's design never registers one.
 
 The issue's premise — "同セッションで両方のブックを開いている" (both books open
-in one session) — has no realization in Coco. Live evaluation is therefore
+in one session) — has no realization in Nicel. Live evaluation is therefore
 **wontfix**, the same disposition as #175 (3D references).
 
 ## Univer formula engine findings
@@ -51,11 +51,11 @@ contains an entry keyed by exactly that bracket string.
 
 In a real xlsx the bracket is a numeric index (`[1]`, `[2]`) that points into
 `<externalReferences>` in `workbook.xml`; resolving it to a loaded workbook
-would require Coco to (a) open the referenced file, (b) register it as a
-Univer unit, and (c) key `_unitData` by the same index. Coco does none of
+would require Nicel to (a) open the referenced file, (b) register it as a
+Univer unit, and (c) key `_unitData` by the same index. Nicel does none of
 these.
 
-### 3. Coco is a single-workbook editor
+### 3. Nicel is a single-workbook editor
 
 `src/store/useWorkbookStore.ts` holds exactly one `currentHandle` +
 `currentSnapshotJson`. Opening another file *replaces* that state (guarded by
@@ -66,7 +66,7 @@ reads the workbook via `fUniver.getActiveWorkbook()` (singular).
 
 Consequently the precondition from finding 2 — a second unit registered in
 `_unitData` — is structurally unreachable. Live cross-workbook evaluation
-cannot happen without first making Coco a multi-workbook editor, which is far
+cannot happen without first making Nicel a multi-workbook editor, which is far
 outside #176's scope and conflicts with the local-first, single-document
 product direction.
 
@@ -107,7 +107,7 @@ cached value**. It always stores `0` as the formula result and sets a global
 "recalculate on open" flag (rust_xlsxwriter 0.77 `worksheet.rs:8507`). For a
 normal formula this is harmless — Excel and Univer both recompute. But an
 external reference **cannot** be recomputed by Univer (finding 3), so after a
-Coco round-trip the cell would display `0` instead of the cached value,
+Nicel round-trip the cell would display `0` instead of the cached value,
 breaking the closed-book fallback.
 
 **Fix:** in the export formula path, when the formula is an external reference
@@ -122,7 +122,7 @@ followed (after the `]`) by a sheet-name `!`. Structured table references
 ## "Refresh" button — wontfix
 
 The acceptance criteria flag a possible "refresh external links" button.
-Per the issue's own local-first constraint, Coco does not fetch external
+Per the issue's own local-first constraint, Nicel does not fetch external
 workbooks over the network or from disk on demand, and — being single-workbook
 — has no in-session second book to refresh against. There is nothing for a
 refresh button to do. **Wontfix**, as anticipated in the issue.
@@ -149,7 +149,7 @@ refresh button to do. **Wontfix**, as anticipated in the issue.
 
 | Criterion | Status |
 |-|-|
-| `=[B.xlsx]Sheet1!A1` re-evaluates when both books are open | Wontfix — Coco is a single-workbook editor; the "both books open" state cannot exist. Univer *could* resolve a cross-unit ref, but Coco never registers a second unit. Logged above. |
+| `=[B.xlsx]Sheet1!A1` re-evaluates when both books are open | Wontfix — Nicel is a single-workbook editor; the "both books open" state cannot exist. Univer *could* resolve a cross-unit ref, but Nicel never registers a second unit. Logged above. |
 | Closed book shows cached value, no error | Yes. Import folds the cached value into `cell.v`; the #176 fix keeps it through export so it survives the round-trip. |
 | xlsx round-trip test | Added (`xlsx_external_reference_formula.rs`); blob/wiring already covered by `xlsx_external_link_preservation.rs`. |
 | Refresh button | Wontfix — local-first constraint + no in-session second book. Logged above. |

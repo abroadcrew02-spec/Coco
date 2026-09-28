@@ -10,8 +10,8 @@ Remaining steps deferred (XL, 残り 5-7週 MVP).
 | 1. DAX engine: parser + evaluator (SUM/AVG/MIN/MAX/COUNT/COUNTROWS/DISTINCTCOUNT/IF/ALL) | ✅ shipped | PR #265, `src/store/daxEngine.ts` |
 | 2. RELATED + SUMX/AVERAGEX/MINX/MAXX/COUNTX (row context + M:1 lookup) | ✅ shipped | PR #266 — 6 関数追加 |
 | 3. FILTER / CALCULATE — filter context propagation | ✅ shipped | PR #267 — フィルター context 完成 |
-| 4. xlsx round-trip: `xl/model/item.data` 経路の preserve (Coco は触らない) | ✅ shipped | PR #270 — PRESERVED_PREFIXES に追加 |
-| 5. `_cocoDataModel` 保存 + Coco-native measure 定義 | ✅ shipped | PR #271 — pure helpers + 20 tests |
+| 4. xlsx round-trip: `xl/model/item.data` 経路の preserve (Nicel は触らない) | ✅ shipped | PR #270 — PRESERVED_PREFIXES に追加 |
+| 5. `_cocoDataModel` 保存 + Nicel-native measure 定義 | ✅ shipped | PR #271 — pure helpers + 20 tests |
 | 6. DataModelDialog UI (テーブル一覧 + measure 編集) | ⏳ | |
 | 7. Pivot 統合 (PR #237 と連動) | ⏳ | |
 
@@ -108,8 +108,8 @@ interface DataModel {
 ### 保存
 
 - 読み取り: xlsx import 時に `xl/model/item.data` (Microsoft 独自 binary format) は **読み取れない** (XML 形式ではない)。
-- 書き出し: 既存 `_preservedParts` の `xl/model/*` を byte-for-byte round-trip。Coco は **触らない**。
-- Coco 独自の measure 定義は `_cocoDataModel` (新規 root key) + `COCO_ROOT_EXTENSION_KEYS` で保持。
+- 書き出し: 既存 `_preservedParts` の `xl/model/*` を byte-for-byte round-trip。Nicel は **触らない**。
+- Nicel 独自の measure 定義は `_cocoDataModel` (新規 root key) + `NICEL_ROOT_EXTENSION_KEYS` で保持。
 - xlsx export: `cocoExtensions/dataModel.json` パートに書き込み。
 
 ### UI
@@ -127,7 +127,7 @@ interface DataModel {
 ## MVP スコープ
 
 - [ ] **xlsx round-trip**: 既存 `_preservedParts` で Excel data model を破壊しない (検証 only)
-- [ ] **Coco-side data model**: テーブル定義 + リレーションシップ + measure
+- [ ] **Nicel-side data model**: テーブル定義 + リレーションシップ + measure
 - [ ] **DAX evaluator**: 上記 14 関数の限定実装
 - [ ] **DataModelDialog**: テーブル一覧 + measure 編集
 - [ ] **Pivot 統合**: PivotEditor で measure を value として使える

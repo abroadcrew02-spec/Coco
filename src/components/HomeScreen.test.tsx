@@ -54,7 +54,7 @@ describe("HomeScreen", () => {
   describe("empty state", () => {
     it("renders the first-run welcome card when no recents or recovery candidates exist", () => {
       render(<HomeScreen />);
-      expect(screen.getByText("Coco へようこそ")).toBeTruthy();
+      expect(screen.getByText("Nicel へようこそ")).toBeTruthy();
       // Tagline is split across a <br/>; query a substring.
       expect(
         screen.getByText(/ローカルファーストの xlsx スプレッドシート/),
@@ -87,7 +87,7 @@ describe("HomeScreen", () => {
         ],
       });
       render(<HomeScreen />);
-      expect(screen.queryByText("Coco へようこそ")).toBeNull();
+      expect(screen.queryByText("Nicel へようこそ")).toBeNull();
     });
 
     it("hides the welcome card when only a recovery candidate is present", () => {
@@ -102,7 +102,7 @@ describe("HomeScreen", () => {
         ],
       });
       render(<HomeScreen />);
-      expect(screen.queryByText("Coco へようこそ")).toBeNull();
+      expect(screen.queryByText("Nicel へようこそ")).toBeNull();
     });
   });
 
@@ -261,7 +261,7 @@ describe("HomeScreen", () => {
       expect(importCall).toBeTruthy();
     });
 
-    it("ファイルを参照 + selecting a .coco dispatches workbook_open_coco", async () => {
+    it("ファイルを参照 + selecting a .coco dispatches workbook_open_nicel", async () => {
       openMock.mockResolvedValue("/tmp/wb.coco");
       invokeMock.mockResolvedValue({
         handle: { workbookId: "wb", path: "/tmp/wb.coco", sourceType: "coco", snapshotJson: "{}" },
@@ -269,7 +269,7 @@ describe("HomeScreen", () => {
       });
       const user = await gotoOpenView();
       await user.click(screen.getByRole("button", { name: /ファイルを参照/ }));
-      const openCall = invokeMock.mock.calls.find((c) => c[0] === "workbook_open_coco");
+      const openCall = invokeMock.mock.calls.find((c) => c[0] === "workbook_open_nicel");
       expect(openCall).toBeTruthy();
     });
 
@@ -278,7 +278,7 @@ describe("HomeScreen", () => {
       const user = await gotoOpenView();
       await user.click(screen.getByRole("button", { name: /ファイルを参照/ }));
       const importCalls = invokeMock.mock.calls.filter((c) =>
-        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(c[0] as string)
+        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_nicel"].includes(c[0] as string)
       );
       expect(importCalls).toHaveLength(0);
     });
@@ -481,7 +481,7 @@ describe("HomeScreen", () => {
           [
             "workbook_import_xlsx",
             "workbook_import_csv",
-            "workbook_open_coco",
+            "workbook_open_nicel",
           ].includes(c[0] as string)
         );
         expect(opens).toHaveLength(0);
@@ -620,7 +620,7 @@ describe("HomeScreen", () => {
       render(<HomeScreen />);
       await user.click(screen.getByText("c.coco"));
       const importCalls = invokeMock.mock.calls.filter((c) =>
-        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(c[0] as string)
+        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_nicel"].includes(c[0] as string)
       );
       expect(importCalls).toHaveLength(0);
     });
@@ -632,7 +632,7 @@ describe("HomeScreen", () => {
       await user.click(reveal);
       expect(invokeMock).toHaveBeenCalledWith("reveal_in_file_manager", { path: "/tmp/a.xlsx" });
       const importCalls = invokeMock.mock.calls.filter((c) =>
-        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(c[0] as string)
+        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_nicel"].includes(c[0] as string)
       );
       expect(importCalls).toHaveLength(0);
     });
@@ -709,7 +709,7 @@ describe("HomeScreen", () => {
         await user.click(pin);
         // Pin click should NOT have triggered an open as a side effect.
         const importCalls = invokeMock.mock.calls.filter((c) =>
-          ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(c[0] as string)
+          ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_nicel"].includes(c[0] as string)
         );
         expect(importCalls).toHaveLength(0);
       });
@@ -1074,7 +1074,7 @@ describe("HomeScreen", () => {
         // No ArrowDown — focusedRecentIdx stays at -1.
         fireEvent.keyDown(window, { key: "Enter" });
         const opens = invokeMock.mock.calls.filter((c) =>
-          ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(
+          ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_nicel"].includes(
             c[0] as string
           )
         );
@@ -1106,7 +1106,7 @@ describe("HomeScreen", () => {
       expect(invokeMock).toHaveBeenCalledWith("workbook_remove_recent", { path: "/tmp/a.xlsx" });
       // Should not have triggered an open as a side effect (stopPropagation).
       const importCalls = invokeMock.mock.calls.filter((c) =>
-        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(c[0] as string)
+        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_nicel"].includes(c[0] as string)
       );
       expect(importCalls).toHaveLength(0);
     });

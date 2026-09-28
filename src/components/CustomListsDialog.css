@@ -1,6 +1,6 @@
 /* Custom Lists dialog reuses the .settings-backdrop / .settings-header /
  * .settings-footer / .settings-btn shells from SettingsDialog.css so the
- * chrome matches the rest of Coco's modal language. The pieces below are
+ * chrome matches the rest of Nicel's modal language. The pieces below are
  * only the bits unique to the two-pane editor layout. */
 
 .custom-lists-modal {
@@ -24,8 +24,8 @@
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-right: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .custom-lists-list {
@@ -51,21 +51,21 @@
   border: 1px solid transparent;
   border-radius: 4px;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   text-align: left;
   cursor: pointer;
   transition: background-color 0.1s ease, border-color 0.1s ease;
 }
 
 .custom-lists-list-item:hover {
-  background-color: var(--coco-surface-hover);
+  background-color: var(--nicel-surface-hover);
 }
 
 .custom-lists-list-item--active,
 .custom-lists-list-item--active:hover {
-  background-color: var(--coco-accent-subtle);
-  border-color: var(--coco-accent);
-  color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-subtle);
+  border-color: var(--nicel-accent);
+  color: var(--nicel-accent-hover);
 }
 
 .custom-lists-list-name {
@@ -78,8 +78,8 @@
 .custom-lists-badge {
   font-size: 10px;
   font-weight: 500;
-  color: var(--coco-text-muted);
-  background-color: var(--coco-border);
+  color: var(--nicel-text-muted);
+  background-color: var(--nicel-border);
   padding: 1px 6px;
   border-radius: 8px;
   flex-shrink: 0;
@@ -90,8 +90,8 @@
   flex-direction: column;
   gap: 6px;
   padding: 10px;
-  border-top: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-top: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .custom-lists-editor {
@@ -124,32 +124,32 @@
 .custom-lists-label {
   font-size: 12px;
   font-weight: 500;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .custom-lists-input,
 .custom-lists-textarea {
   font-family: inherit;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   padding: 6px 8px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   outline: none;
   transition: border-color 0.1s ease, box-shadow 0.1s ease;
 }
 
 .custom-lists-input:focus,
 .custom-lists-textarea:focus {
-  border-color: var(--coco-accent);
+  border-color: var(--nicel-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.18);
 }
 
 .custom-lists-input:disabled,
 .custom-lists-textarea:disabled {
-  background-color: var(--coco-bg);
-  color: var(--coco-text-faint);
+  background-color: var(--nicel-bg);
+  color: var(--nicel-text-faint);
   cursor: not-allowed;
 }
 
@@ -168,17 +168,17 @@
 }
 
 .custom-lists-apply {
-  border: 1px solid var(--coco-border);
+  border: 1px solid var(--nicel-border);
   border-radius: 6px;
   padding: 8px 12px 12px;
   margin: 0;
-  background-color: var(--coco-surface);
+  background-color: var(--nicel-surface);
 }
 
 .custom-lists-apply legend {
   font-size: 12px;
   font-weight: 600;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   padding: 0 4px;
 }
 

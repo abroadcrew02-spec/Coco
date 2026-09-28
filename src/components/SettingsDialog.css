@@ -1,7 +1,7 @@
 .settings-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .settings-modal {
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
   width: 100%;
   max-width: 480px;
   max-height: 80vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .settings-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .settings-close:hover {
-  color: var(--coco-text);
-  background-color: var(--coco-surface-hover);
+  color: var(--nicel-text);
+  background-color: var(--nicel-surface-hover);
 }
 
 .settings-body {
@@ -60,14 +60,14 @@
 
 .settings-section {
   margin-bottom: 10px;
-  border: 1px solid var(--coco-border);
+  border: 1px solid var(--nicel-border);
   border-radius: 6px;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   overflow: hidden;
 }
 
 .settings-section[open] {
-  background-color: var(--coco-surface);
+  background-color: var(--nicel-surface);
 }
 
 .settings-section-summary {
@@ -78,7 +78,7 @@
   cursor: pointer;
   list-style: none;
   user-select: none;
-  background-color: var(--coco-surface);
+  background-color: var(--nicel-surface);
   transition: background-color 0.12s ease;
 }
 
@@ -87,7 +87,7 @@
 }
 
 .settings-section-summary:hover {
-  background-color: var(--coco-surface-hover);
+  background-color: var(--nicel-surface-hover);
 }
 
 .settings-section-summary::before {
@@ -95,7 +95,7 @@
   display: inline-block;
   width: 0;
   height: 0;
-  border-left: 5px solid var(--coco-text-muted);
+  border-left: 5px solid var(--nicel-text-muted);
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
   transition: transform 0.18s ease;
@@ -107,13 +107,13 @@
 }
 
 .settings-section[open] > .settings-section-summary {
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .settings-section h3 {
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   margin: 0;
 }
 
@@ -131,7 +131,7 @@
 
 .settings-hint {
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   margin: 0 0 12px;
   line-height: 1.5;
 }
@@ -147,22 +147,22 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  background-color: var(--coco-surface);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border: 1px solid var(--nicel-border);
   border-radius: 4px;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   cursor: pointer;
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
 .settings-radio:hover {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-border-strong);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-border-strong);
 }
 
 .settings-radio input[type="radio"] {
-  accent-color: var(--coco-accent);
+  accent-color: var(--nicel-accent);
 }
 
 .settings-footer {
@@ -170,24 +170,24 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 20px;
-  background-color: var(--coco-surface);
-  border-top: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border-top: 1px solid var(--nicel-border);
 }
 
 .settings-btn {
   padding: 7px 16px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .settings-btn:hover:not(:disabled) {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-border-strong);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-border-strong);
 }
 
 .settings-btn:disabled {
@@ -196,14 +196,14 @@
 }
 
 .settings-btn--primary {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .settings-btn--primary:hover:not(:disabled) {
-  background-color: var(--coco-accent-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
 }
 
 /* Custom smart-chip rules editor (#185) */
@@ -213,8 +213,8 @@
 
 .scr-editor code {
   font-size: 11px;
-  background-color: var(--coco-surface-hover);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface-hover);
+  border: 1px solid var(--nicel-border);
   border-radius: 3px;
   padding: 0 3px;
 }
@@ -229,9 +229,9 @@
 }
 
 .scr-row {
-  border: 1px solid var(--coco-border);
+  border: 1px solid var(--nicel-border);
   border-radius: 4px;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
 }
 
 .scr-row-view {
@@ -242,7 +242,7 @@
 }
 
 .scr-toggle input[type="checkbox"] {
-  accent-color: var(--coco-accent);
+  accent-color: var(--nicel-accent);
 }
 
 .scr-row-text {
@@ -256,17 +256,17 @@
 .scr-name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .scr-name--off {
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   text-decoration: line-through;
 }
 
 .scr-meta {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -287,17 +287,17 @@
 }
 
 .scr-form--add {
-  border: 1px dashed var(--coco-border-strong);
+  border: 1px dashed var(--nicel-border-strong);
   border-radius: 4px;
-  background-color: var(--coco-surface);
+  background-color: var(--nicel-surface);
 }
 
 .scr-input {
   padding: 6px 8px;
   font-size: 13px;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border);
   border-radius: 4px;
 }
 
@@ -324,9 +324,9 @@
   padding: 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
-  background-color: var(--coco-bg-elevated);
-  color: var(--coco-text);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-bg-elevated);
+  color: var(--nicel-text);
+  border: 1px solid var(--nicel-border);
   border-radius: 4px;
 }
 
@@ -356,19 +356,19 @@
 .url-fetch-cred-table td {
   text-align: left;
   padding: 4px 8px;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
   vertical-align: middle;
 }
 
 .url-fetch-cred-mask {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   letter-spacing: 1px;
-  color: var(--coco-text-muted, #888);
+  color: var(--nicel-text-muted, #888);
 }
 
 .url-fetch-cred-meta {
   font-size: 12px;
-  color: var(--coco-text-muted, #888);
+  color: var(--nicel-text-muted, #888);
 }
 
 .url-fetch-cred-draft {
@@ -399,9 +399,9 @@
 .url-fetch-cred-field select {
   padding: 6px 8px;
   font-size: 13px;
-  background-color: var(--coco-bg-elevated);
-  color: var(--coco-text);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-bg-elevated);
+  color: var(--nicel-text);
+  border: 1px solid var(--nicel-border);
   border-radius: 4px;
 }
 

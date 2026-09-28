@@ -24,14 +24,14 @@ describe("HelpDialog", () => {
   describe("rendering", () => {
     it("renders the title and core sections", () => {
       render(<HelpDialog onClose={onClose} />);
-      expect(screen.getByText("Coco — ヘルプ")).toBeTruthy();
-      expect(screen.getByText("キーボードショートカット（Coco）")).toBeTruthy();
+      expect(screen.getByText("Nicel — ヘルプ")).toBeTruthy();
+      expect(screen.getByText("キーボードショートカット（Nicel）")).toBeTruthy();
       expect(screen.getByText("編集ショートカット（Univer 標準）")).toBeTruthy();
       expect(screen.getByText("対応ファイル形式")).toBeTruthy();
       expect(screen.getByText("このアプリについて")).toBeTruthy();
     });
 
-    it("lists the core Coco shortcuts", () => {
+    it("lists the core Nicel shortcuts", () => {
       render(<HelpDialog onClose={onClose} />);
       expect(screen.getByText("新規ワークブック")).toBeTruthy();
       expect(screen.getByText("ファイルを開く")).toBeTruthy();
@@ -43,13 +43,13 @@ describe("HelpDialog", () => {
     it("lists the Univer-standard editing shortcuts", () => {
       render(<HelpDialog onClose={onClose} />);
       // #97: undo/redo labels disambiguate between Univer-native (cell typing)
-      // and Coco-managed (apply-style mutations).
+      // and Nicel-managed (apply-style mutations).
       expect(screen.getByText("元に戻す（セル入力）")).toBeTruthy();
       expect(screen.getByText("やり直し（セル入力）")).toBeTruthy();
       expect(
-        screen.getByText("元に戻す（書式・図形などCoco操作）"),
+        screen.getByText("元に戻す（書式・図形などNicel操作）"),
       ).toBeTruthy();
-      expect(screen.getByText("やり直し（Coco操作）")).toBeTruthy();
+      expect(screen.getByText("やり直し（Nicel操作）")).toBeTruthy();
       expect(screen.getByText("検索")).toBeTruthy();
       expect(screen.getByText("置換")).toBeTruthy();
     });
@@ -89,7 +89,7 @@ describe("HelpDialog", () => {
       getVersionMock.mockReturnValue(new Promise(() => {}));
       render(<HelpDialog onClose={onClose} />);
       const aboutSection = screen.getByText(/ローカルファースト表計算/);
-      // Should not yet contain a "vX.Y.Z" — text starts with "Coco · ..." instead.
+      // Should not yet contain a "vX.Y.Z" — text starts with "Nicel · ..." instead.
       expect(aboutSection.textContent).not.toMatch(/v\d/);
     });
 
@@ -97,7 +97,7 @@ describe("HelpDialog", () => {
       getVersionMock.mockResolvedValue("1.2.3");
       render(<HelpDialog onClose={onClose} />);
       await waitFor(() => {
-        expect(screen.getByText(/Coco v1\.2\.3/)).toBeTruthy();
+        expect(screen.getByText(/Nicel v1\.2\.3/)).toBeTruthy();
       });
     });
 

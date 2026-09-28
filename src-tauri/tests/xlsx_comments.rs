@@ -16,7 +16,7 @@
 //! mapped authorIds — this is the same shape the export side produces, so we
 //! are testing the real import → export → re-import path.
 
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::{Note, Workbook};
 use serde_json::Value;
 use std::fmt::Write as _;

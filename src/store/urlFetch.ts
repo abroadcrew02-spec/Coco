@@ -367,12 +367,12 @@ export async function streamFetch(
 // (Server-Sent Events) the renderer routes through Rust the same way: Rust
 // owns the socket, applies the same allow-list / SSRF / header guards, caps
 // the concurrent-connection count (DoS defence) and the per-message size,
-// then relays inbound traffic via `coco:ws-message` / `coco:sse-event`.
+// then relays inbound traffic via `nicel:ws-message` / `nicel:sse-event`.
 
 /** Event name Rust emits for every inbound WebSocket message. */
-export const WS_MESSAGE_EVENT = "coco:ws-message";
+export const WS_MESSAGE_EVENT = "nicel:ws-message";
 /** Event name Rust emits for every inbound Server-Sent Event. */
-export const SSE_EVENT = "coco:sse-event";
+export const SSE_EVENT = "nicel:sse-event";
 
 /** Opaque identifier for a live WS or SSE connection. */
 export type ConnectionId = number;
@@ -380,7 +380,7 @@ export type ConnectionId = number;
 /** Discriminator for an outbound or inbound WebSocket frame. */
 export type WsMessageKind = "text" | "binary" | "close" | "error";
 
-/** Payload of a `coco:ws-message` event. */
+/** Payload of a `nicel:ws-message` event. */
 export interface WsMessageEvent {
   connId: ConnectionId;
   /** `text` | `binary` | `close` | `error`. */
@@ -415,7 +415,7 @@ export interface WsConnection {
   close: () => Promise<void>;
 }
 
-/** Payload of a `coco:sse-event` event. */
+/** Payload of a `nicel:sse-event` event. */
 export interface SseEventPayload {
   connId: ConnectionId;
   /** SSE event name (absent ⇒ the default `message`). */
@@ -461,7 +461,7 @@ function encodeBase64(bytes: Uint8Array): string {
  * re-validated for `ws`/`wss` + SSRF by Rust. `headers` and `subprotocols`
  * are caller-specified; hop-by-hop / `Sec-WebSocket-*` headers are rejected.
  *
- * Subscribes to `coco:ws-message` *before* issuing the connect command so no
+ * Subscribes to `nicel:ws-message` *before* issuing the connect command so no
  * early frame is missed. The subscription is torn down automatically on
  * close / error, and by the returned `close()`.
  *
@@ -556,7 +556,7 @@ export async function wsConnect(
  * Open a Server-Sent Events stream via the Rust backend.
  *
  * The URL host must be on the allow list and is re-validated for `http`/
- * `https` + SSRF by Rust. Subscribes to `coco:sse-event` before issuing the
+ * `https` + SSRF by Rust. Subscribes to `nicel:sse-event` before issuing the
  * connect command; the subscription is torn down automatically on the
  * terminal (`done`) event and by the returned `close()`.
  *

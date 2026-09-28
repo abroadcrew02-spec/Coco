@@ -1,7 +1,7 @@
 .security-block-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -11,9 +11,9 @@
 .security-block-modal {
   display: flex;
   gap: 16px;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
   width: 100%;
   max-width: 520px;
   padding: 20px;
@@ -37,13 +37,13 @@
 .security-block-title {
   font-size: 16px;
   font-weight: 600;
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
   margin: 0 0 6px;
 }
 
 .security-block-hint {
   font-size: 13px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   margin: 0 0 12px;
   line-height: 1.5;
 }
@@ -62,15 +62,15 @@
   align-items: flex-start;
   gap: 8px;
   padding: 8px 10px;
-  background-color: var(--coco-warning-bg);
-  border: 1px solid var(--coco-warning);
+  background-color: var(--nicel-warning-bg);
+  border: 1px solid var(--nicel-warning);
   border-radius: 4px;
   font-size: 12px;
 }
 
 .security-block-item--blocking {
-  background-color: var(--coco-danger-bg);
-  border-color: var(--coco-danger);
+  background-color: var(--nicel-danger-bg);
+  border-color: var(--nicel-danger);
 }
 
 .security-block-code {
@@ -78,21 +78,21 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   font-weight: 600;
-  color: var(--coco-danger);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-danger);
+  color: var(--nicel-danger);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-danger);
   border-radius: 3px;
   padding: 1px 6px;
 }
 
 .security-block-item:not(.security-block-item--blocking) .security-block-code {
-  color: var(--coco-warning);
-  border-color: var(--coco-warning);
+  color: var(--nicel-warning);
+  border-color: var(--nicel-warning);
 }
 
 .security-block-message {
   flex: 1;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   word-break: break-word;
 }
 
@@ -102,7 +102,7 @@
 
 .security-block-soft summary {
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   cursor: pointer;
   padding: 4px 0;
 }
@@ -119,24 +119,24 @@
   font-weight: 500;
   border-radius: 4px;
   cursor: pointer;
-  border: 1px solid var(--coco-border-strong);
-  background-color: var(--coco-bg-elevated);
-  color: var(--coco-text);
+  border: 1px solid var(--nicel-border-strong);
+  background-color: var(--nicel-bg-elevated);
+  color: var(--nicel-text);
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
 .security-block-btn:hover {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-border-strong);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-border-strong);
 }
 
 .security-block-btn--primary {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .security-block-btn--primary:hover {
-  background-color: var(--coco-accent-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
 }

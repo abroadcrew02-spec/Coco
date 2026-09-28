@@ -1,4 +1,4 @@
-use coco_lib::commands::settings::{
+use nicel_lib::commands::settings::{
     delete_setting_core, get_setting_core, list_settings_core, set_setting_core,
 };
 use tempfile::TempDir;

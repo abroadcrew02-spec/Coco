@@ -4,7 +4,7 @@
 //! then re-export and verify the resulting `xl/worksheets/sheet1.xml` still
 //! contains `<sheetProtection sheet="1"/>`.
 
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use serde_json::Value;
 use std::io::{Read, Write};
 use tempfile::TempDir;

@@ -1,7 +1,7 @@
 .qcf-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .qcf-modal {
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
   width: 100%;
   max-width: 640px;
   max-height: 85vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .qcf-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .qcf-close:hover {
-  color: var(--coco-text);
-  background-color: var(--coco-surface-hover);
+  color: var(--nicel-text);
+  background-color: var(--nicel-surface-hover);
 }
 
 .qcf-body {
@@ -69,22 +69,22 @@
 
 .qcf-field-label {
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   font-weight: 600;
 }
 
 .qcf-input {
   padding: 7px 9px;
   font-size: 13px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   outline: none;
-  background-color: var(--coco-bg-elevated);
-  color: var(--coco-text);
+  background-color: var(--nicel-bg-elevated);
+  color: var(--nicel-text);
 }
 
 .qcf-input:focus {
-  border-color: var(--coco-accent);
+  border-color: var(--nicel-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.18);
 }
 
@@ -97,7 +97,7 @@
 .qcf-section-title {
   font-size: 12px;
   font-weight: 600;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   margin: 0;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -115,8 +115,8 @@
   align-items: flex-start;
   gap: 4px;
   padding: 8px 10px;
-  background-color: var(--coco-surface);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border: 1px solid var(--nicel-border);
   border-radius: 5px;
   cursor: pointer;
   text-align: left;
@@ -124,14 +124,14 @@
 }
 
 .qcf-preset:hover {
-  border-color: var(--coco-border-strong);
-  background-color: var(--coco-accent-subtle);
+  border-color: var(--nicel-border-strong);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .qcf-preset--active {
-  border-color: var(--coco-accent);
-  background-color: var(--coco-accent-subtle);
-  box-shadow: 0 0 0 1px var(--coco-accent) inset;
+  border-color: var(--nicel-accent);
+  background-color: var(--nicel-accent-subtle);
+  box-shadow: 0 0 0 1px var(--nicel-accent) inset;
 }
 
 .qcf-preset-swatch {
@@ -150,24 +150,24 @@
 .qcf-preset-label {
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .qcf-preset-sub {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .qcf-error {
   margin: 0;
   font-size: 12px;
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
 }
 
 .qcf-footer {
   padding: 12px 20px;
-  border-top: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-top: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -176,7 +176,7 @@
 .qcf-hint {
   margin: 0;
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   line-height: 1.5;
 }
 
@@ -189,32 +189,32 @@
 .qcf-btn {
   padding: 6px 14px;
   font-size: 13px;
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   transition: background-color 0.12s, border-color 0.12s;
 }
 
 .qcf-btn:hover {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-border-strong);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-border-strong);
 }
 
 .qcf-btn--primary {
-  background-color: var(--coco-accent);
-  border-color: var(--coco-accent-hover);
-  color: var(--coco-accent-text);
+  background-color: var(--nicel-accent);
+  border-color: var(--nicel-accent-hover);
+  color: var(--nicel-accent-text);
   font-weight: 600;
 }
 
 .qcf-btn--primary:hover:not(:disabled) {
-  background-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
 }
 
 .qcf-btn--primary:disabled {
-  background-color: var(--coco-border-strong);
-  border-color: var(--coco-border-strong);
+  background-color: var(--nicel-border-strong);
+  border-color: var(--nicel-border-strong);
   cursor: not-allowed;
 }

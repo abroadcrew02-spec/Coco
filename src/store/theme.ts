@@ -117,7 +117,7 @@ export function subscribeSystemTheme(
 
 /** Event name dispatched on `window` when the theme mode is changed (e.g. via
  *  the Settings dialog) so listeners can re-apply without a shared store. */
-export const THEME_CHANGED_EVENT = "coco:theme-changed";
+export const THEME_CHANGED_EVENT = "nicel:theme-changed";
 
 /** Notify listeners that the persisted theme mode has changed. The caller is
  *  expected to have already called `setThemeMode`. */

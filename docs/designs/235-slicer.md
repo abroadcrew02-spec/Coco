@@ -45,7 +45,7 @@ interface SlicerDefinition {
 ### 保存
 
 - `_cocoSlicers` root key (新規) に `SlicerDefinition[]`。
-- `COCO_ROOT_EXTENSION_KEYS` に追加。
+- `NICEL_ROOT_EXTENSION_KEYS` に追加。
 - xlsx export: `cocoExtensions/slicers.json`。**既存 `_preservedParts` の Excel slicer blob には触らない** (xlsx 再 open 時に Excel slicer がそのまま残る)。
 
 ### Pivot / Table との連携
@@ -67,7 +67,7 @@ interface SlicerDefinition {
 - [ ] **SlicerPanel**: 値リスト + チェック + 全選択ボタン
 - [ ] **AND 結合**: 複数 slicer は AND
 - [ ] **シート切替時**: アクティブシートにある slicer のみ表示
-- [ ] **保存**: `_cocoSlicers` + COCO_ROOT_EXTENSION_KEYS
+- [ ] **保存**: `_cocoSlicers` + NICEL_ROOT_EXTENSION_KEYS
 - [ ] **xlsx round-trip**: cocoExtensions/slicers.json
 - [ ] **テスト**: フィルタ AND 結合, 全選択, 値検索
 
@@ -75,7 +75,7 @@ interface SlicerDefinition {
 
 - "タイムライン" (日付スライサー、Excel 独自)
 - スライサースタイル (色テーマ)
-- ピボット連動以外 (Coco chart 連動など)
+- ピボット連動以外 (Nicel chart 連動など)
 - Excel-format slicer blob 出力 (既存 `_preservedParts` で round-trip 維持)
 
 ## 推定工数

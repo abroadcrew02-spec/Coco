@@ -1,7 +1,7 @@
 //! Round-trip test for shape ("text box / rect / ellipse / line") export —
 //! issue #146 / #188.
 //!
-//! Shapes are NOT a Univer feature; Coco stores them under a top-level
+//! Shapes are NOT a Univer feature; Nicel stores them under a top-level
 //! `_textBoxes` snapshot array and the TS-side `flushTextBoxesToPreservedParts`
 //! serialises them into `_preservedParts` (a freshly-minted
 //! `xl/drawings/drawingN.xml` + rels + a `[Content_Types].xml` Override) before
@@ -19,7 +19,7 @@
 use std::io::Read;
 use std::path::PathBuf;
 
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use tempfile::TempDir;
 use zip::ZipArchive;

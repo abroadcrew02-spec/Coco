@@ -14,7 +14,7 @@ Remaining steps deferred (XL, 残り 3-5週).
 | 4b. xlsx round-trip: queryTables byte-preserve | ✅ shipped | PR #270 — PRESERVED_PREFIXES に追加 |
 | 5. `_cocoQueries` 保存 + CRUD helpers | ✅ shipped | PR #272 — pure helpers + 24 tests |
 | 5. GetAndTransformDialog UI (ソース選択 + ステップ追加 + プレビュー) | ⏳ | |
-| 6. `_cocoQueries` 保存 + COCO_ROOT_EXTENSION_KEYS | ⏳ | |
+| 6. `_cocoQueries` 保存 + NICEL_ROOT_EXTENSION_KEYS | ⏳ | |
 | 7. xlsx round-trip via cocoExtensions/queries.json | ⏳ | |
 | 8. Refresh query (既存 query を再実行) | ⏳ | |
 
@@ -82,16 +82,16 @@ interface SavedQuery {
 
 ### 保存
 
-- `IWorkbookData.resources` に **新規 plugin name `COCO_QUERIES`** で `SavedQuery[]` を JSON-stringify して書き込む。
+- `IWorkbookData.resources` に **新規 plugin name `NICEL_QUERIES`** で `SavedQuery[]` を JSON-stringify して書き込む。
 - 既存の `_preservedParts` には触らない (Excel と完全に independent)。
-- xlsx export 時には Coco 独自の `cocoExtensions/queries.json` パートにフォールバック (xlsx_io.rs の既存 cocoExtensions 拡張機構を流用)。
+- xlsx export 時には Nicel 独自の `cocoExtensions/queries.json` パートにフォールバック (xlsx_io.rs の既存 cocoExtensions 拡張機構を流用)。
 
 ### 実行フロー
 
 1. ユーザー source を選ぶ → Rust 側 (csv/json/sqlite) で生 rows を取得。
 2. ステップを順に適用 → 結果 rows + 変換後 columns。
 3. プレビュー: 上位 100 行を grid に表示。
-4. OK → `buildSnapshotFromTransform(result)` で新シートに展開。`applyMutatedSnapshot` で Coco-undo フックされる。
+4. OK → `buildSnapshotFromTransform(result)` で新シートに展開。`applyMutatedSnapshot` で Nicel-undo フックされる。
 5. 再実行: クエリ ID から SavedQuery を取り、 同じ source を再 fetch、steps を再適用。
 
 ## MVP スコープ
@@ -99,13 +99,13 @@ interface SavedQuery {
 - [ ] **データソース** (4): csv, json, jsonl, sqlite (`SELECT` のみ)
 - [ ] **変換** (6): selectColumns / dropColumns / filterRows / sort / rename / groupBy
 - [ ] **UI**: 単一ダイアログ。ステップは追加/削除/順序入れ替え。プレビュー 100 行。
-- [ ] **保存**: `COCO_QUERIES` resource エントリ。Coco↔Coco round-trip。
+- [ ] **保存**: `NICEL_QUERIES` resource エントリ。Nicel↔Nicel round-trip。
 - [ ] **再実行**: 既存クエリを開いて再展開 (「データ → クエリの更新」)
 - [ ] **テスト**: 6 ステップ各2-3 ケース。pipelineの順序付き合成テスト1つ。Rust 側 SQLite 経路の integration test 1つ。
 
 ## 非スコープ (follow-up)
 
-- M 言語ファイル parse/serialize (Excel の `connections.xml`) — Coco 独自フォーマットで十分
+- M 言語ファイル parse/serialize (Excel の `connections.xml`) — Nicel 独自フォーマットで十分
 - Web API / OData / Active Directory data sources — local-first 方針に反する
 - カスタム関数 / pivot 結合 / merge query
 - Refresh-on-open (起動時の自動再取得)

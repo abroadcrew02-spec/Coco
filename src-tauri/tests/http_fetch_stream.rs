@@ -8,8 +8,8 @@
 //   is the mid-stream stop condition,
 // - the request registry assigns unique ids and supports cancellation.
 
-use coco_lib::commands::http_fetch::MAX_BODY_BYTES;
-use coco_lib::commands::http_fetch_stream::{
+use nicel_lib::commands::http_fetch::MAX_BODY_BYTES;
+use nicel_lib::commands::http_fetch_stream::{
     content_length_exceeds_cap, exceeds_cap, validate_stream_request, StreamPlan, StreamRegistry,
 };
 use std::collections::HashMap;

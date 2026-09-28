@@ -15,7 +15,7 @@ const getReadyWorkbookSource =
   editorSource.match(/const getReadyWorkbook = useCallback\(\(label: string\) => \{[\s\S]*?\n  \}, \[\]\);/)?.[0] ?? "";
 const mutationSnapshotSyncSource =
   editorSource.match(/\/\/ Sync snapshot to store on data mutations[\s\S]*?\n  \}, \[markDirty, updateSnapshot\]\);/)?.[0] ?? "";
-// #202: the standalone Coco toolbar row was removed — "← Home" and the file
+// #202: the standalone Nicel toolbar row was removed — "← Home" and the file
 // name now live inside the ribbon's tab strip. The region from the ribbon
 // mount to the sheet-picker stands in for the former toolbar source slice.
 const toolbarSource =
@@ -55,13 +55,13 @@ describe("EditorScreen Univer plugin wiring", () => {
     );
   });
 
-  it("wires Univer's native ja-JP / en-US locales via Coco's bundle (Univer 0.12)", () => {
+  it("wires Univer's native ja-JP / en-US locales via Nicel's bundle (Univer 0.12)", () => {
     expect(editorSource).toMatch(
-      /import \{ buildCocoUniverLocales, toUniverLocaleType \} from "\.\/cocoUniverLocale"/,
+      /import \{ buildNicelUniverLocales, toUniverLocaleType \} from "\.\/nicelUniverLocale"/,
     );
     expect(editorSource).toMatch(/import \{ getLocale, subscribeLocale, t \} from "\.\.\/i18n\/locale"/);
     expect(editorSource).toMatch(/locale: toUniverLocaleType\(getLocale\(\)\)/);
-    expect(editorSource).toMatch(/locales: buildCocoUniverLocales\(\)/);
+    expect(editorSource).toMatch(/locales: buildNicelUniverLocales\(\)/);
   });
 
   it("catches editor init errors and renders a recovery panel", () => {
@@ -99,7 +99,7 @@ describe("EditorScreen Univer plugin wiring", () => {
   });
 
   it("folds back-to-home + filename into the ribbon, no standalone toolbar (#202)", () => {
-    // #202: the standalone Coco toolbar row is gone — the ribbon owns the
+    // #202: the standalone Nicel toolbar row is gone — the ribbon owns the
     // "← Home" navigation and file name (passed as props). No quick-action
     // buttons or per-feature toolbar state remain in this region.
     expect(editorSource).not.toMatch(/className="editor-toolbar"/);
@@ -136,7 +136,7 @@ describe("EditorScreen Univer plugin wiring", () => {
       /markDirty\(\);\s*cancelPendingSnapshotSync\(\);\s*debounceTimer = setTimeout\(\(\) => \{\s*debounceTimer = null;\s*scheduleSnapshotSync\(\);\s*\}, 300\);/,
     );
     expect(mutationSnapshotSyncSource.match(/cancelPendingSnapshotSync\(\);/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
-    // #184 C-1: syncSnapshot re-grafts Coco's workbook-root extension keys
+    // #184 C-1: syncSnapshot re-grafts Nicel's workbook-root extension keys
     // (`_cameraLinks`, `_scenarios`) that `workbook.save()` drops, so a cell
     // edit can't silently wipe the user's camera links / scenarios.
     expect(mutationSnapshotSyncSource).toMatch(/updateSnapshot\(carryForwardRootExtensions\(fresh, prev\)\)/);
@@ -186,14 +186,14 @@ describe("EditorScreen Univer plugin wiring", () => {
 
   it("routes native editor menu commands to existing editor handlers", () => {
     expect(editorSource).toMatch(/const runEditorCommand = useCallback\(\(id: string\) => \{/);
-    expect(editorSource).toMatch(/window\.addEventListener\("coco:editor-command", onEditorCommand\)/);
+    expect(editorSource).toMatch(/window\.addEventListener\("nicel:editor-command", onEditorCommand\)/);
     expect(editorSource).toMatch(/case "format-number":\s*openNumberFormatDialog\(\);/);
     expect(editorSource).toMatch(/case "format-currency":\s*applyQuickFormat\(QUICK_FMT_CURRENCY\);/);
     expect(editorSource).toMatch(/case "data-autosum":\s*applyAutoSum\(\);/);
     expect(editorSource).toMatch(/case "tools-sheet-protection":\s*toggleSheetProtection\(\);/);
     expect(toolbarSource).not.toMatch(/data-testid="sheet-protection-toggle"/);
     // #97: apply-style mutations now go through applyMutatedSnapshot so the
-    // pre-mutation state is checkpointed for Coco undo (Ctrl+Alt+Z).
+    // pre-mutation state is checkpointed for Nicel undo (Ctrl+Alt+Z).
     expect(editorSource).toMatch(/applyMutatedSnapshot\(JSON\.stringify\(fresh\)\)/);
     expect(editorSource).toMatch(/_protected/);
   });

@@ -1,7 +1,7 @@
 .close-confirm-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .close-confirm-modal {
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
   width: 100%;
   max-width: 440px;
   padding: 22px 24px;
@@ -20,16 +20,16 @@
 .close-confirm-title {
   font-size: 16px;
   font-weight: 600;
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
   margin: 0 0 8px;
 }
 
 .close-confirm-file {
   font-size: 12px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  background-color: var(--coco-surface);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border: 1px solid var(--nicel-border);
   border-radius: 3px;
   padding: 4px 8px;
   margin: 0 0 10px;
@@ -38,7 +38,7 @@
 
 .close-confirm-hint {
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   margin: 0 0 18px;
 }
 
@@ -53,36 +53,36 @@
   padding: 7px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
 .close-confirm-btn:hover {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-border-strong);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-border-strong);
 }
 
 .close-confirm-btn--danger {
-  color: var(--coco-danger);
-  border-color: var(--coco-danger);
+  color: var(--nicel-danger);
+  border-color: var(--nicel-danger);
 }
 
 .close-confirm-btn--danger:hover {
-  background-color: var(--coco-danger-bg);
-  border-color: var(--coco-danger);
+  background-color: var(--nicel-danger-bg);
+  border-color: var(--nicel-danger);
 }
 
 .close-confirm-btn--primary {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .close-confirm-btn--primary:hover {
-  background-color: var(--coco-accent-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
 }

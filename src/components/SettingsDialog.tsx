@@ -286,7 +286,7 @@ export default function SettingsDialog({ onClose }: Props) {
               <label className="settings-radio">
                 <input
                   type="radio"
-                  name="coco-locale"
+                  name="nicel-locale"
                   checked={pendingLocale === "ja-JP"}
                   onChange={() => setPendingLocale("ja-JP")}
                 />
@@ -295,7 +295,7 @@ export default function SettingsDialog({ onClose }: Props) {
               <label className="settings-radio">
                 <input
                   type="radio"
-                  name="coco-locale"
+                  name="nicel-locale"
                   checked={pendingLocale === "en-US"}
                   onChange={() => setPendingLocale("en-US")}
                 />
@@ -313,7 +313,7 @@ export default function SettingsDialog({ onClose }: Props) {
                 <label key={mode} className="settings-radio">
                   <input
                     type="radio"
-                    name="coco-theme"
+                    name="nicel-theme"
                     checked={theme === mode}
                     onChange={() => {
                       setThemeState(mode);
@@ -440,7 +440,7 @@ export default function SettingsDialog({ onClose }: Props) {
                       message: `v${r.version} が利用可能です — エディタを開くと案内されます。`,
                     });
                     window.dispatchEvent(
-                      new CustomEvent("coco:editor-command", { detail: "help-check-update" }),
+                      new CustomEvent("nicel:editor-command", { detail: "help-check-update" }),
                     );
                   } catch (e) {
                     setManualCheckStatus({

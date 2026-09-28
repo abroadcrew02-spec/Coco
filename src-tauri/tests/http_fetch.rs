@@ -6,7 +6,7 @@
 // defenses and method/header validation reject bad inputs *before* any
 // socket would be opened.
 
-use coco_lib::commands::http_fetch::{
+use nicel_lib::commands::http_fetch::{
     host_matches, http_fetch_core, parse_allowed_domains, validate_url, UrlCheckError,
 };
 use std::collections::HashMap;

@@ -1,4 +1,4 @@
-# Coco — Deferred work catalog
+# Nicel — Deferred work catalog
 
 Snapshot taken 2026-05-14 against `main`. Single source of truth for everything
 that was intentionally left undone in the Phase 0 / Phase 1 MVP and Phase 2
@@ -38,12 +38,12 @@ None.
 ### high-chart-live (closed via #236)
 - **Title**: Chart in-grid live rendering for newly authored charts
 - **Refs**: `src/components/InGridChartLayer.tsx`, `src/store/inGridChart.ts`, `src/store/inGridChartLayout.ts`, `src/components/ChartPreviewPanel.tsx`
-- **Resolution**: #236 shipped `InGridChartLayer` — a DOM/canvas overlay that renders Coco-authored `_charts` entries anchored to their source cell, with drag-to-move, handle-resize, double-click edit, and Delete-key delete (6 chart types + legend / labels / stacked / header options). This is the self-rendered equivalent of in-grid rendering without the `@univerjs/sheets-chart` Pro plugin — same architectural call as #312's image overlay (render ourselves rather than add the paid/server-dependent plugin). `ChartPreviewPanel` is kept as a sidebar navigation aid for legacy blob `_charts`. **Still out of scope** (separate concern, not tracked here): re-emitting chart OOXML so Excel sees Coco-authored charts — existing Excel chart blobs round-trip byte-for-byte, but newly-authored `_charts` are Coco-only.
+- **Resolution**: #236 shipped `InGridChartLayer` — a DOM/canvas overlay that renders Nicel-authored `_charts` entries anchored to their source cell, with drag-to-move, handle-resize, double-click edit, and Delete-key delete (6 chart types + legend / labels / stacked / header options). This is the self-rendered equivalent of in-grid rendering without the `@univerjs/sheets-chart` Pro plugin — same architectural call as #312's image overlay (render ourselves rather than add the paid/server-dependent plugin). `ChartPreviewPanel` is kept as a sidebar navigation aid for legacy blob `_charts`. **Still out of scope** (separate concern, not tracked here): re-emitting chart OOXML so Excel sees Nicel-authored charts — existing Excel chart blobs round-trip byte-for-byte, but newly-authored `_charts` are Nicel-only.
 
 ### high-image-live (closed via #312)
 - **Title**: Image in-grid live rendering for newly authored images
 - **Refs**: `src/components/InGridImageLayer.tsx`, `src/store/inGridImage.ts`, `src/store/inGridImageLayout.ts`, `src-tauri/src/commands/xlsx_io.rs` (`parse_xlsx_images` / `inject_images_to_xlsx`)
-- **Resolution**: #312 shipped `InGridImageLayer` — a DOM overlay rendering Coco's `_images` snapshot entries anchored to their cell, with drag / resize / delete (#324 added z-order + 90° rotation). xlsx round-trip is full: import normalises `xl/media` + `xl/drawings` into `_images` (XOR invariant against `_preservedParts`), export regenerates media + drawing XML (incl. rotation `rot` and z-order draw order). The earlier `SHEET_DRAWING_PLUGIN` bridge was retired in favour of the self-rendered overlay (Univer 0.5.x native drawing API proved unstable). `ImagePreviewPanel` sidebar is kept as a navigation aid and reads `_images` first, falling back to `_preservedParts` for legacy.
+- **Resolution**: #312 shipped `InGridImageLayer` — a DOM overlay rendering Nicel's `_images` snapshot entries anchored to their cell, with drag / resize / delete (#324 added z-order + 90° rotation). xlsx round-trip is full: import normalises `xl/media` + `xl/drawings` into `_images` (XOR invariant against `_preservedParts`), export regenerates media + drawing XML (incl. rotation `rot` and z-order draw order). The earlier `SHEET_DRAWING_PLUGIN` bridge was retired in favour of the self-rendered overlay (Univer 0.5.x native drawing API proved unstable). `ImagePreviewPanel` sidebar is kept as a navigation aid and reads `_images` first, falling back to `_preservedParts` for legacy.
 
 ---
 
@@ -53,8 +53,8 @@ None.
 
 - **Title**: Form Control OOXML round-trip — byte-preserve `ctrlProps` + `vmlDrawing` on xlsx save (#194 MVP)
 - **Refs**: `src-tauri/src/commands/xlsx_io.rs` (`PRESERVED_PREFIXES` — `"xl/ctrlProps/"` and `"xl/drawings/"` entries), `src-tauri/tests/xlsx_form_control_round_trip.rs`
-- **Resolution**: No new implementation was required. `xl/ctrlProps/` was already added to `PRESERVED_PREFIXES` in a prior commit (#194 Step 1 comment at line 6437). `xl/drawings/` (which covers `vmlDrawing*.vml` and its `_rels/`) was already present. The `merge_content_type_overrides` pass also re-adds Override entries for these prefixes so Excel recognises the parts on re-open. This means Excel-authored form controls (CheckBox, Radio, Spinner, ScrollBar) survive a Coco round-trip byte-for-byte without any additional code changes. 8 regression tests added in `xlsx_form_control_round_trip.rs`: ctrlProp byte equality, vmlDrawing byte equality, vmlDrawing _rels snapshot capture, vml rels in parts snapshot, ctrl+vml co-existence, Content_Types Override presence, double-round-trip idempotency, plain-workbook unaffected guard.
-- **Out of scope** (separate issue): Emitting `<formControlPr>` / `xl/ctrlProps/` XML from scratch for Coco-authored form controls; `<legacyDrawing>` / VML authoring; per-objectType (Radio / Spinner / ScrollBar) native render.
+- **Resolution**: No new implementation was required. `xl/ctrlProps/` was already added to `PRESERVED_PREFIXES` in a prior commit (#194 Step 1 comment at line 6437). `xl/drawings/` (which covers `vmlDrawing*.vml` and its `_rels/`) was already present. The `merge_content_type_overrides` pass also re-adds Override entries for these prefixes so Excel recognises the parts on re-open. This means Excel-authored form controls (CheckBox, Radio, Spinner, ScrollBar) survive a Nicel round-trip byte-for-byte without any additional code changes. 8 regression tests added in `xlsx_form_control_round_trip.rs`: ctrlProp byte equality, vmlDrawing byte equality, vmlDrawing _rels snapshot capture, vml rels in parts snapshot, ctrl+vml co-existence, Content_Types Override presence, double-round-trip idempotency, plain-workbook unaffected guard.
+- **Out of scope** (separate issue): Emitting `<formControlPr>` / `xl/ctrlProps/` XML from scratch for Nicel-authored form controls; `<legacyDrawing>` / VML authoring; per-objectType (Radio / Spinner / ScrollBar) native render.
 
 ### medium-cf-dxf-emit (closed)
 - **Title**: Emit dxf-referenced visual format on CF export
@@ -93,10 +93,10 @@ None.
 - **Resolution**: `security_scan_xlsx` now streams worksheet XML to enforce the 1,000,000 row and 16,384 column hard caps before import, and emits a soft warning when formula count exceeds 1,000,000. Tests in `src-tauri/tests/xlsx_security_caps.rs` cover dimension-based caps, boundary values, formula-heavy warnings, and streaming fallback without `<dimension>`.
 
 ### medium-concurrent-open-race (closed)
-- **Title**: Request-token "newer wins" for `openCoco` / `importXlsx`
+- **Title**: Request-token "newer wins" for `openNicel` / `importXlsx`
 - **Refs**: `src/store/useWorkbookStore.test.ts` audit-item-14 suite, `.claude/audit-findings.md` item 14
 - **Effort**: S
-- **Resolution**: Module-level `openSeq` counter in `src/store/useWorkbookStore.ts`. Each open action (`newWorkbook`, `openCoco`, `importXlsx`, `importCsv`, `restoreCandidate`, `openSnapshot`) captures `++openSeq` on entry and discards its result if the counter has moved on by the time `invoke` resolves. Previously skipped test un-skipped and now passes.
+- **Resolution**: Module-level `openSeq` counter in `src/store/useWorkbookStore.ts`. Each open action (`newWorkbook`, `openNicel`, `importXlsx`, `importCsv`, `restoreCandidate`, `openSnapshot`) captures `++openSeq` on entry and discards its result if the counter has moved on by the time `invoke` resolves. Previously skipped test un-skipped and now passes.
 
 ---
 
@@ -159,9 +159,9 @@ here only so a future contributor doesn't reopen them by accident.
 - **Title**: Real-time multi-user collaboration
 - **Refs**: requirements.md has no collaborative-edit requirement
 - **Effort**: N/A
-- **Why**: Out of scope; Coco is a local-first single-user editor.
+- **Why**: Out of scope; Nicel is a local-first single-user editor.
 
-### wontfix-coco-encryption
+### wontfix-nicel-encryption
 - **Title**: `.coco` encryption (SQLCipher / SEE / app-layer)
 - **Refs**: COVERAGE.md §5.3 (DG-04 deferred), `requirements.md:301-302`
 - **Effort**: L if reinstated
@@ -186,7 +186,7 @@ here only so a future contributor doesn't reopen them by accident.
 - **Why**: External links are preserved as warnings + cached-value blob only; refresh-on-open is explicitly not implemented (offline-first per §5.2).
 
 ### wontfix-chart-style-colors-xml
-- **Title**: Emit `xl/charts/colorsN.xml` (CT_ColorStyle) + `styleN.xml` (CT_ChartStyle) for Coco-authored charts
+- **Title**: Emit `xl/charts/colorsN.xml` (CT_ColorStyle) + `styleN.xml` (CT_ChartStyle) for Nicel-authored charts
 - **Refs**: `src-tauri/src/commands/xlsx_io.rs` (`inject_charts_to_xlsx`), issue #332
 - **Effort**: M (style.xml is a ~48-entry CT_ChartStyle template)
 - **Why**: Decided wontfix 2026-05-28 (Architect assessment + user confirmation). Three reasons: (1) no Excel on the dev host, so a malformed `style.xml` → Excel "repair" → chart loss cannot be caught by CI (which only validates ZIP structure, not whether Excel opens the file); (2) near-zero added value — #334 already emits explicit per-series `<c:ser><c:spPr><a:solidFill>` colors, so `colors.xml`'s auto-color-cycle is moot and without `style.xml` the look is unchanged; (3) asymmetric risk — success = marginal cosmetic gain, failure = chart disappears for every user via auto-update. Charts already render correctly under Excel's default theme today. Re-open only when a real-Excel verification path exists AND the full Excel-emitted ~48-entry style.xml template is ported verbatim.

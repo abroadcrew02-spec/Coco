@@ -1,11 +1,11 @@
-# Dynamic-array formulas (SPILL) on Coco — Univer 0.24 support matrix
+# Dynamic-array formulas (SPILL) on Nicel — Univer 0.24 support matrix
 
 Snapshot date 2026-05-25. Issue #241.
 
 ## Headline
 
 **No engine work required.** Univer 0.24 implements every Excel-365 dynamic-array
-function listed in the original tasking. Coco's only gap was the JA `abstract`
+function listed in the original tasking. Nicel's only gap was the JA `abstract`
 text for 15 of them in `FUNCTION_LIST_JA_ABSTRACT`; the PR that adds this doc
 also fills those slots.
 
@@ -14,7 +14,7 @@ spills and the JA tooltip shows up — tracked separately as `#241 follow-up`.
 
 ## What Univer 0.24 ships (verified via `node_modules` enum walk)
 
-| Category | Function | Univer enum location | Coco JA `abstract` |
+| Category | Function | Univer enum location | Nicel JA `abstract` |
 | --- | --- | --- | --- |
 | Lookup | `FILTER` | `FunctionLookupName` | ✅ existed |
 | Lookup | `SORT` | `FunctionLookupName` | ✅ existed |
@@ -67,7 +67,7 @@ first opened to the public (~2024). By Univer 0.20+ the engine ships
 TypeScript classes for every published Excel 365 array primitive.
 
 This is in contrast to **#235 (Power Query)** and **#240 (Power Pivot / DAX)**,
-where Univer has no comparable engine and Coco would need to build the entire
+where Univer has no comparable engine and Nicel would need to build the entire
 runtime from scratch.
 
 ## Out of scope (intentionally)
@@ -85,4 +85,4 @@ runtime from scratch.
 - Issue #247 (Formula autocomplete tooltip enhance) — would build on this
   layer to surface usage examples, not just `abstract`.
 - `src/components/univerFunctionListJa.ts` — the JA `abstract` overlay.
-- `src/components/cocoUniverLocale.ts` — `mergeLocales` wiring.
+- `src/components/nicelUniverLocale.ts` — `mergeLocales` wiring.

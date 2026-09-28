@@ -1,7 +1,7 @@
 // #238 Step 7 — Query executor: source fetcher + pipeline + snapshot writer.
 //
 // Bridges the pipeline engine (getAndTransform.ts) and query storage
-// (cocoQueries.ts). Pure / framework-free functions except for
+// (nicelQueries.ts). Pure / framework-free functions except for
 // `createTauriSourceFetcher`, which is the sole Tauri integration point.
 //
 // Public API:
@@ -15,8 +15,8 @@
 
 import { runPipeline } from "./getAndTransform";
 import type { PipelineResult, PipelineRow } from "./getAndTransform";
-import { upsertQueryOnSnapshot } from "./cocoQueries";
-import type { QuerySource, SavedQuery } from "./cocoQueries";
+import { upsertQueryOnSnapshot } from "./nicelQueries";
+import type { QuerySource, SavedQuery } from "./nicelQueries";
 import { parseJsonLines } from "./jsonImport";
 
 export type { PipelineResult, PipelineRow };

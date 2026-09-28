@@ -1,6 +1,6 @@
 /* Smart-chip hover popover (#158). Floats over the Univer grid; positioned
  * by inline style from the React component. Visual style matches the rest
- * of Coco's small floating panels (CommentIndicatorsPanel, NavigationBox).
+ * of Nicel's small floating panels (CommentIndicatorsPanel, NavigationBox).
  */
 
 .smart-chip-popover {

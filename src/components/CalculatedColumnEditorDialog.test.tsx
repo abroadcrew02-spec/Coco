@@ -2,8 +2,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import CalculatedColumnEditorDialog from "./CalculatedColumnEditorDialog";
-import type { CocoDataModel, StoredCalculatedColumn } from "../store/cocoDataModel";
-import { addTable, EMPTY_DATA_MODEL } from "../store/cocoDataModel";
+import type { NicelDataModel, StoredCalculatedColumn } from "../store/nicelDataModel";
+import { addTable, EMPTY_DATA_MODEL } from "../store/nicelDataModel";
 import type { ModelTable } from "../store/daxEngine";
 
 afterEach(() => cleanup());
@@ -243,7 +243,7 @@ describe("CalculatedColumnEditorDialog — live preview", () => {
       { First: "Bob", Last: "Jones" },
     ],
   };
-  const cocoModel: CocoDataModel = addTable(EMPTY_DATA_MODEL, custTable);
+  const nicelModel: NicelDataModel = addTable(EMPTY_DATA_MODEL, custTable);
 
   it("shows preview rows after 300ms when expression is entered", async () => {
     vi.useFakeTimers();
@@ -251,7 +251,7 @@ describe("CalculatedColumnEditorDialog — live preview", () => {
       <CalculatedColumnEditorDialog
         tables={TABLES}
         existingPairs={[]}
-        cocoModel={cocoModel}
+        nicelModel={nicelModel}
         onApply={vi.fn()}
         onClose={vi.fn()}
       />,
@@ -273,7 +273,7 @@ describe("CalculatedColumnEditorDialog — live preview", () => {
       <CalculatedColumnEditorDialog
         tables={TABLES}
         existingPairs={[]}
-        cocoModel={cocoModel}
+        nicelModel={nicelModel}
         onApply={vi.fn()}
         onClose={vi.fn()}
       />,
@@ -291,7 +291,7 @@ describe("CalculatedColumnEditorDialog — live preview", () => {
       <CalculatedColumnEditorDialog
         tables={TABLES}
         existingPairs={[]}
-        cocoModel={cocoModel}
+        nicelModel={nicelModel}
         onApply={vi.fn()}
         onClose={vi.fn()}
       />,

@@ -7,7 +7,7 @@
 //! char-width conversion when *it* writes widths, which would otherwise muddy
 //! the assertions for the import test step.
 
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use serde_json::Value;
 use std::io::{Read, Write};
 use tempfile::TempDir;

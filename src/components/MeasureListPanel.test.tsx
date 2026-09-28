@@ -2,12 +2,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import MeasureListPanel from "./MeasureListPanel";
-import type { CocoDataModel } from "../store/cocoDataModel";
+import type { NicelDataModel } from "../store/nicelDataModel";
 
 afterEach(() => cleanup());
 
-function makeSnapshot(model: Partial<CocoDataModel>): string {
-  const full: CocoDataModel = {
+function makeSnapshot(model: Partial<NicelDataModel>): string {
+  const full: NicelDataModel = {
     tables: [],
     relationships: [],
     measures: [],

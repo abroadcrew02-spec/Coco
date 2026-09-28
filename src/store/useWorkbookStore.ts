@@ -44,16 +44,16 @@ interface WorkbookState {
   pinnedPaths: string[]; // recent files the user has pinned; sorts to top of home list
   pinnedOrder: string[]; // user-defined ordering for pinned items (drag-to-reorder)
   suppressCsvPocWarning: boolean; // hide the always-fires "CSV PoC" info banner
-  /** #97: Coco-managed snapshot history for apply-style operations
+  /** #97: Nicel-managed snapshot history for apply-style operations
    *  (AutoSum, format painter, hyperlink, CF, DV, etc.) that bypass
    *  Univer's commandService. Each entry is a `currentSnapshotJson` that
    *  predated the next mutation. Bounded to keep memory in check. */
-  cocoUndoStack: string[];
-  cocoRedoStack: string[];
+  nicelUndoStack: string[];
+  nicelRedoStack: string[];
 
   // Actions
   newWorkbook: () => Promise<void>;
-  openCoco: (path: string) => Promise<void>;
+  openNicel: (path: string) => Promise<void>;
   importXlsx: (path: string) => Promise<void>;
   importCsv: (path: string) => Promise<void>;
   save: () => Promise<void>;
@@ -71,17 +71,17 @@ interface WorkbookState {
   restoreCandidate: (candidateId: string) => Promise<void>;
   dismissCandidate: (candidateId: string) => Promise<void>;
   updateSnapshot: (snapshotJson: string) => void;
-  /** #97: snapshot a pre-mutation state so it can be reverted via cocoUndo.
+  /** #97: snapshot a pre-mutation state so it can be reverted via nicelUndo.
    *  Apply-style operations (AutoSum, format painter, hyperlink, etc.) call
    *  this with the *previous* `currentSnapshotJson` immediately before
    *  calling `updateSnapshot` with the post-mutation state. Pushes onto
-   *  `cocoUndoStack` and clears `cocoRedoStack`. No-op for null inputs. */
-  pushCocoCheckpoint: (prevSnapshotJson: string | null) => void;
+   *  `nicelUndoStack` and clears `nicelRedoStack`. No-op for null inputs. */
+  pushNicelCheckpoint: (prevSnapshotJson: string | null) => void;
   /** #97: pop the last checkpoint, swap it in as currentSnapshotJson, push
    *  the current state onto the redo stack. No-op when the stack is empty. */
-  cocoUndo: () => void;
+  nicelUndo: () => void;
   /** #97: pop from redo stack, swap in, push current onto undo. */
-  cocoRedo: () => void;
+  nicelRedo: () => void;
   markDirty: () => void;
   loadRecentFiles: () => Promise<void>;
   removeRecent: (path: string) => Promise<void>;
@@ -220,8 +220,8 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   pinnedPaths: [],
   pinnedOrder: [],
   suppressCsvPocWarning: false,
-  cocoUndoStack: [],
-  cocoRedoStack: [],
+  nicelUndoStack: [],
+  nicelRedoStack: [],
 
   newWorkbook: async () => {
     const mySeq = ++openSeq;
@@ -246,7 +246,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     }
   },
 
-  openCoco: async (path: string) => {
+  openNicel: async (path: string) => {
     const mySeq = ++openSeq;
     // Capture the pre-open status so a failed open can restore the dirty
     // state of the previous workbook (#48). `loading` is purely transient.
@@ -254,7 +254,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     const priorDirty = get().wasDirtyBeforeExport;
     try {
       set({ saveStatus: "loading" });
-      const result = await invoke<OpenWorkbookResult>("workbook_open_coco", { path });
+      const result = await invoke<OpenWorkbookResult>("workbook_open_nicel", { path });
       if (mySeq !== openSeq) return; // newer open started — discard stale result
       set({
         screen: "editor",
@@ -487,15 +487,15 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     const lower = path.toLowerCase();
     set({ saveStatus: "saving" });
     try {
-      const isCoco = lower.endsWith(".coco");
+      const isNicel = lower.endsWith(".coco");
       const isXlsx = lower.endsWith(".xlsx");
-      const command = isCoco ? "workbook_save_as" : "workbook_export_xlsx";
+      const command = isNicel ? "workbook_save_as" : "workbook_export_xlsx";
       // #146 / #188: flush in-memory shapes into preserved drawing parts for
       // the xlsx route. .coco preserves `_textBoxes` directly so we skip it.
-      const xlsxJson = isCoco
+      const xlsxJson = isNicel
         ? currentSnapshotJson
         : flushTextBoxesToPreservedParts(currentSnapshotJson);
-      const args = isCoco
+      const args = isNicel
         ? {
             workbookId: currentHandle.workbookId,
             path,
@@ -565,16 +565,16 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       if (!hasSnapshotJson(currentSnapshotJson)) return;
 
       const path = currentHandle.path;
-      const isCoco = path ? path.toLowerCase().endsWith(".coco") : false;
+      const isNicel = path ? path.toLowerCase().endsWith(".coco") : false;
       // #71: snapshot we're committing now. If the user edits during the
       // invoke window, currentSnapshotJson moves past it and we must NOT
       // declare the workbook clean (auto_saved) for a stale snapshot.
       const inflightSnapshot = currentSnapshotJson;
 
       try {
-        if (isCoco && path) {
+        if (isNicel && path) {
           // .coco path → direct atomic autosave to the user's file.
-          const result = await invoke<SaveResult>("workbook_autosave_coco", {
+          const result = await invoke<SaveResult>("workbook_autosave_nicel", {
             workbookId: currentHandle.workbookId,
             path,
             snapshotJson: currentSnapshotJson,
@@ -891,28 +891,28 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     }));
   },
 
-  pushCocoCheckpoint: (prevSnapshotJson: string | null) => {
+  pushNicelCheckpoint: (prevSnapshotJson: string | null) => {
     if (!prevSnapshotJson) return;
     set((s) => {
-      const stack = [...s.cocoUndoStack, prevSnapshotJson];
+      const stack = [...s.nicelUndoStack, prevSnapshotJson];
       // Bound the history so a long editing session doesn't accumulate
       // hundreds of MB of snapshots in memory.
       const MAX = 20;
       if (stack.length > MAX) stack.shift();
-      return { cocoUndoStack: stack, cocoRedoStack: [] };
+      return { nicelUndoStack: stack, nicelRedoStack: [] };
     });
   },
 
-  cocoUndo: () => {
-    const { cocoUndoStack, currentSnapshotJson } = get();
-    if (cocoUndoStack.length === 0) return;
-    const prev = cocoUndoStack[cocoUndoStack.length - 1];
-    const nextStack = cocoUndoStack.slice(0, -1);
+  nicelUndo: () => {
+    const { nicelUndoStack, currentSnapshotJson } = get();
+    if (nicelUndoStack.length === 0) return;
+    const prev = nicelUndoStack[nicelUndoStack.length - 1];
+    const nextStack = nicelUndoStack.slice(0, -1);
     set((s) => ({
-      cocoUndoStack: nextStack,
-      cocoRedoStack: currentSnapshotJson
-        ? [...s.cocoRedoStack, currentSnapshotJson]
-        : s.cocoRedoStack,
+      nicelUndoStack: nextStack,
+      nicelRedoStack: currentSnapshotJson
+        ? [...s.nicelRedoStack, currentSnapshotJson]
+        : s.nicelRedoStack,
       currentSnapshotJson: prev,
       // editorRevision bump re-mounts Univer with the restored snapshot.
       // View state (scroll, selection) resets, but the data integrity of
@@ -923,16 +923,16 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     }));
   },
 
-  cocoRedo: () => {
-    const { cocoRedoStack, currentSnapshotJson } = get();
-    if (cocoRedoStack.length === 0) return;
-    const next = cocoRedoStack[cocoRedoStack.length - 1];
-    const nextRedo = cocoRedoStack.slice(0, -1);
+  nicelRedo: () => {
+    const { nicelRedoStack, currentSnapshotJson } = get();
+    if (nicelRedoStack.length === 0) return;
+    const next = nicelRedoStack[nicelRedoStack.length - 1];
+    const nextRedo = nicelRedoStack.slice(0, -1);
     set((s) => ({
-      cocoRedoStack: nextRedo,
-      cocoUndoStack: currentSnapshotJson
-        ? [...s.cocoUndoStack, currentSnapshotJson]
-        : s.cocoUndoStack,
+      nicelRedoStack: nextRedo,
+      nicelUndoStack: currentSnapshotJson
+        ? [...s.nicelUndoStack, currentSnapshotJson]
+        : s.nicelUndoStack,
       currentSnapshotJson: next,
       editorRevision: s.editorRevision + 1,
       saveStatus: "unsaved",
@@ -1050,8 +1050,8 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       lastError: null,
       lastSavedAt: null,
       // #97: drop undo history when leaving the workbook.
-      cocoUndoStack: [],
-      cocoRedoStack: [],
+      nicelUndoStack: [],
+      nicelRedoStack: [],
     }),
 
   setSaveStatus: (status) => set({ saveStatus: status }),

@@ -13,7 +13,7 @@ Remaining steps deferred (L-XL, 残り 7-11週).
 | 3. Chart drawing engine (8 chart types: bar/line/pie/area/...) | ⏳ | 既存 ChartPreviewPanel SVG renderer を流用 |
 | 4. ドラッグ/リサイズ ハンドル | ⏳ | mousedown 連携 |
 | 5. Source range → 自動再描画 (300ms debounce) | ⏳ | CommandExecuted フック |
-| 6. `_cocoCharts` 保存 + COCO_ROOT_EXTENSION_KEYS 追加 | ⏳ | |
+| 6. `_cocoCharts` 保存 + NICEL_ROOT_EXTENSION_KEYS 追加 | ⏳ | |
 | 7. xlsx round-trip via cocoExtensions/charts.json | ⏳ | |
 
 ## ゴール (再掲)
@@ -55,7 +55,7 @@ interface ChartDefinition {
   width: number;              // px
   height: number;             // px
   legend?: "right" | "bottom" | "none";
-  // Coco 独自フィールド (Excel chart blob とは独立)
+  // Nicel 独自フィールド (Excel chart blob とは独立)
   options?: { xAxisTitle?: string; yAxisTitle?: string; colors?: string[] };
 }
 ```
@@ -84,7 +84,7 @@ interface ChartDefinition {
 ### Source 変更時の再描画
 
 - syncSnapshot にフックし、`_cocoCharts[i].sourceRange` のセルが変わったら該当チャートを redraw (debounce 100ms)。
-- セル変更検知は Univer の `CommandExecuted` イベントを Coco 側で diff 計算。
+- セル変更検知は Univer の `CommandExecuted` イベントを Nicel 側で diff 計算。
 
 ## MVP スコープ
 
@@ -93,7 +93,7 @@ interface ChartDefinition {
 - [ ] **配置**: anchor cell から `width × height` px。ドラッグで移動、ハンドルでリサイズ
 - [ ] **データ範囲変更**: 既存チャートの "Source range" を editorial 入力で更新
 - [ ] **データ更新時の再描画**: 元データ変更で debounce 再描画
-- [ ] **保存**: `_cocoCharts` + COCO_ROOT_EXTENSION_KEYS
+- [ ] **保存**: `_cocoCharts` + NICEL_ROOT_EXTENSION_KEYS
 - [ ] **xlsx round-trip**: cocoExtensions/charts.json
 
 ## 非スコープ (follow-up)

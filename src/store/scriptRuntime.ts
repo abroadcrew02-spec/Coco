@@ -58,7 +58,7 @@ export interface ScriptRunResult {
 /** スクリプトが登録できるトリガー種別。 */
 export type TriggerKind = "onOpen" | "onEdit" | "timer" | "menu";
 
-/** `Coco.*` 登録 API でスクリプトが宣言したトリガー。 */
+/** `Nicel.*` 登録 API でスクリプトが宣言したトリガー。 */
 export interface RegisteredTrigger {
   kind: TriggerKind;
   /** menu の表示名 / timer の識別ラベル。onOpen/onEdit では空。 */
@@ -116,8 +116,8 @@ export interface ScriptApi {
   addTimer(intervalMs: number, handler: () => unknown): void;
 }
 
-/** `Coco` 名前空間。`api` のエイリアス + トリガー登録 API。 */
-export type CocoNamespace = ScriptApi;
+/** `Nicel` 名前空間。`api` のエイリアス + トリガー登録 API。 */
+export type NicelNamespace = ScriptApi;
 
 /**
  * 任意の値を log 用文字列に整形する。
@@ -400,15 +400,22 @@ export interface ExecuteOptions {
  */
 export const inlineExecutor: ScriptExecutor = {
   async execute(source, api, options) {
-    let fn: (api: ScriptApi, log: ScriptApi["log"], Coco: CocoNamespace) => unknown;
+    // `Coco` は v0.7 以前の名前空間名。保存済みスクリプトが参照するため
+    // `Nicel` と同じオブジェクトをエイリアスとして渡し続ける。
+    let fn: (
+      api: ScriptApi,
+      log: ScriptApi["log"],
+      Nicel: NicelNamespace,
+      Coco: NicelNamespace,
+    ) => unknown;
     if (options.factory) {
       fn = options.factory(source) as typeof fn;
     } else {
       const body = `"use strict";\n${source}\n${options.triggerCall ?? ""}\n`;
       // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
-      fn = new Function("api", "log", "Coco", body) as typeof fn;
+      fn = new Function("api", "log", "Nicel", "Coco", body) as typeof fn;
     }
-    const ret = await fn(api, api.log, api);
+    const ret = await fn(api, api.log, api, api);
     return { returnValue: ret };
   },
 };
@@ -429,7 +436,7 @@ export interface IframeDataBundle {
  * window.parent / localStorage / cookie / same-origin fetch は SecurityError
  * で遮断される。Blob URL 経由で読み込むため親文書 DOM へも到達不能。
  *
- * #189 C2: トリガーは iframe 内で完結する。`Coco.onOpen/onEdit/addMenuItem/
+ * #189 C2: トリガーは iframe 内で完結する。`Nicel.onOpen/onEdit/addMenuItem/
  * addTimer` で登録されたハンドラ関数は iframe 内の Map (種別/ラベル → 関数)
  * に保持される — 関数参照は iframe 境界を越えられないため。親は
  *   - "list-triggers": スクリプトを実行し、登録されたトリガーの一覧を要求
@@ -444,11 +451,11 @@ function buildIframeHtml(): string {
   "use strict";
   var parentPort = null;
   function send(type, payload) {
-    if (parentPort) parentPort.postMessage({ __coco: true, type: type, payload: payload });
+    if (parentPort) parentPort.postMessage({ __nicel: true, type: type, payload: payload });
   }
   window.addEventListener("message", function (ev) {
     var d = ev.data;
-    if (!d || d.__coco !== true) return;
+    if (!d || d.__nicel !== true) return;
     if (d.type === "run") {
       parentPort = ev.ports && ev.ports[0] ? ev.ports[0] : null;
       runUserScript(d.source, d.snapshot, d.mode, d.fire);
@@ -516,9 +523,10 @@ function buildIframeHtml(): string {
     var registry = { triggers: [], onOpen: [], onEdit: [], menu: [], timer: [] };
     try {
       var api = makeApi(snapshot, logs, registry);
-      var fn = new Function("api", "log", "Coco", '"use strict";\\n' + source + '\\n');
+      // "Coco" は v0.7 以前の名前空間名 (保存済みスクリプト互換のエイリアス)。
+      var fn = new Function("api", "log", "Nicel", "Coco", '"use strict";\\n' + source + '\\n');
       // スクリプト本体を評価 (トリガー登録 + トップレベルコードを実行)。
-      var ret = fn(api, api.log, api);
+      var ret = fn(api, api.log, api, api);
       Promise.resolve(ret).then(function (v) {
         if (mode === "list-triggers") {
           send("done", { ok: true, logs: logs, triggers: registry.triggers });
@@ -597,9 +605,9 @@ export function createIframeExecutor(getBundle: () => IframeDataBundle): ScriptE
 
         channel.port1.onmessage = (ev: MessageEvent) => {
           const d = ev.data as
-            | { __coco?: boolean; type?: string; payload?: unknown }
+            | { __nicel?: boolean; type?: string; payload?: unknown }
             | undefined;
-          if (!d || d.__coco !== true) return;
+          if (!d || d.__nicel !== true) return;
           if (d.type === "call") {
             // iframe からの Facade 書き込み要求をメインスレッドで実行。
             // 保護シートチェックは buildApi 側で引き続き有効。
@@ -645,7 +653,7 @@ export function createIframeExecutor(getBundle: () => IframeDataBundle): ScriptE
           const bundle = getBundle();
           iframe.contentWindow?.postMessage(
             {
-              __coco: true,
+              __nicel: true,
               type: "run",
               source,
               snapshot: bundle,
@@ -927,10 +935,10 @@ var __cocoLabel = ${JSON.stringify(label)};
 var __cocoEvent = ${JSON.stringify(editEvent)};
 var __cocoQueue = [];
 (function () {
-  Coco.onOpen = api.onOpen = function (fn) { if (__cocoFire === "onOpen") __cocoQueue.push(function(){ return fn(); }); };
-  Coco.onEdit = api.onEdit = function (fn) { if (__cocoFire === "onEdit") __cocoQueue.push(function(){ return fn(__cocoEvent); }); };
-  Coco.addMenuItem = api.addMenuItem = function (name, fn) { if (__cocoFire === "menu" && String(name) === __cocoLabel) __cocoQueue.push(function(){ return fn(); }); };
-  Coco.addTimer = api.addTimer = function (ms, fn) { void ms; if (__cocoFire === "timer") __cocoQueue.push(function(){ return fn(); }); };
+  Nicel.onOpen = api.onOpen = function (fn) { if (__cocoFire === "onOpen") __cocoQueue.push(function(){ return fn(); }); };
+  Nicel.onEdit = api.onEdit = function (fn) { if (__cocoFire === "onEdit") __cocoQueue.push(function(){ return fn(__cocoEvent); }); };
+  Nicel.addMenuItem = api.addMenuItem = function (name, fn) { if (__cocoFire === "menu" && String(name) === __cocoLabel) __cocoQueue.push(function(){ return fn(); }); };
+  Nicel.addTimer = api.addTimer = function (ms, fn) { void ms; if (__cocoFire === "timer") __cocoQueue.push(function(){ return fn(); }); };
 })();
 `;
   const triggerCall = `
@@ -1132,9 +1140,9 @@ export function createDefaultScript(): ScriptEntry {
       "// api.setSheetValue(name, 'A1', 'Hello from script');\n" +
       "\n" +
       "// トリガー登録の例:\n" +
-      "// Coco.onOpen(() => api.log('ブックを開きました'));\n" +
-      "// Coco.onEdit((e) => api.log('編集:', e.a1, e.value));\n" +
-      "// Coco.addMenuItem('挨拶', () => api.log('Hello!'));\n",
+      "// Nicel.onOpen(() => api.log('ブックを開きました'));\n" +
+      "// Nicel.onEdit((e) => api.log('編集:', e.a1, e.value));\n" +
+      "// Nicel.addMenuItem('挨拶', () => api.log('Hello!'));\n",
     lastModified: Date.now(),
   };
 }

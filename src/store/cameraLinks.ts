@@ -10,9 +10,9 @@
 //
 // Storage: a workbook-root `_cameraLinks` array on the Univer snapshot.
 // xlsx round-trip is handled by xlsx_io.rs via the cocoExtensions mechanism
-// (the "cameraLinks" family under COCO_EXTENSION_ROOT_FIELDS).
+// (the "cameraLinks" family under NICEL_EXTENSION_ROOT_FIELDS).
 //
-// Snapshot shape (Coco extension to Univer 0.5.x workbook data):
+// Snapshot shape (Nicel extension to Univer 0.5.x workbook data):
 //   {
 //     sheetOrder?: string[],
 //     sheets: { ... },

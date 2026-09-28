@@ -8,14 +8,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(
             // #46: runtime diagnostic logging to a rotating file under the
-            // app data dir (Windows: %APPDATA%/com.coco.app/logs/Coco.log,
+            // app data dir (Windows: %APPDATA%/com.coco.app/logs/Nicel.log,
             // macOS: ~/Library/Logs/com.coco.app/, Linux: $XDG_DATA_HOME/com.coco.app/logs/).
             // Levels are info by default; set RUST_LOG=debug for verbose
             // capture. Limited to 2 MiB per file with 5 rotated copies so
             // crash diagnostics never grow unbounded.
             tauri_plugin_log::Builder::default()
                 .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::LogDir { file_name: Some("Coco".into()) },
+                    tauri_plugin_log::TargetKind::LogDir { file_name: Some("Nicel".into()) },
                 ))
                 .target(tauri_plugin_log::Target::new(
                     tauri_plugin_log::TargetKind::Stdout,
@@ -63,10 +63,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::workbook::workbook_new,
-            commands::workbook::workbook_open_coco,
+            commands::workbook::workbook_open_nicel,
             commands::workbook::workbook_save,
             commands::workbook::workbook_save_as,
-            commands::workbook::workbook_autosave_coco,
+            commands::workbook::workbook_autosave_nicel,
             commands::workbook::workbook_list_recent,
             commands::workbook::workbook_remove_recent,
             commands::workbook::workbook_clear_recent,

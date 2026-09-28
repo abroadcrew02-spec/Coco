@@ -3,7 +3,7 @@
 // user has a single, obvious place to find the installer + raw .exe after a
 // release build. Run via `npm run pack` (defined in package.json).
 //
-// Tauri v2 writes outputs to src-tauri/target/release/{bundle/<format>/, Coco.exe}
+// Tauri v2 writes outputs to src-tauri/target/release/{bundle/<format>/, Nicel.exe}
 // on Windows and similar tree elsewhere. We scan a small allow-list of
 // expected paths and copy whatever exists into ./distbin/, computing SHA-256
 // alongside each binary for distribution per requirements.md §5.6.
@@ -39,16 +39,16 @@ const pkgVersion = (() => {
 
 const candidates = [
   // Raw executable next to target/release/.
-  { src: join(tauriTargetRoot, "coco.exe"), label: "exe" },
-  { src: join(tauriTargetRoot, "Coco.exe"), label: "exe" },
-  { src: join(tauriTargetRoot, "coco"), label: "binary" },
-  { src: join(tauriTargetRoot, "Coco"), label: "binary" },
+  { src: join(tauriTargetRoot, "nicel.exe"), label: "exe" },
+  { src: join(tauriTargetRoot, "Nicel.exe"), label: "exe" },
+  { src: join(tauriTargetRoot, "nicel"), label: "binary" },
+  { src: join(tauriTargetRoot, "Nicel"), label: "binary" },
 ];
 
 const bundleDir = join(tauriTargetRoot, "bundle");
 
 // Pick the freshest mtime among the raw release binaries — used as a floor for
-// bundle freshness. If the user's `tauri build` just produced Coco.exe, any
+// bundle freshness. If the user's `tauri build` just produced Nicel.exe, any
 // bundle older than that exe is definitely a stale artifact from a prior run.
 function latestBinaryMtime() {
   let latest = 0;

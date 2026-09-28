@@ -1,7 +1,7 @@
 .ifd-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .ifd-modal {
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
   width: 100%;
   max-width: 760px;
   max-height: 80vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .ifd-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   margin: 0;
 }
 
@@ -41,30 +41,30 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .ifd-close:hover {
-  color: var(--coco-text);
-  background-color: var(--coco-surface-hover);
+  color: var(--nicel-text);
+  background-color: var(--nicel-surface-hover);
 }
 
 .ifd-toolbar {
   display: flex;
   gap: 10px;
   padding: 12px 20px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .ifd-input {
   flex: 1;
   padding: 6px 8px;
   font-size: 13px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
   font-family: inherit;
 }
@@ -72,16 +72,16 @@
 .ifd-input:focus,
 .ifd-select:focus {
   outline: none;
-  border-color: var(--coco-accent);
+  border-color: var(--nicel-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
 }
 
 .ifd-select {
   padding: 6px 8px;
   font-size: 13px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   font-family: inherit;
   min-width: 160px;
 }
@@ -99,7 +99,7 @@
   margin: 0;
   padding: 6px 0;
   overflow-y: auto;
-  border-right: 1px solid var(--coco-border);
+  border-right: 1px solid var(--nicel-border);
 }
 
 .ifd-row {
@@ -109,14 +109,14 @@
   gap: 10px;
   padding: 6px 14px;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   cursor: pointer;
   user-select: none;
 }
 
 .ifd-row--active {
-  background-color: var(--coco-accent-subtle);
-  color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-subtle);
+  color: var(--nicel-accent-hover);
 }
 
 .ifd-row-name {
@@ -126,11 +126,11 @@
 
 .ifd-row-cat {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .ifd-row--active .ifd-row-cat {
-  color: var(--coco-accent-hover);
+  color: var(--nicel-accent-hover);
 }
 
 .ifd-empty {
@@ -138,14 +138,14 @@
   padding: 24px 14px;
   text-align: center;
   font-size: 13px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   grid-column: 1 / 2;
 }
 
 .ifd-detail {
   padding: 14px 18px;
   overflow-y: auto;
-  background-color: var(--coco-surface);
+  background-color: var(--nicel-surface);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -155,10 +155,10 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 14px;
   font-weight: 600;
-  color: var(--coco-accent-hover);
+  color: var(--nicel-accent-hover);
   padding: 8px 10px;
-  background-color: var(--coco-accent-subtle);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-accent-subtle);
+  border: 1px solid var(--nicel-border);
   border-radius: 4px;
   word-break: break-word;
 }
@@ -167,7 +167,7 @@
   margin: 0;
   font-size: 13px;
   line-height: 1.55;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .ifd-detail-example {
@@ -176,20 +176,20 @@
   flex-direction: column;
   gap: 4px;
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .ifd-detail-example-label {
   font-weight: 600;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .ifd-detail-example code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   padding: 6px 8px;
-  background-color: var(--coco-bg);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-bg);
+  border: 1px solid var(--nicel-border);
   border-radius: 3px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -198,14 +198,14 @@
 .ifd-detail-placeholder {
   margin: 0;
   font-size: 12px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   font-style: italic;
 }
 
 .ifd-footer {
   padding: 12px 20px;
-  background-color: var(--coco-surface);
-  border-top: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border-top: 1px solid var(--nicel-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -214,7 +214,7 @@
 
 .ifd-hint {
   font-size: 11px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
 }
 
 .ifd-footer-actions {
@@ -226,16 +226,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .ifd-btn:hover:not(:disabled) {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-border-strong);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-border-strong);
 }
 
 .ifd-btn:disabled {
@@ -244,14 +244,14 @@
 }
 
 .ifd-btn--primary {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .ifd-btn--primary:hover:not(:disabled) {
-  background-color: var(--coco-accent-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
 }
 
 /* #247 — related-function chips + alias hint */
@@ -264,9 +264,9 @@
 }
 
 .ifd-related-chip {
-  background-color: var(--coco-accent-subtle);
-  color: var(--coco-accent);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-accent-subtle);
+  color: var(--nicel-accent);
+  border: 1px solid var(--nicel-border);
   border-radius: 12px;
   padding: 1px 8px;
   font-size: 11px;
@@ -275,22 +275,22 @@
 }
 
 .ifd-related-chip:hover {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
 }
 
 .ifd-alias-hint {
   margin-bottom: 8px;
   padding: 6px 10px;
-  background-color: var(--coco-accent-subtle);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-accent-subtle);
+  border: 1px solid var(--nicel-border);
   border-radius: 4px;
   font-size: 12px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .ifd-alias-hint code {
   background: none;
   padding: 0;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }

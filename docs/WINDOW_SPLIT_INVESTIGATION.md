@@ -22,8 +22,8 @@ Date: 2026-05-21. Univer: 0.5.x (`@univerjs/sheets-ui`, `@univerjs/core`,
 Univer's freeze renderer (`HeaderFreezeRenderController` in
 `@univerjs/sheets-ui`) only activates when a worksheet snapshot carries a
 populated `IWorksheetData.freeze` field
-(`{ xSplit, ySplit, startRow, startColumn }`). Coco's xlsx import path
-(`src-tauri/src/commands/xlsx_io.rs`) historically wrote only the Coco-private
+(`{ xSplit, ySplit, startRow, startColumn }`). Nicel's xlsx import path
+(`src-tauri/src/commands/xlsx_io.rs`) historically wrote only the Nicel-private
 `_freezePane` marker (`{ row, col, state, topLeft? }`) and never the native
 `freeze` field. Result: opening an xlsx that already contains a frozen / split
 pane showed **no visual freeze** until the user re-toggled it through the View
@@ -45,7 +45,7 @@ in-app visual projection.
 
 * `state="frozen"` — `row`/`col` are fixed row/column counts → direct mapping.
 * `state="split"` — `row`/`col` carry the raw `xSplit`/`ySplit` verbatim.
-  Coco-authored splits store row/col **indices** here (see #156's
+  Nicel-authored splits store row/col **indices** here (see #156's
   `splitPane.ts` write side); Excel-authored splits store **pixel/twip
   offsets**. Univer 0.5.x has no split renderer, so the freeze renderer is the
   visual approximation in both cases.
@@ -74,8 +74,8 @@ Univer 0.5.x's `HeaderFreezeRenderController`
 `_changeToColumn`, `_changeToOffsetX/Y`, and renders draggable
 `_rowFreezeHeaderRect` / `_columnFreezeHeaderRect` handles.
 
-Because Coco's split feature uses `FWorksheet.setFreeze` as its renderer
-(Univer exposes no dedicated split renderer), **the freeze line that Coco's
+Because Nicel's split feature uses `FWorksheet.setFreeze` as its renderer
+(Univer exposes no dedicated split renderer), **the freeze line that Nicel's
 split produces is already draggable** through Univer's built-in handles — the
 user can drag it to reposition the split.
 
@@ -109,7 +109,7 @@ four independently-scrolling viewports.
 
 ### Disposition
 
-Univer constraint. Coco keeps the `setFreeze`-based approximation (top-left
+Univer constraint. Nicel keeps the `setFreeze`-based approximation (top-left
 fixed) for the in-app view, while `_freezePane state="split"` preserves Excel's
 true semantics through the xlsx round-trip. Achieving fully-independent panes
 would require a Univer core feature (a split render controller) — out of scope

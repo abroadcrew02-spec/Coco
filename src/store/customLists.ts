@@ -1,7 +1,7 @@
 // Pure helpers for Excel-style "Custom Lists". A custom list is an ordered
 // sequence of strings (e.g. ["Mon","Tue","Wed",...]) that powers drag-to-fill
 // autocompletion: dropping "Mon" into A1 and dragging down auto-fills the
-// remaining members. Coco's MVP wires the list into a settings-style dialog
+// remaining members. Nicel's MVP wires the list into a settings-style dialog
 // and exposes an "Apply List" action that writes the members into a target
 // range starting from the active cell.
 //

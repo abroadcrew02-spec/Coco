@@ -2,7 +2,7 @@
  *
  * Two-column shell: a fixed left navigation rail (ホーム / 新規 / 開く plus
  * 設定 / ヘルプ pinned to the bottom) and a scrollable main content area.
- * All colors flow through the `--coco-*` theme tokens (issue #191) so the
+ * All colors flow through the `--nicel-*` theme tokens (issue #191) so the
  * screen restyles for light / dark with a single attribute flip. */
 
 .home-screen {
@@ -11,7 +11,7 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background-color: var(--coco-bg);
+  background-color: var(--nicel-bg);
 }
 
 /* ── Left navigation rail ──────────────────────────────────────────────── */
@@ -20,8 +20,8 @@
   width: 200px;
   display: flex;
   flex-direction: column;
-  background-color: var(--coco-bg-elevated);
-  border-right: 1px solid var(--coco-border);
+  background-color: var(--nicel-bg-elevated);
+  border-right: 1px solid var(--nicel-border);
   padding: 16px 0;
 }
 
@@ -32,7 +32,7 @@
 .home-nav-logo {
   font-size: 24px;
   font-weight: 700;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   letter-spacing: -0.5px;
 }
 
@@ -48,7 +48,7 @@
 .home-nav-footer {
   margin-top: auto;
   padding-top: 12px;
-  border-top: 1px solid var(--coco-border);
+  border-top: 1px solid var(--nicel-border);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -62,7 +62,7 @@
   padding: 9px 20px;
   font-size: 14px;
   font-weight: 500;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   background: none;
   border: none;
   border-left: 3px solid transparent;
@@ -73,20 +73,20 @@
 }
 
 .home-nav-item:hover {
-  background-color: var(--coco-surface-hover);
+  background-color: var(--nicel-surface-hover);
 }
 
 .home-nav-item--active {
-  color: var(--coco-accent);
-  background-color: var(--coco-accent-subtle);
-  border-left-color: var(--coco-accent);
+  color: var(--nicel-accent);
+  background-color: var(--nicel-accent-subtle);
+  border-left-color: var(--nicel-accent);
   font-weight: 600;
 }
 
 .home-nav-item--minor {
   font-size: 13px;
   font-weight: 400;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   padding-top: 8px;
   padding-bottom: 8px;
 }
@@ -115,7 +115,7 @@
 .home-view-title {
   font-size: 28px;
   font-weight: 700;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   margin: 0 0 24px;
 }
 
@@ -127,9 +127,9 @@
   gap: 2px;
   padding: 10px 18px;
   margin-bottom: 28px;
-  background-color: var(--coco-accent-subtle);
-  color: var(--coco-accent);
-  border: 1px solid var(--coco-accent);
+  background-color: var(--nicel-accent-subtle);
+  color: var(--nicel-accent);
+  border: 1px solid var(--nicel-accent);
   border-radius: 6px;
   cursor: pointer;
   transition: background-color 0.12s ease, border-color 0.12s ease;
@@ -137,8 +137,8 @@
 }
 
 .home-continue:hover {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-accent-hover);
 }
 
 .home-continue__label {
@@ -150,7 +150,7 @@
 .home-continue__name {
   font-size: 13px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -166,10 +166,10 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   margin-bottom: 12px;
   padding-bottom: 6px;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 /* ── "New" section — template tiles (Excel Start screen) ───────────────── */
@@ -192,8 +192,8 @@
   gap: 8px;
   padding: 12px;
   font-family: inherit;
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border);
   border-radius: 8px;
   cursor: pointer;
   text-align: center;
@@ -202,15 +202,15 @@
 }
 
 .home-template-tile:hover {
-  border-color: var(--coco-accent);
-  background-color: var(--coco-accent-subtle);
-  box-shadow: 0 1px 4px var(--coco-shadow);
+  border-color: var(--nicel-accent);
+  background-color: var(--nicel-accent-subtle);
+  box-shadow: 0 1px 4px var(--nicel-shadow);
 }
 
 /* The blank tile is the primary call to action — accent-tinted by default. */
 .home-template-tile--blank {
-  border-color: var(--coco-accent);
-  background-color: var(--coco-accent-subtle);
+  border-color: var(--nicel-accent);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .home-template-thumb {
@@ -221,7 +221,7 @@
 .home-template-name {
   font-size: 12px;
   font-weight: 600;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   line-height: 1.3;
 }
 
@@ -235,9 +235,9 @@
   font-family: inherit;
   font-size: 12px;
   font-weight: 500;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   background: none;
-  border: 1px dashed var(--coco-border-strong);
+  border: 1px dashed var(--nicel-border-strong);
   border-radius: 8px;
   cursor: pointer;
   text-align: center;
@@ -245,8 +245,8 @@
 }
 
 .home-template-more:hover {
-  border-color: var(--coco-accent);
-  background-color: var(--coco-accent-subtle);
+  border-color: var(--nicel-accent);
+  background-color: var(--nicel-accent-subtle);
 }
 
 /* ── "Open" view actions ───────────────────────────────────────────────── */
@@ -258,27 +258,27 @@
 
 .home-open-hint {
   font-size: 12px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
 }
 
 .btn-secondary {
   padding: 10px 22px;
   font-size: 14px;
   font-weight: 600;
-  background-color: var(--coco-bg-elevated);
-  color: var(--coco-accent);
-  border: 2px solid var(--coco-accent);
+  background-color: var(--nicel-bg-elevated);
+  color: var(--nicel-accent);
+  border: 2px solid var(--nicel-accent);
   border-radius: 6px;
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .btn-secondary:hover {
-  background-color: var(--coco-accent-subtle);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .btn-secondary:active {
-  background-color: var(--coco-accent-subtle);
+  background-color: var(--nicel-accent-subtle);
 }
 
 /* ── Recovery list ─────────────────────────────────────────────────────── */
@@ -295,11 +295,11 @@
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
-  background-color: var(--coco-warning-bg);
-  border: 1px solid var(--coco-warning);
+  background-color: var(--nicel-warning-bg);
+  border: 1px solid var(--nicel-warning);
   border-radius: 6px;
   font-size: 14px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .recovery-item__main {
@@ -318,7 +318,7 @@
 
 .recovery-date {
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   white-space: nowrap;
 }
 
@@ -332,27 +332,27 @@
   padding: 6px 12px;
   font-size: 12px;
   font-weight: 600;
-  background-color: var(--coco-bg-elevated);
-  color: var(--coco-text);
-  border: 1px solid var(--coco-border-strong);
+  background-color: var(--nicel-bg-elevated);
+  color: var(--nicel-text);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
 .btn-tertiary:hover {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-text-faint);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-text-faint);
 }
 
 .btn-tertiary--danger {
-  color: var(--coco-danger);
-  border-color: var(--coco-danger);
+  color: var(--nicel-danger);
+  border-color: var(--nicel-danger);
 }
 
 .btn-tertiary--danger:hover {
-  background-color: var(--coco-danger-bg);
-  border-color: var(--coco-danger);
+  background-color: var(--nicel-danger-bg);
+  border-color: var(--nicel-danger);
 }
 
 /* ── Recents pane (tabs + filter + table) ──────────────────────────────── */
@@ -365,7 +365,7 @@
   padding: 4px 12px 8px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
@@ -374,12 +374,12 @@
 }
 
 .home-recents-tab:hover {
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .home-recents-tab--active {
-  color: var(--coco-accent);
-  border-bottom-color: var(--coco-accent);
+  color: var(--nicel-accent);
+  border-bottom-color: var(--nicel-accent);
 }
 
 /* Recents table — full-width Excel-style file list. */
@@ -395,9 +395,9 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   padding: 6px 10px;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .recent-table .recent-col-when {
@@ -430,17 +430,17 @@
 
 .recent-item > td {
   padding: 9px 10px;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
   vertical-align: middle;
 }
 
 .recent-item:hover > td {
-  background-color: var(--coco-accent-subtle);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .recent-item--focused > td {
-  background-color: var(--coco-surface);
-  box-shadow: inset 0 0 0 1px var(--coco-focus-ring);
+  background-color: var(--nicel-surface);
+  box-shadow: inset 0 0 0 1px var(--nicel-focus-ring);
 }
 
 .recent-item--missing {
@@ -458,7 +458,7 @@
 
 .recent-name {
   font-weight: 500;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -467,7 +467,7 @@
 
 .recent-path {
   font-size: 12px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   max-width: 360px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -476,7 +476,7 @@
 
 .recent-when {
   font-size: 12px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   white-space: nowrap;
   text-align: right;
 }
@@ -491,7 +491,7 @@
   padding: 8px 10px 4px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   letter-spacing: 0.04em;
   background: none;
 }
@@ -501,28 +501,28 @@
   box-sizing: border-box;
   margin-bottom: 8px;
   padding: 6px 10px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   font-size: 13px;
-  background-color: var(--coco-surface);
-  color: var(--coco-text);
+  background-color: var(--nicel-surface);
+  color: var(--nicel-text);
 }
 
 .recent-filter:focus {
-  outline: 2px solid var(--coco-focus-ring);
+  outline: 2px solid var(--nicel-focus-ring);
   outline-offset: -1px;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
 }
 
 .recent-empty-filter {
   font-size: 13px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   margin: 4px 0 8px;
 }
 
 .recent-filter-count {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   margin: 0 0 6px;
 }
 
@@ -530,9 +530,9 @@
   margin-left: 8px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--coco-danger);
-  background-color: var(--coco-danger-bg);
-  border: 1px solid var(--coco-danger);
+  color: var(--nicel-danger);
+  background-color: var(--nicel-danger-bg);
+  border: 1px solid var(--nicel-danger);
   border-radius: 4px;
   padding: 2px 7px;
   white-space: nowrap;
@@ -550,7 +550,7 @@
   background: none;
   border: 1px solid transparent;
   border-radius: 3px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
@@ -597,8 +597,8 @@
 
 /* Drop-target indicator on the row being hovered during drag-reorder. */
 .recent-item--drag-over > td {
-  box-shadow: inset 0 2px 0 var(--coco-accent);
-  background-color: var(--coco-accent-subtle);
+  box-shadow: inset 0 2px 0 var(--nicel-accent);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .recent-pin-indicator {
@@ -615,8 +615,8 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   border-radius: 3px;
-  background: var(--coco-surface-hover);
-  color: var(--coco-text-muted);
+  background: var(--nicel-surface-hover);
+  color: var(--nicel-text-muted);
   vertical-align: 1px;
 }
 
@@ -627,9 +627,9 @@
 /* Legacy .coco recents fall through to the neutral default styling. */
 
 .recent-remove:hover {
-  color: var(--coco-danger);
-  background-color: var(--coco-danger-bg);
-  border-color: var(--coco-danger);
+  color: var(--nicel-danger);
+  background-color: var(--nicel-danger-bg);
+  border-color: var(--nicel-danger);
 }
 
 .home-section-header {
@@ -638,7 +638,7 @@
   justify-content: space-between;
   margin-bottom: 10px;
   padding-bottom: 0;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .home-recents .home-section-header h2 {
@@ -651,19 +651,19 @@
   background: none;
   border: none;
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   cursor: pointer;
   padding: 2px 6px 8px;
   border-radius: 3px;
 }
 
 .link-btn:hover {
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
 }
 
 .home-empty {
   font-size: 14px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   margin-top: 8px;
 }
 
@@ -673,16 +673,16 @@
   max-width: 520px;
   margin-top: 8px;
   padding: 24px 28px;
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-accent);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-accent);
   border-radius: 10px;
-  box-shadow: 0 1px 2px var(--coco-shadow);
+  box-shadow: 0 1px 2px var(--nicel-shadow);
 }
 
 .home-welcome__title {
   font-size: 20px;
   font-weight: 700;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   margin: 0 0 8px;
   border: none;
   text-transform: none;
@@ -693,7 +693,7 @@
 .home-welcome__tagline {
   font-size: 14px;
   line-height: 1.55;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   margin: 0 0 18px;
 }
 
@@ -704,12 +704,12 @@
   padding: 0 0 0 24px;
   margin: 0;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   list-style: decimal;
 }
 
 .home-welcome__steps li::marker {
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   font-weight: 700;
 }
 
@@ -721,9 +721,9 @@
   margin: 4px 0 0;
   padding: 6px 12px;
   font-size: 12px;
-  color: var(--coco-text-muted);
-  background-color: var(--coco-surface);
-  border: 1px solid var(--coco-border);
+  color: var(--nicel-text-muted);
+  background-color: var(--nicel-surface);
+  border: 1px solid var(--nicel-border);
   border-radius: 999px;
 }
 
@@ -733,12 +733,12 @@
 
 .home-tip__label {
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
 }
 
 .home-tip__body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 /* Error / import-warning banner. */
@@ -747,8 +747,8 @@
   align-items: flex-start;
   gap: 8px;
   padding: 12px 14px;
-  background-color: var(--coco-danger-bg);
-  border: 1px solid var(--coco-danger);
+  background-color: var(--nicel-danger-bg);
+  border: 1px solid var(--nicel-danger);
   border-radius: 6px;
   margin-bottom: 24px;
 }
@@ -764,21 +764,21 @@
 .home-error__title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
 }
 
 .home-error__item {
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .home-error__item--blocking {
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
   font-weight: 500;
 }
 
 .home-error__item--warning {
-  color: var(--coco-warning);
+  color: var(--nicel-warning);
 }
 
 .home-error__dismiss {
@@ -787,11 +787,11 @@
   border: none;
   font-size: 18px;
   line-height: 1;
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
   cursor: pointer;
   padding: 0 4px;
 }
 
 .home-error__dismiss:hover {
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
 }

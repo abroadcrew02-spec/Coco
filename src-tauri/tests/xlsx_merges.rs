@@ -4,7 +4,7 @@
 //! `<mergeCell ref="..."/>` entries survived.
 
 use calamine::{open_workbook, Xlsx};
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::{Format, Workbook};
 use serde_json::Value;
 use std::fs;

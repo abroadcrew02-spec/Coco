@@ -1,7 +1,7 @@
 .uad-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .uad-modal {
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
   width: 100%;
   max-width: 560px;
   max-height: 80vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .uad-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .uad-close:hover {
-  color: var(--coco-text);
-  background-color: var(--coco-surface-hover);
+  color: var(--nicel-text);
+  background-color: var(--nicel-surface-hover);
 }
 
 .uad-body {
@@ -64,13 +64,13 @@
 .uad-meta {
   margin: 0;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   display: flex;
   gap: 6px;
 }
 
 .uad-meta-label {
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   min-width: 110px;
 }
 
@@ -80,13 +80,13 @@
 
 .uad-divider {
   border: none;
-  border-top: 1px solid var(--coco-border);
+  border-top: 1px solid var(--nicel-border);
   margin: 8px 0 4px;
 }
 
 .uad-field-label {
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   display: block;
   margin-bottom: 4px;
 }
@@ -99,11 +99,11 @@
 .uad-notes-md {
   margin: 0;
   padding: 10px 12px;
-  background-color: var(--coco-accent-subtle);
-  border: 1px solid var(--coco-border-strong);
+  background-color: var(--nicel-accent-subtle);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 6px;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   line-height: 1.5;
   max-height: 280px;
   overflow-y: auto;
@@ -118,7 +118,7 @@
 .uad-notes-md h6 {
   margin: 8px 0 4px;
   font-weight: 600;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   line-height: 1.3;
 }
 
@@ -166,12 +166,12 @@
 }
 
 .uad-notes-md a {
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   text-decoration: underline;
 }
 
 .uad-notes-md a:hover {
-  color: var(--coco-accent-hover);
+  color: var(--nicel-accent-hover);
 }
 
 .uad-notes-md code {
@@ -184,17 +184,17 @@
     "Liberation Mono",
     monospace;
   font-size: 12px;
-  background-color: var(--coco-accent-subtle);
+  background-color: var(--nicel-accent-subtle);
   padding: 1px 5px;
   border-radius: 3px;
-  color: var(--coco-accent-hover);
+  color: var(--nicel-accent-hover);
 }
 
 .uad-notes-md pre {
   margin: 6px 0;
   padding: 8px 10px;
-  background-color: var(--coco-accent-subtle);
-  border: 1px solid var(--coco-border-strong);
+  background-color: var(--nicel-accent-subtle);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   overflow-x: auto;
 }
@@ -208,13 +208,13 @@
 .uad-notes-md blockquote {
   margin: 6px 0;
   padding: 2px 10px;
-  border-left: 3px solid var(--coco-border-strong);
-  color: var(--coco-text-muted);
+  border-left: 3px solid var(--nicel-border-strong);
+  color: var(--nicel-text-muted);
 }
 
 .uad-notes-md hr {
   border: none;
-  border-top: 1px solid var(--coco-border-strong);
+  border-top: 1px solid var(--nicel-border-strong);
   margin: 8px 0;
 }
 
@@ -225,7 +225,7 @@
 
 .uad-notes-md th,
 .uad-notes-md td {
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   padding: 4px 8px;
   font-size: 12px;
 }
@@ -237,7 +237,7 @@
 
 .uad-notes-empty {
   margin: 0;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   font-style: italic;
   font-size: 12px;
 }
@@ -245,19 +245,19 @@
 .uad-forced-banner {
   margin: 0 0 4px;
   padding: 10px 12px;
-  background-color: var(--coco-danger-bg);
-  border: 1px solid var(--coco-danger);
-  border-left: 4px solid var(--coco-danger);
+  background-color: var(--nicel-danger-bg);
+  border: 1px solid var(--nicel-danger);
+  border-left: 4px solid var(--nicel-danger);
   border-radius: 4px;
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
   font-size: 13px;
   font-weight: 600;
 }
 
 .uad-footer {
   padding: 12px 20px;
-  background-color: var(--coco-surface);
-  border-top: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border-top: 1px solid var(--nicel-border);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -273,16 +273,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .uad-btn:hover:not(:disabled) {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-text-faint);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-text-faint);
 }
 
 .uad-btn:disabled {
@@ -291,22 +291,22 @@
 }
 
 .uad-btn--primary {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .uad-btn--primary:hover:not(:disabled) {
-  background-color: var(--coco-accent-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
 }
 
 .uad-btn--danger {
-  color: var(--coco-danger);
-  border-color: var(--coco-border);
+  color: var(--nicel-danger);
+  border-color: var(--nicel-border);
 }
 
 .uad-btn--danger:hover:not(:disabled) {
-  background-color: var(--coco-danger-bg);
-  border-color: var(--coco-danger);
+  background-color: var(--nicel-danger-bg);
+  border-color: var(--nicel-danger);
 }

@@ -7,7 +7,7 @@
 // state. The integrator wires the parsed result back into Univer via the
 // existing `jumpToA1OnSheet` helper.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension) the helpers walk — same
+// Snapshot shape (Univer 0.5.x + Nicel extension) the helpers walk — same
 // layout used by formulaTrace.ts and dataValidation.ts:
 //   {
 //     sheetOrder?: string[];

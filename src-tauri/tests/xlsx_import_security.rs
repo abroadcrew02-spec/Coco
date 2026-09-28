@@ -1,4 +1,4 @@
-use coco_lib::commands::xlsx_io::import_xlsx_core;
+use nicel_lib::commands::xlsx_io::import_xlsx_core;
 use std::io::Write;
 use tempfile::TempDir;
 use zip::write::FileOptions;

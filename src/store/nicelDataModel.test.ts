@@ -19,10 +19,10 @@ import {
   renameCalculatedColumn,
   toDataModel,
   writeDataModel,
-  type CocoDataModel,
+  type NicelDataModel,
   type StoredCalculatedColumn,
   type StoredMeasure,
-} from "./cocoDataModel";
+} from "./nicelDataModel";
 import { CALC_COLUMN_ERROR, MEASURE_ERROR } from "./daxEngine";
 import type { ModelRelationship, ModelTable } from "./daxEngine";
 
@@ -126,7 +126,7 @@ describe("writeDataModel", () => {
 
 describe("toDataModel", () => {
   it("converts stored model into runtime DataModel (DAX-engine input)", () => {
-    const stored: CocoDataModel = {
+    const stored: NicelDataModel = {
       tables: [sampleTable],
       relationships: [sampleRel],
       measures: [makeMeasure("m1")],
@@ -238,7 +238,7 @@ describe("addCalculatedColumn / removeCalculatedColumn", () => {
 
 describe("round-trip (read ↔ write)", () => {
   it("write + read returns an equivalent model", () => {
-    let m: CocoDataModel = EMPTY_DATA_MODEL;
+    let m: NicelDataModel = EMPTY_DATA_MODEL;
     m = addTable(m, sampleTable);
     m = addRelationship(m, sampleRel);
     m = addMeasure(m, makeMeasure("m1", "Total Sales"));
@@ -277,7 +277,7 @@ describe("applyCalculatedColumns", () => {
     ],
   };
 
-  function modelWithTable(): CocoDataModel {
+  function modelWithTable(): NicelDataModel {
     return addTable(EMPTY_DATA_MODEL, tableWithRows);
   }
 
@@ -289,9 +289,9 @@ describe("applyCalculatedColumns", () => {
       expression: "Sales[Amount] * 2",
       columnName: "AmountX2",
     };
-    const cocoModel = addCalculatedColumn(modelWithTable(), cc);
-    const base = toDataModel(cocoModel);
-    const runtime = applyCalculatedColumns(base, cocoModel);
+    const nicelModel = addCalculatedColumn(modelWithTable(), cc);
+    const base = toDataModel(nicelModel);
+    const runtime = applyCalculatedColumns(base, nicelModel);
 
     expect(runtime.tables[0].rows[0].AmountX2).toBe(200);
     expect(runtime.tables[0].rows[1].AmountX2).toBe(400);
@@ -306,7 +306,7 @@ describe("applyCalculatedColumns", () => {
   });
 
   it("multiple stored columns are applied in definition order", () => {
-    let cocoModel = modelWithTable();
+    let nicelModel = modelWithTable();
     const cc1: StoredCalculatedColumn = {
       id: "cc1",
       name: "AmountX2",
@@ -321,8 +321,8 @@ describe("applyCalculatedColumns", () => {
       expression: "Sales[AmountX2] * 2",
       columnName: "AmountX4",
     };
-    cocoModel = addCalculatedColumn(addCalculatedColumn(cocoModel, cc1), cc2);
-    const runtime = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    nicelModel = addCalculatedColumn(addCalculatedColumn(nicelModel, cc1), cc2);
+    const runtime = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
     expect(runtime.tables[0].rows[0].AmountX4).toBe(400);  // 100*2*2
     expect(runtime.tables[0].rows[1].AmountX4).toBe(800);  // 200*2*2
   });
@@ -335,8 +335,8 @@ describe("applyCalculatedColumns", () => {
       expression: "1 +",  // trailing operator → parse error
       columnName: "Bad",
     };
-    const cocoModel = addCalculatedColumn(modelWithTable(), cc);
-    const runtime = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    const nicelModel = addCalculatedColumn(modelWithTable(), cc);
+    const runtime = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
     expect(runtime.tables[0].rows[0].Bad).toBe("#ERROR!");
     expect(runtime.tables[0].rows[1].Bad).toBe("#ERROR!");
   });
@@ -346,7 +346,7 @@ describe("applyCalculatedColumns", () => {
 // Step 6: evaluateStoredMeasure / evaluateAllStoredMeasures bridges
 // ---------------------------------------------------------------------------
 
-function modelWithMeasures(): CocoDataModel {
+function modelWithMeasures(): NicelDataModel {
   const t: ModelTable = {
     name: "Sales",
     columns: [
@@ -359,7 +359,7 @@ function modelWithMeasures(): CocoDataModel {
       { Region: "West", Amount: 200 },
     ],
   };
-  let m: CocoDataModel = addTable(EMPTY_DATA_MODEL, t);
+  let m: NicelDataModel = addTable(EMPTY_DATA_MODEL, t);
   m = addMeasure(m, {
     id: "m-total",
     name: "Total Amount",
@@ -382,41 +382,41 @@ function modelWithMeasures(): CocoDataModel {
 }
 
 describe("evaluateStoredMeasure — bridge", () => {
-  it("evaluates a simple SUM measure via the coco model", () => {
-    const cocoModel = modelWithMeasures();
-    const runtime = toDataModel(cocoModel);
-    expect(evaluateStoredMeasure(runtime, cocoModel, "Total Amount")).toBe(450);
+  it("evaluates a simple SUM measure via the nicel model", () => {
+    const nicelModel = modelWithMeasures();
+    const runtime = toDataModel(nicelModel);
+    expect(evaluateStoredMeasure(runtime, nicelModel, "Total Amount")).toBe(450);
   });
 
   it("evaluates a COUNTROWS measure", () => {
-    const cocoModel = modelWithMeasures();
-    const runtime = toDataModel(cocoModel);
-    expect(evaluateStoredMeasure(runtime, cocoModel, "Row Count")).toBe(3);
+    const nicelModel = modelWithMeasures();
+    const runtime = toDataModel(nicelModel);
+    expect(evaluateStoredMeasure(runtime, nicelModel, "Row Count")).toBe(3);
   });
 
   it("evaluates a CALCULATE measure", () => {
-    const cocoModel = modelWithMeasures();
-    const runtime = toDataModel(cocoModel);
-    expect(evaluateStoredMeasure(runtime, cocoModel, "West Total")).toBe(200);
+    const nicelModel = modelWithMeasures();
+    const runtime = toDataModel(nicelModel);
+    expect(evaluateStoredMeasure(runtime, nicelModel, "West Total")).toBe(200);
   });
 
   it("returns MEASURE_ERROR for unknown measure name", () => {
-    const cocoModel = modelWithMeasures();
-    const runtime = toDataModel(cocoModel);
-    expect(evaluateStoredMeasure(runtime, cocoModel, "No Such")).toBe(MEASURE_ERROR);
+    const nicelModel = modelWithMeasures();
+    const runtime = toDataModel(nicelModel);
+    expect(evaluateStoredMeasure(runtime, nicelModel, "No Such")).toBe(MEASURE_ERROR);
   });
 
   it("respects external filter context", () => {
-    const cocoModel = modelWithMeasures();
-    const runtime = toDataModel(cocoModel);
+    const nicelModel = modelWithMeasures();
+    const runtime = toDataModel(nicelModel);
     const eastRows = runtime.tables[0].rows.filter((r) => r.Region === "East");
     const ctx = new Map<string, Array<Record<string, unknown>>>([["Sales", eastRows]]);
-    expect(evaluateStoredMeasure(runtime, cocoModel, "Total Amount", ctx)).toBe(250);
+    expect(evaluateStoredMeasure(runtime, nicelModel, "Total Amount", ctx)).toBe(250);
   });
 
   it("works with applyCalculatedColumns runtime (calculated columns visible to measures)", () => {
     // Add a calculated column, then evaluate a measure that references it.
-    let cocoModel = modelWithMeasures();
+    let nicelModel = modelWithMeasures();
     const cc: StoredCalculatedColumn = {
       id: "cc-x2",
       name: "AmountX2",
@@ -424,23 +424,23 @@ describe("evaluateStoredMeasure — bridge", () => {
       expression: "Sales[Amount] * 2",
       columnName: "AmountX2",
     };
-    cocoModel = addCalculatedColumn(cocoModel, cc);
-    cocoModel = addMeasure(cocoModel, {
+    nicelModel = addCalculatedColumn(nicelModel, cc);
+    nicelModel = addMeasure(nicelModel, {
       id: "m-x2-sum",
       name: "Sum AmountX2",
       tableId: "Sales",
       expression: "SUM(Sales[AmountX2])",
     });
-    const runtime = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
-    expect(evaluateStoredMeasure(runtime, cocoModel, "Sum AmountX2")).toBe(900); // (100+150+200)*2
+    const runtime = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
+    expect(evaluateStoredMeasure(runtime, nicelModel, "Sum AmountX2")).toBe(900); // (100+150+200)*2
   });
 });
 
 describe("evaluateAllStoredMeasures — bridge", () => {
   it("evaluates all measures in the model", () => {
-    const cocoModel = modelWithMeasures();
-    const runtime = toDataModel(cocoModel);
-    const results = evaluateAllStoredMeasures(runtime, cocoModel);
+    const nicelModel = modelWithMeasures();
+    const runtime = toDataModel(nicelModel);
+    const results = evaluateAllStoredMeasures(runtime, nicelModel);
     expect(results.size).toBe(3);
     expect(results.get("Total Amount")).toBe(450);
     expect(results.get("Row Count")).toBe(3);
@@ -448,12 +448,12 @@ describe("evaluateAllStoredMeasures — bridge", () => {
   });
 
   it("returns empty map for model with no measures", () => {
-    const cocoModel = addTable(EMPTY_DATA_MODEL, {
+    const nicelModel = addTable(EMPTY_DATA_MODEL, {
       name: "T",
       columns: [],
       rows: [],
     });
-    const results = evaluateAllStoredMeasures(toDataModel(cocoModel), cocoModel);
+    const results = evaluateAllStoredMeasures(toDataModel(nicelModel), nicelModel);
     expect(results.size).toBe(0);
   });
 });
@@ -475,7 +475,7 @@ describe("evaluateTransientMeasure", () => {
     ],
   };
 
-  function baseModel(): CocoDataModel {
+  function baseModel(): NicelDataModel {
     return addTable(EMPTY_DATA_MODEL, tableWithRows);
   }
 
@@ -526,7 +526,7 @@ describe("evaluateTransientCalculatedColumn", () => {
     ],
   };
 
-  function baseModel(): CocoDataModel {
+  function baseModel(): NicelDataModel {
     return addTable(EMPTY_DATA_MODEL, tableWithRows);
   }
 
@@ -582,7 +582,7 @@ describe("evaluateTransientCalculatedColumn", () => {
 // ---------------------------------------------------------------------------
 
 describe("renameMeasure", () => {
-  function makeModel(): CocoDataModel {
+  function makeModel(): NicelDataModel {
     const m1: StoredMeasure = { id: "m1", name: "Total Sales", tableId: "Sales", expression: "SUM(Sales[Amount])" };
     const m2: StoredMeasure = { id: "m2", name: "Avg Price", tableId: "Sales", expression: "AVERAGE(Sales[Amount])" };
     return addMeasure(addMeasure(EMPTY_DATA_MODEL, m1), m2);
@@ -635,7 +635,7 @@ describe("renameMeasure", () => {
 // ---------------------------------------------------------------------------
 
 describe("renameCalculatedColumn", () => {
-  function makeModel(): CocoDataModel {
+  function makeModel(): NicelDataModel {
     const table: ModelTable = {
       name: "Sales",
       columns: [

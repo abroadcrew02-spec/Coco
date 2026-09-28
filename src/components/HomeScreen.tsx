@@ -36,7 +36,7 @@ export default function HomeScreen() {
     lastError,
     importWarnings,
     newWorkbook,
-    openCoco,
+    openNicel,
     importXlsx,
     importCsv,
     restoreCandidate,
@@ -213,7 +213,7 @@ export default function HomeScreen() {
       return;
     }
     const route = routeOpenPath(path);
-    if (route.kind === "coco") await openCoco(route.path);
+    if (route.kind === "coco") await openNicel(route.path);
     else if (route.kind === "csv") await importCsv(route.path);
     else if (route.kind === "xlsx") await importXlsx(route.path);
   };
@@ -262,7 +262,7 @@ export default function HomeScreen() {
     // that matches the prior fallback behavior.
     if (route.kind === "csv") await importCsv(file.path);
     else if (route.kind === "xlsx") await importXlsx(file.path);
-    else await openCoco(file.path);
+    else await openNicel(file.path);
   };
 
   // Create a new workbook from a template tile. The blank tile falls through
@@ -463,7 +463,7 @@ export default function HomeScreen() {
     </ul>
   );
 
-  // ── Recovery candidates (Coco-specific) ───────────────────────────────────
+  // ── Recovery candidates (Nicel-specific) ───────────────────────────────────
   const renderRecovery = () =>
     recoveryCandidates.length > 0 && (
       <div className="home-section">
@@ -586,7 +586,7 @@ export default function HomeScreen() {
       {/* Left navigation rail — Excel Start screen layout. */}
       <nav className="home-nav" aria-label="ホームナビゲーション">
         <div className="home-nav-brand">
-          <span className="home-nav-logo">Coco</span>
+          <span className="home-nav-logo">Nicel</span>
         </div>
         <ul className="home-nav-list">
           <li>
@@ -699,7 +699,7 @@ export default function HomeScreen() {
             {isFirstRun && (
               <section className="home-welcome" aria-labelledby="home-welcome-title">
                 <h2 id="home-welcome-title" className="home-welcome__title">
-                  Coco へようこそ
+                  Nicel へようこそ
                 </h2>
                 <p className="home-welcome__tagline">
                   ローカルファーストの xlsx スプレッドシート。

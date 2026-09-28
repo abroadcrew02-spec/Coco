@@ -1,5 +1,5 @@
-use coco_lib::commands::workbook::{diagnostic_info_core, save_core};
-use coco_lib::db::schema::CURRENT_SCHEMA_VERSION;
+use nicel_lib::commands::workbook::{diagnostic_info_core, save_core};
+use nicel_lib::db::schema::CURRENT_SCHEMA_VERSION;
 use tempfile::TempDir;
 
 fn path_str(p: &std::path::Path) -> String {
@@ -20,7 +20,7 @@ fn missing_file_returns_file_not_found() {
 }
 
 #[test]
-fn fresh_coco_reports_one_snapshot_and_current_schema_version() {
+fn fresh_nicel_reports_one_snapshot_and_current_schema_version() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("data.coco");
     save_core("wb1".into(), Some(path_str(&path)), "{\"v\":1}".into()).unwrap();

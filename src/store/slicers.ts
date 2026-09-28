@@ -3,7 +3,7 @@
 // yet) based on which distinct values of a chosen column the user has
 // selected.
 //
-// Snapshot shape (Coco extension to Univer 0.5.x workbook data):
+// Snapshot shape (Nicel extension to Univer 0.5.x workbook data):
 //   {
 //     sheetOrder?: string[],
 //     sheets: {

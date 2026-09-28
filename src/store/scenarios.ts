@@ -10,7 +10,7 @@
 // .getRange().getValue()` and friends in a `ScenarioAdapter` for live runs,
 // and tests can supply a plain object for unit coverage.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension, at the workbook root —
+// Snapshot shape (Univer 0.5.x + Nicel extension, at the workbook root —
 // scenarios can reference cells on any sheet so we do NOT nest them per
 // -sheet):
 //   {
@@ -71,7 +71,7 @@ export function listScenarios(snapshot: WorkbookScenarioSnapshot | null | undefi
 
 /**
  * Insert (or replace by name) a scenario. Returns a new snapshot object so
- * the caller can JSON-stringify it for Coco's snapshot pipeline. Names are
+ * the caller can JSON-stringify it for Nicel's snapshot pipeline. Names are
  * matched case-insensitively to match Excel's behaviour.
  */
 export function addScenario(

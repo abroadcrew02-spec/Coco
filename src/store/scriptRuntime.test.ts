@@ -205,12 +205,12 @@ if (typeof globalThis.localStorage === "undefined") {
 }
 
 describe("#189 — トリガー収集 (collectTriggers)", () => {
-  it("Coco.onOpen / onEdit / addMenuItem / addTimer の登録を収集する", async () => {
+  it("Nicel.onOpen / onEdit / addMenuItem / addTimer の登録を収集する", async () => {
     const entry = mkScript(
-      "Coco.onOpen(() => {});\n" +
-        "Coco.onEdit((e) => { void e; });\n" +
-        "Coco.addMenuItem('挨拶', () => {});\n" +
-        "Coco.addTimer(1000, () => {});\n",
+      "Nicel.onOpen(() => {});\n" +
+        "Nicel.onEdit((e) => { void e; });\n" +
+        "Nicel.addMenuItem('挨拶', () => {});\n" +
+        "Nicel.addTimer(1000, () => {});\n",
     );
     const out = await collectTriggers(entry);
     const kinds = out.triggers.map((t) => t.kind).sort();
@@ -227,14 +227,24 @@ describe("#189 — トリガー収集 (collectTriggers)", () => {
   });
 
   it("addTimer は最小間隔 250ms にクランプされる", async () => {
-    const out = await collectTriggers(mkScript("Coco.addTimer(10, () => {});"));
+    const out = await collectTriggers(mkScript("Nicel.addTimer(10, () => {});"));
     expect(out.triggers[0].intervalMs).toBe(250);
+  });
+
+  it("旧名 Coco.* (v0.7 以前の保存済みスクリプト) でも登録を収集する", async () => {
+    const entry = mkScript(
+      "Coco.onOpen(() => {});\n" + "Coco.addMenuItem('旧名', () => {});\n",
+    );
+    const out = await collectTriggers(entry);
+    const kinds = out.triggers.map((t) => t.kind).sort();
+    expect(kinds).toEqual(["menu", "onOpen"]);
+    expect(out.triggers.find((t) => t.kind === "menu")?.label).toBe("旧名");
   });
 });
 
 describe("#189 — トリガー発火 (fireTrigger)", () => {
   it("onOpen ハンドラを発火し log が記録される", async () => {
-    const entry = mkScript("Coco.onOpen(() => api.log('opened!'));");
+    const entry = mkScript("Nicel.onOpen(() => api.log('opened!'));");
     const result = await fireTrigger(entry, "onOpen");
     expect(result.ok).toBe(true);
     expect(result.logs).toContain("opened!");
@@ -242,7 +252,7 @@ describe("#189 — トリガー発火 (fireTrigger)", () => {
 
   it("onEdit ハンドラに EditEvent が渡される", async () => {
     const entry = mkScript(
-      "Coco.onEdit((e) => api.log('edited', e.a1, e.value));",
+      "Nicel.onEdit((e) => api.log('edited', e.a1, e.value));",
     );
     const result = await fireTrigger(entry, "onEdit", {
       editEvent: { sheetName: "Sheet1", a1: "B2", row: 1, col: 1, value: 99 },
@@ -253,8 +263,8 @@ describe("#189 — トリガー発火 (fireTrigger)", () => {
 
   it("menu トリガーはラベル一致時のみ発火する", async () => {
     const entry = mkScript(
-      "Coco.addMenuItem('A', () => api.log('ran-A'));\n" +
-        "Coco.addMenuItem('B', () => api.log('ran-B'));\n",
+      "Nicel.addMenuItem('A', () => api.log('ran-A'));\n" +
+        "Nicel.addMenuItem('B', () => api.log('ran-B'));\n",
     );
     const result = await fireTrigger(entry, "menu", { label: "B" });
     expect(result.ok).toBe(true);
@@ -263,10 +273,21 @@ describe("#189 — トリガー発火 (fireTrigger)", () => {
   });
 
   it("timer トリガーを発火できる", async () => {
-    const entry = mkScript("Coco.addTimer(500, () => api.log('tick'));");
+    const entry = mkScript("Nicel.addTimer(500, () => api.log('tick'));");
     const result = await fireTrigger(entry, "timer");
     expect(result.ok).toBe(true);
     expect(result.logs).toContain("tick");
+  });
+
+  it("旧名 Coco.* で登録した menu ハンドラも発火する (Nicel と同じオブジェクト)", async () => {
+    const entry = mkScript(
+      "Coco.addMenuItem('M', () => api.log('ran-legacy'));\n" +
+        "api.log(Coco === Nicel ? 'same' : 'different');\n",
+    );
+    const result = await fireTrigger(entry, "menu", { label: "M" });
+    expect(result.ok).toBe(true);
+    expect(result.logs).toContain("same");
+    expect(result.logs).toContain("ran-legacy");
   });
 });
 
@@ -435,7 +456,7 @@ describe("#189 C2 — inline executor に実 Facade を渡さない", () => {
   it("collectTriggers は list-triggers モードで executor を呼ぶ", async () => {
     const { executor, calls } = makeSpyExecutor();
     // executor を明示注入して経路を観測する (本番は DOM ありで iframe)。
-    const out = await runScript("Coco.onOpen(() => {});", {
+    const out = await runScript("Nicel.onOpen(() => {});", {
       executor,
       mode: "list-triggers",
       collectTriggers: [],
@@ -447,7 +468,7 @@ describe("#189 C2 — inline executor に実 Facade を渡さない", () => {
 
   it("fireTrigger(本番経路) は fire-trigger モードと発火指示を executor に渡す", async () => {
     const { executor, calls } = makeSpyExecutor();
-    await fireTrigger(mkScript("Coco.onEdit(() => {});"), "onEdit", {
+    await fireTrigger(mkScript("Nicel.onEdit(() => {});"), "onEdit", {
       executor,
       editEvent: { sheetName: "S", a1: "A1", row: 0, col: 0, value: 7 },
     });
@@ -459,7 +480,7 @@ describe("#189 C2 — inline executor に実 Facade を渡さない", () => {
 
   it("fireTrigger(本番経路) はカスタム executor 利用時 inlineExecutor を使わない", async () => {
     const { executor, calls } = makeSpyExecutor();
-    await fireTrigger(mkScript("Coco.addMenuItem('M', () => {});"), "menu", {
+    await fireTrigger(mkScript("Nicel.addMenuItem('M', () => {});"), "menu", {
       executor,
       label: "M",
     });

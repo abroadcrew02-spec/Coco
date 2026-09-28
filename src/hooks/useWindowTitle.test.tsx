@@ -50,9 +50,9 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("useWindowTitle", () => {
-  it("sets just 'Coco' on the home screen", () => {
+  it("sets just 'Nicel' on the home screen", () => {
     render(<Probe />);
-    expect(lastTitle()).toBe("Coco");
+    expect(lastTitle()).toBe("Nicel");
   });
 
   it("uses 'Untitled' when in the editor with no path", () => {
@@ -67,7 +67,7 @@ describe("useWindowTitle", () => {
       },
     });
     render(<Probe />);
-    expect(lastTitle()).toBe("Coco — Untitled");
+    expect(lastTitle()).toBe("Nicel — Untitled");
   });
 
   it("extracts the base name on Unix paths", () => {
@@ -82,7 +82,7 @@ describe("useWindowTitle", () => {
       },
     });
     render(<Probe />);
-    expect(lastTitle()).toBe("Coco — quarterly.xlsx");
+    expect(lastTitle()).toBe("Nicel — quarterly.xlsx");
   });
 
   it("extracts the base name on Windows paths", () => {
@@ -97,7 +97,7 @@ describe("useWindowTitle", () => {
       },
     });
     render(<Probe />);
-    expect(lastTitle()).toBe("Coco — book.xlsx");
+    expect(lastTitle()).toBe("Nicel — book.xlsx");
   });
 
   it("appends • when saveStatus is 'unsaved'", () => {
@@ -113,7 +113,7 @@ describe("useWindowTitle", () => {
       saveStatus: "unsaved",
     });
     render(<Probe />);
-    expect(lastTitle()).toBe("Coco — book.xlsx •");
+    expect(lastTitle()).toBe("Nicel — book.xlsx •");
   });
 
   it("removes the • when status transitions back to 'saved'", () => {
@@ -129,9 +129,9 @@ describe("useWindowTitle", () => {
       saveStatus: "unsaved",
     });
     render(<Probe />);
-    expect(lastTitle()).toBe("Coco — book.xlsx •");
+    expect(lastTitle()).toBe("Nicel — book.xlsx •");
     act(() => useWorkbookStore.setState({ saveStatus: "saved" }));
-    expect(lastTitle()).toBe("Coco — book.xlsx");
+    expect(lastTitle()).toBe("Nicel — book.xlsx");
   });
 
   it("does NOT append • for in-progress 'saving' state", () => {
@@ -147,10 +147,10 @@ describe("useWindowTitle", () => {
       saveStatus: "saving",
     });
     render(<Probe />);
-    expect(lastTitle()).toBe("Coco — book.xlsx");
+    expect(lastTitle()).toBe("Nicel — book.xlsx");
   });
 
-  it("reverts to 'Coco' when the user navigates back to home", () => {
+  it("reverts to 'Nicel' when the user navigates back to home", () => {
     useWorkbookStore.setState({
       screen: "editor",
       currentHandle: {
@@ -162,9 +162,9 @@ describe("useWindowTitle", () => {
       },
     });
     render(<Probe />);
-    expect(lastTitle()).toBe("Coco — book.xlsx");
+    expect(lastTitle()).toBe("Nicel — book.xlsx");
     act(() => useWorkbookStore.setState({ screen: "home", currentHandle: null }));
-    expect(lastTitle()).toBe("Coco");
+    expect(lastTitle()).toBe("Nicel");
   });
 
   it("does not throw when setTitle rejects (missing permission, etc.)", () => {

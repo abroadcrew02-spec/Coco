@@ -1,7 +1,7 @@
 // Pure helpers for the "Formula Audit" feature set (Show Formulas,
 // Error Indicators sidebar, and Error Checking dialog).
 //
-// Snapshot shape (Univer 0.5.x + Coco extension) the helpers walk:
+// Snapshot shape (Univer 0.5.x + Nicel extension) the helpers walk:
 //   {
 //     sheets: {
 //       <sheetId>: {
@@ -29,7 +29,7 @@
  * this list (case-sensitive — Excel itself writes them in uppercase).
  *
  * Note: `#GETTING_DATA` and `#CALC!` exist in newer Excel builds but are
- * intentionally omitted from the MVP — Coco doesn't currently emit them
+ * intentionally omitted from the MVP — Nicel doesn't currently emit them
  * and the auditor only needs to cover what our formula engine produces.
  */
 export const ERROR_VALUES: readonly string[] = [
@@ -122,7 +122,7 @@ export function toA1Ref(row: number, col: number): string {
  * follows a visually sensible path.
  *
  * Tolerates a malformed / partial snapshot — returns [] in the failure
- * cases rather than throwing, matching the rest of Coco's best-effort
+ * cases rather than throwing, matching the rest of Nicel's best-effort
  * snapshot patches.
  */
 export function collectAuditIssues(snapshot: unknown): AuditIssue[] {

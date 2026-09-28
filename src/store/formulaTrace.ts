@@ -3,7 +3,7 @@
 // as a sidebar panel (FormulaTracePanel) — the grid-arrow renderer in
 // Univer 0.5.x is too involved to bolt on for MVP.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension) the helpers walk — same
+// Snapshot shape (Univer 0.5.x + Nicel extension) the helpers walk — same
 // layout `formulaAudit.ts` documents:
 //   {
 //     sheetOrder?: string[];

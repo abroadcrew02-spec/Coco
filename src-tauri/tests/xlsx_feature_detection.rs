@@ -1,4 +1,4 @@
-use coco_lib::commands::xlsx_io::detect_unsupported_features;
+use nicel_lib::commands::xlsx_io::detect_unsupported_features;
 use std::io::Write;
 use tempfile::TempDir;
 use zip::write::FileOptions;

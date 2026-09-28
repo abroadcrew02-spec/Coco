@@ -2,7 +2,7 @@
 //
 // Behavioral tests for the ribbon (#198): tab switching, keyboard navigation
 // of the tab strip, and that buttons fire their declared action — editor
-// commands via the `coco:editor-command` window event, Univer ops via the
+// commands via the `nicel:editor-command` window event, Univer ops via the
 // `onUniverAction` prop.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -114,7 +114,7 @@ describe("Ribbon — go home (#204)", () => {
 
   it("the Back to Home button does not emit a menu-action or editor command", () => {
     const cmdHandler = vi.fn();
-    window.addEventListener("coco:editor-command", cmdHandler);
+    window.addEventListener("nicel:editor-command", cmdHandler);
     renderRibbon();
     fireEvent.click(screen.getByRole("tab", { name: /^file$|ファイル/i }));
     fireEvent.click(
@@ -122,14 +122,14 @@ describe("Ribbon — go home (#204)", () => {
     );
     expect(emitMock).not.toHaveBeenCalled();
     expect(cmdHandler).not.toHaveBeenCalled();
-    window.removeEventListener("coco:editor-command", cmdHandler);
+    window.removeEventListener("nicel:editor-command", cmdHandler);
   });
 });
 
 describe("Ribbon — button actions", () => {
-  it("editorCommand button dispatches coco:editor-command", () => {
+  it("editorCommand button dispatches nicel:editor-command", () => {
     const handler = vi.fn();
-    window.addEventListener("coco:editor-command", handler);
+    window.addEventListener("nicel:editor-command", handler);
     renderRibbon();
     fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
     // Format Painter on the Home tab is an editorCommand button.
@@ -137,7 +137,7 @@ describe("Ribbon — button actions", () => {
     expect(handler).toHaveBeenCalledTimes(1);
     const evt = handler.mock.calls[0][0] as CustomEvent;
     expect(evt.detail).toBe("format-painter");
-    window.removeEventListener("coco:editor-command", handler);
+    window.removeEventListener("nicel:editor-command", handler);
   });
 
   it("univer button invokes onUniverAction with its op id", () => {
@@ -234,7 +234,7 @@ describe("Ribbon — dropdown buttons (#202 Phase 3)", () => {
 
   it("a menu dropdown item fires an editor command and closes", () => {
     const handler = vi.fn();
-    window.addEventListener("coco:editor-command", handler);
+    window.addEventListener("nicel:editor-command", handler);
     renderRibbon();
     fireEvent.click(screen.getByRole("tab", { name: /home|ホーム/i }));
     // The Number Format button owns a menu dropdown.
@@ -248,7 +248,7 @@ describe("Ribbon — dropdown buttons (#202 Phase 3)", () => {
     const evt = handler.mock.calls[0][0] as CustomEvent;
     expect(evt.detail).toBe("format-currency");
     expect(screen.queryByRole("menu")).toBeNull();
-    window.removeEventListener("coco:editor-command", handler);
+    window.removeEventListener("nicel:editor-command", handler);
   });
 });
 

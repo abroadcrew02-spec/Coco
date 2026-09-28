@@ -5,7 +5,7 @@
 // is active. Persists to localStorage under `coco.watchList` so the list
 // survives reloads.
 //
-// Snapshot shape walked by readCellSnapshot (Univer 0.5.x + Coco extension —
+// Snapshot shape walked by readCellSnapshot (Univer 0.5.x + Nicel extension —
 // same one formulaAudit.ts / dataValidation.ts use):
 //   {
 //     sheets: {

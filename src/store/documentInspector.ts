@@ -4,7 +4,7 @@
 // rows/cols, external links, preserved parts, file-level metadata) and
 // offers per-category "strip" mutators that return a fresh snapshot object.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension):
+// Snapshot shape (Univer 0.5.x + Nicel extension):
 //   {
 //     name?: string;                          // workbook display name
 //     creator?: string;                       // file-level metadata
@@ -35,7 +35,7 @@
 //
 // All mutators return { snapshotMutated, strippedCount } and never mutate the
 // input. The caller JSON.stringify's snapshotMutated back into the workbook
-// store (EditorScreen.applyMutatedSnapshot wraps it in a Coco undo checkpoint).
+// store (EditorScreen.applyMutatedSnapshot wraps it in a Nicel undo checkpoint).
 //
 // Kept side-effect free so it can be unit-tested without Univer.
 
@@ -357,7 +357,7 @@ function inspectSnapshots(): InspectionResult {
     count: 0,
     items: [],
     description:
-      "Coco スナップショット履歴は SQLite で管理されています。履歴ダイアログから個別に削除してください。",
+      "Nicel スナップショット履歴は SQLite で管理されています。履歴ダイアログから個別に削除してください。",
     canStrip: false,
   };
 }
@@ -377,7 +377,7 @@ function inspectPreservedParts(snapshot: InspectorSnapshot): InspectionResult {
     count,
     items,
     description:
-      "Coco が認識しないカスタム XML / 保持パーツが含まれています (チャート, ピボット, 画像など)。",
+      "Nicel が認識しないカスタム XML / 保持パーツが含まれています (チャート, ピボット, 画像など)。",
     canStrip: true,
   };
 }
@@ -598,7 +598,7 @@ function stripMetadata(snapshot: InspectorSnapshot): number {
  * Returns `{ snapshotMutated, strippedCount }`:
  *   - snapshotMutated: a fresh snapshot object (deep clone, never aliased
  *     back to the caller). The caller JSON.stringify's it back into the
- *     workbook store via applyMutatedSnapshot to get a Coco undo checkpoint.
+ *     workbook store via applyMutatedSnapshot to get a Nicel undo checkpoint.
  *   - strippedCount: number of individual items removed.
  *
  * Snapshots are tracked by the Tauri-managed SQLite layer; "snapshots"

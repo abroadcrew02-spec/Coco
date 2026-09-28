@@ -42,7 +42,7 @@ import "@univerjs/sheets-formula/facade";
 import "@univerjs/engine-formula/facade";
 import "@univerjs/docs-ui/facade";
 // Phase 4b: surface the drawing facade (newOverGridImage / insertImages /
-// getImages / FOverGridImage etc.) on FWorksheet so future Coco code can
+// getImages / FOverGridImage etc.) on FWorksheet so future Nicel code can
 // drive in-grid images programmatically.
 import "@univerjs/sheets-drawing/facade";
 import "@univerjs/sheets-drawing-ui/facade";
@@ -58,9 +58,9 @@ import "@univerjs/drawing-ui/lib/index.css";
 import "@univerjs/sheets-drawing-ui/lib/index.css";
 
 import { undoRedoOverride } from "./univerUndoRedoOverride";
-import { registerCocoContextMenu } from "./univerContextMenu";
+import { registerNicelContextMenu } from "./univerContextMenu";
 import { registerFormulaNormalizer } from "./univerFormulaNormalizer";
-import { buildCocoUniverLocales, toUniverLocaleType } from "./cocoUniverLocale";
+import { buildNicelUniverLocales, toUniverLocaleType } from "./nicelUniverLocale";
 import { useWorkbookStore } from "../store/useWorkbookStore";
 import { useAutoSave } from "../hooks/useAutoSave";
 import type { CompatibilityWarning } from "../types/workbook";
@@ -198,7 +198,7 @@ import {
   cellToA1 as pivotCellToA1,
   renameMeasureReferences,
 } from "../store/pivots";
-import { toDataModel, applyCalculatedColumns } from "../store/cocoDataModel";
+import { toDataModel, applyCalculatedColumns } from "../store/nicelDataModel";
 import ChartCanvasPanel from "./ChartCanvasPanel";
 import InGridChartLayer from "./InGridChartLayer";
 import InGridImageLayer from "./InGridImageLayer";
@@ -379,10 +379,10 @@ import {
   renameCalculatedColumn,
   addTable as addModelTable,
   removeTable as removeDataModelTable,
-} from "../store/cocoDataModel";
-import type { StoredMeasure, StoredCalculatedColumn } from "../store/cocoDataModel";
+} from "../store/nicelDataModel";
+import type { StoredMeasure, StoredCalculatedColumn } from "../store/nicelDataModel";
 import {
-  type CocoLinkedDataTypes,
+  type NicelLinkedDataTypes,
   readLinkedDataTypes,
   writeLinkedDataTypes,
   EMPTY_LINKED_DATA_TYPES,
@@ -393,7 +393,7 @@ import { excelTableToModelTable } from "../store/dataModelTableImport";
 import {
   findQuery,
   removeQueryOnSnapshot,
-} from "../store/cocoQueries";
+} from "../store/nicelQueries";
 import {
   runQuery,
   applyQueryResultToSnapshot,
@@ -680,7 +680,7 @@ export default function EditorScreen() {
   const univerStashRef = useRef<{
     univer: Univer;
     fUniver: FUniver;
-    contextMenuReg: ReturnType<typeof registerCocoContextMenu> | null;
+    contextMenuReg: ReturnType<typeof registerNicelContextMenu> | null;
     formulaNormalizerReg: ReturnType<typeof registerFormulaNormalizer> | null;
     disposeTimer: ReturnType<typeof setTimeout> | null;
   } | null>(null);
@@ -717,10 +717,10 @@ export default function EditorScreen() {
     dismissWarnings,
     dismissExportWarnings,
     updateSnapshot,
-    pushCocoCheckpoint,
+    pushNicelCheckpoint,
     markDirty,
     newWorkbook,
-    openCoco,
+    openNicel,
     importXlsx,
     importCsv,
   } = useWorkbookStore();
@@ -728,15 +728,15 @@ export default function EditorScreen() {
   // #97: wrapper for apply-style snapshot mutations (AutoSum, format painter,
   // hyperlink, CF, DV, chart, image, comment, quick number format). These
   // operations bypass Univer's commandService — without this checkpoint,
-  // Ctrl+Alt+Z (Coco undo) can't roll them back. Univer-mediated mutations
+  // Ctrl+Alt+Z (Nicel undo) can't roll them back. Univer-mediated mutations
   // (typing, insertDefinedName, etc.) keep using updateSnapshot directly so
   // Univer's own Ctrl+Z still owns those.
   const applyMutatedSnapshot = useCallback(
     (newSnapshotJson: string) => {
-      pushCocoCheckpoint(useWorkbookStore.getState().currentSnapshotJson);
+      pushNicelCheckpoint(useWorkbookStore.getState().currentSnapshotJson);
       updateSnapshot(newSnapshotJson);
     },
-    [pushCocoCheckpoint, updateSnapshot],
+    [pushNicelCheckpoint, updateSnapshot],
   );
 
   const [sheetPicker, setSheetPicker] = useState<{ id: string; name: string }[] | null>(null);
@@ -1632,7 +1632,7 @@ export default function EditorScreen() {
   // #150: "Insert → Checkbox" command. Walks the active selection and toggles
   // checkbox decoration on every cell. Single-cell on a pre-decorated cell
   // removes the checkbox (Google Sheets parity: the menu acts as toggle).
-  // Snapshot is pushed through applyMutatedSnapshot so the Coco undo stack
+  // Snapshot is pushed through applyMutatedSnapshot so the Nicel undo stack
   // captures the change.
   const insertCheckboxAtSelection = useCallback(() => {
     const ready = getReadyWorkbook("チェックボックス");
@@ -2751,9 +2751,9 @@ export default function EditorScreen() {
 
       if (config.source.kind === "model") {
         // Model-source pivot: compute via computeModelPivot and write to the active sheet.
-        const cocoModel = readDataModel(fresh);
-        const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
-        const result = computeModelPivot(runtimeModel, cocoModel, config);
+        const nicelModel = readDataModel(fresh);
+        const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
+        const result = computeModelPivot(runtimeModel, nicelModel, config);
         const entry: PivotEntry = { ...config, name, lastOutputRows: result.rowCount, lastOutputCols: result.colCount };
 
         if (isEdit) {
@@ -2777,7 +2777,7 @@ export default function EditorScreen() {
         }
 
         if (!isEdit) {
-          addPivotToSheet(fresh, entry, cocoModel, destSheetId);
+          addPivotToSheet(fresh, entry, nicelModel, destSheetId);
         }
         applyMutatedSnapshot(JSON.stringify(fresh));
         return;
@@ -2836,8 +2836,8 @@ export default function EditorScreen() {
       const workbook = fUniver?.getActiveWorkbook();
       if (!workbook) return;
       const fresh = workbook.save() as unknown as WorkbookPivotSnapshot;
-      const cocoModel = readDataModel(fresh);
-      const res = refreshPivotInSheet(fresh, name, cocoModel);
+      const nicelModel = readDataModel(fresh);
+      const res = refreshPivotInSheet(fresh, name, nicelModel);
       if (res.ok) applyMutatedSnapshot(JSON.stringify(fresh));
     },
     [applyMutatedSnapshot],
@@ -2968,10 +2968,10 @@ export default function EditorScreen() {
   // --- #244 Linked Data Types ------------------------------------------------
 
   /**
-   * Read the current CocoLinkedDataTypes model from the live snapshot.
+   * Read the current NicelLinkedDataTypes model from the live snapshot.
    * Falls back to EMPTY when snapshot is unavailable.
    */
-  const linkedDataTypesModel: CocoLinkedDataTypes = (() => {
+  const linkedDataTypesModel: NicelLinkedDataTypes = (() => {
     if (!currentSnapshotJson) return EMPTY_LINKED_DATA_TYPES;
     try {
       return readLinkedDataTypes(JSON.parse(currentSnapshotJson));
@@ -2981,7 +2981,7 @@ export default function EditorScreen() {
   })();
 
   const updateLinkedDataTypes = useCallback(
-    (next: CocoLinkedDataTypes) => {
+    (next: NicelLinkedDataTypes) => {
       const snap = getSnapshotForTool("リンクされたデータ型");
       if (!snap) return;
       const newSnap = writeLinkedDataTypes(snap, next);
@@ -3261,7 +3261,7 @@ export default function EditorScreen() {
 
   // Bulk-op handlers (Slicer panel toolbar). Same shape as toggleSlicer:
   // mutate the cloned snapshot via the pure helper, re-render pivots if any,
-  // commit via applyMutatedSnapshot (Coco-undo aware).
+  // commit via applyMutatedSnapshot (Nicel-undo aware).
   const clearSlicer = useCallback(
     (name: string) => {
       const fUniver = fUniverRef.current;
@@ -3343,7 +3343,7 @@ export default function EditorScreen() {
     try {
       range.setValue(payload);
     } catch (err) {
-      console.warn("[Coco] insertDateTimeNow failed:", err);
+      console.warn("[Nicel] insertDateTimeNow failed:", err);
     }
   }, []);
 
@@ -3434,7 +3434,7 @@ export default function EditorScreen() {
   // edits collapses into one re-render pass (issue perf budget). Broken links
   // (source sheet deleted) get flagged for the #REF! placeholder. The render
   // pass writes back via updateSnapshot directly (not applyMutatedSnapshot)
-  // so it doesn't pollute the Coco undo stack — it's a derived refresh, not a
+  // so it doesn't pollute the Nicel undo stack — it's a derived refresh, not a
   // user action.
   useEffect(() => {
     if (!currentSnapshotJson) return;
@@ -5436,7 +5436,7 @@ export default function EditorScreen() {
   // these through its command stack, so undo/redo and re-render Just Work).
   // Toggle buttons read the current cell style first so a second click clears.
   // Number-format ops (comma / decimal) take the snapshot `_fmt` path because
-  // Coco doesn't register the optional @univerjs/sheets-numfmt facade.
+  // Nicel doesn't register the optional @univerjs/sheets-numfmt facade.
   const handleUniverAction = useCallback(
     (
       op: import("./ribbon/ribbonDefs").UniverActionId,
@@ -5566,7 +5566,7 @@ export default function EditorScreen() {
           case "increaseDecimal":
           case "decreaseDecimal": {
             // Number-format ops walk the snapshot `_fmt` field directly —
-            // Coco doesn't register @univerjs/sheets-numfmt, and xlsx_io.rs
+            // Nicel doesn't register @univerjs/sheets-numfmt, and xlsx_io.rs
             // keys the round-trip off per-cell `_fmt` (see applyNumberFormat).
             const sheetId = sheet.getSheetId();
             const sr = range.getRow();
@@ -6181,10 +6181,10 @@ export default function EditorScreen() {
   }, []);
 
   // Open the chart dialog targeting the active sheet's current selection.
-  // Coco-authored charts persist into `sheets.<id>._charts` and render via
+  // Nicel-authored charts persist into `sheets.<id>._charts` and render via
   // InGridChartLayer (DOM overlay) — no @univerjs/sheets-chart Pro plugin.
   // The xlsx round-trip preserves existing chart blobs byte-for-byte
-  // (xlsx_io.rs); re-emitting chart OOXML so Excel sees Coco-authored charts
+  // (xlsx_io.rs); re-emitting chart OOXML so Excel sees Nicel-authored charts
   // is a separate, untracked concern. Falls back to A1 if there's no live
   // selection.
   const openChartDialog = useCallback(() => {
@@ -6279,7 +6279,7 @@ export default function EditorScreen() {
   // Called by InGridChartLayer on every pointerup that moved/resized a chart.
   // Uses the cached currentSnapshotJson (drag completes synchronously, so no
   // dialog-open race). Pushed through applyMutatedSnapshot so Ctrl+Alt+Z
-  // (Coco undo) can roll it back.
+  // (Nicel undo) can roll it back.
   const handleChartAnchorChange = useCallback(
     (sheetId: string, chartIndex: number, updated: ChartEntry) => {
       const snapshot = getSnapshotForTool("グラフ移動");
@@ -6496,7 +6496,7 @@ export default function EditorScreen() {
   // the snapshot directly: read → mutate cellData[r][c]._fmt → write back via
   // updateSnapshot. We use the snapshot path because Univer 0.5.x's facade
   // exposes setNumberFormat only via the optional @univerjs/sheets-numfmt
-  // plugin, which Coco doesn't register; the round-trip in xlsx_io.rs is
+  // plugin, which Nicel doesn't register; the round-trip in xlsx_io.rs is
   // already keyed off the per-cell `_fmt` field, so this is the simplest
   // path that preserves the format through save/load.
   const applyNumberFormat = useCallback(
@@ -6723,7 +6723,7 @@ export default function EditorScreen() {
   // Apply the new image by appending an ImageEntry to sheets[id]._images
   // (#312). Returns null on success, or a user-visible error string on rejection.
   // Replaces the legacy _preservedParts write path — per #312 design, _images
-  // and _preservedParts are exclusive per sheet for Coco-authored images.
+  // and _preservedParts are exclusive per sheet for Nicel-authored images.
   const applyImage = useCallback(
     (value: ImageFormValue): string | null => {
       if (!imageDialog) return "ダイアログの状態が無効です";
@@ -7203,10 +7203,10 @@ export default function EditorScreen() {
     if (!selected) return;
     const path = typeof selected === "string" ? selected : selected[0];
     const route = routeOpenPath(path);
-    if (route.kind === "coco") await openCoco(route.path);
+    if (route.kind === "coco") await openNicel(route.path);
     else if (route.kind === "csv") await importCsv(route.path);
     else if (route.kind === "xlsx") await importXlsx(route.path);
-  }, [openCoco, importXlsx, importCsv]);
+  }, [openNicel, importXlsx, importCsv]);
 
   const newFromPalette = useCallback(async () => {
     if (!confirmDiscardIfUnsaved()) return;
@@ -7473,7 +7473,7 @@ export default function EditorScreen() {
       } else if (mod && !e.shiftKey && (e.key === "p" || e.key === "P")) {
         // Ctrl+P / Cmd+P — print preview. Previously bound only via the native
         // menu accelerator (#202 removed the native menu); handled here so the
-        // shortcut keeps opening Coco's in-app preview instead of the WebView's
+        // shortcut keeps opening Nicel's in-app preview instead of the WebView's
         // default browser print.
         e.preventDefault();
         openQuickPrintDialog();
@@ -7725,10 +7725,10 @@ export default function EditorScreen() {
         setCalcOptionsOpen(true);
         break;
       case "calc-recalc-all":
-        window.dispatchEvent(new CustomEvent("coco:calc-recalc", { detail: { scope: "all" } }));
+        window.dispatchEvent(new CustomEvent("nicel:calc-recalc", { detail: { scope: "all" } }));
         break;
       case "calc-recalc-sheet":
-        window.dispatchEvent(new CustomEvent("coco:calc-recalc", { detail: { scope: "sheet" } }));
+        window.dispatchEvent(new CustomEvent("nicel:calc-recalc", { detail: { scope: "sheet" } }));
         break;
       case "view-watch-window":
         setWatchWindowOpen((v) => !v);
@@ -8046,8 +8046,8 @@ export default function EditorScreen() {
     const onMenuCsvExport = () => {
       void handleCsvExport();
     };
-    window.addEventListener("coco:menu-csv-export", onMenuCsvExport);
-    return () => window.removeEventListener("coco:menu-csv-export", onMenuCsvExport);
+    window.addEventListener("nicel:menu-csv-export", onMenuCsvExport);
+    return () => window.removeEventListener("nicel:menu-csv-export", onMenuCsvExport);
   }, [handleCsvExport]);
 
   useEffect(() => {
@@ -8055,8 +8055,8 @@ export default function EditorScreen() {
       const id = event instanceof CustomEvent ? event.detail : null;
       if (typeof id === "string") runEditorCommand(id);
     };
-    window.addEventListener("coco:editor-command", onEditorCommand);
-    return () => window.removeEventListener("coco:editor-command", onEditorCommand);
+    window.addEventListener("nicel:editor-command", onEditorCommand);
+    return () => window.removeEventListener("nicel:editor-command", onEditorCommand);
   }, [runEditorCommand]);
 
   useEffect(() => {
@@ -8140,7 +8140,7 @@ export default function EditorScreen() {
       if (e.key !== "F9") return;
       e.preventDefault();
       const scope = e.shiftKey ? "sheet" : "all";
-      window.dispatchEvent(new CustomEvent("coco:calc-recalc", { detail: { scope } }));
+      window.dispatchEvent(new CustomEvent("nicel:calc-recalc", { detail: { scope } }));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -8236,7 +8236,7 @@ export default function EditorScreen() {
     return () => window.removeEventListener("keydown", onKey);
   }, [applyMutatedSnapshot]);
 
-  // #107: consume the coco:calc-recalc events. Calls Univer's facade calc()
+  // #107: consume the nicel:calc-recalc events. Calls Univer's facade calc()
   // when available (the public surface in 0.5.x exposes a workbook-level
   // calculate via formula plugin); best-effort otherwise.
   useEffect(() => {
@@ -8260,8 +8260,8 @@ export default function EditorScreen() {
         // best-effort
       }
     };
-    window.addEventListener("coco:calc-recalc", onRecalc);
-    return () => window.removeEventListener("coco:calc-recalc", onRecalc);
+    window.addEventListener("nicel:calc-recalc", onRecalc);
+    return () => window.removeEventListener("nicel:calc-recalc", onRecalc);
   }, [updateSnapshot]);
 
   // #111: consume the import-workspace-bundle event dispatched from
@@ -8290,7 +8290,7 @@ export default function EditorScreen() {
           });
           if (result?.restoredWorkbookPath) {
             if (!confirmDiscardIfUnsaved()) return;
-            await openCoco(result.restoredWorkbookPath);
+            await openNicel(result.restoredWorkbookPath);
             setEditorOperationError(
               `バンドルを復元しました (シート ${result.sheetCount} / 設定 ${result.restoredSettingsCount} 件)。`,
             );
@@ -8300,9 +8300,9 @@ export default function EditorScreen() {
         }
       })();
     };
-    window.addEventListener("coco:menu-import-workspace-bundle", onImportBundle);
-    return () => window.removeEventListener("coco:menu-import-workspace-bundle", onImportBundle);
-  }, [openCoco]);
+    window.addEventListener("nicel:menu-import-workspace-bundle", onImportBundle);
+    return () => window.removeEventListener("nicel:menu-import-workspace-bundle", onImportBundle);
+  }, [openNicel]);
 
   // Auto-update: startup check. Fires once on mount (empty deps) unless the
   // user has disabled it in Settings (localStorage `coco.updater.checkOnLaunch
@@ -8408,25 +8408,25 @@ export default function EditorScreen() {
     setEditorOperationError(null);
 
     let univer: Univer | null = null;
-    let contextMenuReg: ReturnType<typeof registerCocoContextMenu> | null = null;
+    let contextMenuReg: ReturnType<typeof registerNicelContextMenu> | null = null;
     let formulaNormalizerReg: ReturnType<typeof registerFormulaNormalizer> | null = null;
 
     try {
       // Univer 0.12 ships a native `LocaleType.JA_JP`, so we wire both EN_US
       // and JA_JP slots from the stock per-package locale bundles (plus a
-      // small Coco override for ~200 formula `abstract` strings) and pick the
-      // initial slot via Coco's app-side `getLocale()`. The 0.5.x EN_US-slot-
-      // with-JA-override workaround that lived in cocoUniverLocale.ts was
+      // small Nicel override for ~200 formula `abstract` strings) and pick the
+      // initial slot via Nicel's app-side `getLocale()`. The 0.5.x EN_US-slot-
+      // with-JA-override workaround that lived in nicelUniverLocale.ts was
       // removed as part of the 0.12.4 bump (docs/UNIVER_0_6_MIGRATION.md
       // change #9).
       univer = new Univer({
         theme: defaultTheme,
         // #193 (Univer 0.8 dark mode): seed the initial dark-mode flag from
-        // Coco's effective theme so the grid renders correctly on first paint.
+        // Nicel's effective theme so the grid renders correctly on first paint.
         // The live-update effect below handles subsequent theme flips.
         darkMode: getEffectiveTheme() === "dark",
         locale: toUniverLocaleType(getLocale()),
-        locales: buildCocoUniverLocales(),
+        locales: buildNicelUniverLocales(),
         // FR-011: bump the per-unit undo stack from Univer's default 20 to 100.
         override: undoRedoOverride,
       });
@@ -8435,7 +8435,7 @@ export default function EditorScreen() {
       univer.registerPlugin(UniverFormulaEnginePlugin);
       univer.registerPlugin(UniverUIPlugin, {
         container: "univer-container",
-        // Coco's own custom ribbon covers the toolbar / header-menu surface.
+        // Nicel's own custom ribbon covers the toolbar / header-menu surface.
         // Hide Univer's native header-bar AND ribbon-toolbar to avoid
         // duplicate UI directly above the column-header row. The formula
         // bar lives outside `data-u-comp="headerbar"` so disabling header
@@ -8475,7 +8475,7 @@ export default function EditorScreen() {
       // Snapshot integration: `UniverSheetsDrawingPlugin` registers a
       // `IResourceManagerService` resource keyed by `SHEET_DRAWING_PLUGIN`,
       // so its data round-trips inside `IWorkbookData.resources` — NOT
-      // inside Coco's `_preservedParts` (which the Rust xlsx_io.rs writer
+      // inside Nicel's `_preservedParts` (which the Rust xlsx_io.rs writer
       // owns for byte-for-byte image part preservation). The two paths are
       // independent: existing-xlsx images keep round-tripping via
       // `_preservedParts`, but in-grid rendering requires a bridge that
@@ -8490,7 +8490,7 @@ export default function EditorScreen() {
       // UniverDocsDrawingPlugin in automatically, but Univer's PluginService
       // logs a noisy debug line for each unregistered dependent on every
       // boot. Register explicitly to silence it. The plugin is inert for
-      // sheet-only Coco workbooks (no DOC unit).
+      // sheet-only Nicel workbooks (no DOC unit).
       univer.registerPlugin(UniverDocsDrawingPlugin);
       univer.registerPlugin(UniverSheetsDrawingPlugin);
       univer.registerPlugin(UniverSheetsDrawingUIPlugin);
@@ -8527,8 +8527,8 @@ export default function EditorScreen() {
             showFormulasMode,
           )
         : {
-            id: "coco-workbook",
-            name: "Coco Workbook",
+            id: "nicel-workbook",
+            name: "Nicel Workbook",
             appVersion: "0.1.0",
             locale: LocaleType.EN_US,
             styles: {},
@@ -8551,10 +8551,10 @@ export default function EditorScreen() {
         throw new Error("Active workbook is not available");
       }
 
-      // Wire Coco-specific entries (Insert Comment / Hyperlink / Number Format)
+      // Wire Nicel-specific entries (Insert Comment / Hyperlink / Number Format)
       // into the cell context menu. We forward to the ref-held callbacks so
       // the menu always invokes the latest React-side dialog opener.
-      contextMenuReg = registerCocoContextMenu(univer, {
+      contextMenuReg = registerNicelContextMenu(univer, {
         openCommentDialog: () => openCommentDialogRef.current(),
         openHyperlinkDialog: () => openHyperlinkDialogRef.current(),
         openNumberFormatDialog: () => openNumberFormatDialogRef.current(),
@@ -8612,7 +8612,7 @@ export default function EditorScreen() {
 
   // #179 (area E): hot-swap Univer's locale when the app language changes,
   // so the editor chrome (ribbon, menus, formula helper) updates without a
-  // page reload. The Coco-side UI re-renders via App's useLocale().
+  // page reload. The Nicel-side UI re-renders via App's useLocale().
   useEffect(() => {
     return subscribeLocale((locale) => {
       const univer = univerRef.current;
@@ -8621,7 +8621,7 @@ export default function EditorScreen() {
   }, []);
 
   // #193 (Univer 0.8 dark mode): keep Univer's native dark-mode flag in sync
-  // with Coco's effective theme. Initial value is seeded in the Univer ctor
+  // with Nicel's effective theme. Initial value is seeded in the Univer ctor
   // above; this effect handles live flips (Settings dialog, OS color-scheme
   // change). Modeled on the locale hot-swap above so the editor never has to
   // be re-mounted on a theme change. ThemeService recolors the grid canvas
@@ -8664,7 +8664,7 @@ export default function EditorScreen() {
       const workbook = fUniver.getActiveWorkbook();
       if (!workbook) return;
       // #184 C-1: `FWorkbook.save()` reconstructs the snapshot from Univer's
-      // internal models, so it drops Coco's workbook-root extension keys
+      // internal models, so it drops Nicel's workbook-root extension keys
       // (`_cameraLinks`, `_scenarios`) that were written straight into the
       // store via `applyMutatedSnapshot` without a Univer re-mount. Re-graft
       // them from the prior store snapshot so a cell edit doesn't silently
@@ -8765,7 +8765,7 @@ export default function EditorScreen() {
   }, []);
 
   // #189 — script triggers. Books can embed JS snippets (snapshot._scripts)
-  // that register onOpen / onEdit / timer triggers via the `Coco.*` API.
+  // that register onOpen / onEdit / timer triggers via the `Nicel.*` API.
   // This effect:
   //   - onOpen : fires every registered onOpen handler once the workbook is
   //              ready (after a short settle delay so Facade is populated).
@@ -9318,7 +9318,7 @@ export default function EditorScreen() {
     : "無題のワークブック";
   const isDirty = saveStatus === "unsaved";
   const fileLabel = isDirty ? `${fileName} •` : fileName;
-  const isCocoFile = (currentHandle?.path ?? "").toLowerCase().endsWith(".coco");
+  const isNicelFile = (currentHandle?.path ?? "").toLowerCase().endsWith(".coco");
   const goHomeAfterConfirm = () => {
     if (!confirmDiscardIfUnsaved()) return;
     goHome();
@@ -9624,7 +9624,7 @@ export default function EditorScreen() {
           </span>
         )}
         {lastSavedAt !== null && (
-          isCocoFile ? (
+          isNicelFile ? (
             <button
               type="button"
               className="status-bar__last-saved status-bar__last-saved--clickable"
@@ -9781,7 +9781,7 @@ export default function EditorScreen() {
             initialMeasure={measureEditor.initial}
             tables={dmTables}
             existingNames={existingNames}
-            cocoModel={dm}
+            nicelModel={dm}
             onApply={applyMeasure}
             onClose={() => setMeasureEditor(null)}
           />
@@ -9802,7 +9802,7 @@ export default function EditorScreen() {
             initialColumn={calcColEditor.initial}
             tables={dmTables}
             existingPairs={existingPairs}
-            cocoModel={dm}
+            nicelModel={dm}
             onApply={applyCalculatedColumn}
             onClose={() => setCalcColEditor(null)}
           />
@@ -10112,8 +10112,8 @@ export default function EditorScreen() {
             persistCalcMode(m);
             setCalcModeState(m);
           }}
-          onRecalcAll={() => window.dispatchEvent(new CustomEvent("coco:calc-recalc", { detail: { scope: "all" } }))}
-          onRecalcSheet={() => window.dispatchEvent(new CustomEvent("coco:calc-recalc", { detail: { scope: "sheet" } }))}
+          onRecalcAll={() => window.dispatchEvent(new CustomEvent("nicel:calc-recalc", { detail: { scope: "all" } }))}
+          onRecalcSheet={() => window.dispatchEvent(new CustomEvent("nicel:calc-recalc", { detail: { scope: "sheet" } }))}
           onClose={() => setCalcOptionsOpen(false)}
         />
       )}

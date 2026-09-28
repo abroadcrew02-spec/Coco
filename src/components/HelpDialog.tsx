@@ -39,8 +39,8 @@ const PHASE2_SHORTCUTS: Shortcut[] = [
 const UNIVER_SHORTCUTS: Shortcut[] = [
   { keys: ["Ctrl", "Z"], description: "元に戻す（セル入力）" },
   { keys: ["Ctrl", "Y"], description: "やり直し（セル入力）" },
-  { keys: ["Ctrl", "Alt", "Z"], description: "元に戻す（書式・図形などCoco操作）" },
-  { keys: ["Ctrl", "Alt", "Shift", "Z"], description: "やり直し（Coco操作）" },
+  { keys: ["Ctrl", "Alt", "Z"], description: "元に戻す（書式・図形などNicel操作）" },
+  { keys: ["Ctrl", "Alt", "Shift", "Z"], description: "やり直し（Nicel操作）" },
   { keys: ["Ctrl", "C"], description: "コピー" },
   { keys: ["Ctrl", "X"], description: "切り取り" },
   { keys: ["Ctrl", "V"], description: "貼り付け" },
@@ -104,7 +104,7 @@ export default function HelpDialog({ onClose }: Props) {
         </header>
         <div className="help-body">
           <section className="help-section">
-            <h3>キーボードショートカット（Coco）</h3>
+            <h3>キーボードショートカット（Nicel）</h3>
             <table className="help-table">
               <tbody>
                 {APP_SHORTCUTS.map((s, i) => (
@@ -189,7 +189,7 @@ export default function HelpDialog({ onClose }: Props) {
           <section className="help-section">
             <h3>このアプリについて</h3>
             <p className="help-about">
-              Coco{version ? ` v${version}` : ""} · ローカルファースト表計算<br />
+              Nicel{version ? ` v${version}` : ""} · ローカルファースト表計算<br />
               ライセンス: Apache-2.0 · 表計算エンジン: Univer (Apache-2.0)
             </p>
             <p style={{ marginTop: 8 }}>
@@ -198,7 +198,7 @@ export default function HelpDialog({ onClose }: Props) {
                 className="help-update-btn"
                 onClick={() => {
                   window.dispatchEvent(
-                    new CustomEvent("coco:editor-command", { detail: "help-check-update" }),
+                    new CustomEvent("nicel:editor-command", { detail: "help-check-update" }),
                   );
                   onClose();
                 }}

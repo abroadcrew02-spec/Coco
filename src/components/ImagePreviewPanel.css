@@ -17,10 +17,10 @@
   max-height: 50vh;
   display: flex;
   flex-direction: column;
-  background: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  background: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 6px;
-  box-shadow: 0 4px 12px var(--coco-shadow);
+  box-shadow: 0 4px 12px var(--nicel-shadow);
   font-size: 12px;
   overflow: hidden;
 }
@@ -30,13 +30,13 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 10px;
-  background: var(--coco-surface);
-  border-bottom: 1px solid var(--coco-border);
+  background: var(--nicel-surface);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .ipp-title {
   font-weight: 600;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .ipp-collapse {
@@ -46,11 +46,11 @@
   font-size: 16px;
   line-height: 1;
   padding: 0 4px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .ipp-collapse:hover {
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .ipp-list {
@@ -62,7 +62,7 @@
 }
 
 .ipp-item {
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .ipp-item:last-child {
@@ -80,12 +80,12 @@
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .ipp-item-btn:hover,
 .ipp-item-btn:focus-visible {
-  background: var(--coco-surface-hover);
+  background: var(--nicel-surface-hover);
   outline: none;
 }
 
@@ -98,7 +98,7 @@
     linear-gradient(45deg, #f3f4f6 25%, transparent 25%) 0 0 / 8px 8px,
     linear-gradient(-45deg, #f3f4f6 25%, transparent 25%) 0 0 / 8px 8px,
     #fafafa;
-  border: 1px solid var(--coco-border);
+  border: 1px solid var(--nicel-border);
   border-radius: 3px;
 }
 
@@ -119,8 +119,8 @@
   top: 44px;
   right: 16px;
   z-index: 25;
-  background: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  background: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 999px;
   padding: 4px 10px;
   cursor: pointer;
@@ -128,12 +128,12 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  box-shadow: 0 2px 6px var(--coco-shadow);
+  box-shadow: 0 2px 6px var(--nicel-shadow);
 }
 
 .ipp-badge:hover,
 .ipp-badge:focus-visible {
-  background: var(--coco-surface-hover);
+  background: var(--nicel-surface-hover);
   outline: none;
 }
 
@@ -144,5 +144,5 @@
 
 .ipp-badge-count {
   font-weight: 600;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }

@@ -1,8 +1,8 @@
 .pvlp-root {
   display: flex;
   flex-direction: column;
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -11,16 +11,16 @@
   padding: 10px 14px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-accent);
-  background-color: var(--coco-accent-subtle);
-  border-bottom: 1px solid var(--coco-border);
+  color: var(--nicel-accent);
+  background-color: var(--nicel-accent-subtle);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .pvlp-empty {
   margin: 0;
   padding: 14px;
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .pvlp-list {
@@ -34,7 +34,7 @@
 .pvlp-row {
   display: flex;
   align-items: stretch;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .pvlp-row:last-child {
@@ -52,17 +52,17 @@
   border: none;
   cursor: pointer;
   font: inherit;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .pvlp-jump:hover {
-  background-color: var(--coco-accent-subtle);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .pvlp-name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
 }
 
 .pvlp-meta {
@@ -70,25 +70,25 @@
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   font-family: "Consolas", "Courier New", monospace;
 }
 
 .pvlp-anchor {
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
 }
 
 .pvlp-arrow {
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
 }
 
 .pvlp-dest {
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .pvlp-counts {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .pvlp-refresh,
@@ -96,25 +96,25 @@
 .pvlp-delete {
   background: none;
   border: none;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
   padding: 0 12px;
-  border-left: 1px solid var(--coco-border);
+  border-left: 1px solid var(--nicel-border);
 }
 
 .pvlp-refresh:hover {
-  color: var(--coco-accent);
-  background-color: var(--coco-accent-subtle);
+  color: var(--nicel-accent);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .pvlp-edit:hover {
-  color: var(--coco-accent);
-  background-color: var(--coco-accent-subtle);
+  color: var(--nicel-accent);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .pvlp-delete:hover {
-  color: var(--coco-danger);
-  background-color: var(--coco-danger-bg);
+  color: var(--nicel-danger);
+  background-color: var(--nicel-danger-bg);
 }

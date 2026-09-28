@@ -1,10 +1,14 @@
-# Coco — current state
+# Nicel — current state
 
-Snapshot 2026-05-28 against `main` (HEAD `c382297`).
+Snapshot 2026-09-28 against the v0.8.0 rename branch (based on `main` `fd38912`).
 
 ## Headline
 
-**MVP-1/2/3 functionally complete; Phase 2 authoring UI delivered; Phase 3 "最強Excel" 15-feature roadmap (meta #248) fully closed.** All MVP-1 (FR-001..FR-014), MVP-2 import (FR-101..FR-105), MVP-3 export (FR-201..FR-204), and CSV (FR-301..FR-304) feature IDs verdict OK in `docs/COVERAGE.md`. **Meta #248 の 15 features は全件クローズ済み** — in-grid chart CRUD, Power Query end-to-end, DAX engine (Pivot×measure 統合 + autocomplete + cross-measure refs + rename cascade), CF live re-paint (sidecar + iconSet + polluted-snapshot recovery), Form Control OOXML round-trip (preserve + Coco-authored emit), local CSV/SQLite Linked Data Types, and in-grid **image** canvas overlay all shipped.
+**v0.8.0: the app is renamed Coco → Nicel.** Product name, UI strings, installer, crate, CSS, file names and docs use the new name. Persisted identifiers keep the old spelling for compatibility: `.coco` extension, `_coco*` snapshot keys, `xl/cocoExtensions/`, `com.coco.app`, `coco.*` localStorage keys, `coco-urlfetch` keyring service, updater endpoint / pubkey. The NSIS installer removes the legacy per-user `Coco` install before installing and re-creates shortcuts (`src-tauri/windows/hooks.nsh`; MSI upgrade code pinned to the Coco value in `tauri.conf.json`). Script API is `Nicel.*` with `Coco` kept as an alias. Details: `CHANGELOG.md` 0.8.0.
+
+**Upgrade test (S2) — not yet run as of 2026-09-28.** On a machine with Coco 0.7.0 installed per-user: build the NSIS installer (a throw-away updater key via `npx tauri signer generate` is enough locally), run `Nicel_0.8.0_x64-setup.exe /P /R /UPDATE /ARGS` (the exact switches the auto-updater uses; `/S` alone does not reproduce the update-mode shortcut path), then check: `HKCU\...\Uninstall\Coco` gone and `...\Uninstall\Nicel` = 0.8.0; `%LOCALAPPDATA%\Coco` gone and `%LOCALAPPDATA%\Nicel\nicel.exe` present; Start-menu + desktop `Nicel.lnk` exist and `Coco.lnk` do not; `%AppData%\com.coco.app` and `%LocalAppData%\com.coco.app` unchanged (settings, recents, macros still there). Run the installer once more with `/S` and confirm the hook is a no-op. Re-run after any Tauri CLI upgrade (the hook depends on the template's `$UpdateMode` variable).
+
+**MVP-1/2/3 functionally complete; Phase 2 authoring UI delivered; Phase 3 "最強Excel" 15-feature roadmap (meta #248) fully closed.** All MVP-1 (FR-001..FR-014), MVP-2 import (FR-101..FR-105), MVP-3 export (FR-201..FR-204), and CSV (FR-301..FR-304) feature IDs verdict OK in `docs/COVERAGE.md`. **Meta #248 の 15 features は全件クローズ済み** — in-grid chart CRUD, Power Query end-to-end, DAX engine (Pivot×measure 統合 + autocomplete + cross-measure refs + rename cascade), CF live re-paint (sidecar + iconSet + polluted-snapshot recovery), Form Control OOXML round-trip (preserve + Nicel-authored emit), local CSV/SQLite Linked Data Types, and in-grid **image** canvas overlay all shipped.
 
 ## Key counts
 
@@ -14,7 +18,7 @@ Snapshot 2026-05-28 against `main` (HEAD `c382297`).
 | Vitest tests passing | 2,844 | same run |
 | Cargo integration test files | 57 | `src-tauri/tests/` |
 | Cargo `#[test]` / `#[tokio::test]` annotations | 537 | grep across `src-tauri/tests/` + `src-tauri/src/` |
-| Distbin artifacts produced by `npm run pack` | Windows: `Coco.exe` + `.msi` + `.exe` (NSIS) + `SHA256SUMS.txt` + `manifest.json` + `README.md`; macOS: `.dmg` + raw `Coco` binary + same metadata; Linux: `.deb` / `.AppImage` / `.rpm` + same metadata | `scripts/pack-distbin.mjs` |
+| Distbin artifacts produced by `npm run pack` | Windows: `Nicel.exe` + `.msi` + `.exe` (NSIS) + `SHA256SUMS.txt` + `manifest.json` + `README.md`; macOS: `.dmg` + raw `Nicel` binary + same metadata; Linux: `.deb` / `.AppImage` / `.rpm` + same metadata | `scripts/pack-distbin.mjs` |
 | Phase 2 dialogs + toolbar tools | 10 + 2 | `docs/COVERAGE.md` Phase 2 table |
 
 ## Phase 3 — meta #248 全 15 features クローズ済み
@@ -25,7 +29,7 @@ Snapshot 2026-05-28 against `main` (HEAD `c382297`).
 | **#238 Power Query** | ✅ closed. 13 transforms + json/csv/sqlite/jsonl/tsv source + SavedQueriesPanel (PRs #264–#293)。 |
 | **#239 Power Pivot / DAX** | ✅ closed. 17 DAX functions + measure/calc-col 編集 UI、**Step 7 Pivot×Measure 統合** (`computeModelPivot` + per-cell filter context, PR #303)、**DAX autocomplete** (`useDaxAutocomplete`) + **measure/calc-col rename cascade** (PR #308)、**cross-measure references** (`[MeasureName]` syntax, PR #317)。 |
 | **#241 CF live re-paint** | ✅ closed. Sidecar + computeCfApplyPlan + range batching + iconSet decoration channel + **polluted-snapshot recovery** (`recoverNumericFromPolluted`, PR #315) + live-loop integration test。 |
-| **#194 Form Control round-trip** | ✅ closed. Excel 由来は byte-preserve (PR #306)、**Coco 新規 CheckBox の OOXML ネイティブ emit** (ctrlProps + vmlDrawing + rels + Content_Types, PR #318)。 |
+| **#194 Form Control round-trip** | ✅ closed. Excel 由来は byte-preserve (PR #306)、**Nicel 新規 CheckBox の OOXML ネイティブ emit** (ctrlProps + vmlDrawing + rels + Content_Types, PR #318)。 |
 | **#244 Linked Data Types** | ✅ closed. ローカル CSV/SQLite ベース (serverless)、lookup + カード + セル展開、in-memory cache、Shift_JIS 自動検出 (PRs #307 / #314 / #316)。 |
 | **#312 Image in-grid overlay** | ✅ closed. 自前 `_images` snapshot key + `InGridImageLayer` overlay (drag/resize/delete) + import 正規化 + export 再生成 (PR #319)。 |
 
@@ -49,8 +53,8 @@ Snapshot 2026-05-28 against `main` (HEAD `c382297`).
 
 ## In-grid canvas overlays (no longer sidebar-only)
 
-- **Chart** — Coco-authored `_charts` entries render via `InGridChartLayer` (canvas overlay) since #236 Step 3. `ChartPreviewPanel` (sidebar) kept for legacy `_charts` blob preview + click-to-jump.
-- **Image** — Coco's `_images` entries render via `InGridImageLayer` (canvas overlay) since #312, with drag / resize / delete. `ImagePreviewPanel` (sidebar) reads `_images` first, falls back to `_preservedParts` for legacy. xlsx round-trip via import normalisation (`_preservedParts` → `_images`, XOR invariant) + export regen.
+- **Chart** — Nicel-authored `_charts` entries render via `InGridChartLayer` (canvas overlay) since #236 Step 3. `ChartPreviewPanel` (sidebar) kept for legacy `_charts` blob preview + click-to-jump.
+- **Image** — Nicel's `_images` entries render via `InGridImageLayer` (canvas overlay) since #312, with drag / resize / delete. `ImagePreviewPanel` (sidebar) reads `_images` first, falls back to `_preservedParts` for legacy. xlsx round-trip via import normalisation (`_preservedParts` → `_images`, XOR invariant) + export regen.
 
 ## Outstanding TODOs (link → `docs/TODOS.md`)
 
@@ -63,7 +67,7 @@ Snapshot 2026-05-28 against `main` (HEAD `c382297`).
   - #324 Image overlay: z-order + 90° 回転 → shipped
 - **Medium / Low**: `docs/TODOS.md` の Medium / Low は全項目 (closed)。
 - **Remaining out-of-scope (untracked / wontfix)**:
-  - Chart OOXML re-emit — Coco-authored `_charts` を Excel が認識する OOXML 出力 (image は #312 で対応済み、chart は未対応)
+  - Chart OOXML re-emit — Nicel-authored `_charts` を Excel が認識する OOXML 出力 (image は #312 で対応済み、chart は未対応)
   - Image: フィルタ / トリミング / SVG・WMF・EMF / 大量画像の base64 → IndexedDB 退避 (#324 で z-order + 回転は対応済み、これらは費用対効果低で wontfix)
 - **Wontfix / out of scope**: VBA execution; real-time collab; `.coco` encryption (DG-04); audit log (§5.3.5); automated signing / notarization (process-gated on credentials); external-link auto-fetch; Excel-compatible cloud Linked Data Types (Bing / Refinitiv — API-dependent).
 
@@ -92,9 +96,9 @@ Outputs to `./distbin/`: platform installer(s), raw executable, `SHA256SUMS.txt`
 
 ### Install
 
-- **Windows**: run `./distbin/coco_*-x64-setup.exe` (NSIS) or `./distbin/coco_*-x64_en-US.msi` (MSI).
-- **macOS**: mount `./distbin/Coco_*_aarch64.dmg` (Apple Silicon) or `..._x64.dmg` (Intel), drag `Coco.app` to `/Applications`. Bundle is unsigned today (Gatekeeper warning expected until signing credentials arrive).
-- **Linux**: install `./distbin/coco_*_amd64.deb` or run `./distbin/coco_*_amd64.AppImage` directly.
+- **Windows**: run `./distbin/nicel_*-x64-setup.exe` (NSIS) or `./distbin/nicel_*-x64_en-US.msi` (MSI).
+- **macOS**: mount `./distbin/Nicel_*_aarch64.dmg` (Apple Silicon) or `..._x64.dmg` (Intel), drag `Nicel.app` to `/Applications`. Bundle is unsigned today (Gatekeeper warning expected until signing credentials arrive).
+- **Linux**: install `./distbin/nicel_*_amd64.deb` or run `./distbin/nicel_*_amd64.AppImage` directly.
 
 ### Verification
 

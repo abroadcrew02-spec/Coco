@@ -11,7 +11,7 @@
 // (no DOM, fully unit-testable). The single DOM-touching routine
 // (`renderRangeToDataUrl`) lives in cameraCanvas.ts.
 //
-// Snapshot shape (Univer 0.5.x + Coco):
+// Snapshot shape (Univer 0.5.x + Nicel):
 //   {
 //     styles?: { [id]: IStyleData },
 //     sheets: {

@@ -1,8 +1,8 @@
 .mlp-root {
   display: flex;
   flex-direction: column;
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -14,16 +14,16 @@
   padding: 10px 14px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-accent);
-  background-color: var(--coco-accent-subtle);
-  border-bottom: 1px solid var(--coco-border);
+  color: var(--nicel-accent);
+  background-color: var(--nicel-accent-subtle);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .mlp-add {
   background: none;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
@@ -31,23 +31,23 @@
 }
 
 .mlp-add:hover {
-  background-color: var(--coco-accent-subtle);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .mlp-empty {
   margin: 0;
   padding: 14px;
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .mlp-section-label {
   padding: 4px 12px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--coco-text-muted);
-  background-color: var(--coco-bg-elevated);
-  border-bottom: 1px solid var(--coco-border);
+  color: var(--nicel-text-muted);
+  background-color: var(--nicel-bg-elevated);
+  border-bottom: 1px solid var(--nicel-border);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   display: flex;
@@ -66,7 +66,7 @@
 .mlp-row {
   display: flex;
   align-items: stretch;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .mlp-row:last-child {
@@ -90,7 +90,7 @@
 }
 
 .mlp-info--editable:hover {
-  background-color: var(--coco-surface-hover);
+  background-color: var(--nicel-surface-hover);
 }
 
 .mlp-info-inner {
@@ -104,7 +104,7 @@
 .mlp-name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
 }
 
 .mlp-meta {
@@ -112,7 +112,7 @@
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   min-width: 0;
 }
 
@@ -120,8 +120,8 @@
   display: inline-block;
   padding: 1px 5px;
   border-radius: 3px;
-  background-color: var(--coco-accent-subtle);
-  color: var(--coco-accent);
+  background-color: var(--nicel-accent-subtle);
+  color: var(--nicel-accent);
   font-size: 10px;
   font-weight: 600;
   font-family: "Consolas", "Courier New", monospace;
@@ -130,7 +130,7 @@
 }
 
 .mlp-expr {
-  color: var(--coco-text);
+  color: var(--nicel-text);
   font-family: "Consolas", "Courier New", monospace;
   font-size: 11px;
   overflow: hidden;
@@ -142,37 +142,37 @@
 .mlp-delete {
   background: none;
   border: none;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
   padding: 0 12px;
-  border-left: 1px solid var(--coco-border);
+  border-left: 1px solid var(--nicel-border);
 }
 
 .mlp-delete:hover {
-  color: var(--coco-danger);
-  background-color: var(--coco-danger-bg);
+  color: var(--nicel-danger);
+  background-color: var(--nicel-danger-bg);
 }
 
 .mlp-rename {
   background: none;
   border: none;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
   padding: 0 8px;
-  border-left: 1px solid var(--coco-border);
+  border-left: 1px solid var(--nicel-border);
 }
 
 .mlp-rename:hover {
-  color: var(--coco-accent);
-  background-color: var(--coco-accent-subtle);
+  color: var(--nicel-accent);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .mlp-row--renaming {
-  background-color: var(--coco-surface-hover);
+  background-color: var(--nicel-surface-hover);
 }
 
 .mlp-rename-wrap {
@@ -187,9 +187,9 @@
 .mlp-rename-input {
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-accent);
-  background: var(--coco-bg-base);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-accent);
+  background: var(--nicel-bg-base);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
   padding: 2px 6px;
   width: 100%;
@@ -197,11 +197,11 @@
 }
 
 .mlp-rename-input--error {
-  border-color: var(--coco-danger);
-  background-color: var(--coco-danger-bg);
+  border-color: var(--nicel-danger);
+  background-color: var(--nicel-danger-bg);
 }
 
 .mlp-rename-error {
   font-size: 11px;
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
 }

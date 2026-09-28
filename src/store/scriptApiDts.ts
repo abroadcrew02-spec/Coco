@@ -10,10 +10,11 @@
 // tsc が宣言ファイル扱いして `export const` の値を出力しないため)。
 
 /** スクリプトエディタの補完リファレンスとして表示する `.d.ts` テキスト。 */
-export const SCRIPT_API_DTS = `// Coco スクリプト API リファレンス (#136 / #189)
+export const SCRIPT_API_DTS = `// Nicel スクリプト API リファレンス (#136 / #189)
 //
-// スクリプト本文では引数として 'api' / 'log' / 'Coco' が渡されます。
-// 'Coco' は 'api' のエイリアスです。
+// スクリプト本文では引数として 'api' / 'log' / 'Nicel' が渡されます。
+// 'Nicel' は 'api' のエイリアスです。旧名 'Coco' (v0.7 以前) も同じ
+// オブジェクトとして引き続き参照できます。
 
 interface EditEvent {
   /** 編集されたシート名 */
@@ -71,6 +72,8 @@ interface ScriptApi {
 }
 
 declare const api: ScriptApi;
+declare const Nicel: ScriptApi;
+/** 旧名 (v0.7 以前)。Nicel と同じオブジェクト。 */
 declare const Coco: ScriptApi;
 declare const log: ScriptApi["log"];
 `;
@@ -86,8 +89,8 @@ export const SCRIPT_API_COMPLETIONS: { label: string; signature: string }[] = [
   { label: "api.fillRange", signature: "(sheetName, a1Range, value): void" },
   { label: "api.setCellFormat", signature: "(sheetName, a1Range, format): void" },
   { label: "api.log", signature: "(...args): void" },
-  { label: "Coco.onOpen", signature: "(handler): void" },
-  { label: "Coco.onEdit", signature: "(handler): void" },
-  { label: "Coco.addMenuItem", signature: "(name, handler): void" },
-  { label: "Coco.addTimer", signature: "(intervalMs, handler): void" },
+  { label: "Nicel.onOpen", signature: "(handler): void" },
+  { label: "Nicel.onEdit", signature: "(handler): void" },
+  { label: "Nicel.addMenuItem", signature: "(name, handler): void" },
+  { label: "Nicel.addTimer", signature: "(intervalMs, handler): void" },
 ];

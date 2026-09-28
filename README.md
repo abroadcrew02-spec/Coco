@@ -1,6 +1,6 @@
-# Coco
+# Nicel
 
-Coco is a local-first spreadsheet desktop application for internal use, built on Tauri v2, Rust, React, TypeScript, and Univer. It reads and writes Excel `.xlsx` as the sole user-visible work format. A SQLite store is used internally for autosave snapshots and crash recovery but is not exposed as a pickable save format.
+Nicel is a local-first spreadsheet desktop application for internal use, built on Tauri v2, Rust, React, TypeScript, and Univer. It reads and writes Excel `.xlsx` as the sole user-visible work format. A SQLite store is used internally for autosave snapshots and crash recovery but is not exposed as a pickable save format.
 
 The full requirements specification lives in [`requirements.md`](./requirements.md). This README is the contributor-facing quick start.
 
@@ -14,7 +14,7 @@ The full requirements specification lives in [`requirements.md`](./requirements.
 
 ### xlsx round-trip preservation
 
-Round-trip means *open xlsx → edit in Coco → save back to xlsx without losing the listed element*. The xlsx I/O adapter preserves:
+Round-trip means *open xlsx → edit in Nicel → save back to xlsx without losing the listed element*. The xlsx I/O adapter preserves:
 
 - Cell values, formulas, and cached formula results (P0 function set: `SUM`, `AVERAGE`, `COUNT`, `COUNTA`, `MIN`, `MAX`, `IF`, `AND`, `OR`, `NOT`, `VLOOKUP`, `INDEX`, `MATCH`, `CONCAT`, `LEFT`, `RIGHT`, `MID`, `LEN`, `TODAY`, `DATE`, `YEAR`, `MONTH`, `DAY`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `ABS`)
 - Cell styles: font, fill, alignment, per-cell borders
@@ -117,4 +117,4 @@ npm run pack:stage
 
 ## License
 
-Coco is intended to ship under **Apache-2.0** (see §1.3 of `requirements.md`). Per-dependency licenses are reviewed before each release; bundled OSS notices are produced as part of the distribution package.
+Nicel is intended to ship under **Apache-2.0** (see §1.3 of `requirements.md`). Per-dependency licenses are reviewed before each release; bundled OSS notices are produced as part of the distribution package.

@@ -12,7 +12,7 @@
 // reconcile every <rect> / <path>. Keeps re-render cost flat regardless
 // of category count.
 //
-// Snapshot shape we read from (Univer 0.5.x + Coco extension):
+// Snapshot shape we read from (Univer 0.5.x + Nicel extension):
 //   {
 //     sheetOrder?: string[],
 //     sheets: {

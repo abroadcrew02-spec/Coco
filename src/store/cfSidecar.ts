@@ -234,7 +234,7 @@ export class CfSidecar {
 
   /**
    * Drop EVERY tracked cell. Used when the workbook resets (file close,
-   * Coco-undo rollback past the rule-creation point, etc.).
+   * Nicel-undo rollback past the rule-creation point, etc.).
    */
   clearAll(): void {
     this.entries.clear();

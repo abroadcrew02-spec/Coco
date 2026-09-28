@@ -1,4 +1,4 @@
-use coco_lib::commands::csv_io::{list_sheet_names, workbook_export_csv};
+use nicel_lib::commands::csv_io::{list_sheet_names, workbook_export_csv};
 use std::fs;
 use tempfile::TempDir;
 

@@ -1,5 +1,5 @@
-use coco_lib::commands::workbook::{
-    list_snapshots_core, open_snapshot_core, save_core, workbook_autosave_coco,
+use nicel_lib::commands::workbook::{
+    list_snapshots_core, open_snapshot_core, save_core, workbook_autosave_nicel,
 };
 use tempfile::TempDir;
 
@@ -22,7 +22,7 @@ fn missing_file_returns_file_not_found_error() {
 }
 
 #[test]
-fn fresh_coco_after_single_save_has_one_snapshot() {
+fn fresh_nicel_after_single_save_has_one_snapshot() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("data.coco");
     save_core("wb1".into(), Some(path_str(&path)), "{\"v\":1}".into()).unwrap();
@@ -43,7 +43,7 @@ fn snapshots_returned_in_descending_order_newest_first() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("data.coco");
     save_core("wb1".into(), Some(path_str(&path)), "{\"v\":1}".into()).unwrap();
-    workbook_autosave_coco("wb1".into(), path_str(&path), "{\"v\":2}".into()).unwrap();
+    workbook_autosave_nicel("wb1".into(), path_str(&path), "{\"v\":2}".into()).unwrap();
     save_core("wb1".into(), Some(path_str(&path)), "{\"v\":3}".into()).unwrap();
 
     let snapshots = list_snapshots_core(&path_str(&path)).unwrap();

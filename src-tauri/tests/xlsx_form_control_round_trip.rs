@@ -5,7 +5,7 @@
 //!   - xl/drawings/vmlDrawingN.vml     (VML shape / visual decorations)
 //!   - xl/worksheets/_rels/sheetN.xml.rels  (relationships stitching them in)
 //!
-//! Coco cannot yet author these parts natively, but the byte-preserve pipeline
+//! Nicel cannot yet author these parts natively, but the byte-preserve pipeline
 //! (PRESERVED_PREFIXES in xlsx_io.rs) captures them verbatim on import and
 //! reinjerts them on export.  This test file pins that behaviour so a future
 //! regression is caught immediately.
@@ -17,7 +17,7 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use tempfile::TempDir;
 use zip::write::FileOptions;
@@ -457,11 +457,11 @@ fn plain_workbook_unaffected() {
 }
 
 // ---------------------------------------------------------------------------
-// #309: Coco-new CheckBox OOXML emit tests
+// #309: Nicel-new CheckBox OOXML emit tests
 // ---------------------------------------------------------------------------
 
-/// Build a minimal snapshot JSON string with one Coco-new checkbox on Sheet1.
-fn snapshot_with_coco_checkbox(checked: bool, label: &str, fmla_link: Option<&str>) -> String {
+/// Build a minimal snapshot JSON string with one Nicel-new checkbox on Sheet1.
+fn snapshot_with_nicel_checkbox(checked: bool, label: &str, fmla_link: Option<&str>) -> String {
     let checked_val = if checked { "true" } else { "false" };
     let fmla_link_field = if let Some(link) = fmla_link {
         format!(r#", "fmlaLink": "{link}""#)
@@ -473,12 +473,12 @@ fn snapshot_with_coco_checkbox(checked: bool, label: &str, fmla_link: Option<&st
     )
 }
 
-/// A single Coco-new checkbox must produce ctrlProp and vmlDrawing parts.
+/// A single Nicel-new checkbox must produce ctrlProp and vmlDrawing parts.
 #[test]
-fn coco_new_checkbox_emits_ctrl_prop_and_vml() {
+fn nicel_new_checkbox_emits_ctrl_prop_and_vml() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
-    let snap = snapshot_with_coco_checkbox(false, "Agree?", None);
+    let snap = snapshot_with_nicel_checkbox(false, "Agree?", None);
 
     let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
     assert!(export.success, "export must succeed: {:?}", export.error);
@@ -488,7 +488,7 @@ fn coco_new_checkbox_emits_ctrl_prop_and_vml() {
 
     assert!(
         zip.by_name("xl/ctrlProps/ctrlProp9000.xml").is_ok(),
-        "ctrlProp9000.xml must be emitted for first-sheet Coco-new checkbox"
+        "ctrlProp9000.xml must be emitted for first-sheet Nicel-new checkbox"
     );
     assert!(
         zip.by_name("xl/drawings/vmlDrawing9000.vml").is_ok(),
@@ -502,10 +502,10 @@ fn coco_new_checkbox_emits_ctrl_prop_and_vml() {
 
 /// [Content_Types].xml must get Override entries for ctrlProp and vmlDrawing.
 #[test]
-fn coco_new_checkbox_content_types_overrides() {
+fn nicel_new_checkbox_content_types_overrides() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
-    let snap = snapshot_with_coco_checkbox(true, "Done", None);
+    let snap = snapshot_with_nicel_checkbox(true, "Done", None);
 
     let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
     assert!(export.success, "export must succeed");
@@ -532,11 +532,11 @@ fn coco_new_checkbox_content_types_overrides() {
 
 /// ctrlProp XML has objectType="CheckBox" and the correct checked attribute.
 #[test]
-fn coco_new_checkbox_ctrl_prop_xml_content() {
+fn nicel_new_checkbox_ctrl_prop_xml_content() {
     for &checked in &[false, true] {
         let tmp = TempDir::new().unwrap();
         let out_path = tmp.path().join("out.xlsx");
-        let snap = snapshot_with_coco_checkbox(checked, "Task", None);
+        let snap = snapshot_with_nicel_checkbox(checked, "Task", None);
 
         let export = export_xlsx_core(path_str(&out_path), snap).unwrap();
         assert!(export.success);
@@ -564,10 +564,10 @@ fn coco_new_checkbox_ctrl_prop_xml_content() {
 
 /// The sheet XML must receive a <legacyDrawing> element after emit.
 #[test]
-fn coco_new_checkbox_legacy_drawing_in_sheet_xml() {
+fn nicel_new_checkbox_legacy_drawing_in_sheet_xml() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
-    let snap = snapshot_with_coco_checkbox(false, "Mark", None);
+    let snap = snapshot_with_nicel_checkbox(false, "Mark", None);
 
     let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
     assert!(export.success);
@@ -589,10 +589,10 @@ fn coco_new_checkbox_legacy_drawing_in_sheet_xml() {
 
 /// Sheet rels must contain the vmlDrawing relationship after emit.
 #[test]
-fn coco_new_checkbox_sheet_rels_has_vml_rel() {
+fn nicel_new_checkbox_sheet_rels_has_vml_rel() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
-    let snap = snapshot_with_coco_checkbox(false, "Select", None);
+    let snap = snapshot_with_nicel_checkbox(false, "Select", None);
 
     let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
     assert!(export.success);
@@ -612,12 +612,12 @@ fn coco_new_checkbox_sheet_rels_has_vml_rel() {
     );
 }
 
-/// A snapshot with no Coco-new checkboxes must not emit ctrlProp or vmlDrawing.
+/// A snapshot with no Nicel-new checkboxes must not emit ctrlProp or vmlDrawing.
 #[test]
-fn no_coco_new_checkboxes_emits_nothing_extra() {
+fn no_nicel_new_checkboxes_emits_nothing_extra() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
-    // Checkbox without _provenance field — treated as non-Coco-new.
+    // Checkbox without _provenance field — treated as non-Nicel-new.
     let snap = r#"{"sheetOrder":["s1"],"sheets":{"s1":{"id":"s1","name":"S1","rowData":{},"_checkboxes":[{"row":0,"col":0,"label":"X","checked":false}]}}}"#.to_string();
 
     let export = export_xlsx_core(path_str(&out_path), snap).expect("export ok");
@@ -636,9 +636,9 @@ fn no_coco_new_checkboxes_emits_nothing_extra() {
     );
 }
 
-/// Mixed: one non-provenance + one Coco-new checkbox; only the Coco-new one emits OOXML.
+/// Mixed: one non-provenance + one Nicel-new checkbox; only the Nicel-new one emits OOXML.
 #[test]
-fn mixed_non_provenance_and_coco_new() {
+fn mixed_non_provenance_and_nicel_new() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
     let snap = r#"{"sheetOrder":["s1"],"sheets":{"s1":{"id":"s1","name":"S1","rowData":{},"_checkboxes":[{"row":0,"col":0,"label":"Old","checked":false},{"_provenance":"coco-new","row":2,"col":0,"label":"New","checked":true}]}}}"#.to_string();
@@ -649,12 +649,12 @@ fn mixed_non_provenance_and_coco_new() {
     let out_bytes = std::fs::read(&out_path).expect("read output");
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(out_bytes)).expect("zip");
 
-    // One Coco-new checkbox → ctrlProp9000 only.
+    // One Nicel-new checkbox → ctrlProp9000 only.
     assert!(
         zip.by_name("xl/ctrlProps/ctrlProp9000.xml").is_ok(),
         "ctrlProp9000.xml must exist for the coco-new checkbox"
     );
-    // Should NOT have ctrlProp9001 — only one Coco-new entry.
+    // Should NOT have ctrlProp9001 — only one Nicel-new entry.
     assert!(
         zip.by_name("xl/ctrlProps/ctrlProp9001.xml").is_err(),
         "ctrlProp9001.xml must NOT exist (only one coco-new checkbox)"
@@ -696,7 +696,7 @@ fn snapshot_with_scrollbar(min: i64, max: i64, step: i64, page: i64, horiz: bool
 }
 
 #[test]
-fn coco_new_radio_emits_ctrl_prop_and_vml() {
+fn nicel_new_radio_emits_ctrl_prop_and_vml() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
     let snap = snapshot_with_radio(false, true, None);
@@ -718,7 +718,7 @@ fn coco_new_radio_emits_ctrl_prop_and_vml() {
 }
 
 #[test]
-fn coco_new_radio_ctrl_prop_has_object_type_radio() {
+fn nicel_new_radio_ctrl_prop_has_object_type_radio() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
     let snap = snapshot_with_radio(true, false, Some("Sheet1!$B$1"));
@@ -750,7 +750,7 @@ fn coco_new_radio_ctrl_prop_has_object_type_radio() {
 }
 
 #[test]
-fn coco_new_radio_vml_client_data_type() {
+fn nicel_new_radio_vml_client_data_type() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
     let snap = snapshot_with_radio(false, true, None);
@@ -778,7 +778,7 @@ fn coco_new_radio_vml_client_data_type() {
 }
 
 #[test]
-fn coco_new_spinner_ctrl_prop_ranges() {
+fn nicel_new_spinner_ctrl_prop_ranges() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
     let snap = snapshot_with_spinner(5, 50, 2, 10, Some("Sheet1!$C$1"));
@@ -810,7 +810,7 @@ fn coco_new_spinner_ctrl_prop_ranges() {
 }
 
 #[test]
-fn coco_new_spinner_vml_client_data() {
+fn nicel_new_spinner_vml_client_data() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
     let snap = snapshot_with_spinner(0, 100, 1, 10, None);
@@ -838,7 +838,7 @@ fn coco_new_spinner_vml_client_data() {
 }
 
 #[test]
-fn coco_new_scrollbar_ctrl_prop_horiz() {
+fn nicel_new_scrollbar_ctrl_prop_horiz() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
     let snap = snapshot_with_scrollbar(0, 200, 5, 20, true, Some("Sheet1!$D$1"));
@@ -874,7 +874,7 @@ fn coco_new_scrollbar_ctrl_prop_horiz() {
 }
 
 #[test]
-fn coco_new_scrollbar_vml_client_data() {
+fn nicel_new_scrollbar_vml_client_data() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
     let snap = snapshot_with_scrollbar(10, 90, 3, 15, true, None);
@@ -903,7 +903,7 @@ fn coco_new_scrollbar_vml_client_data() {
 }
 
 #[test]
-fn coco_new_scrollbar_vertical_no_horiz_element() {
+fn nicel_new_scrollbar_vertical_no_horiz_element() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
     let snap = snapshot_with_scrollbar(0, 100, 1, 10, false, None);
@@ -1007,7 +1007,7 @@ fn form_control_without_provenance_emits_nothing() {
 }
 
 #[test]
-fn coco_new_spinner_cell_a1_ref_parsed() {
+fn nicel_new_spinner_cell_a1_ref_parsed() {
     let tmp = TempDir::new().unwrap();
     let out_path = tmp.path().join("out.xlsx");
     let snap = r#"{"sheetOrder":["s1"],"sheets":{"s1":{"id":"s1","name":"S1","rowData":{},"_formControls":[{"_provenance":"coco-new","kind":"spin","cell":"D5","min":1,"max":20,"step":1,"page":5}]}}}"#.to_string();

@@ -2,8 +2,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import MeasureEditorDialog from "./MeasureEditorDialog";
-import type { CocoDataModel, StoredMeasure } from "../store/cocoDataModel";
-import { addTable, EMPTY_DATA_MODEL } from "../store/cocoDataModel";
+import type { NicelDataModel, StoredMeasure } from "../store/nicelDataModel";
+import { addTable, EMPTY_DATA_MODEL } from "../store/nicelDataModel";
 import type { ModelTable } from "../store/daxEngine";
 
 afterEach(() => cleanup());
@@ -149,7 +149,7 @@ describe("MeasureEditorDialog — live preview", () => {
     columns: [{ name: "Amount", type: "number" }],
     rows: [{ Amount: 100 }, { Amount: 200 }],
   };
-  const cocoModel: CocoDataModel = addTable(EMPTY_DATA_MODEL, salesTable);
+  const nicelModel: NicelDataModel = addTable(EMPTY_DATA_MODEL, salesTable);
 
   it("shows preview value after 300ms when expression is entered", async () => {
     vi.useFakeTimers();
@@ -157,7 +157,7 @@ describe("MeasureEditorDialog — live preview", () => {
       <MeasureEditorDialog
         tables={TABLES}
         existingNames={[]}
-        cocoModel={cocoModel}
+        nicelModel={nicelModel}
         onApply={vi.fn()}
         onClose={vi.fn()}
       />,
@@ -180,7 +180,7 @@ describe("MeasureEditorDialog — live preview", () => {
       <MeasureEditorDialog
         tables={TABLES}
         existingNames={[]}
-        cocoModel={cocoModel}
+        nicelModel={nicelModel}
         onApply={vi.fn()}
         onClose={vi.fn()}
       />,
@@ -198,7 +198,7 @@ describe("MeasureEditorDialog — live preview", () => {
       <MeasureEditorDialog
         tables={TABLES}
         existingNames={[]}
-        cocoModel={cocoModel}
+        nicelModel={nicelModel}
         onApply={vi.fn()}
         onClose={vi.fn()}
       />,

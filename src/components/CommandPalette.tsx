@@ -25,7 +25,7 @@ interface Props {
  * Case-insensitive substring filter over `label + category + keywords`. We
  * keep this intentionally simple (no fuzzy scoring) — VS Code's palette also
  * works well with plain substring matching when the action list is < ~50
- * entries, which is where Coco sits.
+ * entries, which is where Nicel sits.
  */
 function filterCommands(commands: PaletteCommand[], query: string): PaletteCommand[] {
   const trimmed = query.trim().toLowerCase();

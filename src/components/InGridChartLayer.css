@@ -17,9 +17,9 @@
   width: var(--cf-width);
   height: var(--cf-height);
   pointer-events: auto;
-  background: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border);
-  box-shadow: 0 2px 6px var(--coco-shadow);
+  background: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border);
+  box-shadow: 0 2px 6px var(--nicel-shadow);
   overflow: visible;
 }
 

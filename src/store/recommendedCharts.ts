@@ -10,7 +10,7 @@
 // about in isolation. The integrator in EditorScreen reads values from the
 // snapshot, calls `analyzeRange`, and passes the result into the dialog.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension) the consumer eventually
+// Snapshot shape (Univer 0.5.x + Nicel extension) the consumer eventually
 // writes to:
 //   {
 //     sheets: {

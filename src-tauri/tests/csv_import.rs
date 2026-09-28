@@ -1,4 +1,4 @@
-use coco_lib::commands::csv_io::import_csv_core;
+use nicel_lib::commands::csv_io::import_csv_core;
 use std::fs;
 use tempfile::TempDir;
 

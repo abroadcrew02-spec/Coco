@@ -86,11 +86,11 @@ fn open_workbook_db(path: &str) -> Result<Connection, String> {
     Ok(conn)
 }
 
-/// Sniff `path` as a SQLite file and reject anything that isn't a Coco
+/// Sniff `path` as a SQLite file and reject anything that isn't a Nicel
 /// workbook. Shared by every maintenance command (vacuum, integrity,
 /// diagnostic) so #74 stays plugged consistently. Returns Ok(()) on a real
-/// Coco workbook, Err with a user-facing message otherwise.
-fn require_coco_schema(path: &str) -> Result<(), String> {
+/// Nicel workbook, Err with a user-facing message otherwise.
+fn require_nicel_schema(path: &str) -> Result<(), String> {
     let conn = Connection::open_with_flags(
         path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
@@ -111,13 +111,13 @@ fn require_coco_schema(path: &str) -> Result<(), String> {
         )
         .unwrap_or(false);
     if !has_meta || !has_snapshots {
-        return Err("Not a Coco workbook (.coco)".to_string());
+        return Err("Not a Nicel workbook (.coco)".to_string());
     }
     Ok(())
 }
 
-/// Read-only Coco DB open: rejects files that lack Coco's core tables so we
-/// never write Coco schema onto unrelated SQLite databases.
+/// Read-only Nicel DB open: rejects files that lack Nicel's core tables so we
+/// never write Nicel schema onto unrelated SQLite databases.
 fn open_workbook_db_for_read(path: &str) -> Result<Connection, String> {
     let conn = Connection::open_with_flags(
         path,
@@ -139,7 +139,7 @@ fn open_workbook_db_for_read(path: &str) -> Result<Connection, String> {
         )
         .unwrap_or(false);
     if !has_meta || !has_snapshots {
-        return Err("Not a Coco workbook (.coco)".to_string());
+        return Err("Not a Nicel workbook (.coco)".to_string());
     }
     Ok(conn)
 }
@@ -399,7 +399,7 @@ pub fn workbook_new() -> Result<WorkbookHandle, String> {
     })
 }
 
-pub fn open_coco_core(
+pub fn open_nicel_core(
     data_dir: &std::path::Path,
     path: &str,
 ) -> Result<OpenWorkbookResult, String> {
@@ -444,13 +444,13 @@ pub fn open_coco_core(
 }
 
 #[tauri::command]
-pub fn workbook_open_coco(
+pub fn workbook_open_nicel(
     app: tauri::AppHandle,
     path: String,
 ) -> Result<OpenWorkbookResult, String> {
     use tauri::Manager;
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    open_coco_core(&data_dir, &path)
+    open_nicel_core(&data_dir, &path)
 }
 
 /// Best-effort: after a successful save, record the file in recent_files so
@@ -521,7 +521,7 @@ pub fn workbook_save_as(
 }
 
 #[tauri::command]
-pub fn workbook_autosave_coco(
+pub fn workbook_autosave_nicel(
     workbook_id: String,
     path: String,
     snapshot_json: String,
@@ -778,11 +778,11 @@ pub fn vacuum_core(path: &str) -> Result<VacuumResult, String> {
     if !p.exists() {
         return Err(format!("File not found: {path}"));
     }
-    // #74: refuse to VACUUM SQLite files that aren't Coco workbooks. Same
-    // motivation as #51 — Coco's commands accept any path string, so without
+    // #74: refuse to VACUUM SQLite files that aren't Nicel workbooks. Same
+    // motivation as #51 — Nicel's commands accept any path string, so without
     // a schema sniff a malicious frontend invocation could rewrite an
     // unrelated database (KeePass, app history, etc.).
-    require_coco_schema(path)?;
+    require_nicel_schema(path)?;
     let before_bytes = std::fs::metadata(p).map_err(|e| e.to_string())?.len();
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     conn.execute_batch("VACUUM;").map_err(|e| e.to_string())?;
@@ -821,7 +821,7 @@ pub fn check_integrity_core(path: &str) -> Result<IntegrityCheckResult, String> 
     if !std::path::Path::new(path).exists() {
         return Err(format!("File not found: {path}"));
     }
-    require_coco_schema(path)?; // #74
+    require_nicel_schema(path)?; // #74
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("PRAGMA integrity_check")
@@ -869,7 +869,7 @@ pub fn diagnostic_info_core(path: &str) -> Result<DiagnosticInfo, String> {
     if !p.exists() {
         return Err(format!("File not found: {path}"));
     }
-    require_coco_schema(path)?; // #74
+    require_nicel_schema(path)?; // #74
     let size_bytes = std::fs::metadata(p).map_err(|e| e.to_string())?.len();
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     let snapshot_count: i64 = conn

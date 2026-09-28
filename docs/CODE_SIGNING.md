@@ -1,17 +1,17 @@
-# Coco — Windows コード署名 (オプション) 運用ガイド
+# Nicel — Windows コード署名 (オプション) 運用ガイド
 
-このドキュメントは Windows 向け Coco インストーラ (`*-setup.exe` / `*.msi`) のコード署名運用手順をまとめたものである。署名証明書を取得していない状態でも release pipeline は通る (Phase 1 と同じ未署名状態) ため、本ガイドの対応はオプション扱い。
+このドキュメントは Windows 向け Nicel インストーラ (`*-setup.exe` / `*.msi`) のコード署名運用手順をまとめたものである。署名証明書を取得していない状態でも release pipeline は通る (Phase 1 と同じ未署名状態) ため、本ガイドの対応はオプション扱い。
 
 ## 1. 概要
 
-Windows でユーザーが Coco インストーラを実行すると、初回は **Microsoft Defender SmartScreen** が「発行元不明のアプリ」警告を出す。これを回避するにはインストーラに信頼された発行元の **Authenticode 署名** を付与する必要がある。署名証明書には大きく分けて 2 種類ある。
+Windows でユーザーが Nicel インストーラを実行すると、初回は **Microsoft Defender SmartScreen** が「発行元不明のアプリ」警告を出す。これを回避するにはインストーラに信頼された発行元の **Authenticode 署名** を付与する必要がある。署名証明書には大きく分けて 2 種類ある。
 
 | 種別 | 価格目安 (年) | SmartScreen 即時パス | 備考 |
 |---|---|---|---|
 | **OV (Organization Validation)** | $80 - $200 | △ ダウンロード数に応じて段階的に評価が上がる | コスパは良いが「最初の数百 DL は警告」 |
 | **EV (Extended Validation)** | $200 - $400 | ○ 取得直後から警告なし | ハードウェアトークン必須 (HSM / USB) |
 
-Coco のように初回 DL 数が読めない場合、 **EV cert + クラウド署名サービス** の組み合わせが運用負荷と効果のバランスが良い。
+Nicel のように初回 DL 数が読めない場合、 **EV cert + クラウド署名サービス** の組み合わせが運用負荷と効果のバランスが良い。
 
 ## 2. 証明書購入の選択肢
 
@@ -36,7 +36,7 @@ Coco のように初回 DL 数が読めない場合、 **EV cert + クラウド�
 ローカル PowerShell で実行:
 
 ```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes(".\coco-signing.pfx")) | Set-Clipboard
+[Convert]::ToBase64String([IO.File]::ReadAllBytes(".\nicel-signing.pfx")) | Set-Clipboard
 ```
 
 クリップボードに base64 文字列がコピーされる。
@@ -61,14 +61,14 @@ GitHub repo → Settings → Secrets and variables → Actions → **New reposit
 ### 4-1. signtool verify (CLI)
 
 ```powershell
-& "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe" verify /pa /v Coco_x.y.z_x64-setup.exe
+& "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe" verify /pa /v Nicel_x.y.z_x64-setup.exe
 ```
 
 `Successfully verified` と表示されればOK。
 
 ### 4-2. エクスプローラ (GUI)
 
-1. `Coco_x.y.z_x64-setup.exe` を右クリック → **プロパティ**
+1. `Nicel_x.y.z_x64-setup.exe` を右クリック → **プロパティ**
 2. **デジタル署名** タブが存在することを確認
 3. 署名者欄をダブルクリック → 「この証明書を表示」で発行元と有効期限を確認
 
@@ -80,7 +80,7 @@ VM またはまっさらな Windows マシンでダブルクリックし、Smart
 
 `signtool sign` に `/tr <url> /td sha256` を渡してタイムスタンプを埋め込んでいる。これにより**証明書の有効期限が切れた後も署名は有効**として扱われる (タイムスタンプ時点で証明書が有効だったことが暗号学的に証明されるため)。
 
-Coco では DigiCert RFC 3161 サーバ (`http://timestamp.digicert.com`) を使用。代替:
+Nicel では DigiCert RFC 3161 サーバ (`http://timestamp.digicert.com`) を使用。代替:
 
 - `http://timestamp.sectigo.com`
 - `http://timestamp.globalsign.com/tsa/r6advanced1`

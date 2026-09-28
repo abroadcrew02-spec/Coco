@@ -4,7 +4,7 @@
 // hierarchy once, and `Ribbon.tsx` renders it generically. Three action kinds
 // are supported:
 //
-//   editorCommand  — fires the existing `coco:editor-command` window event
+//   editorCommand  — fires the existing `nicel:editor-command` window event
 //                    with one of EditorScreen's 108 command ids. No new
 //                    command ids are invented here (issue constraint).
 //   univer         — invokes a Univer-native operation through the facade

@@ -5,8 +5,8 @@
   align-items: stretch;
   gap: 0;
   flex-shrink: 0;
-  background-color: var(--coco-bg-elevated);
-  border-bottom: 1px solid var(--coco-border);
+  background-color: var(--nicel-bg-elevated);
+  border-bottom: 1px solid var(--nicel-border);
   padding: 2px 6px;
   min-height: 28px;
 }
@@ -24,28 +24,28 @@
   padding: 0 10px;
   font-style: italic;
   font-size: 13px;
-  color: var(--coco-text-muted);
-  border-left: 1px solid var(--coco-border);
-  border-right: 1px solid var(--coco-border);
+  color: var(--nicel-text-muted);
+  border-left: 1px solid var(--nicel-border);
+  border-right: 1px solid var(--nicel-border);
   margin: 0 6px;
 }
 
 .formula-bar__input {
   flex: 1 1 auto;
   appearance: none;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
-  background-color: var(--coco-bg-elevated);
-  color: var(--coco-text);
+  background-color: var(--nicel-bg-elevated);
+  color: var(--nicel-text);
   font-size: 13px;
   font-family: "Consolas", "Courier New", monospace;
   padding: 2px 8px;
 }
 
 .formula-bar__input:focus {
-  border-color: var(--coco-accent);
+  border-color: var(--nicel-accent);
 }
 
 .formula-bar__input::placeholder {
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
 }

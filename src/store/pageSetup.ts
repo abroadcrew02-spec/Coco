@@ -5,7 +5,7 @@
 // pass can map these fields onto OOXML <pageSetup>/<pageMargins>/<headerFooter>/
 // <printOptions> elements for full Excel-compatible print metadata.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension):
+// Snapshot shape (Univer 0.5.x + Nicel extension):
 //   {
 //     sheets: {
 //       <sheetId>: {

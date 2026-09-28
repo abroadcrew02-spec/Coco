@@ -37,7 +37,7 @@ function describeIssue(issue: AuditIssue): { title: string; suggestion: string }
 /**
  * Modal stepper through the auditor's issue list. Mirrors Excel's
  * "Error Checking" dialog (Formulas → Error Checking) but slimmed to the
- * controls Coco currently supports:
+ * controls Nicel currently supports:
  *
  *   - Previous / Next: walk the issue list.
  *   - Ignore: skip the current issue without acting on it (drops it from
@@ -58,7 +58,7 @@ export default function ErrorCheckingDialog({ issues, onJumpToCell, onClose }: P
   const [remaining, setRemaining] = useState<AuditIssue[]>(initialSet);
   const [index, setIndex] = useState(0);
 
-  // Esc closes — same convention as SortDialog and the rest of Coco's modals.
+  // Esc closes — same convention as SortDialog and the rest of Nicel's modals.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {

@@ -11,7 +11,7 @@ import { routeOpenPath } from "../store/pathRouter";
 // Returns whether a drag is currently hovering the window so the App can render
 // an overlay.
 export function useFileDrop(): { isHovering: boolean } {
-  const openCoco = useWorkbookStore((s) => s.openCoco);
+  const openNicel = useWorkbookStore((s) => s.openNicel);
   const importXlsx = useWorkbookStore((s) => s.importXlsx);
   const importCsv = useWorkbookStore((s) => s.importCsv);
 
@@ -49,7 +49,7 @@ export function useFileDrop(): { isHovering: boolean } {
       ) {
         return;
       }
-      if (route.kind === "coco") await openCoco(route.path);
+      if (route.kind === "coco") await openNicel(route.path);
       else if (route.kind === "csv") await importCsv(route.path);
       else if (route.kind === "xlsx") await importXlsx(route.path);
     };
@@ -82,7 +82,7 @@ export function useFileDrop(): { isHovering: boolean } {
       cancelled = true;
       if (unlisten) unlisten();
     };
-  }, [openCoco, importXlsx, importCsv]);
+  }, [openNicel, importXlsx, importCsv]);
 
   return { isHovering };
 }

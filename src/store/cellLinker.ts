@@ -4,7 +4,7 @@
 // drive both the preview pane in the dialog and the actual apply step in
 // EditorScreen, and so they're testable without Univer.
 //
-// Snapshot shape we care about (Univer 0.5.x + Coco extension):
+// Snapshot shape we care about (Univer 0.5.x + Nicel extension):
 //   {
 //     sheetOrder?: string[];               // canonical sheet ordering
 //     sheets: {

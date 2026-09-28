@@ -46,7 +46,7 @@ export const HYPERLINK_STYLE = {
 /**
  * Parse an A1-style single-cell ref (e.g. "B12", "AA3") into 0-based row/col.
  * Returns null on malformed input — callers treat the entry as unprocessable
- * and skip it rather than throwing, matching the rest of Coco's best-effort
+ * and skip it rather than throwing, matching the rest of Nicel's best-effort
  * snapshot patching (compare to `_dataValidations` / `_comments`).
  */
 export function parseA1(cell: string): CellCoord | null {

@@ -20,10 +20,10 @@ import {
 import {
   applyCalculatedColumns,
   toDataModel,
-  type CocoDataModel,
+  type NicelDataModel,
   type StoredMeasure,
   type StoredCalculatedColumn,
-} from "./cocoDataModel";
+} from "./nicelDataModel";
 import type { ModelTable } from "./daxEngine";
 import { MEASURE_ERROR } from "./daxEngine";
 
@@ -63,7 +63,7 @@ const TOTAL_MEASURE: StoredMeasure = {
   expression: "SUM(Sales[Amount])",
 };
 
-function makeBaseModel(): CocoDataModel {
+function makeBaseModel(): NicelDataModel {
   return {
     tables: [{ ...SALES_TABLE, rows: SALES_TABLE.rows.map((r) => ({ ...r })) }],
     relationships: [],
@@ -92,8 +92,8 @@ describe("Scenario 1: end-to-end measure pivot", () => {
    *   [3]: ['Total', 400,     600,     1000    ]
    */
   it("produces correct cross-tab values from SUM(Sales[Amount])", () => {
-    const cocoModel = makeBaseModel();
-    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    const nicelModel = makeBaseModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
 
     const config: PivotConfig = {
       source: { kind: "model", tableName: "Sales" },
@@ -104,7 +104,7 @@ describe("Scenario 1: end-to-end measure pivot", () => {
       hasHeader: false,
     };
 
-    const result = computeModelPivot(runtimeModel, cocoModel, config);
+    const result = computeModelPivot(runtimeModel, nicelModel, config);
 
     expect(result.rowCount).toBe(4);
     expect(result.colCount).toBe(4);
@@ -137,8 +137,8 @@ describe("Scenario 1: end-to-end measure pivot", () => {
   });
 
   it("throws when source.kind is not 'model'", () => {
-    const cocoModel = makeBaseModel();
-    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    const nicelModel = makeBaseModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
 
     const badConfig: PivotConfig = {
       source: { kind: "sheet", sheetId: "s1", range: { r1: 0, c1: 0, r2: 0, c2: 0 } },
@@ -149,13 +149,13 @@ describe("Scenario 1: end-to-end measure pivot", () => {
       hasHeader: false,
     };
 
-    expect(() => computeModelPivot(runtimeModel, cocoModel, badConfig)).toThrow(
+    expect(() => computeModelPivot(runtimeModel, nicelModel, badConfig)).toThrow(
       "computeModelPivot requires source.kind === 'model'",
     );
   });
 
   it("handles empty table gracefully — returns header + grand-total rows only", () => {
-    const emptyModel: CocoDataModel = {
+    const emptyModel: NicelDataModel = {
       tables: [{ name: "Sales", columns: SALES_TABLE.columns, rows: [] }],
       relationships: [],
       measures: [TOTAL_MEASURE],
@@ -196,7 +196,7 @@ describe("Scenario 2: calculated column + measure mixed pivot", () => {
    *   West/2023: 300 * 0.9 = 270
    *   West/2024: 400 * 0.9 = 360
    */
-  function makeModelWithNetAmount(): CocoDataModel {
+  function makeModelWithNetAmount(): NicelDataModel {
     const netAmountCol: StoredCalculatedColumn = {
       id: "cc-net",
       name: "NetAmount",
@@ -219,8 +219,8 @@ describe("Scenario 2: calculated column + measure mixed pivot", () => {
   }
 
   it("NetTotal measure reflects calculated column values", () => {
-    const cocoModel = makeModelWithNetAmount();
-    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    const nicelModel = makeModelWithNetAmount();
+    const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
 
     const config: PivotConfig = {
       source: { kind: "model", tableName: "Sales" },
@@ -231,7 +231,7 @@ describe("Scenario 2: calculated column + measure mixed pivot", () => {
       hasHeader: false,
     };
 
-    const result = computeModelPivot(runtimeModel, cocoModel, config);
+    const result = computeModelPivot(runtimeModel, nicelModel, config);
     const m = result.output;
 
     // East/2023 = 90, East/2024 = 180, row total = 270
@@ -251,8 +251,8 @@ describe("Scenario 2: calculated column + measure mixed pivot", () => {
   });
 
   it("can pivot on the calculated column itself as a column-kind value field", () => {
-    const cocoModel = makeModelWithNetAmount();
-    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    const nicelModel = makeModelWithNetAmount();
+    const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
 
     const config: PivotConfig = {
       source: { kind: "model", tableName: "Sales" },
@@ -263,7 +263,7 @@ describe("Scenario 2: calculated column + measure mixed pivot", () => {
       hasHeader: false,
     };
 
-    const result = computeModelPivot(runtimeModel, cocoModel, config);
+    const result = computeModelPivot(runtimeModel, nicelModel, config);
     const m = result.output;
 
     // showValueLabelRow = true (cols.length === 0)
@@ -286,22 +286,22 @@ describe("Scenario 2: calculated column + measure mixed pivot", () => {
 // ---------------------------------------------------------------------------
 
 describe("Scenario 3: snapshot round-trip with addPivot + refreshPivot", () => {
-  function makeWorkbook(cocoModel: CocoDataModel): WorkbookPivotSnapshot {
+  function makeWorkbook(nicelModel: NicelDataModel): WorkbookPivotSnapshot {
     return {
       sheetOrder: ["sheet1"],
       sheets: {
         sheet1: {
           name: "Sheet1",
           cellData: {},
-          _cocoDataModel: cocoModel,
+          _cocoDataModel: nicelModel,
         },
       },
     };
   }
 
   it("addPivot registers the entry on the destination sheet", () => {
-    const cocoModel = makeBaseModel();
-    const workbook = makeWorkbook(cocoModel);
+    const nicelModel = makeBaseModel();
+    const workbook = makeWorkbook(nicelModel);
 
     const entry: PivotEntry = {
       name: "Pivot1",
@@ -313,7 +313,7 @@ describe("Scenario 3: snapshot round-trip with addPivot + refreshPivot", () => {
       hasHeader: false,
     };
 
-    addPivot(workbook, entry, cocoModel, "sheet1");
+    addPivot(workbook, entry, nicelModel, "sheet1");
 
     const pivots = workbook.sheets?.sheet1?._pivots;
     expect(Array.isArray(pivots)).toBe(true);
@@ -322,8 +322,8 @@ describe("Scenario 3: snapshot round-trip with addPivot + refreshPivot", () => {
   });
 
   it("addPivot seeds lastOutputRows / lastOutputCols from computeModelPivot", () => {
-    const cocoModel = makeBaseModel();
-    const workbook = makeWorkbook(cocoModel);
+    const nicelModel = makeBaseModel();
+    const workbook = makeWorkbook(nicelModel);
 
     const entry: PivotEntry = {
       name: "Pivot1",
@@ -335,7 +335,7 @@ describe("Scenario 3: snapshot round-trip with addPivot + refreshPivot", () => {
       hasHeader: false,
     };
 
-    addPivot(workbook, entry, cocoModel, "sheet1");
+    addPivot(workbook, entry, nicelModel, "sheet1");
 
     const stored = workbook.sheets?.sheet1?._pivots?.[0];
     // 4 rows (header + East + West + Total) × 4 cols (Region, 2023, 2024, Total)
@@ -344,8 +344,8 @@ describe("Scenario 3: snapshot round-trip with addPivot + refreshPivot", () => {
   });
 
   it("refreshPivot writes cell values at the correct destination coordinates", () => {
-    const cocoModel = makeBaseModel();
-    const workbook = makeWorkbook(cocoModel);
+    const nicelModel = makeBaseModel();
+    const workbook = makeWorkbook(nicelModel);
 
     const entry: PivotEntry = {
       name: "Pivot1",
@@ -357,8 +357,8 @@ describe("Scenario 3: snapshot round-trip with addPivot + refreshPivot", () => {
       hasHeader: false,
     };
 
-    addPivot(workbook, entry, cocoModel, "sheet1");
-    const { ok } = refreshPivot(workbook, "Pivot1", cocoModel, "sheet1");
+    addPivot(workbook, entry, nicelModel, "sheet1");
+    const { ok } = refreshPivot(workbook, "Pivot1", nicelModel, "sheet1");
     expect(ok).toBe(true);
 
     const cellData = workbook.sheets!.sheet1!.cellData as Record<
@@ -386,16 +386,16 @@ describe("Scenario 3: snapshot round-trip with addPivot + refreshPivot", () => {
   });
 
   it("refreshPivot returns ok:false when pivot name is not found", () => {
-    const cocoModel = makeBaseModel();
-    const workbook = makeWorkbook(cocoModel);
+    const nicelModel = makeBaseModel();
+    const workbook = makeWorkbook(nicelModel);
 
-    const result = refreshPivot(workbook, "NonExistent", cocoModel, "sheet1");
+    const result = refreshPivot(workbook, "NonExistent", nicelModel, "sheet1");
     expect(result.ok).toBe(false);
   });
 
-  it("refreshPivot returns ok:false for model pivot when cocoModel is absent", () => {
-    const cocoModel = makeBaseModel();
-    const workbook = makeWorkbook(cocoModel);
+  it("refreshPivot returns ok:false for model pivot when nicelModel is absent", () => {
+    const nicelModel = makeBaseModel();
+    const workbook = makeWorkbook(nicelModel);
 
     const entry: PivotEntry = {
       name: "Pivot1",
@@ -407,15 +407,15 @@ describe("Scenario 3: snapshot round-trip with addPivot + refreshPivot", () => {
       hasHeader: false,
     };
 
-    addPivot(workbook, entry, cocoModel, "sheet1");
-    // Pass no cocoModel → should fail gracefully
+    addPivot(workbook, entry, nicelModel, "sheet1");
+    // Pass no nicelModel → should fail gracefully
     const result = refreshPivot(workbook, "Pivot1", undefined, "sheet1");
     expect(result.ok).toBe(false);
   });
 
   it("listAllPivots reflects entry registered by addPivot", () => {
-    const cocoModel = makeBaseModel();
-    const workbook = makeWorkbook(cocoModel);
+    const nicelModel = makeBaseModel();
+    const workbook = makeWorkbook(nicelModel);
 
     const entry: PivotEntry = {
       name: "Pivot1",
@@ -427,7 +427,7 @@ describe("Scenario 3: snapshot round-trip with addPivot + refreshPivot", () => {
       hasHeader: false,
     };
 
-    addPivot(workbook, entry, cocoModel, "sheet1");
+    addPivot(workbook, entry, nicelModel, "sheet1");
     const listings = listAllPivots(workbook);
     expect(listings).toHaveLength(1);
     expect(listings[0].pivot.name).toBe("Pivot1");
@@ -447,13 +447,13 @@ describe("Scenario 4: invalid DAX expression propagates #ERROR! into pivot cells
       tableId: "Sales",
       expression: "= INVALID(",
     };
-    const cocoModel: CocoDataModel = {
+    const nicelModel: NicelDataModel = {
       tables: [{ ...SALES_TABLE, rows: SALES_TABLE.rows.map((r) => ({ ...r })) }],
       relationships: [],
       measures: [brokenMeasure],
       calculatedColumns: [],
     };
-    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
 
     const config: PivotConfig = {
       source: { kind: "model", tableName: "Sales" },
@@ -464,7 +464,7 @@ describe("Scenario 4: invalid DAX expression propagates #ERROR! into pivot cells
       hasHeader: false,
     };
 
-    const result = computeModelPivot(runtimeModel, cocoModel, config);
+    const result = computeModelPivot(runtimeModel, nicelModel, config);
     const m = result.output;
 
     // Data cells (non-header, non-header-col, non-total-label) should be #ERROR!
@@ -477,8 +477,8 @@ describe("Scenario 4: invalid DAX expression propagates #ERROR! into pivot cells
   });
 
   it("unknown measure name also yields MEASURE_ERROR", () => {
-    const cocoModel = makeBaseModel();
-    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    const nicelModel = makeBaseModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
 
     const config: PivotConfig = {
       source: { kind: "model", tableName: "Sales" },
@@ -489,7 +489,7 @@ describe("Scenario 4: invalid DAX expression propagates #ERROR! into pivot cells
       hasHeader: false,
     };
 
-    const result = computeModelPivot(runtimeModel, cocoModel, config);
+    const result = computeModelPivot(runtimeModel, nicelModel, config);
     // showValueLabelRow=true, headerRowCount=1
     // Row 1 = East data
     expect(result.output[1][1]).toBe(MEASURE_ERROR);

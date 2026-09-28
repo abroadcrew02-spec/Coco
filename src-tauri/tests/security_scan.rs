@@ -1,4 +1,4 @@
-use coco_lib::commands::security::{security_scan_xlsx, SecurityScanResult};
+use nicel_lib::commands::security::{security_scan_xlsx, SecurityScanResult};
 use rust_xlsxwriter::Workbook;
 use std::io::Write;
 use tempfile::TempDir;

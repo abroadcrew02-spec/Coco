@@ -11,7 +11,7 @@
 //     *changes*; without the clear, two identical consecutive messages
 //     (e.g. moving back to the same cell) would be silent.
 //   - The regions are kept in the accessibility tree (not display:none) via
-//     the `.coco-visually-hidden` clip pattern, so assistive tech still reads
+//     the `.nicel-visually-hidden` clip pattern, so assistive tech still reads
 //     them while sighted users see nothing.
 
 import { useEffect, useState } from "react";
@@ -51,7 +51,7 @@ export default function LiveRegion() {
   return (
     <>
       <div
-        className="coco-visually-hidden"
+        className="nicel-visually-hidden"
         role="status"
         aria-live="polite"
         aria-atomic="true"
@@ -60,7 +60,7 @@ export default function LiveRegion() {
         {polite}
       </div>
       <div
-        className="coco-visually-hidden"
+        className="nicel-visually-hidden"
         role="alert"
         aria-live="assertive"
         aria-atomic="true"

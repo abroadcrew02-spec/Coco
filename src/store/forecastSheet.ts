@@ -25,7 +25,7 @@
 //   t_c   ≈ inverse normal CDF at (1 + c) / 2     (large-n approximation)
 //   bound = ŷ_i ± t_c * s_e
 //
-// We approximate t_c with the normal quantile because Coco doesn't ship a
+// We approximate t_c with the normal quantile because Nicel doesn't ship a
 // t-distribution table. For the default c = 0.95 this gives t ≈ 1.96, which
 // matches Excel within rounding for any reasonable sample size.
 //

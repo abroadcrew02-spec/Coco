@@ -8,7 +8,7 @@ export type PathRoute =
   | { kind: "csv"; path: string }
   | { kind: "unsupported"; path: string; extension: string | null };
 
-const COCO_EXT = [".coco"];
+const NICEL_EXT = [".coco"];
 const XLSX_EXT = [".xlsx", ".xlsm"];
 // .tsv routes through the same import path as .csv — the Rust side picks the
 // right delimiter from the extension.
@@ -29,7 +29,7 @@ function extractExtension(lower: string): string | null {
 
 export function routeOpenPath(path: string): PathRoute {
   const lower = path.toLowerCase();
-  if (endsWithAny(lower, COCO_EXT)) return { kind: "coco", path };
+  if (endsWithAny(lower, NICEL_EXT)) return { kind: "coco", path };
   if (endsWithAny(lower, XLSX_EXT)) return { kind: "xlsx", path };
   if (endsWithAny(lower, CSV_EXT)) return { kind: "csv", path };
   return { kind: "unsupported", path, extension: extractExtension(lower) };

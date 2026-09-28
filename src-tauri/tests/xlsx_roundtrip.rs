@@ -1,5 +1,5 @@
 use calamine::{open_workbook, Data, Reader, Xlsx};
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use serde_json::Value;
 use std::path::PathBuf;

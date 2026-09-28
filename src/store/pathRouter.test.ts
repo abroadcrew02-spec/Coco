@@ -3,7 +3,7 @@ import { routeOpenPath } from "./pathRouter";
 
 describe("routeOpenPath", () => {
   describe("recognized extensions", () => {
-    it("routes .coco to coco", () => {
+    it("routes .coco to nicel", () => {
       const r = routeOpenPath("/tmp/wb.coco");
       expect(r).toEqual({ kind: "coco", path: "/tmp/wb.coco" });
     });
@@ -106,9 +106,9 @@ describe("routeOpenPath", () => {
     });
 
     it("ignores a known extension that appears mid-path (not at end)", () => {
-      // "/tmp/coco-dir/output.png" — the .coco fragment is in the directory name,
-      // not the file extension. Must not be routed as a coco workbook.
-      expect(routeOpenPath("/tmp/coco-dir/output.png").kind).toBe("unsupported");
+      // "/tmp/nicel-dir/output.png" — the .coco fragment is in the directory name,
+      // not the file extension. Must not be routed as a nicel workbook.
+      expect(routeOpenPath("/tmp/nicel-dir/output.png").kind).toBe("unsupported");
     });
   });
 
@@ -159,7 +159,7 @@ describe("routeOpenPath", () => {
       expect(r).toEqual({ kind: "csv", path: "/tmp/📊_2026.csv" });
     });
 
-    it("routes a Chinese basename ending in .coco to coco", () => {
+    it("routes a Chinese basename ending in .coco to nicel", () => {
       // Defense-in-depth: confirms lowercasing of mixed-script paths still
       // preserves the path payload exactly as input.
       const r = routeOpenPath("/tmp/工作簿.coco");

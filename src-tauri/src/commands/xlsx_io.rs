@@ -914,13 +914,13 @@ pub(crate) fn parse_xlsx_freeze_panes(
     out
 }
 
-/// Project a Coco `_freezePane` declaration onto Univer's native
+/// Project a Nicel `_freezePane` declaration onto Univer's native
 /// `IWorksheetData.freeze` field (`{ xSplit, ySplit, startRow, startColumn }`).
 ///
 /// Without this, opening an xlsx that carries a frozen / split pane shows no
 /// visual freeze until the user toggles it via the View menu: Univer's freeze
 /// renderer only activates when `sheets.<id>.freeze` is populated, but the
-/// import path historically wrote only the Coco-private `_freezePane` marker.
+/// import path historically wrote only the Nicel-private `_freezePane` marker.
 /// This helper closes that gap (issue #178, item 3) so the freeze / split is
 /// visible immediately on direct open.
 ///
@@ -929,7 +929,7 @@ pub(crate) fn parse_xlsx_freeze_panes(
 ///     `xSplit`/`ySplit` of a frozen pane). They map directly onto Univer's
 ///     `IFreeze`.
 ///   * `state="split"`  — `row`/`col` carry the raw `xSplit`/`ySplit` verbatim.
-///     Coco-authored splits store row/col indices here; Excel-authored splits
+///     Nicel-authored splits store row/col indices here; Excel-authored splits
 ///     store pixel/twip offsets. Univer 0.5.x has no split renderer, so the
 ///     freeze renderer is the visual approximation either way.
 ///
@@ -1658,7 +1658,7 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
             code: "XLSX_CHARTS_DISCARDED".to_string(),
-            message: "このファイルにはグラフが含まれていますが、Coco では保持されません。保存時に失われます。".to_string(),
+            message: "このファイルにはグラフが含まれていますが、Nicel では保持されません。保存時に失われます。".to_string(),
             affected_sheets: None,
         });
     }
@@ -1667,7 +1667,7 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
             severity: "warning".to_string(),
             code: "XLSX_PIVOT_DISCARDED".to_string(),
             message:
-                "ピボットテーブルが含まれていますが、Coco では保持されません。保存時に失われます。"
+                "ピボットテーブルが含まれていますが、Nicel では保持されません。保存時に失われます。"
                     .to_string(),
             affected_sheets: None,
         });
@@ -1676,7 +1676,7 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
             code: "XLSX_EXTERNAL_LINKS_DISCARDED".to_string(),
-            message: "外部ブックへのリンクが含まれています。キャッシュ値は保持されますが、Coco では外部ブックの自動取得は行いません。".to_string(),
+            message: "外部ブックへのリンクが含まれています。キャッシュ値は保持されますが、Nicel では外部ブックの自動取得は行いません。".to_string(),
             affected_sheets: None,
         });
     }
@@ -1684,7 +1684,7 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
             code: "XLSX_VBA_DISCARDED".to_string(),
-            message: "VBA マクロが含まれていますが、Coco では実行も保持もされません。保存時に失われます。".to_string(),
+            message: "VBA マクロが含まれていますが、Nicel では実行も保持もされません。保存時に失われます。".to_string(),
             affected_sheets: None,
         });
     }
@@ -1692,7 +1692,7 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
             code: "XLSX_EMBEDDED_OBJECTS_DISCARDED".to_string(),
-            message: "埋め込みオブジェクト（OLE 等）が含まれていますが、Coco では保持されません。"
+            message: "埋め込みオブジェクト（OLE 等）が含まれていますが、Nicel では保持されません。"
                 .to_string(),
             affected_sheets: None,
         });
@@ -1701,7 +1701,7 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
             code: "XLSX_DRAWINGS_DISCARDED".to_string(),
-            message: "図形・画像が含まれていますが、Coco では保持されません。保存時に失われます。"
+            message: "図形・画像が含まれていますが、Nicel では保持されません。保存時に失われます。"
                 .to_string(),
             affected_sheets: None,
         });
@@ -1710,7 +1710,7 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
             code: "XLSX_FORM_CONTROLS_NOT_RENDERED".to_string(),
-            message: "フォームコントロール（チェックボックス・ラジオボタン・スピンボタン等）が検出されましたが、Coco では Excel の装飾として再現されません。リンクされたセルの値は読み込まれます。".to_string(),
+            message: "フォームコントロール（チェックボックス・ラジオボタン・スピンボタン等）が検出されましたが、Nicel では Excel の装飾として再現されません。リンクされたセルの値は読み込まれます。".to_string(),
             affected_sheets: None,
         });
     }
@@ -1718,7 +1718,7 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
             code: "XLSX_CONDITIONAL_FORMATTING".to_string(),
-            message: "条件付き書式が検出されました。Coco では編集できず、保存時に失われます。"
+            message: "条件付き書式が検出されました。Nicel では編集できず、保存時に失われます。"
                 .to_string(),
             affected_sheets: None,
         });
@@ -1727,7 +1727,7 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
             code: "XLSX_DATA_VALIDATION".to_string(),
-            message: "データバリデーション設定が検出されました。Coco では編集できず、保存時に失われます。".to_string(),
+            message: "データバリデーション設定が検出されました。Nicel では編集できず、保存時に失われます。".to_string(),
             affected_sheets: None,
         });
     }
@@ -2528,7 +2528,7 @@ pub(crate) fn parse_xlsx_hyperlinks<R: Read + Seek>(
 }
 
 /// One parsed cell-note entry from a worksheet's linked `comments*.xml`.
-/// Coco preserves only the legacy (non-threaded) form: cell reference, author
+/// Nicel preserves only the legacy (non-threaded) form: cell reference, author
 /// name, plain text. Modern threaded comments (`xl/threadedComments/*`) and
 /// VML drawing geometry are intentionally dropped on import — rust_xlsxwriter
 /// re-creates fresh VML for any note we re-emit on export.
@@ -3927,7 +3927,7 @@ fn apply_conditional_format_from_snapshot(
         // existing xlsx they round-trip via the verbatim raw_xml path
         // (parse_sheet_conditional_formatting line 3319) so files keep
         // their visuals — we just don't generate new rules of these
-        // shapes from the Coco dialog.
+        // shapes from the Nicel dialog.
         _ => false,
     }
 }
@@ -5055,21 +5055,21 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         preserved_parts.as_mut(),
     );
 
-    // #105: re-hydrate any `xl/cocoExtensions/*.json` parts a previous Coco
+    // #105: re-hydrate any `xl/cocoExtensions/*.json` parts a previous Nicel
     // export wrote (tables / sparklines / outline / pivot meta / slicers /
-    // scenarios / sheet notes / Coco-authored charts / threaded-comment
+    // scenarios / sheet notes / Nicel-authored charts / threaded-comment
     // extras). For files Excel saved (no extension parts), this is a no-op.
-    let coco_extensions = read_coco_extensions(&mut archive);
+    let nicel_extensions = read_nicel_extensions(&mut archive);
 
-    // Bug 4 fix: detect when this looks like a Coco-authored workbook but no
+    // Bug 4 fix: detect when this looks like a Nicel-authored workbook but no
     // cocoExtensions parts are present. That indicates Excel (or another
     // tool) re-saved the file and silently dropped the extension parts, so
     // tables / pivots / slicers / sparklines / outline / scenarios / sheet
     // notes / threaded-comment extras have been lost. We don't auto-recover
     // anything — just surface a warning so the user knows the original
     // structure may not be intact.
-    let coco_extensions_missing_after_external_edit =
-        coco_extensions.is_empty() && xlsx_looks_coco_authored(&mut archive);
+    let nicel_extensions_missing_after_external_edit =
+        nicel_extensions.is_empty() && xlsx_looks_nicel_authored(&mut archive);
 
     let mut snapshot = json!({
         "id": workbook_id,
@@ -5096,16 +5096,16 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     }
     // #312 Step 8: SHEET_DRAWING_PLUGIN resource bridge disabled.
     // InGridImageLayer reads _images directly; @univerjs/sheets-drawing stays dormant.
-    merge_coco_extensions_into_snapshot(&mut snapshot, &coco_extensions);
+    merge_nicel_extensions_into_snapshot(&mut snapshot, &nicel_extensions);
 
-    // #330: Remove Coco-emitted chart parts (9001+) from _preservedParts so they
-    // are not double-taken on the next import. Coco-authored charts round-trip via
+    // #330: Remove Nicel-emitted chart parts (9001+) from _preservedParts so they
+    // are not double-taken on the next import. Nicel-authored charts round-trip via
     // xl/cocoExtensions/charts.json; the xl/charts/chart9xxx.xml files emitted by
     // inject_charts_to_xlsx are regenerated each export and must not accumulate in
     // _preservedParts. Only strip parts whose numeric suffix >= 9001 to avoid
     // disturbing Excel-origin chart1.xml etc.
     {
-        let has_coco_charts = snapshot
+        let has_nicel_charts = snapshot
             .get("sheets")
             .and_then(|s| s.as_object())
             .map(|sheets| {
@@ -5119,25 +5119,25 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             })
             .unwrap_or(false);
 
-        if has_coco_charts {
+        if has_nicel_charts {
             if let Some(parts) = snapshot
                 .get_mut("_preservedParts")
                 .and_then(|pp| pp.get_mut("parts"))
                 .and_then(|v| v.as_object_mut())
             {
-                let coco_chart_keys: Vec<String> = parts
+                let nicel_chart_keys: Vec<String> = parts
                     .keys()
                     .filter(|k| {
-                        // Matches xl/charts/chart9NNN.xml (Coco-emitted 9001+ space)
+                        // Matches xl/charts/chart9NNN.xml (Nicel-emitted 9001+ space)
                         if let Some(rest) = k.strip_prefix("xl/charts/chart") {
                             let stem = rest.strip_suffix(".xml").unwrap_or(rest);
                             stem.parse::<u32>().map(|n| n >= 9001).unwrap_or(false)
                         } else if let Some(rest) = k.strip_prefix("xl/drawings/_rels/drawing") {
-                            // Coco-emitted drawing rels: xl/drawings/_rels/drawing9xxx.xml.rels
+                            // Nicel-emitted drawing rels: xl/drawings/_rels/drawing9xxx.xml.rels
                             let stem = rest.strip_suffix(".xml.rels").unwrap_or(rest);
                             stem.parse::<u32>().map(|n| n >= 9001).unwrap_or(false)
                         } else if let Some(rest) = k.strip_prefix("xl/drawings/drawing") {
-                            // Also strip Coco-emitted drawing9xxx.xml parts (chart-only drawings)
+                            // Also strip Nicel-emitted drawing9xxx.xml parts (chart-only drawings)
                             let stem = rest.strip_suffix(".xml").unwrap_or(
                                 rest.strip_suffix(".xml.rels").unwrap_or(rest)
                             );
@@ -5148,7 +5148,7 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
                     })
                     .cloned()
                     .collect();
-                for k in coco_chart_keys {
+                for k in nicel_chart_keys {
                     parts.remove(&k);
                 }
             }
@@ -5192,14 +5192,14 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
         });
     }
 
-    // Bug 4 fix: surface silent data loss when a Coco-authored xlsx loses its
+    // Bug 4 fix: surface silent data loss when a Nicel-authored xlsx loses its
     // cocoExtensions parts (typical when the file was re-saved in Excel).
-    if coco_extensions_missing_after_external_edit {
+    if nicel_extensions_missing_after_external_edit {
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
-            code: "XLSX_COCO_EXTENSIONS_MISSING".to_string(),
+            code: "XLSX_NICEL_EXTENSIONS_MISSING".to_string(),
             message:
-                "このファイルは Coco で作成された可能性がありますが、Coco 拡張データ (テーブル / ピボット / スパークライン等) が含まれていません。Excel 等の他ツールで上書き保存された場合、これらの機能は失われている可能性があります。"
+                "このファイルは Nicel で作成された可能性がありますが、Nicel 拡張データ (テーブル / ピボット / スパークライン等) が含まれていません。Excel 等の他ツールで上書き保存された場合、これらの機能は失われている可能性があります。"
                     .to_string(),
             affected_sheets: None,
         });
@@ -6275,8 +6275,8 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
         });
     }
 
-    // #309: Emit OOXML ctrlProp / vmlDrawing for Coco-new checkboxes.
-    if let Err(e) = inject_coco_form_controls(&tmp_path, &snapshot, &sheet_order) {
+    // #309: Emit OOXML ctrlProp / vmlDrawing for Nicel-new checkboxes.
+    if let Err(e) = inject_nicel_form_controls(&tmp_path, &snapshot, &sheet_order) {
         let _ = std::fs::remove_file(&tmp_path);
         return Ok(ExportResult {
             success: false,
@@ -6284,14 +6284,14 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
             warnings: vec![CompatibilityWarning {
                 severity: "blocking".to_string(),
                 code: "XLSX_FORM_CONTROL_EMIT_FAILED".to_string(),
-                message: format!("Coco-new form control emit failed: {e}"),
+                message: format!("Nicel-new form control emit failed: {e}"),
                 affected_sheets: None,
             }],
             error: Some(format!("XLSX_FORM_CONTROL_EMIT_FAILED: {e}")),
         });
     }
 
-    // #330: Emit OOXML chart parts for Coco-authored charts (_charts).
+    // #330: Emit OOXML chart parts for Nicel-authored charts (_charts).
     // Runs after inject_images_to_xlsx so image drawings can be extended in-place.
     if let Err(e) = inject_charts_to_xlsx(&tmp_path, &snapshot, &sheet_order) {
         let _ = std::fs::remove_file(&tmp_path);
@@ -6301,32 +6301,32 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
             warnings: vec![CompatibilityWarning {
                 severity: "blocking".to_string(),
                 code: "XLSX_CHART_EMIT_FAILED".to_string(),
-                message: format!("Coco-authored chart emit failed: {e}"),
+                message: format!("Nicel-authored chart emit failed: {e}"),
                 affected_sheets: None,
             }],
             error: Some(format!("XLSX_CHART_EMIT_FAILED: {e}")),
         });
     }
 
-    // #105 / #120: Coco-extension preservation. Snapshot fields that have no
+    // #105 / #120: Nicel-extension preservation. Snapshot fields that have no
     // first-class OOXML representation (tables, sparklines, outline groups,
-    // pivot metadata, slicers, scenarios, sheet notes, Coco-authored charts,
+    // pivot metadata, slicers, scenarios, sheet notes, Nicel-authored charts,
     // threaded-comments extras) are bundled into `xl/cocoExtensions/*.json`
-    // parts. Excel ignores them, but a Coco re-import restores them losslessly.
-    let (coco_ext_bundles, coco_ext_families) =
-        build_coco_extension_bundles(&snapshot, &sheet_order);
-    if let Err(e) = inject_coco_extensions(&tmp_path, &coco_ext_bundles) {
+    // parts. Excel ignores them, but a Nicel re-import restores them losslessly.
+    let (nicel_ext_bundles, nicel_ext_families) =
+        build_nicel_extension_bundles(&snapshot, &sheet_order);
+    if let Err(e) = inject_nicel_extensions(&tmp_path, &nicel_ext_bundles) {
         let _ = std::fs::remove_file(&tmp_path);
         return Ok(ExportResult {
             success: false,
             path: path.clone(),
             warnings: vec![CompatibilityWarning {
                 severity: "blocking".to_string(),
-                code: "XLSX_COCO_EXTENSIONS_INJECTION_FAILED".to_string(),
-                message: format!("coco extensions injection failed: {e}"),
+                code: "XLSX_NICEL_EXTENSIONS_INJECTION_FAILED".to_string(),
+                message: format!("nicel extensions injection failed: {e}"),
                 affected_sheets: None,
             }],
-            error: Some(format!("XLSX_COCO_EXTENSIONS_INJECTION_FAILED: {e}")),
+            error: Some(format!("XLSX_NICEL_EXTENSIONS_INJECTION_FAILED: {e}")),
         });
     }
 
@@ -6412,17 +6412,17 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
         });
     }
 
-    // #120: surface per-family notices when a snapshot carried Coco-only data
+    // #120: surface per-family notices when a snapshot carried Nicel-only data
     // that we preserved via cocoExtensions parts. The data IS in the file and
-    // will round-trip back into Coco, but Excel won't render it. The wording
+    // will round-trip back into Nicel, but Excel won't render it. The wording
     // makes both halves explicit so users can plan accordingly.
-    for fam in &coco_ext_families {
-        let label = coco_extension_label_ja(fam);
+    for fam in &nicel_ext_families {
+        let label = nicel_extension_label_ja(fam);
         warnings.push(CompatibilityWarning {
             severity: "info".to_string(),
-            code: format!("XLSX_COCO_EXTENSION_{}", fam.to_uppercase()),
+            code: format!("XLSX_NICEL_EXTENSION_{}", fam.to_uppercase()),
             message: format!(
-                "{label} は Coco 拡張パート (xl/cocoExtensions/{fam}.json) として保存されました (Excel では非表示・Coco で再オープン時に復元されます)"
+                "{label} は Nicel 拡張パート (xl/cocoExtensions/{fam}.json) として保存されました (Excel では非表示・Nicel で再オープン時に復元されます)"
             ),
             affected_sheets: None,
         });
@@ -6468,13 +6468,13 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
 //   - External-link wiring IS rewired: workbook.xml.rels gets the externalLink
 //     `<Relationship>` entries appended, and workbook.xml has its captured
 //     `<externalReferences>` block spliced back in. Per req 5.3.2, cached
-//     values survive but Coco never auto-fetches the external workbook.
+//     values survive but Nicel never auto-fetches the external workbook.
 // ============================================================================
 
 /// True when a formula string is an external-book reference, i.e. it carries
 /// an OOXML `[index]` / `[Book.xlsx]` workbook bracket before a sheet name —
 /// `=[1]Sheet1!A1`, `='[1]Sheet 1'!A1`, `=SUM([2]Data!B2:B9)`. Univer's
-/// formula engine cannot evaluate these in Coco (single-workbook editor — the
+/// formula engine cannot evaluate these in Nicel (single-workbook editor — the
 /// referenced unit is never loaded), so on export their imported cached value
 /// must be re-emitted as the formula result (#176).
 ///
@@ -6533,19 +6533,19 @@ const PRESERVED_PREFIXES: &[&str] = &[
     "xl/media/",
     "xl/externalLinks/",
     // #239 Step 4: Power Pivot / Data Model. xl/model/item.data is the binary
-    // Vertipaq columnstore (xlsx 2013+). Coco doesn't author it — but a user
-    // opening an Excel-authored data-model workbook in Coco and re-saving
+    // Vertipaq columnstore (xlsx 2013+). Nicel doesn't author it — but a user
+    // opening an Excel-authored data-model workbook in Nicel and re-saving
     // would otherwise lose the model entirely. Byte-perfect round-trip via
-    // _preservedParts keeps the model intact even when Coco can't read it.
+    // _preservedParts keeps the model intact even when Nicel can't read it.
     "xl/model/",
     // #238 Step 4 (xlsx round-trip for Power Query connection definitions).
     // Excel stores query connection metadata in connections.xml + queryTables/.
     // Same preservation rationale as xl/model/.
     "xl/queryTables/",
     // #194 Step 1 (form controls OOXML preservation). ctrlProps + vmlDrawings
-    // carry form control state. Coco can't write these natively yet so
+    // carry form control state. Nicel can't write these natively yet so
     // byte-for-byte preservation keeps Excel-authored form controls intact
-    // through a Coco round-trip.
+    // through a Nicel round-trip.
     "xl/ctrlProps/",
     "xl/embeddings/",
 ];
@@ -7231,7 +7231,7 @@ pub(crate) fn build_sheet_drawing_resource<R: Read + Seek>(
             // Deterministic drawingId derived from (sheet, drawing index, rid)
             // so re-imports of the same xlsx produce a stable id. Univer just
             // requires uniqueness within the subunit; this is stable + unique.
-            let drawing_id = format!("coco-img-{}-{}-{}", i, anchor_idx, embed_rid);
+            let drawing_id = format!("nicel-img-{}-{}-{}", i, anchor_idx, embed_rid);
 
             let sheet_transform = json!({
                 "from": {
@@ -8511,16 +8511,16 @@ fn remap_ext_reference_rids(block: &str, rid_remap: &HashMap<String, String>) ->
 }
 
 // ============================================================================
-// Coco extension parts (#105 / #120)
+// Nicel extension parts (#105 / #120)
 //
 // Several feature snapshots — tables, sparklines, outline groups, pivot
-// metadata, slicers, scenarios, sheet notes, Coco-authored charts, and the
+// metadata, slicers, scenarios, sheet notes, Nicel-authored charts, and the
 // threaded-comments extras (replies / resolved / resolvedAt / resolvedBy /
-// createdAt) — have no canonical OOXML representation that Coco's writer can
+// createdAt) — have no canonical OOXML representation that Nicel's writer can
 // emit. Rather than silently dropping them, we serialize each family into a
 // dedicated JSON part under `xl/cocoExtensions/<feature>.json` inside the
 // output xlsx. Excel itself ignores unknown parts under `xl/` so the file
-// stays valid for Excel/Sheets; Coco re-reads the parts on import and merges
+// stays valid for Excel/Sheets; Nicel re-reads the parts on import and merges
 // the values back into the snapshot at the original locations.
 //
 // Bundle structure for per-sheet families:
@@ -8543,7 +8543,7 @@ fn remap_ext_reference_rids(block: &str, rid_remap: &HashMap<String, String>) ->
 /// Per-sheet snapshot fields we preserve via cocoExtensions parts.
 /// Tuple: (snapshot key, target file stem). The file stem is appended to
 /// `xl/cocoExtensions/` and gets a `.json` extension.
-const COCO_EXTENSION_SHEET_FIELDS: &[(&str, &str)] = &[
+const NICEL_EXTENSION_SHEET_FIELDS: &[(&str, &str)] = &[
     ("_outlineRows", "outlineRows"),
     ("_outlineCols", "outlineCols"),
     ("_tables", "tables"),
@@ -8556,17 +8556,17 @@ const COCO_EXTENSION_SHEET_FIELDS: &[(&str, &str)] = &[
     // The control's *value* lives in a plain cell so it round-trips through
     // xlsx natively; this part preserves the control metadata (which cells
     // are decorated, group ids, min/max/step) that has no OOXML equivalent
-    // Coco's writer can emit. Re-read on import and merged back per sheet.
+    // Nicel's writer can emit. Re-read on import and merged back per sheet.
     ("_checkboxes", "checkboxes"),
     ("_formControls", "formControls"),
 ];
 
 /// Workbook-root fields preserved as standalone JSON parts.
-const COCO_EXTENSION_ROOT_FIELDS: &[(&str, &str)] =
+const NICEL_EXTENSION_ROOT_FIELDS: &[(&str, &str)] =
     &[("_scenarios", "scenarios"), ("_cameraLinks", "cameraLinks")];
 
 /// Threaded-comments extra-field keys captured per cell inside `_comments[]`.
-const COCO_THREADED_COMMENT_KEYS: &[&str] = &[
+const NICEL_THREADED_COMMENT_KEYS: &[&str] = &[
     "replies",
     "resolved",
     "resolvedAt",
@@ -8576,7 +8576,7 @@ const COCO_THREADED_COMMENT_KEYS: &[&str] = &[
 
 /// User-facing label per family — used by the warning emitter so users see
 /// concrete field names rather than internal snapshot keys.
-fn coco_extension_label_ja(file_stem: &str) -> &'static str {
+fn nicel_extension_label_ja(file_stem: &str) -> &'static str {
     match file_stem {
         "outlineRows" => "アウトライン(行)",
         "outlineCols" => "アウトライン(列)",
@@ -8585,13 +8585,13 @@ fn coco_extension_label_ja(file_stem: &str) -> &'static str {
         "pivots" => "ピボットテーブル設定",
         "slicers" => "スライサー",
         "notes" => "シートメモ",
-        "charts" => "Coco作成のチャート",
+        "charts" => "Nicel作成のチャート",
         "scenarios" => "シナリオ",
         "cameraLinks" => "カメラ画像",
         "checkboxes" => "チェックボックス",
         "formControls" => "フォームコントロール",
         "threadedComments" => "コメント返信/解決状態",
-        _ => "Coco拡張データ",
+        _ => "Nicel拡張データ",
     }
 }
 
@@ -8624,7 +8624,7 @@ fn strip_camera_data_urls(val: &Value) -> Value {
 ///   - `bundles`: map from full zip part path → JSON bytes
 ///   - `families`: ordered list of file stems that actually produced a bundle,
 ///     used by the export path to emit one CompatibilityWarning per family.
-fn build_coco_extension_bundles(
+fn build_nicel_extension_bundles(
     snapshot: &Value,
     sheet_order: &[Value],
 ) -> (HashMap<String, Vec<u8>>, Vec<String>) {
@@ -8634,7 +8634,7 @@ fn build_coco_extension_bundles(
     let sheets_obj = snapshot.get("sheets").and_then(|v| v.as_object());
 
     // Per-sheet families.
-    for (snap_key, file_stem) in COCO_EXTENSION_SHEET_FIELDS {
+    for (snap_key, file_stem) in NICEL_EXTENSION_SHEET_FIELDS {
         let mut by_idx: Map<String, Value> = Map::new();
         if let Some(sheets) = sheets_obj {
             for (idx, sid_val) in sheet_order.iter().enumerate() {
@@ -8660,7 +8660,7 @@ fn build_coco_extension_bundles(
     }
 
     // Workbook-root families.
-    for (snap_key, file_stem) in COCO_EXTENSION_ROOT_FIELDS {
+    for (snap_key, file_stem) in NICEL_EXTENSION_ROOT_FIELDS {
         if let Some(val) = snapshot.get(*snap_key) {
             if !val.is_null() {
                 // #184 M-1: a camera link's `dataUrl` is a baked PNG (base64,
@@ -8686,7 +8686,7 @@ fn build_coco_extension_bundles(
     }
 
     // Threaded-comments extras. Walk every sheet's `_comments[]`; capture any
-    // entry that carries one of `COCO_THREADED_COMMENT_KEYS` keyed by cell
+    // entry that carries one of `NICEL_THREADED_COMMENT_KEYS` keyed by cell
     // ref. The legacy `xl/commentsN.xml` body still carries cell/author/text,
     // so this part only covers the additive fields Excel can't store natively.
     let mut threaded_by_idx: Map<String, Value> = Map::new();
@@ -8707,7 +8707,7 @@ fn build_coco_extension_bundles(
                     .map(|s| s.to_string());
                 let Some(cell_ref) = cell_ref else { continue };
                 let mut extras: Map<String, Value> = Map::new();
-                for k in COCO_THREADED_COMMENT_KEYS {
+                for k in NICEL_THREADED_COMMENT_KEYS {
                     if let Some(v) = obj.get(*k) {
                         if !v.is_null() {
                             extras.insert((*k).to_string(), v.clone());
@@ -8743,7 +8743,7 @@ fn build_coco_extension_bundles(
 /// part that doesn't exist, not the other way around. (We deliberately skip
 /// declaring our own content type so that the file stays maximally compatible
 /// with strict OOXML validators that reject unknown content types.)
-fn inject_coco_extensions(
+fn inject_nicel_extensions(
     tmp_path: &std::path::Path,
     bundles: &HashMap<String, Vec<u8>>,
 ) -> Result<(), String> {
@@ -8796,12 +8796,12 @@ fn inject_coco_extensions(
 /// Per-family upper bound on the JSON body we'll merge back from a
 /// cocoExtensions part. Defense-in-depth: a hostile or corrupt xlsx must not
 /// inflate the snapshot beyond what the export path will accept.
-const COCO_EXTENSION_PART_CAP_BYTES: u64 = 16 * 1024 * 1024;
+const NICEL_EXTENSION_PART_CAP_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Read all `xl/cocoExtensions/*.json` parts from the input archive. Returns
 /// a map from file stem (e.g. `"tables"`) → parsed JSON value (the bundle
-/// object as produced by `build_coco_extension_bundles`).
-fn read_coco_extensions<R: Read + Seek>(
+/// object as produced by `build_nicel_extension_bundles`).
+fn read_nicel_extensions<R: Read + Seek>(
     archive: &mut zip::ZipArchive<R>,
 ) -> HashMap<String, Value> {
     let mut out: HashMap<String, Value> = HashMap::new();
@@ -8813,7 +8813,7 @@ fn read_coco_extensions<R: Read + Seek>(
             let name = entry.name().to_string();
             if name.starts_with("xl/cocoExtensions/")
                 && name.ends_with(".json")
-                && entry.size() <= COCO_EXTENSION_PART_CAP_BYTES
+                && entry.size() <= NICEL_EXTENSION_PART_CAP_BYTES
             {
                 names.push(name);
             }
@@ -8844,16 +8844,17 @@ fn read_coco_extensions<R: Read + Seek>(
     out
 }
 
-/// Detect whether the archive looks like a Coco-authored workbook by
-/// scanning `docProps/core.xml` for the literal string "Coco" inside either
-/// `<dc:creator>` or `<cp:lastModifiedBy>`. Returns true on a match. This is
+/// Detect whether the archive looks like a Nicel-authored workbook by
+/// scanning `docProps/core.xml` for the literal string "Nicel" (or "Coco",
+/// the app name before v0.8.0 — files saved by older versions carry it) inside
+/// either `<dc:creator>` or `<cp:lastModifiedBy>`. Returns true on a match. This is
 /// a coarse heuristic — false positives only matter when paired with the
 /// "no cocoExtensions parts present" condition (see Bug 4): together they
-/// mean the file used to carry Coco extension data that has since been
+/// mean the file used to carry Nicel extension data that has since been
 /// stripped (most likely by Excel re-saving the file). False negatives are
 /// preferable to crashing on a malformed core.xml so any read/parse error
 /// short-circuits to `false`.
-fn xlsx_looks_coco_authored<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> bool {
+fn xlsx_looks_nicel_authored<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> bool {
     let Ok(mut entry) = archive.by_name("docProps/core.xml") else {
         return false;
     };
@@ -8862,15 +8863,15 @@ fn xlsx_looks_coco_authored<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) ->
         return false;
     }
     // Scan only the dc:creator and cp:lastModifiedBy elements so a stray
-    // "Coco" in a title/subject field doesn't trigger a false positive.
-    contains_coco_in_element(&buf, "dc:creator")
-        || contains_coco_in_element(&buf, "cp:lastModifiedBy")
+    // "Nicel" in a title/subject field doesn't trigger a false positive.
+    contains_nicel_in_element(&buf, "dc:creator")
+        || contains_nicel_in_element(&buf, "cp:lastModifiedBy")
 }
 
 // True when the named XML element (taking the first occurrence) has a body
-// that contains the substring "Coco" (case-sensitive — matches the exported
+// that contains the substring "Nicel" (case-sensitive — matches the exported
 // app name). Skips closing tags and empty / self-closed elements.
-fn contains_coco_in_element(xml: &str, tag: &str) -> bool {
+fn contains_nicel_in_element(xml: &str, tag: &str) -> bool {
     // Find `<tag` (open) and then the matching close `</tag>`. We don't try
     // to handle full XML namespaces — `dc:creator` and `cp:lastModifiedBy`
     // are stable in OOXML core.xml.
@@ -8889,15 +8890,17 @@ fn contains_coco_in_element(xml: &str, tag: &str) -> bool {
         return false;
     };
     let body = &xml[body_start..body_start + close_off];
-    body.contains("Coco")
+    // "Coco" = pre-v0.8.0 app name; workbooks saved by those versions still
+    // carry it and must keep triggering the extension-loss warning.
+    body.contains("Nicel") || body.contains("Coco")
 }
 
 /// Merge the cocoExtensions bundles back into the snapshot at the locations
 /// the export path captured them from. Skips families we don't recognize so
-/// future cocoExtension parts written by a newer Coco can round-trip without
+/// future cocoExtension parts written by a newer Nicel can round-trip without
 /// requiring this reader to know about them (they just won't surface in the
 /// in-memory snapshot — an acceptable loss for forward compatibility).
-fn merge_coco_extensions_into_snapshot(
+fn merge_nicel_extensions_into_snapshot(
     snapshot: &mut Value,
     bundles: &HashMap<String, Value>,
 ) {
@@ -8928,7 +8931,7 @@ fn merge_coco_extensions_into_snapshot(
     };
 
     // Per-sheet families.
-    for (snap_key, file_stem) in COCO_EXTENSION_SHEET_FIELDS {
+    for (snap_key, file_stem) in NICEL_EXTENSION_SHEET_FIELDS {
         let Some(bundle) = bundles.get(*file_stem) else {
             continue;
         };
@@ -8951,7 +8954,7 @@ fn merge_coco_extensions_into_snapshot(
     }
 
     // Workbook-root families.
-    for (snap_key, file_stem) in COCO_EXTENSION_ROOT_FIELDS {
+    for (snap_key, file_stem) in NICEL_EXTENSION_ROOT_FIELDS {
         if let Some(bundle) = bundles.get(*file_stem) {
             snap_obj.insert((*snap_key).to_string(), bundle.clone());
         }
@@ -9105,13 +9108,13 @@ mod freeze_projection_tests {
 }
 
 // ============================================================================
-// #309: Coco-new CheckBox OOXML emit
+// #309: Nicel-new CheckBox OOXML emit
 // ============================================================================
 
 /// Unified form control entry for OOXML emit. Covers CheckBox (#309) as well
 /// as Radio, Spinner, and ScrollBar (#322).
 #[derive(Debug)]
-enum CocoNewFormControl {
+enum NicelNewFormControl {
     CheckBox {
         row: u32,
         col: u32,
@@ -9148,7 +9151,7 @@ enum CocoNewFormControl {
     },
 }
 
-impl CocoNewFormControl {
+impl NicelNewFormControl {
     fn row(&self) -> u32 {
         match self {
             Self::CheckBox { row, .. } | Self::Radio { row, .. }
@@ -9163,11 +9166,11 @@ impl CocoNewFormControl {
     }
 }
 
-fn collect_coco_new_checkboxes(
+fn collect_nicel_new_checkboxes(
     snapshot: &Value,
     sheet_order: &[Value],
-) -> Vec<(usize, Vec<CocoNewFormControl>)> {
-    let mut result: Vec<(usize, Vec<CocoNewFormControl>)> = Vec::new();
+) -> Vec<(usize, Vec<NicelNewFormControl>)> {
+    let mut result: Vec<(usize, Vec<NicelNewFormControl>)> = Vec::new();
     let Some(sheets_obj) = snapshot.get("sheets").and_then(|v| v.as_object()) else {
         return result;
     };
@@ -9175,7 +9178,7 @@ fn collect_coco_new_checkboxes(
         let Some(sid) = sid_val.as_str() else { continue };
         let Some(sheet) = sheets_obj.get(sid) else { continue };
 
-        let mut controls: Vec<CocoNewFormControl> = Vec::new();
+        let mut controls: Vec<NicelNewFormControl> = Vec::new();
 
         // --- _checkboxes (CheckBox, #309) ---
         if let Some(arr) = sheet.get("_checkboxes").and_then(|v| v.as_array()) {
@@ -9185,7 +9188,7 @@ fn collect_coco_new_checkboxes(
                 if provenance != "coco-new" {
                     continue;
                 }
-                controls.push(CocoNewFormControl::CheckBox {
+                controls.push(NicelNewFormControl::CheckBox {
                     row: obj.get("row").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
                     col: obj.get("col").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
                     label: obj
@@ -9232,7 +9235,7 @@ fn collect_coco_new_checkboxes(
                     .map(|s| s.to_string());
                 match kind {
                     "radio" => {
-                        controls.push(CocoNewFormControl::Radio {
+                        controls.push(NicelNewFormControl::Radio {
                             row,
                             col,
                             label: obj.get("label").and_then(|v| v.as_str())
@@ -9243,7 +9246,7 @@ fn collect_coco_new_checkboxes(
                         });
                     }
                     "spin" => {
-                        controls.push(CocoNewFormControl::Spinner {
+                        controls.push(NicelNewFormControl::Spinner {
                             row,
                             col,
                             min: obj.get("min").and_then(|v| v.as_i64()).unwrap_or(0),
@@ -9254,7 +9257,7 @@ fn collect_coco_new_checkboxes(
                         });
                     }
                     "scroll" => {
-                        controls.push(CocoNewFormControl::ScrollBar {
+                        controls.push(NicelNewFormControl::ScrollBar {
                             row,
                             col,
                             min: obj.get("min").and_then(|v| v.as_i64()).unwrap_or(0),
@@ -9277,9 +9280,9 @@ fn collect_coco_new_checkboxes(
     result
 }
 
-fn build_ctrl_prop_xml_309(fc: &CocoNewFormControl) -> String {
+fn build_ctrl_prop_xml_309(fc: &NicelNewFormControl) -> String {
     match fc {
-        CocoNewFormControl::CheckBox { checked, fmla_link, .. } => {
+        NicelNewFormControl::CheckBox { checked, fmla_link, .. } => {
             let checked_attr = if *checked { "Checked" } else { "Unchecked" };
             let fmla_link_attr = fmla_link
                 .as_deref()
@@ -9292,7 +9295,7 @@ objectType=\"CheckBox\" checked=\"{checked_attr}\"{fmla_link_attr} \
 lockText=\"1\" defaultSize=\"0\" noThreeD=\"1\"/>\n"
             )
         }
-        CocoNewFormControl::Radio { checked, first_button, fmla_link, .. } => {
+        NicelNewFormControl::Radio { checked, first_button, fmla_link, .. } => {
             let checked_attr = if *checked { "Checked" } else { "Unchecked" };
             let first_attr = if *first_button { " firstButton=\"1\"" } else { "" };
             let fmla_link_attr = fmla_link
@@ -9306,7 +9309,7 @@ objectType=\"Radio\" checked=\"{checked_attr}\"{first_attr}{fmla_link_attr} \
 lockText=\"1\" defaultSize=\"0\" noThreeD=\"1\"/>\n"
             )
         }
-        CocoNewFormControl::Spinner { min, max, inc, page, fmla_link, .. } => {
+        NicelNewFormControl::Spinner { min, max, inc, page, fmla_link, .. } => {
             let fmla_link_attr = fmla_link
                 .as_deref()
                 .map(|l| format!(" fmlaLink=\"{}\"", encode_xml_text(l)))
@@ -9318,7 +9321,7 @@ objectType=\"Spinner\" min=\"{min}\" max=\"{max}\" inc=\"{inc}\" page=\"{page}\"
 lockText=\"1\" defaultSize=\"0\"/>\n"
             )
         }
-        CocoNewFormControl::ScrollBar { min, max, inc, page, horiz, fmla_link, .. } => {
+        NicelNewFormControl::ScrollBar { min, max, inc, page, horiz, fmla_link, .. } => {
             let horiz_attr = if *horiz { " horiz=\"1\"" } else { "" };
             let fmla_link_attr = fmla_link
                 .as_deref()
@@ -9334,7 +9337,7 @@ lockText=\"1\" defaultSize=\"0\"/>\n"
     }
 }
 
-fn build_vml_shape_309(shape_id: u32, fc: &CocoNewFormControl) -> String {
+fn build_vml_shape_309(shape_id: u32, fc: &NicelNewFormControl) -> String {
     let row = fc.row();
     let col = fc.col();
     let right_col = col + 2;
@@ -9343,7 +9346,7 @@ fn build_vml_shape_309(shape_id: u32, fc: &CocoNewFormControl) -> String {
     let shape_id_str = format!("_x0000_s{shape_id}");
 
     match fc {
-        CocoNewFormControl::CheckBox { checked, fmla_link, label, .. } => {
+        NicelNewFormControl::CheckBox { checked, fmla_link, label, .. } => {
             let checked_el = if *checked { "<x:Checked>1</x:Checked>\n      " } else { "" };
             let fmla_link_el = fmla_link
                 .as_deref()
@@ -9367,7 +9370,7 @@ fillcolor=\"window\" strokecolor=\"windowText\" filled=\"f\" stroked=\"f\">\n\
   </v:shape>\n"
             )
         }
-        CocoNewFormControl::Radio { checked, first_button, fmla_link, label, .. } => {
+        NicelNewFormControl::Radio { checked, first_button, fmla_link, label, .. } => {
             let checked_el = if *checked { "<x:Checked>1</x:Checked>\n      " } else { "" };
             let first_el = if *first_button { "<x:FirstButton/>\n      " } else { "" };
             let fmla_link_el = fmla_link
@@ -9392,7 +9395,7 @@ fillcolor=\"window\" strokecolor=\"windowText\" filled=\"f\" stroked=\"f\">\n\
   </v:shape>\n"
             )
         }
-        CocoNewFormControl::Spinner { min, max, inc, page, fmla_link, .. } => {
+        NicelNewFormControl::Spinner { min, max, inc, page, fmla_link, .. } => {
             let fmla_link_el = fmla_link
                 .as_deref()
                 .map(|l| format!("<x:FmlaLink>{}</x:FmlaLink>\n      ", encode_xml_text(l)))
@@ -9414,7 +9417,7 @@ width:12pt;height:20pt;z-index:1\" filled=\"f\" stroked=\"f\">\n\
   </v:shape>\n"
             )
         }
-        CocoNewFormControl::ScrollBar { min, max, inc, page, horiz, fmla_link, .. } => {
+        NicelNewFormControl::ScrollBar { min, max, inc, page, horiz, fmla_link, .. } => {
             let horiz_el = if *horiz { "<x:Horiz/>\n      " } else { "" };
             let fmla_link_el = fmla_link
                 .as_deref()
@@ -9440,7 +9443,7 @@ width:108pt;height:12pt;z-index:1\" filled=\"f\" stroked=\"f\">\n\
     }
 }
 
-fn build_vml_drawing_xml_309(shape_base: u32, controls: &[CocoNewFormControl]) -> String {
+fn build_vml_drawing_xml_309(shape_base: u32, controls: &[NicelNewFormControl]) -> String {
     let mut shapes = String::new();
     for (i, fc) in controls.iter().enumerate() {
         shapes.push_str(&build_vml_shape_309(shape_base + i as u32, fc));
@@ -9480,8 +9483,8 @@ Target=\"../ctrlProps/ctrlProp{ctrl_n}.xml\"/>\n",
     )
 }
 
-/// Inject OOXML form-control parts for Coco-new checkboxes after the base xlsx is written.
-fn inject_coco_form_controls(
+/// Inject OOXML form-control parts for Nicel-new checkboxes after the base xlsx is written.
+fn inject_nicel_form_controls(
     tmp_path: &std::path::Path,
     snapshot: &Value,
     sheet_order: &[Value],
@@ -9490,7 +9493,7 @@ fn inject_coco_form_controls(
     use std::io::Cursor;
     use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
-    let sheets_with_checkboxes = collect_coco_new_checkboxes(snapshot, sheet_order);
+    let sheets_with_checkboxes = collect_nicel_new_checkboxes(snapshot, sheet_order);
     if sheets_with_checkboxes.is_empty() {
         return Ok(());
     }
@@ -9674,7 +9677,7 @@ Target=\"../drawings/vmlDrawing{vml_n}.vml\"/>"
 }
 
 // ============================================================================
-// #330: inject_charts_to_xlsx — emit Coco-authored _charts as OOXML parts.
+// #330: inject_charts_to_xlsx — emit Nicel-authored _charts as OOXML parts.
 // Runs after inject_images_to_xlsx so that when image+chart share a sheet,
 // this function reads the drawing file written by images and extends it with
 // graphicFrame anchors rather than creating a conflicting second drawing.
@@ -9905,7 +9908,7 @@ fn extract_chart_series(chart: &Value, sheets_obj: &serde_json::Map<String, Valu
     ChartSeriesData { series: series_vec, sheet_name }
 }
 
-/// Build chart XML for a Coco chart entry. Returns the XML string.
+/// Build chart XML for a Nicel chart entry. Returns the XML string.
 fn build_chart_xml(chart: &Value, series_data: &ChartSeriesData) -> String {
     let chart_type = chart.get("type").and_then(|v| v.as_str()).unwrap_or("bar");
     let title = chart.get("title").and_then(|v| v.as_str()).unwrap_or("");

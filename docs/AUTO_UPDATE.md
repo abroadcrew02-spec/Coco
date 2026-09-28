@@ -1,10 +1,10 @@
-# Coco — auto-update operations runbook
+# Nicel — auto-update operations runbook
 
-This is the operations runbook for Coco's auto-update feature. Audience: Coco maintainers (5 people or fewer) who will cut releases. Read this end-to-end once before your first release; afterwards section 3 ("リリース手順") is the daily reference.
+This is the operations runbook for Nicel's auto-update feature. Audience: Nicel maintainers (5 people or fewer) who will cut releases. Read this end-to-end once before your first release; afterwards section 3 ("リリース手順") is the daily reference.
 
 ## 1. 概要
 
-Coco の自動アップデートは [Tauri v2 updater plugin](https://v2.tauri.app/plugin/updater/) と GitHub Releases を組み合わせたフローで動作する。リリース時、GitHub Releases に minisign 署名済みの `.nsis.zip` バンドルと `latest.json` メタファイルを配置する。アプリは起動時 (および任意のタイミングで) `latest.json` を取得し、現在のバージョンより新しければユーザーに更新を提示する。ユーザーが承認するとバックグラウンドで `.nsis.zip` をダウンロードし、ローカルで minisign 署名検証 → 検証成功時のみ Coco.exe をスワップして再起動する。署名検証に失敗したダウンロードは破棄される。
+Nicel の自動アップデートは [Tauri v2 updater plugin](https://v2.tauri.app/plugin/updater/) と GitHub Releases を組み合わせたフローで動作する。リリース時、GitHub Releases に minisign 署名済みの `.nsis.zip` バンドルと `latest.json` メタファイルを配置する。アプリは起動時 (および任意のタイミングで) `latest.json` を取得し、現在のバージョンより新しければユーザーに更新を提示する。ユーザーが承認するとバックグラウンドで `.nsis.zip` をダウンロードし、ローカルで minisign 署名検証 → 検証成功時のみ Nicel.exe をスワップして再起動する。署名検証に失敗したダウンロードは破棄される。
 
 - 対象 OS: **Windows のみ** (macOS / Linux 版は Phase 2)
 - 通信先: `https://github.com/abroadcrew02-spec/Coco/releases/latest/download/latest.json`
@@ -74,10 +74,10 @@ git push origin v0.2.0
 
 1. GitHub Actions の `Release` workflow が `v*` タグを検知して起動する (所要 ~10 分)。
 2. 完了すると `https://github.com/abroadcrew02-spec/Coco/releases/tag/v0.2.0` に以下が揃う:
-   - `Coco_0.2.0_x64-setup.exe` (NSIS インストーラ)
-   - `Coco_0.2.0_x64-setup.nsis.zip` (updater 用バンドル)
-   - `Coco_0.2.0_x64-setup.nsis.zip.sig` (minisign 署名)
-   - `Coco_0.2.0_x64_en-US.msi` (MSI インストーラ)
+   - `Nicel_0.2.0_x64-setup.exe` (NSIS インストーラ)
+   - `Nicel_0.2.0_x64-setup.nsis.zip` (updater 用バンドル)
+   - `Nicel_0.2.0_x64-setup.nsis.zip.sig` (minisign 署名)
+   - `Nicel_0.2.0_x64_en-US.msi` (MSI インストーラ)
    - `latest.json` (updater が読むメタファイル)
 3. 既存ユーザーは次回起動時に `latest.json` をチェックして更新を検知する。
 
@@ -88,7 +88,7 @@ git push origin v0.2.0
 `CHANGELOG/v<version>.md` を以下のフォーマットで作成する:
 
 ```markdown
-# Coco v0.2.0
+# Nicel v0.2.0
 
 ## 新機能
 - ...
@@ -161,10 +161,10 @@ gh release delete v0.1.1-rc1 --cleanup-tag --yes
   A: 設定ダイアログ → 更新セクション → 「起動時に更新を確認する」を OFF。次回起動以降は外部通信を行わない。
 
 - **Q: 完全にオフラインで使いたい。**
-  A: 上記の「起動時に更新を確認する」を OFF にすれば、Coco から外部への通信はゼロになる。アップデートが必要になったら手動で Releases ページから DL する。
+  A: 上記の「起動時に更新を確認する」を OFF にすれば、Nicel から外部への通信はゼロになる。アップデートが必要になったら手動で Releases ページから DL する。
 
 - **Q: アップデート中にデータが消えませんか?**
-  A: 消えない。`.coco` / `.xlsx` / 設定ファイル / 各種バックアップは無傷で、`Coco.exe` のバイナリだけが置換される。最近開いたファイルや UI 状態も保持される。
+  A: 消えない。`.coco` / `.xlsx` / 設定ファイル / 各種バックアップは無傷で、`Nicel.exe` のバイナリだけが置換される。最近開いたファイルや UI 状態も保持される。
 
 - **Q: 過去のバージョンに戻したい。**
   A: GitHub Releases ページ (`https://github.com/abroadcrew02-spec/Coco/releases`) から旧バージョンの `.exe` を手動ダウンロードして再インストールする。設定とユーザーデータはそのまま引き継がれる。
@@ -188,7 +188,7 @@ gh release delete v0.1.1-rc1 --cleanup-tag --yes
 `v0.1.0` は自動更新機能を搭載する前のビルドである。このバージョンを使っているユーザーは、updater プラグインが組み込まれていないため、`latest.json` を取りに行く処理自体が存在しない。したがって以下のように扱う。
 
 - **`v0.1.0` ユーザー** → 自動更新は届かない。次の更新 (`v0.1.1` 以降) は **1 回だけ手動ダウンロード + 再インストール** が必要。
-  - 案内テンプレ: 「お手数ですが [Releases ページ](https://github.com/abroadcrew02-spec/Coco/releases/latest) から最新版 `Coco_x.y.z_x64-setup.exe` をダウンロードして上書きインストールしてください。次回以降はアプリ内から自動更新されます。」
+  - 案内テンプレ: 「お手数ですが [Releases ページ](https://github.com/abroadcrew02-spec/Coco/releases/latest) から最新版 `Nicel_x.y.z_x64-setup.exe` をダウンロードして上書きインストールしてください。次回以降はアプリ内から自動更新されます。」
 - **`v0.1.1` 以降のユーザー** → updater プラグイン入りのため、それ以降のバージョンは全自動で配信される。手動操作は不要。
 - 設定・ユーザーデータ・最近開いたファイルなどは手動再インストールでも引き継がれる (`%AppData%/com.coco.app/` 配下なのでインストーラの影響を受けない)。
 

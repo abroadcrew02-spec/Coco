@@ -4,7 +4,7 @@
 // (see commands/workbook.rs::workbook_new), so the editor can load it via
 // the same updateSnapshot path used for any other mutation.
 //
-// Snapshot shape (Univer 0.5.x + Coco extensions):
+// Snapshot shape (Univer 0.5.x + Nicel extensions):
 //   {
 //     id: string,                    // workbook uuid (filled in at load time)
 //     name: "Untitled",

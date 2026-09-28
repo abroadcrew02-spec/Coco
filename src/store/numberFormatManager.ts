@@ -4,11 +4,11 @@
 // inherited xlsx files quickly accumulate dozens of near-duplicate codes
 // ("#,##0", "#,##0_)", "#,##0_-") with no easy way to consolidate.
 //
-// This module walks the Coco snapshot, dedupes by code, and exposes mutation
+// This module walks the Nicel snapshot, dedupes by code, and exposes mutation
 // helpers that rewrite every matching `_fmt` field in one pass. Kept entirely
 // framework-free so unit tests don't need Univer in scope.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension) — only the fields we touch:
+// Snapshot shape (Univer 0.5.x + Nicel extension) — only the fields we touch:
 //   {
 //     sheetOrder?: string[],
 //     sheets: {
@@ -17,7 +17,7 @@
 //         cellData?: {
 //           <row>: {
 //             <col>: {
-//               _fmt?: string,          // Coco-managed per-cell format code
+//               _fmt?: string,          // Nicel-managed per-cell format code
 //               s?: { n?: { pattern?: string } },  // Univer's style-table form
 //               ...
 //             } | undefined

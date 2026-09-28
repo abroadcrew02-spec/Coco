@@ -209,7 +209,7 @@ export function matchShortcut(
 
 /** Event name fired on `window` when bindings change so the global-shortcut
  *  hook can re-read localStorage without a shared store. */
-export const MACRO_SHORTCUTS_CHANGED_EVENT = "coco:macro-shortcuts-changed";
+export const MACRO_SHORTCUTS_CHANGED_EVENT = "nicel:macro-shortcuts-changed";
 
 export function notifyShortcutsChanged(): void {
   if (typeof window === "undefined") return;

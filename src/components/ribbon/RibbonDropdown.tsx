@@ -13,7 +13,7 @@
 // Closing: Escape, Tab, an outside click/focus, or selecting an item. Keyboard
 // navigation inside the popover follows the WAI-ARIA menu pattern (↑/↓/Home/
 // End move, Enter/Space activate, Esc closes and restores focus to the
-// owning button). All colors use `--coco-*` tokens so dark mode is automatic.
+// owning button). All colors use `--nicel-*` tokens so dark mode is automatic.
 
 import { useCallback, useEffect, useRef } from "react";
 import { t } from "../../i18n/locale";

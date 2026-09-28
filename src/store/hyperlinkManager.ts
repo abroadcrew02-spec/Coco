@@ -3,7 +3,7 @@
 // per-row jump/edit/delete, bulk-delete-by-kind, and lightweight URL syntax
 // validation.
 //
-// Reads the same Coco-extended snapshot shape used by hyperlinkRender.ts:
+// Reads the same Nicel-extended snapshot shape used by hyperlinkRender.ts:
 //
 //   {
 //     sheetOrder?: string[],

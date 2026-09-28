@@ -5,7 +5,7 @@
 .ecd-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -13,9 +13,9 @@
 }
 
 .ecd-modal {
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
   width: 100%;
   max-width: 520px;
   max-height: 80vh;
@@ -29,14 +29,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .ecd-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
   margin: 0;
 }
 
@@ -45,15 +45,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .ecd-close:hover {
-  color: var(--coco-text);
-  background-color: var(--coco-surface-hover);
+  color: var(--nicel-text);
+  background-color: var(--nicel-surface-hover);
 }
 
 .ecd-body {
@@ -76,28 +76,28 @@
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
 }
 
 .ecd-cell-ref {
   margin: 0;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
 .ecd-label {
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   font-size: 12px;
 }
 
 .ecd-code {
   font-family: "Consolas", "Menlo", monospace;
   font-size: 12px;
-  color: var(--coco-text);
-  background: var(--coco-surface);
+  color: var(--nicel-text);
+  background: var(--nicel-surface);
   padding: 2px 6px;
   border-radius: 3px;
 }
@@ -105,10 +105,10 @@
 .ecd-suggestion {
   margin: 0;
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   line-height: 1.6;
-  background: var(--coco-warning-bg);
-  border: 1px solid var(--coco-warning);
+  background: var(--nicel-warning-bg);
+  border: 1px solid var(--nicel-warning);
   border-radius: 4px;
   padding: 8px 10px;
 }
@@ -116,13 +116,13 @@
 .ecd-empty {
   margin: 0;
   font-size: 13px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .ecd-footer {
   padding: 12px 20px;
-  background-color: var(--coco-surface);
-  border-top: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border-top: 1px solid var(--nicel-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -144,16 +144,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .ecd-btn:hover:not(:disabled) {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-border-strong);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-border-strong);
 }
 
 .ecd-btn:disabled {
@@ -162,12 +162,12 @@
 }
 
 .ecd-btn--primary {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .ecd-btn--primary:hover:not(:disabled) {
-  background-color: var(--coco-accent-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
 }

@@ -1,4 +1,4 @@
-use coco_lib::db::schema::{current_schema_version, initialize, CURRENT_SCHEMA_VERSION};
+use nicel_lib::db::schema::{current_schema_version, initialize, CURRENT_SCHEMA_VERSION};
 use rusqlite::Connection;
 use tempfile::TempDir;
 

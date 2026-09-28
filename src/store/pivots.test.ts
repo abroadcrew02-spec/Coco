@@ -14,8 +14,8 @@ import {
   type PivotRange,
   type WorkbookPivotSnapshot,
 } from "./pivots";
-import type { CocoDataModel } from "./cocoDataModel";
-import { applyCalculatedColumns, toDataModel } from "./cocoDataModel";
+import type { NicelDataModel } from "./nicelDataModel";
+import { applyCalculatedColumns, toDataModel } from "./nicelDataModel";
 
 // #237 — Regression suite for the pre-existing pivot engine. The
 // `src/store/pivots.ts` module shipped without test coverage; this file locks
@@ -406,9 +406,9 @@ describe("normalizePivotEntry", () => {
 // ---------- #239 Step 7: computeModelPivot ----------
 
 describe("computeModelPivot", () => {
-  // CocoDataModel with a single table "Sales" containing Region, Year, Amount.
+  // NicelDataModel with a single table "Sales" containing Region, Year, Amount.
   // One measure TotalSales = SUM(Sales[Amount]).
-  function makeCocoModel(): CocoDataModel {
+  function makeNicelModel(): NicelDataModel {
     return {
       tables: [
         {
@@ -448,10 +448,10 @@ describe("computeModelPivot", () => {
   }
 
   it("builds a Region × Year matrix with measure values + totals", () => {
-    const cocoModel = makeCocoModel();
-    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    const nicelModel = makeNicelModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
 
-    const result = computeModelPivot(runtimeModel, cocoModel, makeConfig());
+    const result = computeModelPivot(runtimeModel, nicelModel, makeConfig());
 
     const flat = result.output.flat().map(String);
     // Row headers present.
@@ -469,10 +469,10 @@ describe("computeModelPivot", () => {
   });
 
   it("computes correct Total row (row ALL per column)", () => {
-    const cocoModel = makeCocoModel();
-    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    const nicelModel = makeNicelModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
 
-    const result = computeModelPivot(runtimeModel, cocoModel, makeConfig());
+    const result = computeModelPivot(runtimeModel, nicelModel, makeConfig());
 
     // Last row is Total row.
     const totalRow = result.output[result.output.length - 1];
@@ -487,10 +487,10 @@ describe("computeModelPivot", () => {
   });
 
   it("computes correct Total column (col ALL per row)", () => {
-    const cocoModel = makeCocoModel();
-    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    const nicelModel = makeNicelModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
 
-    const result = computeModelPivot(runtimeModel, cocoModel, makeConfig());
+    const result = computeModelPivot(runtimeModel, nicelModel, makeConfig());
 
     // Find East row and West row; last column is Total column.
     const lastCol = result.colCount - 1;
@@ -504,10 +504,10 @@ describe("computeModelPivot", () => {
   });
 
   it("applies filter fields before bucketing", () => {
-    const cocoModel = makeCocoModel();
-    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    const nicelModel = makeNicelModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
 
-    const result = computeModelPivot(runtimeModel, cocoModel, makeConfig({
+    const result = computeModelPivot(runtimeModel, nicelModel, makeConfig({
       filters: [{ field: "Region", values: ["East"] }],
     }));
 
@@ -522,10 +522,10 @@ describe("computeModelPivot", () => {
   });
 
   it("handles a mixed column+measure values config", () => {
-    const cocoModel = makeCocoModel();
-    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    const nicelModel = makeNicelModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
 
-    const result = computeModelPivot(runtimeModel, cocoModel, {
+    const result = computeModelPivot(runtimeModel, nicelModel, {
       source: { kind: "model", tableName: "Sales" },
       destination: { row: 0, col: 0 },
       rows: ["Region"],
@@ -548,17 +548,17 @@ describe("computeModelPivot", () => {
   });
 
   it("returns rowCount/colCount matching matrix dimensions", () => {
-    const cocoModel = makeCocoModel();
-    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    const nicelModel = makeNicelModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
 
-    const result = computeModelPivot(runtimeModel, cocoModel, makeConfig());
+    const result = computeModelPivot(runtimeModel, nicelModel, makeConfig());
     expect(result.rowCount).toBe(result.output.length);
     expect(result.colCount).toBe(result.output[0]?.length ?? 0);
   });
 
   it("throws when source.kind is not 'model'", () => {
-    const cocoModel = makeCocoModel();
-    const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+    const nicelModel = makeNicelModel();
+    const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
 
     const badConfig: PivotConfig = {
       source: { kind: "sheet", sheetId: "s1", range: { r1: 0, c1: 0, r2: 1, c2: 1 } },
@@ -567,14 +567,14 @@ describe("computeModelPivot", () => {
       values: [],
       hasHeader: true,
     };
-    expect(() => computeModelPivot(runtimeModel, cocoModel, badConfig)).toThrow();
+    expect(() => computeModelPivot(runtimeModel, nicelModel, badConfig)).toThrow();
   });
 });
 
 // ---------- #239 Step 7: refreshPivot model mode ----------
 
 describe("refreshPivot (model source)", () => {
-  function makeCocoModel(): CocoDataModel {
+  function makeNicelModel(): NicelDataModel {
     return {
       tables: [
         {
@@ -598,7 +598,7 @@ describe("refreshPivot (model source)", () => {
   }
 
   it("writes computeModelPivot output into the destination sheet", () => {
-    const cocoModel = makeCocoModel();
+    const nicelModel = makeNicelModel();
     const wb: WorkbookPivotSnapshot = {
       sheetOrder: ["dest"],
       sheets: {
@@ -621,7 +621,7 @@ describe("refreshPivot (model source)", () => {
       },
     };
 
-    const res = refreshPivot(wb, "ModelPivot1", cocoModel, "dest");
+    const res = refreshPivot(wb, "ModelPivot1", nicelModel, "dest");
     expect(res.ok).toBe(true);
 
     const cellData = wb.sheets!["dest"]!.cellData!;
@@ -634,7 +634,7 @@ describe("refreshPivot (model source)", () => {
     expect(allValues).toContain(300);
   });
 
-  it("returns { ok: false } when cocoModel is not supplied for a model pivot", () => {
+  it("returns { ok: false } when nicelModel is not supplied for a model pivot", () => {
     const wb: WorkbookPivotSnapshot = {
       sheetOrder: ["dest"],
       sheets: {
@@ -661,7 +661,7 @@ describe("refreshPivot (model source)", () => {
   });
 
   it("wipes old footprint before writing new output", () => {
-    const cocoModel = makeCocoModel();
+    const nicelModel = makeNicelModel();
     const wb: WorkbookPivotSnapshot = {
       sheetOrder: ["dest"],
       sheets: {
@@ -691,7 +691,7 @@ describe("refreshPivot (model source)", () => {
       },
     };
 
-    refreshPivot(wb, "ModelPivot1", cocoModel, "dest");
+    refreshPivot(wb, "ModelPivot1", nicelModel, "dest");
 
     // The old cell at row 4 col 0 (outside new footprint) should be wiped.
     expect(wb.sheets!["dest"]!.cellData!["4"]?.["0"]).toBeUndefined();

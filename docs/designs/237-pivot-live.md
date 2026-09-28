@@ -4,7 +4,7 @@ Status: **Design only**. Implementation deferred (L, 4-8週).
 
 ## ゴール (再掲)
 
-Coco は xlsx pivot を byte-perfect 保持しているが、**Coco UI から新規作成 / 編集する手段が無い**。Excel 並みのドラッグでフィールド配置できる UI を提供する。
+Nicel は xlsx pivot を byte-perfect 保持しているが、**Nicel UI から新規作成 / 編集する手段が無い**。Excel 並みのドラッグでフィールド配置できる UI を提供する。
 
 ## アーキテクチャ
 
@@ -24,7 +24,7 @@ buildPivotMatrix(rows, def): Matrix
 applyPivotToSheet(snapshot, sheetId, matrix)
         │
         ▼
-applyMutatedSnapshot (Coco undo 入り)
+applyMutatedSnapshot (Nicel undo 入り)
 ```
 
 ### 型
@@ -60,9 +60,9 @@ interface PivotDefinition {
 ### 保存
 
 - `_cocoPivots` という workbook-root 拡張キー (新規) に `PivotDefinition[]` を格納。
-- `COCO_ROOT_EXTENSION_KEYS` に追加して syncSnapshot で再 graft。
-- xlsx export: 既存 `_preservedParts` の Excel pivot blob はそのまま (上書きしない)。Coco-pivot は `cocoExtensions/pivots.json` パートとして書き込み。
-- xlsx 再 import: Coco-pivot が存在すればそれを使い、無ければ既存 `_preservedParts` の Excel pivot を保持。
+- `NICEL_ROOT_EXTENSION_KEYS` に追加して syncSnapshot で再 graft。
+- xlsx export: 既存 `_preservedParts` の Excel pivot blob はそのまま (上書きしない)。Nicel-pivot は `cocoExtensions/pivots.json` パートとして書き込み。
+- xlsx 再 import: Nicel-pivot が存在すればそれを使い、無ければ既存 `_preservedParts` の Excel pivot を保持。
 
 ### レンダリング
 
@@ -84,7 +84,7 @@ interface PivotDefinition {
 - [ ] **集計**: sum/count/average/min/max/countNumeric/stdev/var の8種
 - [ ] **小計/総計**: 行ごと / 列ごと / 総計 のチェックボックス
 - [ ] **showAs**: value / percentOfTotal / percentOfRow / percentOfColumn (基本4種)
-- [ ] **保存**: `_cocoPivots` + COCO_ROOT_EXTENSION_KEYS
+- [ ] **保存**: `_cocoPivots` + NICEL_ROOT_EXTENSION_KEYS
 - [ ] **xlsx round-trip**: cocoExtensions/pivots.json
 - [ ] **テスト**: buildPivotMatrix の入力 → 期待行列マッピング ~10 ケース
 
@@ -108,5 +108,5 @@ interface PivotDefinition {
 ## 関連
 
 - 既存: `_preservedParts` Excel pivot blob round-trip
-- 既存: `snapshotSync.COCO_ROOT_EXTENSION_KEYS` (拡張ポイント)
+- 既存: `snapshotSync.NICEL_ROOT_EXTENSION_KEYS` (拡張ポイント)
 - 既存: ChartPreviewPanel (floating panel のスタイル参考)

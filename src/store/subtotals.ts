@@ -3,10 +3,10 @@
 // Walks a range row-by-row, sorted by a group-by column, and emits summary
 // rows ("<group> Total") plus a final "Grand Total" row. The transformation
 // is one-shot: we mutate cellData by inserting new rows rather than storing
-// a persistent rule. Coco-managed snapshot undo (applyMutatedSnapshot) is
+// a persistent rule. Nicel-managed snapshot undo (applyMutatedSnapshot) is
 // the recovery path if the user wants to roll back.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension) — the slice we touch:
+// Snapshot shape (Univer 0.5.x + Nicel extension) — the slice we touch:
 //   {
 //     sheets: {
 //       <sheetId>: {

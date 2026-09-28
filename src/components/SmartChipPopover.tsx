@@ -44,7 +44,7 @@ interface Props {
 
 function iconFor(kind: SmartChipKind): string {
   // Plain text glyphs — no icon-font dependency. Matches the rest of
-  // Coco's panel-glyph style (e.g. CommentIndicatorsPanel's red triangle).
+  // Nicel's panel-glyph style (e.g. CommentIndicatorsPanel's red triangle).
   if (kind === "url") return "🔗";
   if (kind === "email") return "✉";
   if (kind === "custom") return "🏷";

@@ -2,14 +2,14 @@
 // snapshot JSON string and returns a new JSON string — never mutates the
 // input. Kept side-effect free so it can be unit-tested without Univer.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension), the relevant slice:
+// Snapshot shape (Univer 0.5.x + Nicel extension), the relevant slice:
 //   {
 //     sheetOrder: string[],                    // tab order, by sheetId
 //     sheets: {
 //       <sheetId>: {
 //         id?: string,                         // typically equals the key
 //         name?: string,                       // display name in the tab
-//         _tabColor?: string,                  // round-tripped Coco extension
+//         _tabColor?: string,                  // round-tripped Nicel extension
 //         _protected?: {...},
 //         _dataValidations?: [...],
 //         cellData?: {...},

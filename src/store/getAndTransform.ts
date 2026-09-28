@@ -1,7 +1,7 @@
 // #238 Power Query 風 Get & Transform — pure pipeline engine.
 //
 // Excel の Power Query は M 言語 + 大量のソース/transform をサポートするが、
-// Coco の MVP では下記スコープに絞る:
+// Nicel の MVP では下記スコープに絞る:
 //   - データソース: csv / json / jsonl / sqlite (本ファイルは pipeline 専用なので
 //     ソース読み込みは別レイヤー — call site で受け取った rows[] から開始)
 //   - 変換ステップ 13 種: selectColumns / dropColumns / filterRows / sort /

@@ -11,7 +11,7 @@ import { flattenBlocks } from "./macroDsl";
 //   * We only record CommandType.COMMAND (Univer's user-facing layer). Replaying
 //     a COMMAND re-generates the corresponding MUTATION + undo MUTATION, which
 //     is exactly the same path a real keystroke takes — so the workbook's
-//     existing Undo stack and Coco's snapshot sync still work after playback.
+//     existing Undo stack and Nicel's snapshot sync still work after playback.
 //   * Recording observes only — it does NOT mutate Univer state, so we don't
 //     need to suppress autosave during recording. Playback DOES mutate, and
 //     each replayed COMMAND already drives the usual markDirty path; that is
@@ -19,7 +19,7 @@ import { flattenBlocks } from "./macroDsl";
 //   * Playback toggles a `state: "playing"` flag so the recording listener
 //     ignores commands that are themselves replays — without it, "record →
 //     play once → re-record" would inadvertently duplicate every event.
-//   * `fromCollab` is filtered (defensive — Coco is local-only today but the
+//   * `fromCollab` is filtered (defensive — Nicel is local-only today but the
 //     option exists in IExecutionOptions and we want to be future-proof).
 //   * Undo/redo commands are explicitly EXCLUDED from the whitelist. The user
 //     intent of recording is "the net effect of my edits"; capturing undo

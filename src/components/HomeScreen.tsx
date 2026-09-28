@@ -748,7 +748,7 @@ export default function HomeScreen() {
                   ファイルを参照…
                 </button>
                 <span className="home-open-hint">
-                  xlsx / xlsm / csv / tsv / coco に対応
+                  xlsx / xlsm / csv / tsv に対応
                 </span>
               </div>
             </section>

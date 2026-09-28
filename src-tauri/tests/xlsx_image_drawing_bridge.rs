@@ -11,7 +11,7 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-use coco_lib::commands::xlsx_io::import_xlsx_core;
+use nicel_lib::commands::xlsx_io::import_xlsx_core;
 use rust_xlsxwriter::Workbook;
 use tempfile::TempDir;
 use zip::write::FileOptions;
@@ -467,7 +467,7 @@ fn one_cell_anchor_emits_position_anchor_type() {
     // The parser iterates `twoCellAnchor` then `oneCellAnchor` by tag name
     // (not source-XML document order), and both anchors reuse `rId1` here so
     // we disambiguate by parse position via the anchor_idx baked into the
-    // drawingId (`coco-img-<sheet>-<anchor_idx>-<rid>`).
+    // drawingId (`nicel-img-<sheet>-<anchor_idx>-<rid>`).
     let parse_order_two = order[0].as_str().expect("two-cell drawingId");
     let parse_order_one = order[1].as_str().expect("one-cell drawingId");
     assert!(

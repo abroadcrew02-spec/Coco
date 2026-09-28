@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import type { SavedQuery } from "../store/cocoQueries";
-import { readQueries } from "../store/cocoQueries";
+import type { SavedQuery } from "../store/nicelQueries";
+import { readQueries } from "../store/nicelQueries";
 import "./SavedQueriesPanel.css";
 
 interface Props {

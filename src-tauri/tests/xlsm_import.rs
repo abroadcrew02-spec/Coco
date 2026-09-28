@@ -1,11 +1,11 @@
 use calamine::{open_workbook, Data, Reader, Xlsx};
-use coco_lib::commands::xlsx_io::import_xlsx_core;
+use nicel_lib::commands::xlsx_io::import_xlsx_core;
 use rust_xlsxwriter::Workbook;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 // Build a minimal xlsx fixture, then copy it with a .xlsm extension. calamine
-// reads either equivalently; the test exercises Coco's extension-based routing
+// reads either equivalently; the test exercises Nicel's extension-based routing
 // (working_path derivation, macro-loss warning, optional overwrite warning).
 fn build_xlsm_fixture(dir: &TempDir, name: &str) -> PathBuf {
     let xlsx = dir.path().join("__base.xlsx");

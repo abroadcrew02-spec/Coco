@@ -3,7 +3,7 @@
 //
 // Design — same philosophy as src/store/checkbox.ts:
 //
-//   Snapshot shape (Univer 0.5.x + Coco extension):
+//   Snapshot shape (Univer 0.5.x + Nicel extension):
 //     { sheets: { <sheetId>: { _formControls?: FormControlEntry[] } } }
 //
 // A form control is anchored to a single cell (the cell that visually hosts
@@ -15,7 +15,7 @@
 //
 // The `_formControls` array is purely metadata: "this cell hosts a control of
 // kind K bound to linkedCell L with these min/max/step params". It is
-// preserved Coco↔Coco through the .coco JSON snapshot and round-trips through
+// preserved Nicel↔Nicel through the .coco JSON snapshot and round-trips through
 // xlsx via the `xl/cocoExtensions/formControls.json` part (see xlsx_io.rs),
 // mirroring how `_tables` / `_slicers` / `_sparklines` survive xlsx.
 //

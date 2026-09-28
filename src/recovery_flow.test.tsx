@@ -243,7 +243,7 @@ describe("recovery flow §6.5 (クラッシュ復元) — end to end", () => {
         "workbook_save",
         "workbook_save_as",
         "workbook_export_xlsx",
-        "workbook_autosave_coco",
+        "workbook_autosave_nicel",
       ].includes(c[0] as string)
     );
     expect(dangerousCalls).toHaveLength(0);

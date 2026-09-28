@@ -114,7 +114,7 @@ describe("autoSave race prevention", () => {
     expect(invokeMock).not.toHaveBeenCalled();
   });
 
-  it("invokes workbook_autosave_coco when path is .coco and not racing", async () => {
+  it("invokes workbook_autosave_nicel when path is .coco and not racing", async () => {
     invokeMock.mockResolvedValue({ success: true, path: "/tmp/test.coco", error: null });
     useWorkbookStore.setState({
       currentHandle: makeHandle({ path: "/tmp/test.coco" }),
@@ -122,7 +122,7 @@ describe("autoSave race prevention", () => {
       currentSnapshotJson: "{\"v\":1}",
     });
     await useWorkbookStore.getState().autoSave();
-    expect(invokeMock).toHaveBeenCalledWith("workbook_autosave_coco", expect.objectContaining({
+    expect(invokeMock).toHaveBeenCalledWith("workbook_autosave_nicel", expect.objectContaining({
       workbookId: "wb-test",
       path: "/tmp/test.coco",
       snapshotJson: "{\"v\":1}",
@@ -160,7 +160,7 @@ describe("autoSave race prevention", () => {
   it("waits for pending .coco autosave before manual save writes the same path", async () => {
     const autoSaveResult = deferred<SaveResult>();
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "workbook_autosave_coco") return autoSaveResult.promise;
+      if (cmd === "workbook_autosave_nicel") return autoSaveResult.promise;
       if (cmd === "workbook_save") {
         return Promise.resolve({ success: true, path: "/tmp/data.coco", error: null });
       }
@@ -181,7 +181,7 @@ describe("autoSave race prevention", () => {
     expect(invokeMock).toHaveBeenCalledTimes(1);
     expect(invokeMock).toHaveBeenNthCalledWith(
       1,
-      "workbook_autosave_coco",
+      "workbook_autosave_nicel",
       expect.objectContaining({ path: "/tmp/data.coco", snapshotJson: "{\"v\":\"old\"}" })
     );
 
@@ -349,7 +349,7 @@ describe("pending snapshot flush", () => {
     await useWorkbookStore.getState().autoSave();
 
     expect(invokeMock).toHaveBeenCalledWith(
-      "workbook_autosave_coco",
+      "workbook_autosave_nicel",
       expect.objectContaining({ snapshotJson: "{\"v\":\"fresh\"}" })
     );
   });
@@ -751,20 +751,20 @@ describe("newWorkbook", () => {
   });
 });
 
-describe("openCoco", () => {
+describe("openNicel", () => {
   it("routes to editor with snapshot and saved status", async () => {
     invokeMock.mockResolvedValue({
       handle: {
-        workbookId: "wb-coco",
+        workbookId: "wb-nicel",
         path: "/tmp/data.coco",
         sourceType: "coco",
         snapshotJson: "{\"v\":1}",
       },
       warnings: [],
     });
-    await useWorkbookStore.getState().openCoco("/tmp/data.coco");
+    await useWorkbookStore.getState().openNicel("/tmp/data.coco");
     const s = useWorkbookStore.getState();
-    expect(invokeMock).toHaveBeenCalledWith("workbook_open_coco", { path: "/tmp/data.coco" });
+    expect(invokeMock).toHaveBeenCalledWith("workbook_open_nicel", { path: "/tmp/data.coco" });
     expect(s.screen).toBe("editor");
     expect(s.saveStatus).toBe("saved");
     expect(s.currentSnapshotJson).toBe("{\"v\":1}");
@@ -772,7 +772,7 @@ describe("openCoco", () => {
 
   it("surfaces friendly error when file not found", async () => {
     invokeMock.mockRejectedValue("File not found: /missing.coco");
-    await useWorkbookStore.getState().openCoco("/missing.coco");
+    await useWorkbookStore.getState().openNicel("/missing.coco");
     const s = useWorkbookStore.getState();
     expect(s.saveStatus).toBe("saved");
     expect(s.lastError).toContain("/missing.coco");
@@ -1340,32 +1340,32 @@ describe("loadAutoSaveInterval", () => {
 // --- Audit findings (T2) — items 14-17 -------------------------------------
 
 describe("audit item 14: concurrent open race", () => {
-  // The store's openCoco / importXlsx use a module-level `openSeq` request
+  // The store's openNicel / importXlsx use a module-level `openSeq` request
   // token: each call captures `++openSeq` on entry and discards its result
   // if `openSeq` has moved on by the time the invoke resolves. This test
   // verifies the "newer wins" contract by deliberately resolving the
   // EARLIER call AFTER the LATER one — the earlier result must NOT
   // overwrite the newer state.
   it(
-    "openCoco started first but resolved last must NOT clobber the later importXlsx",
+    "openNicel started first but resolved last must NOT clobber the later importXlsx",
     async () => {
       // Defer the two invoke responses manually so we control the ordering.
-      let resolveCoco!: (v: unknown) => void;
+      let resolveNicel!: (v: unknown) => void;
       let resolveXlsx!: (v: unknown) => void;
-      const cocoPromise = new Promise((r) => (resolveCoco = r));
+      const nicelPromise = new Promise((r) => (resolveNicel = r));
       const xlsxPromise = new Promise((r) => (resolveXlsx = r));
 
       invokeMock.mockImplementation((cmd: string) => {
-        if (cmd === "workbook_open_coco") return cocoPromise;
+        if (cmd === "workbook_open_nicel") return nicelPromise;
         if (cmd === "workbook_import_xlsx") return xlsxPromise;
         return Promise.resolve(undefined);
       });
 
-      // Start coco open FIRST, then xlsx import (the "newer" intent).
-      const cocoDone = useWorkbookStore.getState().openCoco("/A.coco");
+      // Start nicel open FIRST, then xlsx import (the "newer" intent).
+      const nicelDone = useWorkbookStore.getState().openNicel("/A.coco");
       const xlsxDone = useWorkbookStore.getState().importXlsx("/B.xlsx");
 
-      // Resolve the NEWER (xlsx) first; the OLDER (coco) resolves after.
+      // Resolve the NEWER (xlsx) first; the OLDER (nicel) resolves after.
       resolveXlsx({
         handle: {
           workbookId: "wb-xlsx",
@@ -1375,9 +1375,9 @@ describe("audit item 14: concurrent open race", () => {
         },
         warnings: [],
       });
-      resolveCoco({
+      resolveNicel({
         handle: {
-          workbookId: "wb-coco",
+          workbookId: "wb-nicel",
           path: "/A.coco",
           sourceType: "coco",
           snapshotJson: "{\"c\":1}",
@@ -1385,10 +1385,10 @@ describe("audit item 14: concurrent open race", () => {
         warnings: [],
       });
 
-      await Promise.all([cocoDone, xlsxDone]);
+      await Promise.all([nicelDone, xlsxDone]);
 
       // The user's last intent was xlsx, so the editor should show xlsx.
-      // Today this fails because openCoco's late set() overwrites the
+      // Today this fails because openNicel's late set() overwrites the
       // xlsx result. That's the latent bug the audit flagged.
       expect(useWorkbookStore.getState().currentHandle?.workbookId).toBe("wb-xlsx");
     }
@@ -1864,7 +1864,7 @@ describe("save additional branches", () => {
     invokeMock.mockResolvedValue({
       success: false,
       path: "/tmp/data.coco",
-      error: "COCO_WRITE_FAILED",
+      error: "NICEL_WRITE_FAILED",
     });
     useWorkbookStore.setState({
       currentHandle: makeHandle({ path: "/tmp/data.coco" }),

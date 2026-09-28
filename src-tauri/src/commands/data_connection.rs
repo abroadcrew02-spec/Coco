@@ -17,7 +17,7 @@
 // ETL steps (#190 Phase 2) are applied on the frontend (see
 // `store/dataConnections.ts`) — this module only produces the raw grid.
 // PostgreSQL / MySQL are intentionally out of scope: they require a running
-// server, which conflicts with Coco's local-first design.
+// server, which conflicts with Nicel's local-first design.
 
 use serde_json::{json, Map, Value};
 

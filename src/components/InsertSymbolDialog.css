@@ -1,7 +1,7 @@
 .isd-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .isd-modal {
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
   width: 100%;
   max-width: 720px;
   max-height: 80vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .isd-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   margin: 0;
 }
 
@@ -41,30 +41,30 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .isd-close:hover {
-  color: var(--coco-text);
-  background-color: var(--coco-surface-hover);
+  color: var(--nicel-text);
+  background-color: var(--nicel-surface-hover);
 }
 
 .isd-toolbar {
   display: flex;
   gap: 10px;
   padding: 12px 20px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .isd-input {
   flex: 1;
   padding: 6px 8px;
   font-size: 13px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
   font-family: inherit;
 }
@@ -72,16 +72,16 @@
 .isd-input:focus,
 .isd-select:focus {
   outline: none;
-  border-color: var(--coco-accent);
+  border-color: var(--nicel-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
 }
 
 .isd-select {
   padding: 6px 8px;
   font-size: 13px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   font-family: inherit;
   min-width: 200px;
 }
@@ -92,7 +92,7 @@
   max-height: 50vh;
   overflow-y: auto;
   padding: 12px 18px;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
 }
 
 .isd-grid {
@@ -106,8 +106,8 @@
   align-items: center;
   justify-content: center;
   height: 46px;
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border);
   border-radius: 4px;
   cursor: pointer;
   padding: 0;
@@ -116,20 +116,20 @@
 }
 
 .isd-cell:hover {
-  background-color: var(--coco-accent-subtle);
-  border-color: var(--coco-border-strong);
+  background-color: var(--nicel-accent-subtle);
+  border-color: var(--nicel-border-strong);
 }
 
 .isd-cell--active {
-  background-color: var(--coco-accent-subtle);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent-subtle);
+  border-color: var(--nicel-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.18);
 }
 
 .isd-cell-glyph {
   font-size: 22px;
   line-height: 1;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   user-select: none;
 }
 
@@ -137,7 +137,7 @@
   margin: 24px 0;
   text-align: center;
   font-size: 13px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .isd-preview {
@@ -145,8 +145,8 @@
   align-items: center;
   gap: 14px;
   padding: 12px 20px;
-  background-color: var(--coco-surface);
-  border-top: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border-top: 1px solid var(--nicel-border);
   min-height: 56px;
 }
 
@@ -155,7 +155,7 @@
   line-height: 1;
   width: 44px;
   text-align: center;
-  color: var(--coco-accent-hover);
+  color: var(--nicel-accent-hover);
   font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols",
     "Noto Color Emoji", "Segoe UI Emoji", sans-serif;
 }
@@ -170,13 +170,13 @@
 .isd-preview-name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   text-transform: capitalize;
 }
 
 .isd-preview-code {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   display: flex;
   gap: 12px;
@@ -186,19 +186,19 @@
 .isd-preview-cat {
   font-family: inherit;
   font-size: 11px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
 }
 
 .isd-preview-placeholder {
   font-size: 12px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   font-style: italic;
 }
 
 .isd-footer {
   padding: 12px 20px;
-  background-color: var(--coco-surface);
-  border-top: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border-top: 1px solid var(--nicel-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -207,7 +207,7 @@
 
 .isd-hint {
   font-size: 11px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
 }
 
 .isd-footer-actions {
@@ -219,16 +219,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .isd-btn:hover:not(:disabled) {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-border-strong);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-border-strong);
 }
 
 .isd-btn:disabled {
@@ -237,12 +237,12 @@
 }
 
 .isd-btn--primary {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .isd-btn--primary:hover:not(:disabled) {
-  background-color: var(--coco-accent-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
 }

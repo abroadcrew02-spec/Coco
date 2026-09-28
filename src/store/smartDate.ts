@@ -12,7 +12,7 @@
 // left untouched — partial conversions are expected and surfaced via the
 // returned `convertedCount`.
 //
-// Snapshot shape (Univer 0.5.x + Coco):
+// Snapshot shape (Univer 0.5.x + Nicel):
 //   {
 //     sheets: {
 //       <sheetId>: {

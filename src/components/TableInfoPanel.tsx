@@ -16,7 +16,7 @@ interface Props {
   onRename: (oldName: string, newName: string) => void;
   /** Drop a table from a specific sheet. */
   onDelete: (sheetId: string, name: string) => void;
-  /** Import the table into the Coco Data Model. */
+  /** Import the table into the Nicel Data Model. */
   onAddToDataModel?: (sheetId: string, tableName: string) => void;
 }
 

@@ -1,8 +1,35 @@
 # Changelog
 
-All notable changes to Coco are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
+All notable changes to Nicel (formerly Coco) are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.8.0] - 2026-09-28
+
+Minor release. The application is renamed from **Coco** to **Nicel**. Delivered to v0.7.0 users through the auto-updater.
+
+### Changed
+
+- **Product name Coco → Nicel** everywhere the user sees it: window title, home screen, help, settings, installer (`Nicel_0.8.0_x64-setup.exe`), install directory and executable (`nicel.exe`), log file (`Nicel.log`). Code identifiers, CSS custom properties / class names, file names (`nicelDataModel.ts`, `nicelQueries.ts`, `nicelUniverLocale.ts`), the Rust crate (`nicel` / `nicel_lib`) and the docs follow the new name.
+- **Installer migration hook** (`src-tauri/windows/hooks.nsh`, wired via `bundle.windows.nsis.installerHooks`): the NSIS installer looks for the legacy per-user `Coco` uninstall entry and runs its uninstaller silently before installing Nicel, so an auto-update does not leave two copies behind. Because the legacy uninstaller removes the Coco shortcuts and the updater runs the installer in `/UPDATE` mode (which skips shortcut creation), the hook clears the template's update flag so Start-menu / desktop `Nicel` shortcuts are created; taskbar pins cannot be restored. App data is untouched (it lives under the unchanged bundle identifier).
+- **MSI upgrade code pinned** to the value the Coco MSIs were built with (`bundle.windows.wix.upgradeCode = 2f0d29e5-0f27-5c52-b1c4-aee05c0224af`, verified against the released `Coco_0.7.0_x64_en-US.msi`), so a Nicel MSI performs a major upgrade over a Coco MSI instead of installing side by side. Tauri would otherwise derive a new code from the new product name.
+- **Script API namespace `Nicel.*`** (`Nicel.onOpen` / `onEdit` / `addMenuItem` / `addTimer`). The old `Coco` global stays as an alias to the same object so saved scripts keep working.
+- **Chart OOXML emit** (#334): per-series colors, data labels, and sparse `numCache` so blank cells become gaps instead of zeros.
+
+### Unchanged on purpose (compatibility)
+
+- The `.coco` workbook extension and the `"coco"` source-type value (SQLite CHECK constraint, recents).
+- Snapshot keys `_cocoQueries` / `_cocoDataModel` / `_cocoDataTypes` / `_cocoCharts` / `_cocoSlicers` / `_cocoPivots`, the `xl/cocoExtensions/*.json` parts inside saved xlsx, and the `"coco-new"` form-control provenance marker.
+- Bundle identifier `com.coco.app` (AppData path, installer identity), localStorage keys (`coco.*`, including the macro key seed), OS keyring service `coco-urlfetch`.
+- Updater endpoint (`abroadcrew02-spec/Coco` GitHub repo), updater public key, signing-key file names, CI env var `COCO_PERF_GATE`.
+- Workbooks saved by Coco are still recognised as app-authored (`docProps/core.xml` creator check accepts both names).
+
+### Known issues
+
+- MSI-installed machines: the legacy `Coco` MSI entry is not removed by the NSIS migration hook; uninstall Coco manually (no data loss).
+- Real-Excel visual verification of emitted chart / image / form-control OOXML is still open (#337).
+
+See also `CHANGELOG/v0.7.0.md` for the 0.7.0 release notes (published on GitHub Releases only).
 
 ## [0.6.1] - 2026-05-25
 

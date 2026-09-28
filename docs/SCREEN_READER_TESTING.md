@@ -31,7 +31,7 @@ surface, so confirm at least once there.
 
 ## General setup
 
-1. Start the screen reader **before** launching Coco.
+1. Start the screen reader **before** launching Nicel.
 2. Open a workbook with a mix of text, numbers, and a few empty cells.
 3. Put the screen reader in "focus" / "forms" mode where applicable so key
    presses reach the app.
@@ -107,7 +107,7 @@ Escape-to-close and that focus is not visually lost.
 
 1. Using only the keyboard (Tab), move focus across toolbar buttons, status
    bar controls, and dialog inputs.
-2. **Expected:** a clear focus outline (`--coco-focus-ring`, themed for light
+2. **Expected:** a clear focus outline (`--nicel-focus-ring`, themed for light
    and dark) is visible on the focused element.
 3. Click the same controls with the mouse.
    **Expected:** no focus ring is drawn on pointer interaction
@@ -128,5 +128,5 @@ Escape-to-close and that focus is not visually lost.
 
 ## Recording results
 
-For each release, note: screen reader + version, OS build, Coco version, and
+For each release, note: screen reader + version, OS build, Nicel version, and
 pass/fail per AC above. File any regression as a new issue referencing #177.

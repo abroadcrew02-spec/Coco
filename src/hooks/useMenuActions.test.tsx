@@ -137,7 +137,7 @@ describe("useMenuActions", () => {
       });
     });
 
-    it("'open' routes .coco to workbook_open_coco", async () => {
+    it("'open' routes .coco to workbook_open_nicel", async () => {
       openMock.mockResolvedValue("/tmp/wb.coco");
       invokeMock.mockResolvedValue({
         handle: { workbookId: "wb", path: "/tmp/wb.coco", sourceType: "coco", snapshotJson: "{}" },
@@ -145,7 +145,7 @@ describe("useMenuActions", () => {
       });
       render(<Probe />);
       await fireMenu("open");
-      expect(invokeMock).toHaveBeenCalledWith("workbook_open_coco", { path: "/tmp/wb.coco" });
+      expect(invokeMock).toHaveBeenCalledWith("workbook_open_nicel", { path: "/tmp/wb.coco" });
     });
 
     it("'open' is a no-op when the user cancels the dialog", async () => {
@@ -153,7 +153,7 @@ describe("useMenuActions", () => {
       render(<Probe />);
       await fireMenu("open");
       const importCalls = invokeMock.mock.calls.filter((c) =>
-        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(c[0] as string)
+        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_nicel"].includes(c[0] as string)
       );
       expect(importCalls).toHaveLength(0);
     });
@@ -184,13 +184,13 @@ describe("useMenuActions", () => {
       expect(exportSpy).toHaveBeenCalledTimes(1);
     });
 
-    it("'export-csv' dispatches a coco:menu-csv-export window event", async () => {
+    it("'export-csv' dispatches a nicel:menu-csv-export window event", async () => {
       const listener = vi.fn();
-      window.addEventListener("coco:menu-csv-export", listener);
+      window.addEventListener("nicel:menu-csv-export", listener);
       render(<Probe />);
       await fireMenu("export-csv");
       expect(listener).toHaveBeenCalledTimes(1);
-      window.removeEventListener("coco:menu-csv-export", listener);
+      window.removeEventListener("nicel:menu-csv-export", listener);
     });
   });
 
@@ -247,7 +247,7 @@ describe("useMenuActions", () => {
       const listener = vi.fn((event: Event) => {
         received.push((event as CustomEvent<string>).detail);
       });
-      window.addEventListener("coco:editor-command", listener);
+      window.addEventListener("nicel:editor-command", listener);
       render(<Probe />);
 
       for (const id of ids) {
@@ -256,7 +256,7 @@ describe("useMenuActions", () => {
 
       expect(listener).toHaveBeenCalledTimes(ids.length);
       expect(received).toEqual(ids);
-      window.removeEventListener("coco:editor-command", listener);
+      window.removeEventListener("nicel:editor-command", listener);
     });
   });
 

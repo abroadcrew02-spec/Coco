@@ -3,7 +3,7 @@
 // across all sheets, reorder rules by priority, and delete rules — all
 // without touching Univer directly.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension):
+// Snapshot shape (Univer 0.5.x + Nicel extension):
 //   {
 //     sheetOrder?: string[],
 //     sheets: {

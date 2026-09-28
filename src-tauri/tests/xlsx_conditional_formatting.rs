@@ -4,7 +4,7 @@
 //! snapshot → export → re-import, plus a no-CF regression so a clean file
 //! doesn't accidentally pick up a `<conditionalFormatting>` block on export.
 
-use coco_lib::commands::xlsx_io::{
+use nicel_lib::commands::xlsx_io::{
     detect_unsupported_features, export_xlsx_core, import_xlsx_core,
 };
 use rust_xlsxwriter::{

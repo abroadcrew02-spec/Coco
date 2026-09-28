@@ -1,7 +1,7 @@
 .bd-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .bd-modal {
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
   width: 100%;
   max-width: 540px;
   max-height: 86vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .bd-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .bd-close:hover {
-  color: var(--coco-text);
-  background-color: var(--coco-surface-hover);
+  color: var(--nicel-text);
+  background-color: var(--nicel-surface-hover);
 }
 
 .bd-body {
@@ -77,13 +77,13 @@
 
 .bd-field-label {
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .bd-input {
   padding: 6px 8px;
   font-size: 13px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
   font-family: inherit;
 }
@@ -91,16 +91,16 @@
 .bd-input:focus,
 .bd-select:focus {
   outline: none;
-  border-color: var(--coco-accent);
+  border-color: var(--nicel-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
 }
 
 .bd-select {
   padding: 6px 8px;
   font-size: 13px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   font-family: inherit;
 }
 
@@ -108,16 +108,16 @@
   width: 56px;
   height: 30px;
   padding: 0;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   cursor: pointer;
 }
 
 .bd-presets {
-  border: 1px solid var(--coco-border);
+  border: 1px solid var(--nicel-border);
   border-radius: 6px;
-  background-color: var(--coco-accent-subtle);
+  background-color: var(--nicel-accent-subtle);
   padding: 10px 12px;
   margin: 0;
   display: flex;
@@ -137,21 +137,21 @@
   align-items: center;
   gap: 4px;
   padding: 6px 4px 4px;
-  border: 1px solid var(--coco-border);
+  border: 1px solid var(--nicel-border);
   border-radius: 4px;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   cursor: pointer;
   font-family: inherit;
 }
 
 .bd-preset:hover:not(:disabled) {
-  background-color: var(--coco-accent-subtle);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent-subtle);
+  border-color: var(--nicel-accent);
 }
 
 .bd-preset--selected {
-  background-color: var(--coco-accent-subtle);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent-subtle);
+  border-color: var(--nicel-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
 }
 
@@ -161,7 +161,7 @@
 
 .bd-preset-label {
   font-size: 10px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   text-align: center;
   line-height: 1.2;
   min-height: 2.4em;
@@ -179,20 +179,20 @@
 .bd-hint {
   margin: 0;
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   line-height: 1.5;
 }
 
 .bd-error {
   margin: 0;
   font-size: 12px;
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
 }
 
 .bd-footer {
   padding: 12px 20px;
-  background-color: var(--coco-surface);
-  border-top: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border-top: 1px solid var(--nicel-border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -208,16 +208,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .bd-btn:hover:not(:disabled) {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-border-strong);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-border-strong);
 }
 
 .bd-btn:disabled {
@@ -226,12 +226,12 @@
 }
 
 .bd-btn--primary {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .bd-btn--primary:hover:not(:disabled) {
-  background-color: var(--coco-accent-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
 }

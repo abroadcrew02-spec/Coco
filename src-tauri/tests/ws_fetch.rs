@@ -11,7 +11,7 @@
 // - the SSE line parser implements the WHATWG event-stream grammar,
 // - per-message / subprotocol / header validation is enforced.
 
-use coco_lib::commands::ws_fetch::{
+use nicel_lib::commands::ws_fetch::{
     b64_decode, sse_feed_line, validate_headers, validate_subprotocols, validate_ws_url,
     ConnRegistry, SseEventBuilder, Transport, WsCheckError, MAX_CONNECTIONS,
 };

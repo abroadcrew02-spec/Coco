@@ -1,12 +1,12 @@
-use coco_lib::commands::recovery::autosave_temp_core;
-use coco_lib::commands::workbook::{
-    clear_recent_core, list_recent_core, list_recovery_core, open_coco_core, remove_recent_core,
+use nicel_lib::commands::recovery::autosave_temp_core;
+use nicel_lib::commands::workbook::{
+    clear_recent_core, list_recent_core, list_recovery_core, open_nicel_core, remove_recent_core,
     restore_backup_core, save_core, workbook_new,
 };
 use rusqlite::Connection;
 use tempfile::TempDir;
 
-fn coco_path(dir: &TempDir, name: &str) -> std::path::PathBuf {
+fn nicel_path(dir: &TempDir, name: &str) -> std::path::PathBuf {
     dir.path().join(name)
 }
 
@@ -15,9 +15,9 @@ fn path_str(p: &std::path::Path) -> String {
 }
 
 #[test]
-fn open_coco_missing_path_returns_err() {
+fn open_nicel_missing_path_returns_err() {
     let app_dir = TempDir::new().unwrap();
-    let result = open_coco_core(app_dir.path(), "/does/not/exist.coco");
+    let result = open_nicel_core(app_dir.path(), "/does/not/exist.coco");
     assert!(result.is_err());
     let msg = result.unwrap_err();
     assert!(
@@ -32,8 +32,8 @@ fn restore_backup_missing_temp_file_clears_candidate() {
     let r = autosave_temp_core(app_dir.path(), "wb-missing", "{}").unwrap();
     // #72: recovery file now carries a per-session suffix; use the path the
     // autosave returned rather than reconstructing it from workbook_id.
-    let coco_path = std::path::PathBuf::from(r.path);
-    std::fs::remove_file(&coco_path).unwrap();
+    let nicel_path = std::path::PathBuf::from(r.path);
+    std::fs::remove_file(&nicel_path).unwrap();
 
     // Restore should fail with a clear error AND drop the stale row.
     let result = restore_backup_core(app_dir.path(), "wb-missing");
@@ -74,10 +74,10 @@ fn workbook_handle_serializes_requires_save_as_in_camel_case() {
 }
 
 #[test]
-fn open_coco_reads_latest_snapshot() {
+fn open_nicel_reads_latest_snapshot() {
     let app_dir = TempDir::new().unwrap();
     let wb_dir = TempDir::new().unwrap();
-    let wb_path = coco_path(&wb_dir, "data.coco");
+    let wb_path = nicel_path(&wb_dir, "data.coco");
 
     save_core(
         "wb-test".into(),
@@ -92,7 +92,7 @@ fn open_coco_reads_latest_snapshot() {
     )
     .unwrap();
 
-    let result = open_coco_core(app_dir.path(), &path_str(&wb_path)).unwrap();
+    let result = open_nicel_core(app_dir.path(), &path_str(&wb_path)).unwrap();
     assert_eq!(result.handle.workbook_id, "wb-test");
     assert_eq!(
         result.handle.path.as_deref(),
@@ -109,13 +109,13 @@ fn open_coco_reads_latest_snapshot() {
 }
 
 #[test]
-fn open_coco_records_recent_file() {
+fn open_nicel_records_recent_file() {
     let app_dir = TempDir::new().unwrap();
     let wb_dir = TempDir::new().unwrap();
-    let wb_path = coco_path(&wb_dir, "alpha.coco");
+    let wb_path = nicel_path(&wb_dir, "alpha.coco");
     save_core("wb".into(), Some(path_str(&wb_path)), "{}".into()).unwrap();
 
-    open_coco_core(app_dir.path(), &path_str(&wb_path)).unwrap();
+    open_nicel_core(app_dir.path(), &path_str(&wb_path)).unwrap();
 
     let conn = Connection::open(app_dir.path().join("app_state.db")).unwrap();
     let count: i64 = conn
@@ -132,14 +132,14 @@ fn open_coco_records_recent_file() {
 fn list_recent_returns_recorded_files_with_existence_flags() {
     let app_dir = TempDir::new().unwrap();
     let wb_dir = TempDir::new().unwrap();
-    let alive = coco_path(&wb_dir, "alive.coco");
-    let dead = coco_path(&wb_dir, "dead.coco");
+    let alive = nicel_path(&wb_dir, "alive.coco");
+    let dead = nicel_path(&wb_dir, "dead.coco");
 
     save_core("wb-a".into(), Some(path_str(&alive)), "{}".into()).unwrap();
     save_core("wb-d".into(), Some(path_str(&dead)), "{}".into()).unwrap();
 
-    open_coco_core(app_dir.path(), &path_str(&alive)).unwrap();
-    open_coco_core(app_dir.path(), &path_str(&dead)).unwrap();
+    open_nicel_core(app_dir.path(), &path_str(&alive)).unwrap();
+    open_nicel_core(app_dir.path(), &path_str(&dead)).unwrap();
 
     std::fs::remove_file(&dead).unwrap();
 
@@ -177,7 +177,7 @@ fn list_recovery_returns_autosave_candidates() {
 }
 
 #[test]
-fn restore_backup_opens_temp_coco_snapshot() {
+fn restore_backup_opens_temp_nicel_snapshot() {
     let app_dir = TempDir::new().unwrap();
 
     autosave_temp_core(app_dir.path(), "wb-r", "{\"restored\":true}").unwrap();
@@ -213,13 +213,13 @@ fn restore_backup_errors_on_missing_candidate() {
 fn remove_recent_drops_single_path() {
     let app_dir = TempDir::new().unwrap();
     let wb_dir = TempDir::new().unwrap();
-    let a = coco_path(&wb_dir, "a.coco");
-    let b = coco_path(&wb_dir, "b.coco");
+    let a = nicel_path(&wb_dir, "a.coco");
+    let b = nicel_path(&wb_dir, "b.coco");
 
     save_core("wb-a".into(), Some(path_str(&a)), "{}".into()).unwrap();
     save_core("wb-b".into(), Some(path_str(&b)), "{}".into()).unwrap();
-    open_coco_core(app_dir.path(), &path_str(&a)).unwrap();
-    open_coco_core(app_dir.path(), &path_str(&b)).unwrap();
+    open_nicel_core(app_dir.path(), &path_str(&a)).unwrap();
+    open_nicel_core(app_dir.path(), &path_str(&b)).unwrap();
     assert_eq!(list_recent_core(app_dir.path()).unwrap().len(), 2);
 
     remove_recent_core(app_dir.path(), &path_str(&a)).unwrap();
@@ -240,9 +240,9 @@ fn clear_recent_drops_all() {
     let app_dir = TempDir::new().unwrap();
     let wb_dir = TempDir::new().unwrap();
     for i in 0..3 {
-        let p = coco_path(&wb_dir, &format!("f{i}.coco"));
+        let p = nicel_path(&wb_dir, &format!("f{i}.coco"));
         save_core(format!("wb-{i}"), Some(path_str(&p)), "{}".into()).unwrap();
-        open_coco_core(app_dir.path(), &path_str(&p)).unwrap();
+        open_nicel_core(app_dir.path(), &path_str(&p)).unwrap();
     }
     assert_eq!(list_recent_core(app_dir.path()).unwrap().len(), 3);
 

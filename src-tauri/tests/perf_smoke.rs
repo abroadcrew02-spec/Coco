@@ -27,8 +27,8 @@
 // Cold start (app launch p50 3s / p95 5s) is *not* covered here — it requires
 // the Tauri shell to be running, which can't be done from a unit-test binary.
 
-use coco_lib::commands::workbook::save_core;
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::workbook::save_core;
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::{Formula, Workbook};
 use serde_json::{json, Map, Value};
 use std::time::{Duration, Instant};

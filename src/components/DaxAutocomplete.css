@@ -7,10 +7,10 @@
   top: 100%;
   left: 0;
   z-index: 1400;
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
-  box-shadow: 0 4px 16px var(--coco-shadow);
+  box-shadow: 0 4px 16px var(--nicel-shadow);
   min-width: 240px;
   max-width: 360px;
   max-height: 220px;
@@ -25,18 +25,18 @@
   padding: 5px 10px;
   cursor: pointer;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   user-select: none;
 }
 
 .dac-item:hover,
 .dac-item[aria-selected="true"] {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
 }
 
 .dac-item-name {
-  font-family: var(--coco-font-mono, monospace);
+  font-family: var(--nicel-font-mono, monospace);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -53,8 +53,8 @@
   font-size: 10px;
   padding: 1px 4px;
   border-radius: 2px;
-  background-color: var(--coco-surface);
-  color: var(--coco-text-muted);
+  background-color: var(--nicel-surface);
+  color: var(--nicel-text-muted);
   margin-left: auto;
   white-space: nowrap;
   flex-shrink: 0;

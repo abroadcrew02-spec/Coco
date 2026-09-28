@@ -1,5 +1,5 @@
-use coco_lib::commands::recovery::{autosave_temp_core, clear_recovery_core};
-use coco_lib::commands::workbook::MAX_SNAPSHOTS_PER_WORKBOOK;
+use nicel_lib::commands::recovery::{autosave_temp_core, clear_recovery_core};
+use nicel_lib::commands::workbook::MAX_SNAPSHOTS_PER_WORKBOOK;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -37,7 +37,7 @@ fn find_recovery_file(data_dir: &std::path::Path, workbook_id: &str) -> std::pat
 }
 
 #[test]
-fn autosave_creates_temp_coco_and_candidate_row() {
+fn autosave_creates_temp_nicel_and_candidate_row() {
     let tmp = TempDir::new().unwrap();
     let result = autosave_temp_core(tmp.path(), "wb-1", "{\"x\":1}").unwrap();
     assert!(result.success);
@@ -71,8 +71,8 @@ fn autosave_uses_auto_save_reason() {
     let tmp = TempDir::new().unwrap();
     autosave_temp_core(tmp.path(), "wb-2", "{}").unwrap();
 
-    let coco_path = find_recovery_file(tmp.path(), "wb-2");
-    let conn = Connection::open(&coco_path).unwrap();
+    let nicel_path = find_recovery_file(tmp.path(), "wb-2");
+    let conn = Connection::open(&nicel_path).unwrap();
     let reason: String = conn
         .query_row(
             "SELECT reason FROM workbook_snapshots WHERE workbook_id = ?1",
@@ -102,8 +102,8 @@ fn repeated_autosave_prunes_snapshots_to_cap_and_keeps_latest() {
         autosave_temp_core(tmp.path(), "wb-retention", &format!("{{\"v\":{i}}}")).unwrap();
     }
 
-    let coco_path = find_recovery_file(tmp.path(), "wb-retention");
-    let conn = Connection::open(&coco_path).unwrap();
+    let nicel_path = find_recovery_file(tmp.path(), "wb-retention");
+    let conn = Connection::open(&nicel_path).unwrap();
     let count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM workbook_snapshots WHERE workbook_id = ?1",
@@ -128,13 +128,13 @@ fn clear_recovery_removes_file_and_row() {
     let tmp = TempDir::new().unwrap();
     autosave_temp_core(tmp.path(), "wb-4", "{}").unwrap();
 
-    let coco_path = find_recovery_file(tmp.path(), "wb-4");
-    assert!(coco_path.exists());
+    let nicel_path = find_recovery_file(tmp.path(), "wb-4");
+    assert!(nicel_path.exists());
     assert_eq!(count_candidates(tmp.path(), "wb-4"), 1);
 
     clear_recovery_core(tmp.path(), "wb-4").unwrap();
 
-    assert!(!coco_path.exists(), "temp .coco should be deleted");
+    assert!(!nicel_path.exists(), "temp .coco should be deleted");
     assert_eq!(count_candidates(tmp.path(), "wb-4"), 0);
 }
 
@@ -156,8 +156,8 @@ fn clear_recovery_tolerates_missing_temp_file() {
     autosave_temp_core(tmp.path(), "wb-5", "{}").unwrap();
 
     // Manually delete the temp file BEFORE calling clear_recovery.
-    let coco_path = find_recovery_file(tmp.path(), "wb-5");
-    std::fs::remove_file(&coco_path).unwrap();
+    let nicel_path = find_recovery_file(tmp.path(), "wb-5");
+    std::fs::remove_file(&nicel_path).unwrap();
 
     // clear_recovery should still succeed and remove the DB row.
     clear_recovery_core(tmp.path(), "wb-5").unwrap();

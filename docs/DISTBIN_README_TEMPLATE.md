@@ -1,6 +1,6 @@
-# Coco — distribution artifacts
+# Nicel — distribution artifacts
 
-This directory is produced by `npm run pack` (which invokes `tauri build` and then `scripts/pack-distbin.mjs`). It contains the redistributable build artifacts for the current Coco release, plus a SHA-256 checksum file and a JSON manifest.
+This directory is produced by `npm run pack` (which invokes `tauri build` and then `scripts/pack-distbin.mjs`). It contains the redistributable build artifacts for the current Nicel release, plus a SHA-256 checksum file and a JSON manifest.
 
 This README is regenerated on every `npm run pack` run. Do not edit by hand — edit `docs/DISTBIN_README_TEMPLATE.md` instead.
 
@@ -10,11 +10,11 @@ The script copies whichever artifacts Tauri produced on the host platform. On a 
 
 | File | Purpose | When to use |
 | ---- | ------- | ----------- |
-| `Coco_<version>_x64_en-US.msi` | Windows MSI installer (WiX) | Standard managed-deployment install. Works with Group Policy / Intune / SCCM. |
-| `Coco_<version>_x64-setup.exe` | Windows NSIS installer | Lightweight per-user install for individual workstations. |
-| `Coco.exe` (or `coco.exe`) | Raw application executable | Run portably without installing. Used by QA for reproducing issues. |
+| `Nicel_<version>_x64_en-US.msi` | Windows MSI installer (WiX) | Standard managed-deployment install. Works with Group Policy / Intune / SCCM. |
+| `Nicel_<version>_x64-setup.exe` | Windows NSIS installer | Lightweight per-user install for individual workstations. |
+| `Nicel.exe` (or `nicel.exe`) | Raw application executable | Run portably without installing. Used by QA for reproducing issues. |
 
-On macOS the script will instead stage `Coco_<version>_x64.dmg` and on Linux it will stage `.deb`, `.rpm`, or `.AppImage` depending on what bundlers ran.
+On macOS the script will instead stage `Nicel_<version>_x64.dmg` and on Linux it will stage `.deb`, `.rpm`, or `.AppImage` depending on what bundlers ran.
 
 In every case the directory also contains:
 
@@ -26,19 +26,19 @@ In every case the directory also contains:
 
 The MSI and NSIS installers both lay down the same payload, just with different installer mechanics:
 
-- **Program files**: `%ProgramFiles%\Coco\` (MSI default) or `%LocalAppData%\Programs\Coco\` (NSIS per-user default).
-- **Start menu shortcut**: `Coco`.
-- **User data**: created lazily under `%AppData%\Coco\` on first launch. Recents, settings, and recovery candidates live here.
+- **Program files**: `%ProgramFiles%\Nicel\` (MSI default) or `%LocalAppData%\Programs\Nicel\` (NSIS per-user default).
+- **Start menu shortcut**: `Nicel`.
+- **User data**: created lazily under `%AppData%\Nicel\` on first launch. Recents, settings, and recovery candidates live here.
 - **Backups**: `.bak.1`..`.bak.5` are written next to the user's own `.xlsx` / `.coco` files, not under `%AppData%`.
 
-Uninstalling Coco does **not** delete user data per requirements.md §5.6.
+Uninstalling Nicel does **not** delete user data per requirements.md §5.6.
 
 ## Verifying SHA-256 checksums
 
 ### Windows (PowerShell)
 
 ```powershell
-Get-FileHash .\Coco_<version>_x64_en-US.msi -Algorithm SHA256
+Get-FileHash .\Nicel_<version>_x64_en-US.msi -Algorithm SHA256
 # compare the Hash field against the matching line in SHA256SUMS.txt
 ```
 

@@ -56,7 +56,7 @@ jobs:
         run: |
           Write-Host "Installing code-signing cert into CurrentUser\My"
           $bytes = [System.Convert]::FromBase64String($env:WINDOWS_CERT_BASE64)
-          $tmp = Join-Path $env:RUNNER_TEMP "coco-signing.pfx"
+          $tmp = Join-Path $env:RUNNER_TEMP "nicel-signing.pfx"
           [System.IO.File]::WriteAllBytes($tmp, $bytes)
           $secure = ConvertTo-SecureString -String $env:WINDOWS_CERT_PASSWORD -Force -AsPlainText
           $cert = Import-PfxCertificate -FilePath $tmp -Password $secure -CertStoreLocation Cert:\CurrentUser\My
@@ -124,7 +124,7 @@ jobs:
           Write-Host "Found $($assets.Count) release assets"
 
           # 1) Create as draft (no consumers see it yet)
-          $createArgs = @("release", "create", $tag, "--draft", "--title", "Coco $tag")
+          $createArgs = @("release", "create", $tag, "--draft", "--title", "Nicel $tag")
           if ($hasNotes) { $createArgs += @("--notes-file", $notesFile) } else { $createArgs += @("--generate-notes") }
           & gh @createArgs
           if ($LASTEXITCODE -ne 0) { Write-Error "gh release create (draft) failed"; exit $LASTEXITCODE }

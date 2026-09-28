@@ -7,7 +7,7 @@
 //   4. Preview the pipeline result after each step change.
 //   5. Apply the result to the workbook and save the query definition.
 //
-// Wires into: Step 1 (runPipeline), Step 5 (cocoQueries CRUD), Step 7 (runQuery + applyQueryResultToSnapshot).
+// Wires into: Step 1 (runPipeline), Step 5 (nicelQueries CRUD), Step 7 (runQuery + applyQueryResultToSnapshot).
 
 import { useCallback, useEffect, useState } from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
@@ -19,8 +19,8 @@ import type {
   PipelineResult,
   ConditionalOp,
 } from "../store/getAndTransform";
-import type { QuerySource, SavedQuery } from "../store/cocoQueries";
-import { generateQueryName, readQueries } from "../store/cocoQueries";
+import type { QuerySource, SavedQuery } from "../store/nicelQueries";
+import { generateQueryName, readQueries } from "../store/nicelQueries";
 import {
   createTauriSourceFetcher,
   applyQueryResultToSnapshot,

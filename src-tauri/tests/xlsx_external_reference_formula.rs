@@ -1,7 +1,7 @@
 //! issue #176: external-workbook-reference formula round-trip.
 //!
 //! `=[1]Sheet1!A1` (and `=[Other.xlsx]Sheet1!A1`) reference a cell in a
-//! *different* workbook. Coco is a single-workbook editor — the referenced
+//! *different* workbook. Nicel is a single-workbook editor — the referenced
 //! book is never loaded as a second Univer unit — so Univer cannot
 //! live-evaluate an external reference. The user can only ever see the
 //! *cached* value Excel stored at last save.
@@ -9,12 +9,12 @@
 //! That makes cached-value preservation load-bearing for external references,
 //! unlike normal formulas (which Univer recomputes at render time). The catch:
 //! rust_xlsxwriter's `write_formula` always stores `0` as the formula result.
-//! Without intervention an external reference would round-trip through Coco
+//! Without intervention an external reference would round-trip through Nicel
 //! as `<f>=[1]Sheet1!A1</f><v>0</v>`, silently losing the cached value.
 //!
 //! The #176 fix re-emits the cached value via `set_formula_result` for
 //! external-reference formula cells. This test asserts that BOTH the formula
-//! *text* and the cached *value* survive a full Coco round-trip
+//! *text* and the cached *value* survive a full Nicel round-trip
 //! (snapshot -> export xlsx -> re-import + on-disk calamine check), and that
 //! a normal formula in the same sheet is left to recalc (no spurious result).
 //!
@@ -23,7 +23,7 @@
 //! `xlsx_external_link_preservation.rs`.
 
 use calamine::{open_workbook, Data, Reader, Xlsx};
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -39,7 +39,7 @@ fn external_reference_formula_and_cached_value_round_trip() {
     let fixture = tmp.path().join("ext_ref.xlsx");
     let exported = tmp.path().join("ext_ref_out.xlsx");
 
-    // ---- Build a plain fixture and import it to obtain a real Coco snapshot.
+    // ---- Build a plain fixture and import it to obtain a real Nicel snapshot.
     {
         let mut wb = Workbook::new();
         let ws = wb.add_worksheet();
@@ -85,7 +85,7 @@ fn external_reference_formula_and_cached_value_round_trip() {
     );
     let patched_json = serde_json::to_string(&snapshot).expect("serialize patched snapshot");
 
-    // ---- Export via Coco.
+    // ---- Export via Nicel.
     let export = export_xlsx_core(path_str(&exported), patched_json).expect("export call");
     assert!(
         export.success,

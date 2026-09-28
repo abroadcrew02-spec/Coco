@@ -50,11 +50,11 @@ export function requestHelp() {
 // useMenuActions) all share one prompt and stay aligned.
 export function useGlobalShortcuts() {
   const newWorkbook = useWorkbookStore((s) => s.newWorkbook);
-  const openCoco = useWorkbookStore((s) => s.openCoco);
+  const openNicel = useWorkbookStore((s) => s.openNicel);
   const importXlsx = useWorkbookStore((s) => s.importXlsx);
   const importCsv = useWorkbookStore((s) => s.importCsv);
-  const cocoUndo = useWorkbookStore((s) => s.cocoUndo);
-  const cocoRedo = useWorkbookStore((s) => s.cocoRedo);
+  const nicelUndo = useWorkbookStore((s) => s.nicelUndo);
+  const nicelRedo = useWorkbookStore((s) => s.nicelRedo);
 
   useEffect(() => {
     const onKey = async (e: KeyboardEvent) => {
@@ -65,7 +65,7 @@ export function useGlobalShortcuts() {
         return;
       }
 
-      // #97: Ctrl/Cmd+Alt+Z / Ctrl/Cmd+Alt+Shift+Z = Coco snapshot undo/redo.
+      // #97: Ctrl/Cmd+Alt+Z / Ctrl/Cmd+Alt+Shift+Z = Nicel snapshot undo/redo.
       // Sits next to (not on top of) Univer's native Ctrl+Z, which still owns
       // cell-typing undo. This pair rolls back apply-style mutations (AutoSum,
       // format painter, hyperlink, CF, DV, chart, image, comment) that
@@ -73,9 +73,9 @@ export function useGlobalShortcuts() {
       if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) {
-          cocoRedo();
+          nicelRedo();
         } else {
-          cocoUndo();
+          nicelUndo();
         }
         return;
       }
@@ -128,7 +128,7 @@ export function useGlobalShortcuts() {
         if (!selected) return;
         const path = typeof selected === "string" ? selected : selected[0];
         const route = routeOpenPath(path);
-        if (route.kind === "coco") await openCoco(route.path);
+        if (route.kind === "coco") await openNicel(route.path);
         else if (route.kind === "csv") await importCsv(route.path);
         else if (route.kind === "xlsx") await importXlsx(route.path);
       }
@@ -136,5 +136,5 @@ export function useGlobalShortcuts() {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [newWorkbook, openCoco, importXlsx, importCsv, cocoUndo, cocoRedo]);
+  }, [newWorkbook, openNicel, importXlsx, importCsv, nicelUndo, nicelRedo]);
 }

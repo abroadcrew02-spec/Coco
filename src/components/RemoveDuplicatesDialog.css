@@ -1,7 +1,7 @@
 .rdd-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .rdd-modal {
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
   width: 100%;
   max-width: 520px;
   max-height: 80vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .rdd-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .rdd-close:hover {
-  color: var(--coco-text);
-  background-color: var(--coco-surface-hover);
+  color: var(--nicel-text);
+  background-color: var(--nicel-surface-hover);
 }
 
 .rdd-body {
@@ -69,20 +69,20 @@
 
 .rdd-field-label {
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .rdd-input {
   padding: 6px 8px;
   font-size: 13px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
   font-family: inherit;
 }
 
 .rdd-input:focus {
   outline: none;
-  border-color: var(--coco-accent);
+  border-color: var(--nicel-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
 }
 
@@ -91,13 +91,13 @@
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .rdd-cols {
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 6px;
-  background-color: var(--coco-accent-subtle);
+  background-color: var(--nicel-accent-subtle);
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -110,7 +110,7 @@
   gap: 6px;
   align-items: center;
   padding-bottom: 6px;
-  border-bottom: 1px dashed var(--coco-border);
+  border-bottom: 1px dashed var(--nicel-border);
 }
 
 .rdd-cols-list {
@@ -127,31 +127,31 @@
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   padding: 2px 4px;
   border-radius: 3px;
 }
 
 .rdd-col-item:hover {
-  background-color: var(--coco-accent-subtle);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .rdd-col-letter {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   min-width: 28px;
 }
 
 .rdd-error {
   margin: 0;
   font-size: 12px;
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
 }
 
 .rdd-footer {
   padding: 12px 20px;
-  background-color: var(--coco-surface);
-  border-top: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border-top: 1px solid var(--nicel-border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -160,7 +160,7 @@
 .rdd-hint {
   margin: 0;
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   line-height: 1.5;
 }
 
@@ -174,16 +174,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .rdd-btn:hover:not(:disabled) {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-text-faint);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-text-faint);
 }
 
 .rdd-btn:disabled {
@@ -192,25 +192,25 @@
 }
 
 .rdd-btn--primary {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .rdd-btn--primary:hover:not(:disabled) {
-  background-color: var(--coco-accent-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
 }
 
 .rdd-btn--ghost {
   padding: 4px 10px;
   font-size: 12px;
-  color: var(--coco-accent);
-  border-color: var(--coco-border);
-  background-color: var(--coco-accent-subtle);
+  color: var(--nicel-accent);
+  border-color: var(--nicel-border);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .rdd-btn--ghost:hover:not(:disabled) {
-  background-color: var(--coco-accent-subtle);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent-subtle);
+  border-color: var(--nicel-accent);
 }

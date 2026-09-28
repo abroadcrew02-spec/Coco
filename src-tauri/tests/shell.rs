@@ -1,4 +1,4 @@
-use coco_lib::commands::shell::reveal_in_file_manager_core;
+use nicel_lib::commands::shell::reveal_in_file_manager_core;
 
 #[test]
 fn empty_path_returns_dedicated_error_code() {

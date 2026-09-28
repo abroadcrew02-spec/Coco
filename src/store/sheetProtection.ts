@@ -3,7 +3,7 @@
 // protected?" toolbar hint and the live command-blocking guard. Kept side
 // -effect free so it can be unit-tested without standing up Univer.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension):
+// Snapshot shape (Univer 0.5.x + Nicel extension):
 //   { sheets: { sheetId: { _protected?: { protected?: boolean } } } }
 
 export interface ProtectedSnapshot {

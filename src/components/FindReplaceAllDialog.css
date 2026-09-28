@@ -1,7 +1,7 @@
 .fra-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .fra-modal {
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
   width: 100%;
   max-width: 760px;
   max-height: 85vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .fra-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .fra-close:hover {
-  color: var(--coco-text);
-  background-color: var(--coco-surface-hover);
+  color: var(--nicel-text);
+  background-color: var(--nicel-surface-hover);
 }
 
 .fra-body {
@@ -69,13 +69,13 @@
 
 .fra-field-label {
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .fra-input {
   padding: 6px 8px;
   font-size: 13px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
   font-family: inherit;
 }
@@ -83,7 +83,7 @@
 .fra-input:focus,
 .fra-select:focus {
   outline: none;
-  border-color: var(--coco-accent);
+  border-color: var(--nicel-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
 }
 
@@ -99,7 +99,7 @@
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .fra-select-field {
@@ -107,22 +107,22 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .fra-select {
   padding: 5px 8px;
   font-size: 13px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   font-family: inherit;
 }
 
 .fra-results {
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 6px;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -141,10 +141,10 @@
 }
 
 .fra-results-header {
-  background-color: var(--coco-accent-subtle);
-  color: var(--coco-text-muted);
+  background-color: var(--nicel-accent-subtle);
+  color: var(--nicel-text-muted);
   font-weight: 600;
-  border-bottom: 1px solid var(--coco-border-strong);
+  border-bottom: 1px solid var(--nicel-border-strong);
 }
 
 .fra-results-body {
@@ -154,17 +154,17 @@
 
 .fra-result-row {
   cursor: pointer;
-  border-bottom: 1px solid var(--coco-border);
-  color: var(--coco-text);
+  border-bottom: 1px solid var(--nicel-border);
+  color: var(--nicel-text);
 }
 
 .fra-result-row:hover {
-  background-color: var(--coco-surface-hover);
+  background-color: var(--nicel-surface-hover);
 }
 
 .fra-result-row.is-selected {
-  background-color: var(--coco-accent-subtle);
-  color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-subtle);
+  color: var(--nicel-accent-hover);
 }
 
 .fra-cell {
@@ -174,7 +174,7 @@
 }
 
 .fra-cell--preview {
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   font-family:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 11px;
@@ -184,15 +184,15 @@
   padding: 24px 10px;
   text-align: center;
   font-size: 12px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
 }
 
 .fra-overflow {
   padding: 8px 10px;
   font-size: 11px;
-  color: var(--coco-text-muted);
-  background-color: var(--coco-surface);
-  border-top: 1px dashed var(--coco-border);
+  color: var(--nicel-text-muted);
+  background-color: var(--nicel-surface);
+  border-top: 1px dashed var(--nicel-border);
 }
 
 .fra-status {
@@ -201,17 +201,17 @@
 }
 
 .fra-status--info {
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
 }
 
 .fra-status--error {
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
 }
 
 .fra-footer {
   padding: 12px 20px;
-  background-color: var(--coco-surface);
-  border-top: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border-top: 1px solid var(--nicel-border);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -227,16 +227,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .fra-btn:hover:not(:disabled) {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-border-strong);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-border-strong);
 }
 
 .fra-btn:disabled {
@@ -245,12 +245,12 @@
 }
 
 .fra-btn--primary {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .fra-btn--primary:hover:not(:disabled) {
-  background-color: var(--coco-accent-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
 }

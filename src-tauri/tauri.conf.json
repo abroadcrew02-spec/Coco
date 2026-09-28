@@ -1,6 +1,6 @@
 {
-  "productName": "Coco",
-  "version": "0.7.0",
+  "productName": "Nicel",
+  "version": "0.8.0",
   "identifier": "com.coco.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -11,7 +11,7 @@
   "app": {
     "windows": [
       {
-        "title": "Coco",
+        "title": "Nicel",
         "width": 1280,
         "height": 800,
         "minWidth": 800,
@@ -24,6 +24,7 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "Nicel",
     "targets": ["nsis", "msi"],
     "createUpdaterArtifacts": true,
     "icon": [
@@ -39,8 +40,15 @@
     "windows": {
       "digestAlgorithm": "sha256",
       "timestampUrl": "https://timestamp.digicert.com",
-      "wix": { "language": ["ja-JP", "en-US"] },
-      "nsis": { "displayLanguageSelector": false, "languages": ["English", "Japanese"] }
+      "wix": {
+        "language": ["ja-JP", "en-US"],
+        "upgradeCode": "2f0d29e5-0f27-5c52-b1c4-aee05c0224af"
+      },
+      "nsis": {
+        "displayLanguageSelector": false,
+        "languages": ["English", "Japanese"],
+        "installerHooks": "./windows/hooks.nsh"
+      }
     }
   },
   "plugins": {

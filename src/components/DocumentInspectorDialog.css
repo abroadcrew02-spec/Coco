@@ -5,7 +5,7 @@
 .doc-inspector-backdrop {
   position: fixed;
   inset: 0;
-  background: var(--coco-overlay);
+  background: var(--nicel-overlay);
   z-index: 1000;
   display: flex;
   align-items: center;
@@ -13,16 +13,16 @@
 }
 
 .doc-inspector-modal {
-  background: var(--coco-bg-elevated);
+  background: var(--nicel-bg-elevated);
   border-radius: 8px;
   width: min(720px, 95vw);
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 12px 32px var(--coco-shadow);
+  box-shadow: 0 12px 32px var(--nicel-shadow);
   overflow: hidden;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .doc-inspector-header {
@@ -30,15 +30,15 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  background: var(--coco-surface);
-  border-bottom: 1px solid var(--coco-border);
+  background: var(--nicel-surface);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .doc-inspector-title {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -52,13 +52,13 @@
 }
 
 .doc-inspector-status--clean {
-  background: var(--coco-accent-subtle);
-  color: var(--coco-accent);
+  background: var(--nicel-accent-subtle);
+  color: var(--nicel-accent);
 }
 
 .doc-inspector-status--hits {
-  background: var(--coco-warning-bg);
-  color: var(--coco-warning);
+  background: var(--nicel-warning-bg);
+  color: var(--nicel-warning);
 }
 
 .doc-inspector-header-actions {
@@ -74,19 +74,19 @@
   font-size: 20px;
   line-height: 1;
   padding: 4px 8px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .doc-inspector-close:hover {
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .doc-inspector-intro {
   margin: 0;
   padding: 10px 16px;
-  background: var(--coco-surface);
-  border-bottom: 1px solid var(--coco-border);
-  color: var(--coco-text-muted);
+  background: var(--nicel-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  color: var(--nicel-text-muted);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -95,12 +95,12 @@
   flex: 1;
   overflow-y: auto;
   padding: 8px 16px;
-  background: var(--coco-bg-elevated);
+  background: var(--nicel-bg-elevated);
 }
 
 .doc-inspector-empty {
   text-align: center;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   padding: 32px 0;
   margin: 0;
 }
@@ -112,7 +112,7 @@
 }
 
 .doc-inspector-row {
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
   padding: 10px 0;
 }
 
@@ -121,7 +121,7 @@
 }
 
 .doc-inspector-row--hit .doc-inspector-row-title {
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .doc-inspector-row-summary {
@@ -142,14 +142,14 @@
 
 .doc-inspector-row-title {
   font-weight: 600;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .doc-inspector-row-count {
   font-size: 11px;
   font-weight: 600;
-  background: var(--coco-surface);
-  color: var(--coco-text-muted);
+  background: var(--nicel-surface);
+  color: var(--nicel-text-muted);
   padding: 1px 8px;
   border-radius: 999px;
   min-width: 28px;
@@ -157,12 +157,12 @@
 }
 
 .doc-inspector-row-count--hit {
-  background: var(--coco-danger-bg);
-  color: var(--coco-danger);
+  background: var(--nicel-danger-bg);
+  color: var(--nicel-danger);
 }
 
 .doc-inspector-row-desc {
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   font-size: 12px;
   flex-basis: 100%;
 }
@@ -177,15 +177,15 @@
 .doc-inspector-mini-btn {
   padding: 3px 10px;
   font-size: 12px;
-  border: 1px solid var(--coco-border-strong);
-  background: var(--coco-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
+  background: var(--nicel-bg-elevated);
   border-radius: 4px;
   cursor: pointer;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .doc-inspector-mini-btn:hover:not(:disabled) {
-  background: var(--coco-surface-hover);
+  background: var(--nicel-surface-hover);
 }
 
 .doc-inspector-mini-btn:disabled {
@@ -194,19 +194,19 @@
 }
 
 .doc-inspector-mini-btn--danger {
-  color: var(--coco-danger);
-  border-color: var(--coco-danger);
+  color: var(--nicel-danger);
+  border-color: var(--nicel-danger);
 }
 
 .doc-inspector-mini-btn--danger:hover:not(:disabled) {
-  background: var(--coco-danger-bg);
+  background: var(--nicel-danger-bg);
 }
 
 .doc-inspector-items {
   list-style: none;
   margin: 8px 0 0 0;
   padding: 6px 12px;
-  background: var(--coco-surface);
+  background: var(--nicel-surface);
   border-radius: 4px;
   max-height: 220px;
   overflow-y: auto;
@@ -219,7 +219,7 @@
   gap: 8px;
   padding: 4px 0;
   font-size: 12px;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .doc-inspector-item:last-child {
@@ -232,7 +232,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   font-family: "Consolas", "Menlo", monospace;
 }
 
@@ -241,32 +241,32 @@
   align-items: center;
   justify-content: flex-end;
   padding: 12px 16px;
-  border-top: 1px solid var(--coco-border);
-  background: var(--coco-surface);
+  border-top: 1px solid var(--nicel-border);
+  background: var(--nicel-surface);
   gap: 8px;
 }
 
 .doc-inspector-btn {
   padding: 6px 12px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
-  background: var(--coco-bg-elevated);
+  background: var(--nicel-bg-elevated);
   cursor: pointer;
   font-size: 13px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .doc-inspector-btn:hover:not(:disabled) {
-  background: var(--coco-surface-hover);
+  background: var(--nicel-surface-hover);
 }
 
 .doc-inspector-btn--primary {
-  background: var(--coco-info);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-info);
+  background: var(--nicel-info);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-info);
 }
 
 .doc-inspector-btn--primary:hover:not(:disabled) {
-  background: var(--coco-info);
+  background: var(--nicel-info);
   filter: brightness(0.92);
 }

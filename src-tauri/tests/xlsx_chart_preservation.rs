@@ -4,13 +4,13 @@
 //!
 //! We hand-craft a fixture by writing a plain xlsx with rust_xlsxwriter then
 //! splicing in chart/drawing parts + a worksheet `<drawing>` reference using
-//! the zip crate. After round-tripping through Coco's xlsx_io, we re-open
+//! the zip crate. After round-tripping through Nicel's xlsx_io, we re-open
 //! the output zip and assert the chart part still exists and matches.
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use tempfile::TempDir;
 use zip::write::FileOptions;

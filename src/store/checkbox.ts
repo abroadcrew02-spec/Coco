@@ -2,7 +2,7 @@
 //
 // MVP design — Google Sheets parity:
 //
-//   Snapshot shape (Univer 0.5.x + Coco extension):
+//   Snapshot shape (Univer 0.5.x + Nicel extension):
 //     { sheets: { <sheetId>: { _checkboxes?: Array<{ cell: "A1" }> } } }
 //
 // The cell's underlying value (`cellData[row][col].v`) is a literal JS boolean
@@ -46,7 +46,7 @@ export interface CheckboxSnapshot {
 /**
  * Parse a single-cell A1 ref ("A1", "AA42") to 0-based (row, col). Returns
  * null on malformed input — callers treat the entry as unprocessable rather
- * than throwing, matching the rest of Coco's best-effort snapshot patching.
+ * than throwing, matching the rest of Nicel's best-effort snapshot patching.
  */
 export function parseA1(cell: string): CellCoord | null {
   const m = /^([A-Z]+)(\d+)$/.exec(cell.trim().toUpperCase());

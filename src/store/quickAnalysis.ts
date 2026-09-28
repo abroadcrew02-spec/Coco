@@ -7,7 +7,7 @@
 // the snapshot, calls `recommendForRange`, and forwards the result into
 // `setQuickAnalysisDialog({...})`.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension) consumed upstream:
+// Snapshot shape (Univer 0.5.x + Nicel extension) consumed upstream:
 //   {
 //     sheets: {
 //       <sheetId>: {

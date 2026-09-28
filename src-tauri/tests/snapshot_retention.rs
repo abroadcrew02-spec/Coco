@@ -1,4 +1,4 @@
-use coco_lib::commands::workbook::{save_core, workbook_autosave_coco, MAX_SNAPSHOTS_PER_WORKBOOK};
+use nicel_lib::commands::workbook::{save_core, workbook_autosave_nicel, MAX_SNAPSHOTS_PER_WORKBOOK};
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -6,8 +6,8 @@ fn path_str(p: &std::path::Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-fn count_snapshots(coco_path: &std::path::Path, workbook_id: &str) -> i64 {
-    let conn = Connection::open(coco_path).unwrap();
+fn count_snapshots(nicel_path: &std::path::Path, workbook_id: &str) -> i64 {
+    let conn = Connection::open(nicel_path).unwrap();
     conn.query_row(
         "SELECT COUNT(*) FROM workbook_snapshots WHERE workbook_id = ?1",
         rusqlite::params![workbook_id],
@@ -16,8 +16,8 @@ fn count_snapshots(coco_path: &std::path::Path, workbook_id: &str) -> i64 {
     .unwrap()
 }
 
-fn count_with_reason(coco_path: &std::path::Path, workbook_id: &str, reason: &str) -> i64 {
-    let conn = Connection::open(coco_path).unwrap();
+fn count_with_reason(nicel_path: &std::path::Path, workbook_id: &str, reason: &str) -> i64 {
+    let conn = Connection::open(nicel_path).unwrap();
     conn.query_row(
         "SELECT COUNT(*) FROM workbook_snapshots WHERE workbook_id = ?1 AND reason = ?2",
         rusqlite::params![workbook_id, reason],
@@ -39,12 +39,12 @@ fn manual_save_records_manual_save_reason() {
 }
 
 #[test]
-fn autosave_coco_records_auto_save_reason() {
+fn autosave_nicel_records_auto_save_reason() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("data.coco");
     let wb_id = "test-wb-2";
 
-    let result = workbook_autosave_coco(wb_id.into(), path_str(&path), "{\"x\":1}".into()).unwrap();
+    let result = workbook_autosave_nicel(wb_id.into(), path_str(&path), "{\"x\":1}".into()).unwrap();
     assert!(result.success);
     assert_eq!(count_with_reason(&path, wb_id, "auto_save"), 1);
     assert_eq!(count_with_reason(&path, wb_id, "manual_save"), 0);

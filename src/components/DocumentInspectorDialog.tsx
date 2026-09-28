@@ -40,7 +40,7 @@ const CATEGORY_TITLES: Record<InspectionCategory, string> = {
  *
  * The dialog never mutates the snapshot itself — same separation-of-
  * concerns as CommentsManagerDialog. EditorScreen's `applyMutatedSnapshot`
- * is the single source of truth for the Coco undo checkpoint.
+ * is the single source of truth for the Nicel undo checkpoint.
  */
 export default function DocumentInspectorDialog({
   inspections,

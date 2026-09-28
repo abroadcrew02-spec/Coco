@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 //
 // Integrity tests for the ribbon model (#198). The ribbon may only fire
-// `coco:editor-command` ids that EditorScreen actually dispatches, and the
+// `nicel:editor-command` ids that EditorScreen actually dispatches, and the
 // model itself must be internally consistent (unique ids, valid actions).
 
 import { describe, it, expect } from "vitest";

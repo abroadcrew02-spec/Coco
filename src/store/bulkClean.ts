@@ -3,7 +3,7 @@
 // range and rewrites `v` in place. Formula cells (`.f` set) are skipped — Excel
 // applies these as values, not as TRIM()/CLEAN()/UPPER() wrappers.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension):
+// Snapshot shape (Univer 0.5.x + Nicel extension):
 //   {
 //     sheets: {
 //       <sheetId>: {
@@ -58,7 +58,7 @@ const BULK_CLEAN_MAX_NEW_CELLS = 100_000;
 
 // Collapse any run of unicode whitespace down to single spaces and strip
 // leading/trailing whitespace. Matches Excel TRIM() semantics for inner runs
-// (Excel's TRIM only handles ASCII space, but Coco follows the documented
+// (Excel's TRIM only handles ASCII space, but Nicel follows the documented
 // "collapse whitespace runs" intent — covers 　 too).
 function opTrim(s: string): string {
   return s.replace(/[\s　]+/g, " ").replace(/^ +| +$/g, "");

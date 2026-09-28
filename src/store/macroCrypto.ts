@@ -13,7 +13,7 @@
 //     distributor can detect any field being swapped, not just ciphertext
 //     corruption — GCM's tag only protects the ciphertext+iv pairing.
 //   * Key derivation: PBKDF2-SHA256, 150k iterations, over a device-local
-//     secret. There is no user passphrase (Coco is a local-first desktop app
+//     secret. There is no user passphrase (Nicel is a local-first desktop app
 //     with no account system — see the project's serverless preference), so
 //     the "secret" is a random 256-bit value generated once and kept in
 //     localStorage under `coco.macroKeySeed`. This is NOT protection against a

@@ -10,7 +10,7 @@
 //
 // Output:
 //   { headers: string[], rows: Array<Record<string, unknown>>, warnings: string[] }
-// Caller turns this into a Coco snapshot fragment via `buildSnapshotFromJson`.
+// Caller turns this into a Nicel snapshot fragment via `buildSnapshotFromJson`.
 
 export interface JsonImportResult {
   headers: string[];
@@ -150,9 +150,9 @@ function normaliseCellValue(v: unknown): CellValue {
 }
 
 /**
- * Build a fresh Coco snapshot from a parsed JSON import. The caller wires
+ * Build a fresh Nicel snapshot from a parsed JSON import. The caller wires
  * the resulting JSON string into `updateSnapshot` via `applyMutatedSnapshot`
- * so the Coco undo stack captures the previous state.
+ * so the Nicel undo stack captures the previous state.
  *
  * `appVersion` and `id` are placeholders — the load path can replace them
  * post-mutation with whatever the backend stamps.

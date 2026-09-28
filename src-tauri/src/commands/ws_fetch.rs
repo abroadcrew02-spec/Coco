@@ -7,11 +7,11 @@
 // stream (SSE). This module adds:
 //
 // - `ws_connect(url, headers?, subprotocols?) -> ConnectionId` — opens a
-//   WebSocket, drives the read loop off-thread, emits `coco:ws-message`.
+//   WebSocket, drives the read loop off-thread, emits `nicel:ws-message`.
 // - `ws_send(conn_id, kind, data)` — sends a text or (base64) binary frame.
 // - `ws_close(conn_id)` — closes the socket.
 // - `sse_connect(url, headers?) -> ConnectionId` — opens an SSE stream, emits
-//   `coco:sse-event` per server-sent event.
+//   `nicel:sse-event` per server-sent event.
 // - `sse_close(conn_id)` — closes the stream.
 //
 // Security: WS/SSE reuse the *exact same* guards as `http_fetch` — the allow
@@ -53,9 +53,9 @@ use crate::commands::http_fetch::{
 use crate::db::app_db::open_app_db_at;
 
 /// Event emitted for every inbound WebSocket message.
-pub const WS_MESSAGE_EVENT: &str = "coco:ws-message";
+pub const WS_MESSAGE_EVENT: &str = "nicel:ws-message";
 /// Event emitted for every inbound Server-Sent Event.
-pub const SSE_EVENT: &str = "coco:sse-event";
+pub const SSE_EVENT: &str = "nicel:sse-event";
 
 /// Hard cap on the number of WS + SSE connections alive at once. A long-lived
 /// connection holds an OS socket and a background task for its whole lifetime,
@@ -368,7 +368,7 @@ impl Drop for RegistryGuard {
 
 // --- Event payloads ------------------------------------------------------
 
-/// Payload of a `coco:ws-message` event. `kind` is `text` | `binary` |
+/// Payload of a `nicel:ws-message` event. `kind` is `text` | `binary` |
 /// `close` | `error`; `data` is the text / base64 bytes / close reason /
 /// opaque error tag depending on `kind`.
 #[derive(Debug, Clone, Serialize)]
@@ -379,7 +379,7 @@ pub struct WsMessageEvent {
     pub data: String,
 }
 
-/// Payload of a `coco:sse-event`. `event` is the SSE event name (default
+/// Payload of a `nicel:sse-event`. `event` is the SSE event name (default
 /// `message`); `data` is the joined data lines; `id` is the last-event-id if
 /// the server sent one. `done`/`error` mark the terminal event.
 #[derive(Debug, Clone, Serialize)]
@@ -725,7 +725,7 @@ fn build_ws_request(
 }
 
 /// Drive a connected WebSocket: pump caller frames out and server frames in,
-/// emitting `coco:ws-message` events. Returns when the socket closes, the
+/// emitting `nicel:ws-message` events. Returns when the socket closes, the
 /// caller requests a close, or an error occurs.
 async fn run_ws(
     app: &tauri::AppHandle,
@@ -795,7 +795,7 @@ async fn run_ws(
     }
 }
 
-/// Handle one inbound WS frame. Emits the matching `coco:ws-message` event.
+/// Handle one inbound WS frame. Emits the matching `nicel:ws-message` event.
 /// Returns `false` when the frame is a server `Close` (read loop should stop).
 /// Oversize text/binary frames are dropped with an `error` event (DoS guard).
 fn handle_inbound(app: &tauri::AppHandle, conn_id: u64, msg: WsMessage) -> bool {
@@ -886,7 +886,7 @@ pub fn ws_close(registry: tauri::State<'_, Arc<ConnRegistry>>, conn_id: u64) -> 
 
 /// Open an SSE stream. Validates the URL (allow list + SSRF, `http`/`https`)
 /// and headers, enforces the concurrent-connection cap, then reads the stream
-/// off-thread emitting `coco:sse-event` events. Returns the `ConnectionId`.
+/// off-thread emitting `nicel:sse-event` events. Returns the `ConnectionId`.
 #[tauri::command]
 pub async fn sse_connect(
     app: tauri::AppHandle,
@@ -942,7 +942,7 @@ pub async fn sse_connect(
 }
 
 /// Drive an SSE stream: connect, then parse the `text/event-stream` body line
-/// by line, emitting `coco:sse-event` events. Returns `Err(tag)` only on a
+/// by line, emitting `nicel:sse-event` events. Returns `Err(tag)` only on a
 /// failure *before* it could emit its own terminal event.
 async fn run_sse(
     app: &tauri::AppHandle,
@@ -1042,7 +1042,7 @@ async fn run_sse(
     }
 }
 
-/// Emit one parsed SSE event as a `coco:sse-event`.
+/// Emit one parsed SSE event as a `nicel:sse-event`.
 fn emit_sse(
     app: &tauri::AppHandle,
     conn_id: u64,

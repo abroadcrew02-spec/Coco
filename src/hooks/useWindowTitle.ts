@@ -25,10 +25,10 @@ export function useWindowTitle() {
       ((saveStatus === "export_done" || saveStatus === "export_failed") && wasDirtyBeforeExport);
     const title =
       fileName === null
-        ? "Coco"
+        ? "Nicel"
         : dirty
-        ? `Coco — ${fileName} •`
-        : `Coco — ${fileName}`;
+        ? `Nicel — ${fileName} •`
+        : `Nicel — ${fileName}`;
     // setTitle is async but we don't await — failures (missing permission, etc.)
     // are non-critical and shouldn't block the UI.
     getCurrentWindow()

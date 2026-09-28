@@ -1,6 +1,6 @@
 // #179 (area D): Japanese `abstract` strings for Univer's formula functions.
 //
-// HISTORY: at Univer 0.5.x, Coco had to serve JA UI from the EN_US locale slot
+// HISTORY: at Univer 0.5.x, Nicel had to serve JA UI from the EN_US locale slot
 // because Univer didn't ship `LocaleType.JA_JP`. Every function's `abstract`
 // in the formula helper / autocomplete was English, so this file shipped JA
 // translations to fill the gap.
@@ -8,7 +8,7 @@
 // CURRENT (post-PR #218, Univer 0.12+): Univer ships native `LocaleType.JA_JP`
 // and `@univerjs/sheets-formula-ui` includes JA `abstract` text for ALL 245
 // functions in this map (and many more). The overlay still applies via the
-// last-wins `mergeLocales` in cocoUniverLocale.ts, so **Coco's strings now
+// last-wins `mergeLocales` in nicelUniverLocale.ts, so **Nicel's strings now
 // override Univer's native JA** (shorter / more literal vs. Univer's longer
 // Microsoft-style phrasing). This is a translation-quality preference, not a
 // gap fill. A future cleanup may drop this file entirely if the team decides

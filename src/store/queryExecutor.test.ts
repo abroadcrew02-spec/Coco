@@ -7,7 +7,7 @@ import {
   type SourceFetcher,
   type QueryRunResult,
 } from "./queryExecutor";
-import type { SavedQuery } from "./cocoQueries";
+import type { SavedQuery } from "./nicelQueries";
 import type { PipelineRow } from "./getAndTransform";
 
 // ---------------------------------------------------------------------------

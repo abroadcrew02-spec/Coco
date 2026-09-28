@@ -1,4 +1,4 @@
-# Coco — FR coverage audit (MVP-1 / MVP-2 / MVP-3 / Phase 2 entry)
+# Nicel — FR coverage audit (MVP-1 / MVP-2 / MVP-3 / Phase 2 entry)
 
 Snapshot taken 2026-05-14 against `main` (HEAD `2b6eb76`).
 Supersedes the older `docs/MVP1_AUDIT.md` (covered only §4.1).
@@ -23,7 +23,7 @@ Verdict legend:
 | FR-009 | OK      | Filter via `UniverSheetsFilterPlugin` (I1, registered in `EditorScreen.tsx`); sort via toolbar `SortDialog` (H1) writing reordered rows into snapshot. Round-trip preserved by xlsx_io (`74594d0`). |
 | FR-010 | OK      | `UniverFindReplacePlugin` + `UniverSheetsFindReplacePlugin` (`852ac45`); Ctrl+F / Ctrl+H. |
 | FR-011 | OK      | `CappedUndoRedoService` overrides Univer's default `LocalUndoRedoService` (cap 20 → 100). Registered via `override: undoRedoOverride` in Univer ctor. Unit-tested (H2). |
-| FR-012 | OK      | `promptSaveAs` offers only the xlsx filter; routes to `workbook_export_xlsx`. xlsx is canonical, `.coco` no longer user-pickable as of 2026-05-15 (AD-02) — see CHANGELOG. Internal SQLite snapshots still power autosave via `useAutoSave` (`workbook_autosave_temp` / `workbook_autosave_coco`); atomic save with `PRAGMA integrity_check` + `.bak.1..5` rotation. |
+| FR-012 | OK      | `promptSaveAs` offers only the xlsx filter; routes to `workbook_export_xlsx`. xlsx is canonical, `.coco` no longer user-pickable as of 2026-05-15 (AD-02) — see CHANGELOG. Internal SQLite snapshots still power autosave via `useAutoSave` (`workbook_autosave_temp` / `workbook_autosave_nicel`); atomic save with `PRAGMA integrity_check` + `.bak.1..5` rotation. |
 | FR-013 | OK      | `HomeScreen` recents (≤ 10 from backend); each row has "見つかりません" badge when `!f.exists`; × button → `removeRecent`. |
 | FR-014 | OK      | xlsx_io emits `XLSM_MACROS_DISCARDED` warning; `App.tsx` shows `XlsmMacroLossDialog` once per workbook + banner. |
 

@@ -96,7 +96,7 @@ export default function App() {
     goHome,
   } = useWorkbookStore();
 
-  // #179 (area E): re-render the whole Coco UI tree when the locale changes
+  // #179 (area E): re-render the whole Nicel UI tree when the locale changes
   // so a language switch reflects immediately without a page reload.
   useLocale();
 

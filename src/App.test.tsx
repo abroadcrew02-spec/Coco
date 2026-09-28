@@ -70,7 +70,7 @@ function resetStore() {
 
 beforeEach(() => {
   // Tests assert against Japanese labels; pin the i18n locale so the help
-  // dialog title stays "Coco — ヘルプ" instead of the en-US fallback.
+  // dialog title stays "Nicel — ヘルプ" instead of the en-US fallback.
   localStorage.setItem("coco.locale", "ja-JP");
   invokeMock.mockReset();
   // Route by command name so list commands return [] (the store stores the
@@ -244,7 +244,7 @@ describe("App", () => {
       render(<App />);
       requestHelp();
       await waitFor(() => {
-        expect(screen.getByText("Coco — ヘルプ")).toBeTruthy();
+        expect(screen.getByText("Nicel — ヘルプ")).toBeTruthy();
       });
     });
 
@@ -259,12 +259,12 @@ describe("App", () => {
     it("HelpDialog × closes the dialog", async () => {
       render(<App />);
       requestHelp();
-      await waitFor(() => screen.getByText("Coco — ヘルプ"));
+      await waitFor(() => screen.getByText("Nicel — ヘルプ"));
       // The × header button in HelpDialog has aria-label="ダイアログを閉じる".
       const closers = screen.getAllByLabelText("ダイアログを閉じる");
       fireEvent.click(closers[0]);
       await waitFor(() => {
-        expect(screen.queryByText("Coco — ヘルプ")).toBeNull();
+        expect(screen.queryByText("Nicel — ヘルプ")).toBeNull();
       });
     });
   });

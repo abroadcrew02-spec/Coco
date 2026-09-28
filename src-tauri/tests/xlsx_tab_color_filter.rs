@@ -4,7 +4,7 @@
 //! straight from the parsed snapshot fields (`_tabColor` / `_autoFilter`) and
 //! cross-check the on-disk XML after export.
 
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::{Color, Workbook};
 use serde_json::Value;
 use std::io::Read;

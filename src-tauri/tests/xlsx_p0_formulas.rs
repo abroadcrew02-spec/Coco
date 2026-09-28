@@ -1,7 +1,7 @@
 //! FR-003 / requirements.md §4.4: P0 formula round-trip.
 //!
 //! Asserts that the formula *text* for every P0 function in §4.4 survives a
-//! full Coco round-trip (import xlsx -> export xlsx -> re-import) verbatim
+//! full Nicel round-trip (import xlsx -> export xlsx -> re-import) verbatim
 //! (modulo the leading `=`, which calamine strips on read). The cached value
 //! is intentionally not asserted here: rust_xlsxwriter has no formula engine
 //! and the runtime engine (Univer) only fires up inside the renderer, so this
@@ -21,7 +21,7 @@
 //! function name + a distinguishing argument fragment both survive.
 
 use calamine::{open_workbook, Reader, Xlsx};
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use serde_json::Value;
 use std::path::Path;
@@ -32,7 +32,7 @@ fn path_str(p: &Path) -> String {
 }
 
 /// (row, col, formula text written verbatim to xlsx, marker fragments that
-/// must appear in the round-tripped text on both the Coco snapshot and the
+/// must appear in the round-tripped text on both the Nicel snapshot and the
 /// re-exported xlsx).
 struct FormulaCase {
     row: u32,
@@ -287,7 +287,7 @@ fn every_p0_formula_round_trips() {
         wb.save(&fixture).expect("save fixture");
     }
 
-    // ---- Import via Coco ----
+    // ---- Import via Nicel ----
     let imported = import_xlsx_core(path_str(&fixture)).expect("import fixture");
     let snapshot_json = imported
         .handle
@@ -323,7 +323,7 @@ fn every_p0_formula_round_trips() {
         import_failures.join("\n  - ")
     );
 
-    // ---- Export via Coco ----
+    // ---- Export via Nicel ----
     let export = export_xlsx_core(path_str(&exported), snapshot_json).expect("export call");
     assert!(
         export.success,

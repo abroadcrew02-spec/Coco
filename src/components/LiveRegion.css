@@ -5,7 +5,7 @@
  * live-region updates) while occupying no visible space and never affecting
  * layout. Do NOT use display:none / visibility:hidden — those remove the
  * node from the accessibility tree and silence the announcement. */
-.coco-visually-hidden {
+.nicel-visually-hidden {
   position: absolute;
   width: 1px;
   height: 1px;

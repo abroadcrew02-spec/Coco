@@ -1,4 +1,4 @@
-// #193 (Univer 0.8 path): wire Coco's effective theme to Univer's native
+// #193 (Univer 0.8 path): wire Nicel's effective theme to Univer's native
 // dark-mode switch.
 //
 // Univer 0.8 introduced first-class dark mode (`IUniverConfig.darkMode` for the

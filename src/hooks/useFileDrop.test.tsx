@@ -96,10 +96,10 @@ describe("useFileDrop", () => {
       expect(invokeMock).toHaveBeenCalledWith("workbook_import_xlsx", { path: "/tmp/macros.xlsm" });
     });
 
-    it("routes .coco to workbook_open_coco", async () => {
+    it("routes .coco to workbook_open_nicel", async () => {
       render(<Probe />);
       await fireDrop("/tmp/wb.coco");
-      expect(invokeMock).toHaveBeenCalledWith("workbook_open_coco", { path: "/tmp/wb.coco" });
+      expect(invokeMock).toHaveBeenCalledWith("workbook_open_nicel", { path: "/tmp/wb.coco" });
     });
 
     it("routes .csv to workbook_import_csv with the current encoding", async () => {
@@ -116,7 +116,7 @@ describe("useFileDrop", () => {
       render(<Probe />);
       await fireDrop("/tmp/photo.png");
       const importCalls = invokeMock.mock.calls.filter((c) =>
-        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(c[0] as string)
+        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_nicel"].includes(c[0] as string)
       );
       expect(importCalls).toHaveLength(0);
       // Hint references the extension so the user can identify why nothing happened.
@@ -194,7 +194,7 @@ describe("useFileDrop", () => {
         await Promise.resolve();
       });
       const importCalls = invokeMock.mock.calls.filter((c) =>
-        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_coco"].includes(c[0] as string)
+        ["workbook_import_xlsx", "workbook_import_csv", "workbook_open_nicel"].includes(c[0] as string)
       );
       expect(importCalls).toHaveLength(0);
     });

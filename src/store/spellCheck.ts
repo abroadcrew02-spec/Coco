@@ -3,7 +3,7 @@
 // tokens that don't appear in either the built-in dictionary or the user's
 // localStorage-backed custom list.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension) the helpers walk:
+// Snapshot shape (Univer 0.5.x + Nicel extension) the helpers walk:
 //   {
 //     sheets: {
 //       <sheetId>: {
@@ -111,7 +111,7 @@ export const BUILTIN_DICTIONARY: ReadonlySet<string> = new Set<string>([
   "zero", "first", "second", "third", "fourth", "fifth", "sixth", "seventh",
   "eighth", "ninth", "tenth", "hundred", "thousand", "million", "billion",
   "half", "double", "triple", "single", "pair",
-  // Spreadsheet / business / Coco-specific vocab
+  // Spreadsheet / business / Nicel-specific vocab
   "workbook", "spreadsheet", "worksheet", "sheet", "sheets", "cell", "cells",
   "column", "columns", "row", "rows", "range", "ranges", "table", "tables",
   "chart", "charts", "graph", "graphs", "pivot", "pivots", "slicer", "slicers",
@@ -194,7 +194,7 @@ export const BUILTIN_DICTIONARY: ReadonlySet<string> = new Set<string>([
   "through", "across", "around", "between", "among", "above", "below",
   "under", "over", "behind", "beyond", "near", "far", "here", "there",
   "where", "anywhere", "everywhere", "nowhere", "somewhere",
-  // Coco-product
+  // Nicel-product
   "coco", "univer", "tauri", "react", "excel", "office",
 ]);
 

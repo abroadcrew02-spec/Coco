@@ -7,7 +7,7 @@
 // commented cell's display value (`v`). The CommentsAllOverlay companion
 // component renders the full text for cells the suffix has to truncate.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension; mirrors xlsx_io.rs):
+// Snapshot shape (Univer 0.5.x + Nicel extension; mirrors xlsx_io.rs):
 //   {
 //     sheets: {
 //       <sheetId>: {

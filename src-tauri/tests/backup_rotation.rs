@@ -1,4 +1,4 @@
-use coco_lib::commands::workbook::{
+use nicel_lib::commands::workbook::{
     bak_path, enforce_backup_size_cap, rotate_backups, save_core, temp_save_path,
     total_backup_size, MAX_BACKUPS,
 };
@@ -205,7 +205,7 @@ fn rotate_backups_applies_size_cap_after_shift() {
 }
 
 #[test]
-fn save_core_replaces_existing_coco_target() {
+fn save_core_replaces_existing_nicel_target() {
     let tmp = TempDir::new().expect("tempdir");
     let target = tmp.path().join("replace.coco");
     let path = target.to_string_lossy().into_owned();

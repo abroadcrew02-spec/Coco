@@ -3,7 +3,7 @@
 // inside the Univer snapshot we stash them at `sheets.<sheetId>._tables` so the
 // existing snapshot-pipeline patches (e.g. tableRender.ts) can pick them up.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension):
+// Snapshot shape (Univer 0.5.x + Nicel extension):
 //   {
 //     sheetOrder?: string[],
 //     sheets: {

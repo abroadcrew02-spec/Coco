@@ -1,14 +1,14 @@
 /* LinkedDataTypesPanel — local CSV data type sources panel.
-   Accent colour: teal (#0d9488 / coco-accent token) to distinguish from
-   other panels. Uses existing coco CSS custom-property tokens throughout. */
+   Accent colour: teal (#0d9488 / nicel-accent token) to distinguish from
+   other panels. Uses existing nicel CSS custom-property tokens throughout. */
 
 .ldtp-root {
   display: flex;
   flex-direction: column;
   width: 100%;
   height: 100%;
-  background-color: var(--coco-bg-elevated);
-  border-left: 1px solid var(--coco-border);
+  background-color: var(--nicel-bg-elevated);
+  border-left: 1px solid var(--nicel-border);
   overflow: hidden;
   font-family: inherit;
   font-size: 12px;
@@ -21,15 +21,15 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-accent-subtle);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .ldtp-title {
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
 }
 
 .ldtp-header-close {
@@ -37,15 +37,15 @@
   border: 0;
   cursor: pointer;
   font-size: 16px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   padding: 0 4px;
   line-height: 1;
   border-radius: 3px;
 }
 
 .ldtp-header-close:hover {
-  color: var(--coco-text);
-  background: var(--coco-surface-hover);
+  color: var(--nicel-text);
+  background: var(--nicel-surface-hover);
 }
 
 /* ---------- section labels ---------- */
@@ -54,10 +54,10 @@
   padding: 8px 14px 4px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -71,7 +71,7 @@
   padding: 0;
   overflow-y: auto;
   max-height: 180px;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .ldtp-source-item {
@@ -80,7 +80,7 @@
   align-items: center;
   gap: 6px;
   padding: 6px 14px;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .ldtp-source-item:last-child {
@@ -95,7 +95,7 @@
 
 .ldtp-source-name {
   font-weight: 600;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -103,7 +103,7 @@
 
 .ldtp-source-meta {
   font-size: 10px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -114,7 +114,7 @@
   background: transparent;
   border: 0;
   cursor: pointer;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   font-size: 14px;
   line-height: 1;
   padding: 2px 4px;
@@ -123,13 +123,13 @@
 }
 
 .ldtp-remove-btn:hover {
-  color: var(--coco-danger);
-  background: var(--coco-danger-bg);
+  color: var(--nicel-danger);
+  background: var(--nicel-danger-bg);
 }
 
 .ldtp-empty {
   padding: 12px 14px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -138,7 +138,7 @@
 
 .ldtp-register-area {
   padding: 10px 14px;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -148,8 +148,8 @@
   width: 100%;
   padding: 6px 10px;
   font-size: 12px;
-  background: var(--coco-accent);
-  color: var(--coco-accent-text);
+  background: var(--nicel-accent);
+  color: var(--nicel-accent-text);
   border: 0;
   border-radius: 4px;
   cursor: pointer;
@@ -157,7 +157,7 @@
 }
 
 .ldtp-register-btn:hover:not(:disabled) {
-  background: var(--coco-accent-hover);
+  background: var(--nicel-accent-hover);
 }
 
 .ldtp-register-btn:disabled {
@@ -179,23 +179,23 @@
 
 .ldtp-form-label {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .ldtp-form-input,
 .ldtp-form-select {
   padding: 4px 8px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   font-size: 12px;
   font-family: inherit;
-  background: var(--coco-bg-elevated);
-  color: var(--coco-text);
+  background: var(--nicel-bg-elevated);
+  color: var(--nicel-text);
 }
 
 .ldtp-form-input:focus,
 .ldtp-form-select:focus {
-  outline: 2px solid var(--coco-accent);
+  outline: 2px solid var(--nicel-accent);
   outline-offset: 1px;
 }
 
@@ -208,7 +208,7 @@
 .ldtp-form-file-path {
   flex: 1;
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -225,20 +225,20 @@
   font-size: 11px;
   border-radius: 4px;
   cursor: pointer;
-  border: 1px solid var(--coco-border-strong);
-  background: var(--coco-bg-elevated);
-  color: var(--coco-text);
+  border: 1px solid var(--nicel-border-strong);
+  background: var(--nicel-bg-elevated);
+  color: var(--nicel-text);
   font-family: inherit;
 }
 
 .ldtp-form-btn--primary {
-  background: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .ldtp-form-btn--primary:hover:not(:disabled) {
-  background: var(--coco-accent-hover);
+  background: var(--nicel-accent-hover);
 }
 
 .ldtp-form-btn:disabled {
@@ -247,7 +247,7 @@
 }
 
 .ldtp-error {
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
   font-size: 11px;
 }
 
@@ -264,19 +264,19 @@
 
 .ldtp-lookup-hint {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   line-height: 1.5;
 }
 
 .ldtp-lookup-key {
   font-size: 12px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   font-weight: 600;
   margin-bottom: 4px;
 }
 
 .ldtp-card {
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -285,9 +285,9 @@
   padding: 4px 10px;
   font-size: 10px;
   font-weight: 600;
-  color: var(--coco-accent);
-  background: var(--coco-accent-subtle);
-  border-bottom: 1px solid var(--coco-border);
+  color: var(--nicel-accent);
+  background: var(--nicel-accent-subtle);
+  border-bottom: 1px solid var(--nicel-border);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -303,7 +303,7 @@
   align-items: baseline;
   gap: 6px;
   padding: 5px 10px;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .ldtp-card-row:last-child {
@@ -314,7 +314,7 @@
   width: 100px;
   flex-shrink: 0;
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -323,7 +323,7 @@
 .ldtp-card-val {
   flex: 1;
   font-size: 12px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -335,16 +335,16 @@
   width: 100%;
   padding: 5px 10px;
   font-size: 11px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
-  background: var(--coco-bg-elevated);
-  color: var(--coco-text);
+  background: var(--nicel-bg-elevated);
+  color: var(--nicel-text);
   cursor: pointer;
   font-family: inherit;
 }
 
 .ldtp-expand-btn:hover:not(:disabled) {
-  background: var(--coco-surface-hover);
+  background: var(--nicel-surface-hover);
 }
 
 .ldtp-expand-btn:disabled {
@@ -354,13 +354,13 @@
 
 .ldtp-loading {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   font-style: italic;
 }
 
 .ldtp-miss {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 /* ---------- #323 source action row ---------- */
@@ -377,8 +377,8 @@
 .ldtp-expand-cols-editor {
   width: 100%;
   padding: 8px 14px;
-  border-top: 1px solid var(--coco-border);
-  background: var(--coco-surface);
+  border-top: 1px solid var(--nicel-border);
+  background: var(--nicel-surface);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -387,7 +387,7 @@
 .ldtp-expand-cols-label {
   font-size: 10px;
   font-weight: 600;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -411,17 +411,17 @@
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   cursor: pointer;
 }
 
 /* ---------- dark mode ---------- */
 
 [data-theme="dark"] .ldtp-register-btn {
-  background: var(--coco-accent);
+  background: var(--nicel-accent);
 }
 
 [data-theme="dark"] .ldtp-form-input,
 [data-theme="dark"] .ldtp-form-select {
-  background: var(--coco-surface);
+  background: var(--nicel-surface);
 }

@@ -1,6 +1,6 @@
 # リリース / 自動アップデート手順
 
-Coco の新バージョンを配信する際の手順と注意点。開発者向け。
+Nicel の新バージョンを配信する際の手順と注意点。開発者向け。
 
 ## 仕組み（概要）
 
@@ -16,7 +16,7 @@ Coco の新バージョンを配信する際の手順と注意点。開発者向
 1. バージョンを **3ファイルすべて**で上げる（必ず一致させる）
    - `package.json` の `version`
    - `src-tauri/tauri.conf.json` の `version`
-   - `src-tauri/Cargo.toml` の `version`（`src-tauri/Cargo.lock` の `coco` エントリも）
+   - `src-tauri/Cargo.toml` の `version`（`src-tauri/Cargo.lock` の `nicel` エントリも）
 2. `CHANGELOG/v0.3.0.md` を作成（リリースノートになる）
 3. コミット
 4. タグを push：
@@ -25,7 +25,7 @@ Coco の新バージョンを配信する際の手順と注意点。開発者向
    git push origin v0.3.0
    ```
 5. GitHub Actions が自動でビルド・署名・公開（数十分）
-6. 各 PC の Coco が起動時に検知して自動更新
+6. 各 PC の Nicel が起動時に検知して自動更新
 
 **2回目以降はローカルビルド不要。** タグ push のみで配信される。
 

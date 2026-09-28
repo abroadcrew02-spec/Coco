@@ -13,7 +13,7 @@ import "./SnapshotControlsDialog.css";
 //      localStorage.
 //   2. "今すぐスナップショット" button — fires the host-supplied
 //      `onSnapshotNow` callback; the host is responsible for translating
-//      that into a window event (`coco:snapshot-now`) or a direct
+//      that into a window event (`nicel:snapshot-now`) or a direct
 //      `store.save()` call. Keeping the side effect at the host edge keeps
 //      this component test-friendly (no Tauri imports here).
 //

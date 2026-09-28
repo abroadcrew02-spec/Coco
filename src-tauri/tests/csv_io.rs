@@ -12,7 +12,7 @@
 //! + call *_core (or the Tauri command which doesn't require AppHandle) +
 //! assert against serde_json::Value.
 
-use coco_lib::commands::csv_io::{
+use nicel_lib::commands::csv_io::{
     import_csv_core, list_sheet_names, read_sqlite_columns, read_sqlite_rows, read_sqlite_tables,
     workbook_export_csv,
 };

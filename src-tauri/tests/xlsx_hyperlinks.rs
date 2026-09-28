@@ -8,7 +8,7 @@
 //! snapshot → export cycle, plus the regression that a clean workbook does not
 //! grow an empty `_hyperlinks` array on round-trip.
 
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::{Url, Workbook};
 use serde_json::Value;
 use std::io::Read;

@@ -1,8 +1,8 @@
-# Univer 0.6+ migration feasibility (Coco)
+# Univer 0.6+ migration feasibility (Nicel)
 
 Branch `claude/univer-06-feasibility`. Snapshot date 2026-05-25.
 
-This report exists because three open Coco issues all bottom out on Univer
+This report exists because three open Nicel issues all bottom out on Univer
 0.5.x limitations:
 
 - **#193** — dark theme for the grid canvas (row/col headers, gridlines)
@@ -19,7 +19,7 @@ shipped 0.6.0 in Feb 2025 and is now on **0.24.0** (May 23, 2026, npm
 `latest`). We are roughly 19 minor versions behind, not one. That changes
 the calculus significantly.
 
-## Section 1 — Coco's current Univer footprint (0.5.x)
+## Section 1 — Nicel's current Univer footprint (0.5.x)
 
 ### 1.1 Packages
 
@@ -41,7 +41,7 @@ From `package.json` (lines 22–36):
 | `@univerjs/sheets-formula` | ^0.5.3 | `UniverSheetsFormulaPlugin` | Small |
 | `@univerjs/sheets-formula-ui` | ^0.5.3 | `UniverSheetsFormulaUIPlugin` + locale + 527-function JA name list (`univerFunctionListJa.ts`) | Medium |
 | `@univerjs/sheets-ui` | ^0.5.3 | `UniverSheetsUIPlugin` + locale + `setActiveSheet`/`getRange` facade extensions auto-imported via `@univerjs/facade` | **Large** |
-| `@univerjs/ui` | ^0.5.3 | `UniverUIPlugin`, `IMenuService`, `MenuPosition`, `RibbonStartGroup`, etc. for the Coco-side context-menu wiring (`univerContextMenu.ts`) | Medium |
+| `@univerjs/ui` | ^0.5.3 | `UniverUIPlugin`, `IMenuService`, `MenuPosition`, `RibbonStartGroup`, etc. for the Nicel-side context-menu wiring (`univerContextMenu.ts`) | Medium |
 
 Not currently installed but referenced as "would solve X" in code comments:
 
@@ -51,9 +51,9 @@ Not currently installed but referenced as "would solve X" in code comments:
 - `@univerjs/sheets-drawing` — referenced at `chartPreviewData.ts:4`.
   Images sidebar (`ImagePreviewPanel`) is the agreed substitute.
 - `@univerjs/sheets-numfmt` — referenced at `EditorScreen.tsx:4737`,
-  `:4867`, `:5580`. Coco uses snapshot-level `_fmt` writes instead.
+  `:4867`, `:5580`. Nicel uses snapshot-level `_fmt` writes instead.
 - `@univerjs/sheets-sort` — referenced at `EditorScreen.tsx:7570`.
-  Coco's `SortDialog` writes sorted rows into the snapshot.
+  Nicel's `SortDialog` writes sorted rows into the snapshot.
 
 ### 1.2 Mount block (the surface that changes most on upgrade)
 
@@ -63,7 +63,7 @@ Not currently installed but referenced as "would solve X" in code comments:
 univer = new Univer({
   theme: defaultTheme,
   locale: LocaleType.EN_US,
-  locales: { [LocaleType.EN_US]: buildCocoUniverLocale(getLocale()) },
+  locales: { [LocaleType.EN_US]: buildNicelUniverLocale(getLocale()) },
   override: undoRedoOverride,                    // FR-011, caps undo at 100
 });
 
@@ -91,7 +91,7 @@ Three things make this fragile:
 1. **`FUniver.newAPI(univer)`** is from the deprecated `@univerjs/facade`
    package — every facade-call site through the app indirects through this
    single ref. Total `as unknown as ...` / `as any` casts touching Univer
-   types in `EditorScreen.tsx` alone: ~90 (Grep). Most are because Coco
+   types in `EditorScreen.tsx` alone: ~90 (Grep). Most are because Nicel
    bypasses the facade for the data-validation, conditional-formatting,
    chart, image, comment, hyperlink, table, sparkline, outline, slicer,
    pivot, scenario, sheet-protection, named-range, and named-style
@@ -128,7 +128,7 @@ Three things make this fragile:
 - `src/components/univerLocaleSwap.ts` — hot-swap of `LocaleService`.
 - `src/components/univerUndoRedoOverride.ts` — `IUndoRedoService` 
   override constant for FR-011.
-- `src/components/cocoUniverLocale.ts` — locale bundle (5 packages).
+- `src/components/nicelUniverLocale.ts` — locale bundle (5 packages).
 - `src/components/conditionalFormatRender.ts`, `hyperlinkRender.ts`,
   `errorIndicatorRender.ts`, `outlineRender.ts`, `showFormulasRender.ts`,
   `showAllCommentsRender.ts`, `renderGlyphs.ts`, etc. — snapshot patchers
@@ -157,7 +157,7 @@ Three things make this fragile:
 | 0.7.0 | 2025-05-14 | TailwindCSS refactor, table beta, note beta |
 | 0.6.10 | 2025-04-18 | last 0.6.x — bubble/relation charts, `FRange.showDropdown` |
 | **0.6.0** | 2025-02-14 | **`@univerjs/facade` removed**, React 19, multi-sheet loading |
-| 0.5.5 (Coco) | 2025-01-20 | current |
+| 0.5.5 (Nicel) | 2025-01-20 | current |
 
 (Source: `gh api repos/dream-num/univer/releases`; `npm view @univerjs/core dist-tags.latest` = 0.24.0.)
 
@@ -208,9 +208,9 @@ runtime still requires `@univerjs-pro/license` at install time. As of
 
 Implications:
 
-- If Coco is willing to take a commercial Univer Pro license, charts are
+- If Nicel is willing to take a commercial Univer Pro license, charts are
   a drop-in plugin.
-- If Coco must stay Apache-2.0 / serverless / no-vendor-license, in-grid
+- If Nicel must stay Apache-2.0 / serverless / no-vendor-license, in-grid
   charts remain blocked — the sidebar `ChartPreviewPanel` stays the
   shipping answer.
 
@@ -253,7 +253,7 @@ graphics primitive shared by charts/drawings.
 The new pattern is:
 
 ```js
-// BEFORE (Coco today)
+// BEFORE (Nicel today)
 import { FUniver } from '@univerjs/facade';
 const api = FUniver.newAPI(univer);
 
@@ -301,33 +301,33 @@ The migration page hinted at in the deprecation warning
 themselves are the canonical migration document, which is why this report
 quotes them verbatim.
 
-## Section 3 — Breaking-change impact map for Coco
+## Section 3 — Breaking-change impact map for Nicel
 
 Cross-referencing release notes from 0.6.0 → 0.24.0 against Section 1.
 
-| # | Change | Origin | Coco call sites affected | Impact |
+| # | Change | Origin | Nicel call sites affected | Impact |
 | - | ------ | ------ | ------------------------ | ------ |
 | 1 | `@univerjs/facade` removed; `FUniver` re-exported from `@univerjs/core/facade` | 0.6.0 | `EditorScreen.tsx:25`, `ScriptEditorDialog.tsx:18`, `store/scriptRuntime.ts:19` (`import type { FUniver }`) | **Low** (3 import-path renames + drop the dep) |
 | 2 | Per-plugin facade extensions (`import '@univerjs/sheets-ui/facade'`, `…/sheets-formula/facade`, etc.) | 0.6.0 | New side-effect imports needed wherever facade extensions are used: `getRange`, `getActiveSheet`, `setActiveSheet`, `setFontColor`, `setFontLine`, `setValue`, `insertDefinedName`, `deleteDefinedName`, etc. (~30 sites in `EditorScreen.tsx`) | **Low** (one-time addition; sites unchanged) |
-| 3 | Redi DI view APIs (`useDependency`, `RediContext`, `useObservable`) moved from `@univerjs/core` → `@univerjs/ui` | 0.6.0 | Coco doesn't use these directly | None |
-| 4 | React 19 compat refactor; "core no longer depends on React" | 0.6.0 | Coco is on React 18.3.1 — works on Univer 0.6+, but to stay forward-compatible we should plan a React 19 hop in parallel | **Low** |
+| 3 | Redi DI view APIs (`useDependency`, `RediContext`, `useObservable`) moved from `@univerjs/core` → `@univerjs/ui` | 0.6.0 | Nicel doesn't use these directly | None |
+| 4 | React 19 compat refactor; "core no longer depends on React" | 0.6.0 | Nicel is on React 18.3.1 — works on Univer 0.6+, but to stay forward-compatible we should plan a React 19 hop in parallel | **Low** |
 | 5 | TailwindCSS refactor; `data-u-comp` attributes replace some class-name selectors | 0.7.0 | Check `src/components/EditorScreen.css` for any `.univer-*` selectors. `:313` has `.univer-formula-box` mentioned — needs re-verification | **Low** (1 known DOM-selector hook) |
-| 6 | Dark mode; `core.darkMode` config, `ThemeService` switcher | 0.7.0–0.8.0 | New: we need to wire Coco's existing dark-mode toggle (already used for the chrome) to `univer.setDarkMode(true)` or via `ThemeService` | **Low–Medium** (new wiring, replaces #193 hacks) |
-| 7 | `mergeLocales(...)` helper + batch `registerPlugin([...])` | 0.10.0 | `cocoUniverLocale.ts` could simplify; mount block could collapse 12 registerPlugin lines into one array | **Low** (optional refactor) |
-| 8 | Permission-control API restructured | 0.12.0 | Coco has no permission-API call sites today (sheet-protection goes through `_protection` snapshot field + `onBeforeCommandExecute` block at I3). No-op unless we want to switch to native permission system | None |
-| 9 | Native `ja-JP` locale | 0.12.0 | **Wins us a deletion**: the `cocoUniverLocale.ts` JA override + `univerLocaleSwap.ts` workaround for the "Univer 0.5.x doesn't ship LocaleType.JA_JP" gap (commented at `EditorScreen.tsx:7535–7540`) becomes unnecessary. Switch `LocaleType.EN_US` → `LocaleType.JA_JP` | **Low** (net code reduction) |
-| 10 | History feature refactor (richer history info) | 0.16.1 | Coco overrides `IUndoRedoService` (FR-011). History API surface may have moved — needs re-verification on a sandbox | **Medium** (touches FR-011 override) |
+| 6 | Dark mode; `core.darkMode` config, `ThemeService` switcher | 0.7.0–0.8.0 | New: we need to wire Nicel's existing dark-mode toggle (already used for the chrome) to `univer.setDarkMode(true)` or via `ThemeService` | **Low–Medium** (new wiring, replaces #193 hacks) |
+| 7 | `mergeLocales(...)` helper + batch `registerPlugin([...])` | 0.10.0 | `nicelUniverLocale.ts` could simplify; mount block could collapse 12 registerPlugin lines into one array | **Low** (optional refactor) |
+| 8 | Permission-control API restructured | 0.12.0 | Nicel has no permission-API call sites today (sheet-protection goes through `_protection` snapshot field + `onBeforeCommandExecute` block at I3). No-op unless we want to switch to native permission system | None |
+| 9 | Native `ja-JP` locale | 0.12.0 | **Wins us a deletion**: the `nicelUniverLocale.ts` JA override + `univerLocaleSwap.ts` workaround for the "Univer 0.5.x doesn't ship LocaleType.JA_JP" gap (commented at `EditorScreen.tsx:7535–7540`) becomes unnecessary. Switch `LocaleType.EN_US` → `LocaleType.JA_JP` | **Low** (net code reduction) |
+| 10 | History feature refactor (richer history info) | 0.16.1 | Nicel overrides `IUndoRedoService` (FR-011). History API surface may have moved — needs re-verification on a sandbox | **Medium** (touches FR-011 override) |
 | 11 | Context-menu refactor (`contextMenuHostService`); `DropdownLegacy` removed | 0.16.1 | `univerContextMenu.ts` registers via `ICommandService` + `IMenuService` (`MenuPosition`, `RibbonStartGroup`) — these APIs may have shifted | **Medium** (one ~250-line file to re-port) |
-| 12 | `IGlobalZoneService` removed; use `IUIPartsService` + `BuiltInUIPart.GLOBAL` | 0.24.0 | Coco doesn't reference `IGlobalZoneService` | None |
-| 13 | `FWorksheet.onCellDataChange` / `onBeforeCellDataChange` removed → `univerAPI.addEvent(univerAPI.Event.*)` | 0.24.0 | Coco wires `(workbook as unknown as { onCellClick? })` and `onCellHover` ad-hoc (`EditorScreen.tsx:8093`, `:8207`). The 0.6.0 event refactor (FEventRegistry, #4616) already changed these — Coco's pattern will need to be replaced with `univerAPI.addEvent(univerAPI.Event.CellClicked, …)` etc. | **Medium** (~5 event handlers) |
-| 14 | `FWorksheet.getLastColumns` → `getLastColumn` | 0.24.0 | Not used in Coco source (grep clean) | None |
-| 15 | `customizeColumnHeader` superseded by per-header facade APIs (PR #4549 "better col header facade", PR #4526 "customize column header height") | 0.6.0 | Coco doesn't currently call `customizeColumnHeader`; this resolves the #193 blocker via dark mode (#6) | N/A (gain, not breakage) |
+| 12 | `IGlobalZoneService` removed; use `IUIPartsService` + `BuiltInUIPart.GLOBAL` | 0.24.0 | Nicel doesn't reference `IGlobalZoneService` | None |
+| 13 | `FWorksheet.onCellDataChange` / `onBeforeCellDataChange` removed → `univerAPI.addEvent(univerAPI.Event.*)` | 0.24.0 | Nicel wires `(workbook as unknown as { onCellClick? })` and `onCellHover` ad-hoc (`EditorScreen.tsx:8093`, `:8207`). The 0.6.0 event refactor (FEventRegistry, #4616) already changed these — Nicel's pattern will need to be replaced with `univerAPI.addEvent(univerAPI.Event.CellClicked, …)` etc. | **Medium** (~5 event handlers) |
+| 14 | `FWorksheet.getLastColumns` → `getLastColumn` | 0.24.0 | Not used in Nicel source (grep clean) | None |
+| 15 | `customizeColumnHeader` superseded by per-header facade APIs (PR #4549 "better col header facade", PR #4526 "customize column header height") | 0.6.0 | Nicel doesn't currently call `customizeColumnHeader`; this resolves the #193 blocker via dark mode (#6) | N/A (gain, not breakage) |
 | 16 | `appVersion` field meaning unchanged; `IWorkbookData` shape mostly stable but `styles` interning has new constraints in 0.10+ | various | Snapshot writers in `xlsx_io.rs` produce styles; verify `_fmt` cells still load. Round-trip tests should catch regressions | **Medium** (run the 10-fixture compat suite) |
-| 17 | Drawing/chart/shape facade path migration from UI package to core package | 0.20.0 | Affects future chart/drawing facade imports; if Coco adopts drawings, must use the new paths | N/A until adopt |
-| 18 | Plugin pre-registered via preset now throws an explicit error if registered again | 0.6.10 | Coco builds without presets — no conflict | None |
+| 17 | Drawing/chart/shape facade path migration from UI package to core package | 0.20.0 | Affects future chart/drawing facade imports; if Nicel adopts drawings, must use the new paths | N/A until adopt |
+| 18 | Plugin pre-registered via preset now throws an explicit error if registered again | 0.6.10 | Nicel builds without presets — no conflict | None |
 
 **Aggregate**: ~6 Low / ~4 Medium / 0 High changes. The "redi injector
-disposed" StrictMode race that Coco fixed in `39139c5` is **probably no
+disposed" StrictMode race that Nicel fixed in `39139c5` is **probably no
 longer needed on 0.6+** — release v0.6.0 #4596 "split skeleton into core
 and render-engine" and the v0.8.0 dispose fixes (#5328 "sheets-ui:
 dispose univer error") together suggest the underlying lifecycle is
@@ -356,7 +356,7 @@ adopt Univer Pro.
 | Bump package versions + side-effect facade imports (changes #1, #2) | 2–3 | Mechanical |
 | Re-run typecheck against new types; fix `as unknown as` casts that drift | 4–8 | ~90 cast sites, most will type-check unchanged; the painful ones touch the boutique snapshot fields |
 | Locale: switch to native `LocaleType.JA_JP`; delete the override workaround (#9) | 1–2 | Net deletion |
-| Dark mode wiring (#6) — replace #193's grid-canvas dark-theme effort | 2–4 | Read `ThemeService` docs, wire Coco's existing theme toggle |
+| Dark mode wiring (#6) — replace #193's grid-canvas dark-theme effort | 2–4 | Read `ThemeService` docs, wire Nicel's existing theme toggle |
 | Context-menu re-port (#11) — `IMenuService` / `MenuPosition` API shifts | 4–8 | One file (`univerContextMenu.ts`, ~250 lines) |
 | Event-handler refactor (#13) — `addEvent(Event.CellClicked, …)` pattern | 2–4 | ~5 handlers |
 | FR-011 undo-redo override re-verify against history refactor (#10) | 4 | Verify the override still applies; tests already exist (`univerUndoRedoOverride.test.ts`) |
@@ -386,9 +386,9 @@ Univer Pro.
   should be unaffected by Univer upgrades (we own the snapshot shape via
   `xlsx_io.rs`). The risky ones are the `(range as unknown as { getWidth?
   })` defensive shims — those exist because the facade's range type
-  doesn't expose all the methods Coco needs; if 0.6+ exposed them
+  doesn't expose all the methods Nicel needs; if 0.6+ exposed them
   properly, the casts could be deleted.
-- **TailwindCSS refactor (0.7.0)** — Coco's `EditorScreen.css` includes
+- **TailwindCSS refactor (0.7.0)** — Nicel's `EditorScreen.css` includes
   `.univer-formula-box` (`:313`). If that class no longer exists or
   changed shape, layout regressions until we update the selector to
   `[data-u-comp="…"]`.
@@ -407,7 +407,7 @@ that was removed in Feb 2025; every boot-time deprecation warning is a
 reminder we're on borrowed time. Upgrading closes **#193 outright** (via
 v0.8 dark mode) and **high-image-live outright** (via Apache-2.0
 `@univerjs/sheets-drawing`), which together unblock the two highest-
-leverage Coco items on the queue. high-chart-live remains sidebar-only
+leverage Nicel items on the queue. high-chart-live remains sidebar-only
 in OSS — that's an acceptable steady state per existing project policy
 (`feedback_serverless_preference.md`); adopting Univer Pro for charts
 would conflict with the local-first / no-vendor-license stance.
@@ -423,7 +423,7 @@ Open questions that need a sandbox to settle (not in scope of this doc):
 - Is the deferred-dispose `univerStashRef` workaround still needed on
   0.24? Verify by reverting it on a 0.24 sandbox and running the dev
   build under StrictMode.
-- Does Coco's snapshot-patch pipeline (the 11 `patchX` functions) still
+- Does Nicel's snapshot-patch pipeline (the 11 `patchX` functions) still
   produce a renderable workbook on 0.24's stricter style-id interning?
   The `xlsx_p0_compat.rs` 10-fixture suite is the canary.
 - Does `IMenuService` / `MenuPosition` / `RibbonStartGroup` survive the

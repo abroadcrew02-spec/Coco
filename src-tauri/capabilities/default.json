@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capability for Coco desktop",
+  "description": "Default capability for Nicel desktop",
   "windows": ["main"],
   "permissions": [
     "core:default",

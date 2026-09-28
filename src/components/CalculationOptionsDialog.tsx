@@ -73,7 +73,7 @@ export default function CalculationOptionsDialog({
               <label key={mode} className="calc-opts-radio">
                 <input
                   type="radio"
-                  name="coco-calc-mode"
+                  name="nicel-calc-mode"
                   checked={pending === mode}
                   onChange={() => setPending(mode)}
                 />

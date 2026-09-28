@@ -3,7 +3,7 @@
 // (WorkbookStatsDialog) and any future caller (status bar tooltip, CLI) can
 // share the same numbers without standing up Univer.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension):
+// Snapshot shape (Univer 0.5.x + Nicel extension):
 //   {
 //     sheetOrder?: string[];
 //     namedRanges?: unknown[];
@@ -18,7 +18,7 @@
 //               v?: unknown;                       // cell value (number / string / boolean)
 //               f?: unknown;                       // formula text (when present)
 //               s?: object | string;               // style id or inline style
-//               _fmt?: string;                     // Coco-managed number-format code
+//               _fmt?: string;                     // Nicel-managed number-format code
 //               [k: string]: unknown;
 //             } | undefined;
 //           };
@@ -256,7 +256,7 @@ function walkSheetCells(
         }
       }
 
-      // Number format — both Coco-managed `_fmt` and inline `s.n.pattern` are
+      // Number format — both Nicel-managed `_fmt` and inline `s.n.pattern` are
       // recognised by numberFormatManager; we only need the unique-set count
       // here so `_fmt` is sufficient (inline patterns serialise via styleIds).
       if (typeof cell._fmt === "string" && cell._fmt.trim().length > 0) {

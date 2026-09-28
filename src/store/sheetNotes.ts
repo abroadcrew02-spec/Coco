@@ -1,7 +1,7 @@
 // Pure helpers for the per-sheet free-form Markdown note feature.
 //
 // Snapshot shape (per sheet, additive — single optional `_note` object
-// alongside other Coco extensions like `_comments`, `_dataValidations`):
+// alongside other Nicel extensions like `_comments`, `_dataValidations`):
 //
 //   sheets: {
 //     <sheetId>: {

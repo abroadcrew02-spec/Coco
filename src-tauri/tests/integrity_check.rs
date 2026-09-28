@@ -1,4 +1,4 @@
-use coco_lib::commands::workbook::{check_integrity_core, save_core};
+use nicel_lib::commands::workbook::{check_integrity_core, save_core};
 use tempfile::TempDir;
 
 fn path_str(p: &std::path::Path) -> String {

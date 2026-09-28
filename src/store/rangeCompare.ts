@@ -3,10 +3,10 @@
 // diffs, including value mismatches, formula-only mismatches (where the
 // computed value is the same but the formula text drifts), and size-mismatch
 // "only in A" / "only in B" rows. Excel ships this under Inquire's "Compare
-// Workbooks" only for whole files; Coco's twist is range-local so users can
+// Workbooks" only for whole files; Nicel's twist is range-local so users can
 // audit a copied block against its source without leaving the workbook.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension) the helpers walk — same
+// Snapshot shape (Univer 0.5.x + Nicel extension) the helpers walk — same
 // shape consumed by snapshotDiff.ts / formulaAudit.ts so the cell-traversal
 // pattern matches:
 //   {

@@ -5,13 +5,13 @@
 //! rust_xlsxwriter doesn't expose a pivot-table API, so we hand-craft a
 //! fixture by writing a plain xlsx with rust_xlsxwriter and splicing in
 //! pivotTable + pivotCache parts plus a worksheet rel pointing at the pivot.
-//! After round-tripping through Coco's xlsx_io we re-open the output zip and
+//! After round-tripping through Nicel's xlsx_io we re-open the output zip and
 //! assert the pivot part still exists and matches.
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use tempfile::TempDir;
 use zip::write::FileOptions;
@@ -38,7 +38,7 @@ const PIVOT_TABLE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone
 const PIVOT_CACHE_DEF_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
                       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-                      r:id="rId1" refreshedBy="Coco" recordCount="0"/>"#;
+                      r:id="rId1" refreshedBy="Nicel" recordCount="0"/>"#;
 
 const PIVOT_CACHE_REC_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0"/>"#;

@@ -86,7 +86,7 @@ export default function CsvImportWizardDialog({
   const [columnTypes, setColumnTypes] = useState<CsvColumnType[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Escape-to-close, matching the other Coco dialogs.
+  // Escape-to-close, matching the other Nicel dialogs.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {

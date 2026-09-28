@@ -11,7 +11,7 @@
 // Tauri) so the print preview is instant: the snapshot is already in memory
 // and there's no need to write a temp file.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension):
+// Snapshot shape (Univer 0.5.x + Nicel extension):
 //   {
 //     name?: string,
 //     sheetOrder: string[],

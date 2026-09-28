@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { carryForwardRootExtensions, COCO_ROOT_EXTENSION_KEYS } from "./snapshotSync";
+import { carryForwardRootExtensions, NICEL_ROOT_EXTENSION_KEYS } from "./snapshotSync";
 
 // #184 C-1 regression: `FWorkbook.save()` reconstructs the snapshot from
-// Univer's internal models and drops Coco's workbook-root extension keys
+// Univer's internal models and drops Nicel's workbook-root extension keys
 // (`_cameraLinks`, `_scenarios`). The MUTATION-driven `syncSnapshot` overwrites
 // the store with that output on every cell edit — without carry-forward the
 // user's camera links / scenarios vanish on the next keystroke.
@@ -75,12 +75,12 @@ describe("carryForwardRootExtensions", () => {
   });
 
   it("exports the extension key list for the xlsx round-trip to mirror", () => {
-    expect(COCO_ROOT_EXTENSION_KEYS).toContain("_cameraLinks");
-    expect(COCO_ROOT_EXTENSION_KEYS).toContain("_scenarios");
+    expect(NICEL_ROOT_EXTENSION_KEYS).toContain("_cameraLinks");
+    expect(NICEL_ROOT_EXTENSION_KEYS).toContain("_scenarios");
     // Phase 4d: image/textbox inserts write into _preservedParts and must
     // survive the next syncSnapshot or the drawing parts vanish on the next
     // cell edit.
-    expect(COCO_ROOT_EXTENSION_KEYS).toContain("_preservedParts");
+    expect(NICEL_ROOT_EXTENSION_KEYS).toContain("_preservedParts");
   });
 
   it("re-grafts _preservedParts dropped by workbook.save() (Phase 4d)", () => {

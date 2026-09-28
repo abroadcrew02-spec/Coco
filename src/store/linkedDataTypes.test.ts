@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
-  type CocoLinkedDataTypes,
+  type NicelLinkedDataTypes,
   type LinkedDataTypeSource,
   EMPTY_LINKED_DATA_TYPES,
   readLinkedDataTypes,
@@ -161,9 +161,9 @@ describe("writeLinkedDataTypes", () => {
 
   it("writes sources into a snapshot clone", () => {
     const snap = { sheets: {} };
-    const model: CocoLinkedDataTypes = { sources: [makeSource()] };
+    const model: NicelLinkedDataTypes = { sources: [makeSource()] };
     const out = writeLinkedDataTypes(snap, model);
-    expect((out._cocoDataTypes as CocoLinkedDataTypes).sources).toHaveLength(1);
+    expect((out._cocoDataTypes as NicelLinkedDataTypes).sources).toHaveLength(1);
     // Must not mutate the input
     expect(snap).not.toHaveProperty("_cocoDataTypes");
   });
@@ -171,7 +171,7 @@ describe("writeLinkedDataTypes", () => {
 
 describe("snapshot round-trip", () => {
   it("survives write → read with sources intact", () => {
-    const model: CocoLinkedDataTypes = { sources: [makeSource()] };
+    const model: NicelLinkedDataTypes = { sources: [makeSource()] };
     const snap = writeLinkedDataTypes({}, model);
     const recovered = readLinkedDataTypes(snap);
     expect(recovered.sources).toHaveLength(1);
@@ -445,7 +445,7 @@ describe("SQLite source — isValidSource via readLinkedDataTypes", () => {
 
   it("survives write → read round-trip for a sqlite source", () => {
     const src = makeSqliteSource();
-    const model: CocoLinkedDataTypes = { sources: [src] };
+    const model: NicelLinkedDataTypes = { sources: [src] };
     const snap = writeLinkedDataTypes({}, model);
     const recovered = readLinkedDataTypes(snap);
     expect(recovered.sources).toHaveLength(1);

@@ -856,7 +856,7 @@ export const CALC_COLUMN_ERROR = "#ERROR!";
  * column name to inject, and the DAX expression to evaluate per row.
  *
  * This is a runtime representation (no storage IDs, no format metadata).
- * Callers typically build it from `StoredCalculatedColumn` in cocoDataModel.
+ * Callers typically build it from `StoredCalculatedColumn` in nicelDataModel.
  */
 export interface CalculatedColumnDef {
   /** Name of the target ModelTable. */

@@ -119,7 +119,7 @@ export const EDITOR_COMMAND_IDS = new Set([
 // keyboard shortcuts share one implementation surface.
 export function useMenuActions() {
   const newWorkbook = useWorkbookStore((s) => s.newWorkbook);
-  const openCoco = useWorkbookStore((s) => s.openCoco);
+  const openNicel = useWorkbookStore((s) => s.openNicel);
   const importXlsx = useWorkbookStore((s) => s.importXlsx);
   const importCsv = useWorkbookStore((s) => s.importCsv);
   const save = useWorkbookStore((s) => s.save);
@@ -146,7 +146,7 @@ export function useMenuActions() {
       if (!selected) return;
       const path = typeof selected === "string" ? selected : selected[0];
       const route = routeOpenPath(path);
-      if (route.kind === "coco") await openCoco(route.path);
+      if (route.kind === "coco") await openNicel(route.path);
       else if (route.kind === "csv") await importCsv(route.path);
       else if (route.kind === "xlsx") await importXlsx(route.path);
     };
@@ -154,12 +154,12 @@ export function useMenuActions() {
     const handleCsvExport = async () => {
       // CSV export needs a sheet picker; the EditorScreen owns that flow.
       // Bounce via a window event so EditorScreen can react.
-      window.dispatchEvent(new CustomEvent("coco:menu-csv-export"));
+      window.dispatchEvent(new CustomEvent("nicel:menu-csv-export"));
     };
 
     const dispatch = async (id: string) => {
       if (EDITOR_COMMAND_IDS.has(id)) {
-        window.dispatchEvent(new CustomEvent("coco:editor-command", { detail: id }));
+        window.dispatchEvent(new CustomEvent("nicel:editor-command", { detail: id }));
         return;
       }
 
@@ -193,7 +193,7 @@ export function useMenuActions() {
           await exportWorkspaceBundle();
           break;
         case "import-workspace-bundle":
-          window.dispatchEvent(new CustomEvent("coco:menu-import-workspace-bundle"));
+          window.dispatchEvent(new CustomEvent("nicel:menu-import-workspace-bundle"));
           break;
         case "settings":
           requestSettings();
@@ -223,5 +223,5 @@ export function useMenuActions() {
       cancelled = true;
       if (unlisten) unlisten();
     };
-  }, [newWorkbook, openCoco, importXlsx, importCsv, save, promptSaveAs, exportXlsx, exportHtml, exportPdf, exportWorkspaceBundle]);
+  }, [newWorkbook, openNicel, importXlsx, importCsv, save, promptSaveAs, exportXlsx, exportHtml, exportPdf, exportWorkspaceBundle]);
 }

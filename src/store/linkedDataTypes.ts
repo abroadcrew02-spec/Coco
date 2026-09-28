@@ -2,14 +2,14 @@
 // #310 — SQLite source support added.
 //
 // Excel's Stock/Geography types rely on cloud APIs (Bing, Refinitiv) which
-// conflict with Coco's serverless-first policy. This module provides a
+// conflict with Nicel's serverless-first policy. This module provides a
 // local alternative: the user registers a CSV or SQLite file as a "data type
 // source", specifying a key column. Selecting a cell and opening the
 // LinkedDataTypes panel performs a case-insensitive lookup and displays
 // matching rows as a data card.
 //
-// Persistence: the `_cocoDataTypes` key is added to the Coco snapshot JSON,
-// following the same pattern as `_cocoDataModel` in cocoDataModel.ts.
+// Persistence: the `_cocoDataTypes` key is added to the Nicel snapshot JSON,
+// following the same pattern as `_cocoDataModel` in nicelDataModel.ts.
 //
 // Pure / framework-free.
 
@@ -73,26 +73,26 @@ export function resolveExpandColumns(source: LinkedDataTypeSource): string[] {
   return nonKey;
 }
 
-export interface CocoLinkedDataTypes {
+export interface NicelLinkedDataTypes {
   sources: LinkedDataTypeSource[];
 }
 
 /** Empty state — implicit when snapshot has no `_cocoDataTypes` key. */
-export const EMPTY_LINKED_DATA_TYPES: CocoLinkedDataTypes = {
+export const EMPTY_LINKED_DATA_TYPES: NicelLinkedDataTypes = {
   sources: [],
 };
 
 // ---------------------------------------------------------------------------
-// Snapshot I/O — follows cocoDataModel.ts conventions.
+// Snapshot I/O — follows nicelDataModel.ts conventions.
 // ---------------------------------------------------------------------------
 
 interface SnapshotWithDataTypes {
-  _cocoDataTypes?: CocoLinkedDataTypes;
+  _cocoDataTypes?: NicelLinkedDataTypes;
   [k: string]: unknown;
 }
 
 /** Read linked data types from a snapshot. Returns EMPTY when key is absent. */
-export function readLinkedDataTypes(snapshot: unknown): CocoLinkedDataTypes {
+export function readLinkedDataTypes(snapshot: unknown): NicelLinkedDataTypes {
   if (!snapshot || typeof snapshot !== "object") return EMPTY_LINKED_DATA_TYPES;
   const raw = (snapshot as SnapshotWithDataTypes)._cocoDataTypes;
   if (!raw || typeof raw !== "object") return EMPTY_LINKED_DATA_TYPES;
@@ -133,7 +133,7 @@ function isValidSource(v: unknown): v is LinkedDataTypeSource {
  */
 export function writeLinkedDataTypes(
   snapshot: unknown,
-  model: CocoLinkedDataTypes,
+  model: NicelLinkedDataTypes,
 ): Record<string, unknown> {
   const base =
     snapshot && typeof snapshot === "object"
@@ -148,30 +148,30 @@ export function writeLinkedDataTypes(
 }
 
 // ---------------------------------------------------------------------------
-// CRUD helpers — all return new CocoLinkedDataTypes (immutable).
+// CRUD helpers — all return new NicelLinkedDataTypes (immutable).
 // ---------------------------------------------------------------------------
 
 export function addSource(
-  model: CocoLinkedDataTypes,
+  model: NicelLinkedDataTypes,
   source: LinkedDataTypeSource,
-): CocoLinkedDataTypes {
+): NicelLinkedDataTypes {
   // Replace existing entry with same id idempotently.
   const filtered = model.sources.filter((s) => s.id !== source.id);
   return { sources: [...filtered, source] };
 }
 
 export function removeSource(
-  model: CocoLinkedDataTypes,
+  model: NicelLinkedDataTypes,
   id: string,
-): CocoLinkedDataTypes {
+): NicelLinkedDataTypes {
   return { sources: model.sources.filter((s) => s.id !== id) };
 }
 
 export function updateSource(
-  model: CocoLinkedDataTypes,
+  model: NicelLinkedDataTypes,
   id: string,
   patch: Partial<Omit<LinkedDataTypeSource, "id">>,
-): CocoLinkedDataTypes {
+): NicelLinkedDataTypes {
   return {
     sources: model.sources.map((s) =>
       s.id === id ? { ...s, ...patch, updatedAt: new Date().toISOString() } : s,
@@ -179,7 +179,7 @@ export function updateSource(
   };
 }
 
-export function listSources(model: CocoLinkedDataTypes): LinkedDataTypeSource[] {
+export function listSources(model: NicelLinkedDataTypes): LinkedDataTypeSource[] {
   return model.sources;
 }
 

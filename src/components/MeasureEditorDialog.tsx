@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { CocoDataModel, StoredMeasure } from "../store/cocoDataModel";
-import { evaluateTransientMeasure } from "../store/cocoDataModel";
+import type { NicelDataModel, StoredMeasure } from "../store/nicelDataModel";
+import { evaluateTransientMeasure } from "../store/nicelDataModel";
 import { DAX_FUNCTION_REFERENCE, MEASURE_ERROR, parseDaxSafe } from "../store/daxEngine";
 import { useDaxAutocomplete } from "./useDaxAutocomplete";
 import DaxColumnRefChips from "./DaxColumnRefChips";
@@ -15,7 +15,7 @@ interface Props {
   /** Existing measure names — for unique-name validation. */
   existingNames: string[];
   /** Full data model — used for the live-preview evaluation. */
-  cocoModel?: CocoDataModel;
+  nicelModel?: NicelDataModel;
   onApply: (measure: StoredMeasure) => void;
   onClose: () => void;
 }
@@ -24,7 +24,7 @@ export default function MeasureEditorDialog({
   initialMeasure,
   tables,
   existingNames,
-  cocoModel,
+  nicelModel,
   onApply,
   onClose,
 }: Props) {
@@ -69,7 +69,7 @@ export default function MeasureEditorDialog({
     });
   };
 
-  const autocompleteTables = (cocoModel?.tables ?? []).map((t) => ({
+  const autocompleteTables = (nicelModel?.tables ?? []).map((t) => ({
     name: t.name,
     columns: t.columns.map((c) => ({ name: c.name })),
   }));
@@ -92,13 +92,13 @@ export default function MeasureEditorDialog({
 
   // Live preview — debounced 300 ms to avoid evaluating on every keystroke.
   useEffect(() => {
-    if (!expression.trim() || !cocoModel) {
+    if (!expression.trim() || !nicelModel) {
       setPreview(null);
       return;
     }
     const tid = setTimeout(() => {
       try {
-        const result = evaluateTransientMeasure(cocoModel, {
+        const result = evaluateTransientMeasure(nicelModel, {
           name: name.trim() || "_preview_",
           expression: expression.trim(),
         });
@@ -112,7 +112,7 @@ export default function MeasureEditorDialog({
       }
     }, 300);
     return () => clearTimeout(tid);
-  }, [expression, name, cocoModel]);
+  }, [expression, name, nicelModel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -232,7 +232,7 @@ export default function MeasureEditorDialog({
             </div>
             <DaxFunctionChips onInsert={handleChipInsert} />
             <DaxColumnRefChips
-              tables={cocoModel?.tables ?? []}
+              tables={nicelModel?.tables ?? []}
               onInsert={handleChipInsert}
             />
             {parseError !== null && (

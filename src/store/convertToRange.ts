@@ -5,7 +5,7 @@
 // each cell's `cellData[r][c].s` so the converted range still LOOKS like a
 // table even though the `_tables` entry is gone.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension, mirrors src/store/tables.ts):
+// Snapshot shape (Univer 0.5.x + Nicel extension, mirrors src/store/tables.ts):
 //   {
 //     sheets: {
 //       <sheetId>: {

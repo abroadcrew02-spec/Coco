@@ -16,10 +16,10 @@
   max-height: 60vh;
   display: flex;
   flex-direction: column;
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 6px;
-  box-shadow: 0 4px 12px var(--coco-shadow);
+  box-shadow: 0 4px 12px var(--nicel-shadow);
   font-size: 12px;
   overflow: hidden;
 }
@@ -29,21 +29,21 @@
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-accent-subtle);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .cam-title {
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
 }
 
 .cam-count {
   font-size: 11px;
-  color: var(--coco-accent-text);
-  background-color: var(--coco-accent);
+  color: var(--nicel-accent-text);
+  background-color: var(--nicel-accent);
   border-radius: 10px;
   padding: 1px 8px;
   min-width: 22px;
@@ -54,7 +54,7 @@
   margin: 0;
   padding: 16px 14px;
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   line-height: 1.5;
 }
 
@@ -71,7 +71,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .cam-item:last-child {
@@ -89,7 +89,7 @@
   font-family: "Consolas", "Menlo", monospace;
   font-size: 11px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -100,25 +100,25 @@
 .cam-btn {
   padding: 2px 8px;
   font-size: 11px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
-  background-color: var(--coco-bg-elevated);
-  color: var(--coco-text);
+  background-color: var(--nicel-bg-elevated);
+  color: var(--nicel-text);
   cursor: pointer;
   flex-shrink: 0;
 }
 
 .cam-btn:hover:not(:disabled) {
-  background-color: var(--coco-surface-hover);
+  background-color: var(--nicel-surface-hover);
 }
 
 .cam-btn--danger {
-  color: var(--coco-danger);
-  border-color: var(--coco-border);
+  color: var(--nicel-danger);
+  border-color: var(--nicel-border);
 }
 
 .cam-btn--danger:hover:not(:disabled) {
-  background-color: var(--coco-danger-bg);
+  background-color: var(--nicel-danger-bg);
 }
 
 .cam-thumb-btn {
@@ -133,7 +133,7 @@
 
 .cam-thumb-btn:hover .cam-thumb,
 .cam-thumb-btn:focus-visible .cam-thumb {
-  border-color: var(--coco-accent);
+  border-color: var(--nicel-accent);
   outline: none;
 }
 
@@ -142,8 +142,8 @@
   max-width: 100%;
   max-height: 140px;
   object-fit: contain;
-  background-color: var(--coco-surface);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border: 1px solid var(--nicel-border);
   border-radius: 3px;
 }
 
@@ -156,16 +156,16 @@
   font-family: "Consolas", "Menlo", monospace;
   font-weight: 700;
   font-size: 13px;
-  color: var(--coco-danger);
-  background-color: var(--coco-danger-bg);
-  border: 1px dashed var(--coco-danger);
+  color: var(--nicel-danger);
+  background-color: var(--nicel-danger-bg);
+  border: 1px dashed var(--nicel-danger);
   border-radius: 3px;
 }
 
 .cam-ref-error--stale {
-  color: var(--coco-text-muted);
-  background-color: var(--coco-surface);
-  border-color: var(--coco-border);
+  color: var(--nicel-text-muted);
+  background-color: var(--nicel-surface);
+  border-color: var(--nicel-border);
   font-weight: 500;
 }
 
@@ -176,11 +176,11 @@
   font-size: 11px;
   border: 0;
   background: transparent;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   cursor: pointer;
 }
 
 .cam-dst-btn:hover {
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   text-decoration: underline;
 }

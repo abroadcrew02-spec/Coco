@@ -16,7 +16,7 @@
 //     (e.g. "SUM of Amount").
 //   - Trailing "Total" column on the right and "Total" row at the bottom.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension) — the slice we touch:
+// Snapshot shape (Univer 0.5.x + Nicel extension) — the slice we touch:
 //   {
 //     sheetOrder?: string[],
 //     sheets: {
@@ -30,7 +30,7 @@
 //
 // Source kinds:
 //   - "sheet": reads rows from a rectangular cellData range (legacy / default).
-//   - "model": reads rows from a CocoDataModel table; measure values are
+//   - "model": reads rows from a NicelDataModel table; measure values are
 //     evaluated via the DAX engine with per-cell filter contexts.
 //
 // We persist PivotEntry records on the *destination* sheet (for model pivots)
@@ -43,8 +43,8 @@
 // tested without Univer.
 
 import type { DataModel } from "./daxEngine";
-import type { CocoDataModel } from "./cocoDataModel";
-import { evaluateStoredMeasure, applyCalculatedColumns, toDataModel } from "./cocoDataModel";
+import type { NicelDataModel } from "./nicelDataModel";
+import { evaluateStoredMeasure, applyCalculatedColumns, toDataModel } from "./nicelDataModel";
 
 export type PivotAggregator = "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN";
 
@@ -62,7 +62,7 @@ export interface PivotRange {
 /**
  * Discriminated union for pivot data sources.
  *   - "sheet": the classic mode — rows come from a rectangular cellData range.
- *   - "model": rows come from a named table in the Coco Data Model.
+ *   - "model": rows come from a named table in the Nicel Data Model.
  */
 export type PivotSource =
   | { kind: "sheet"; sheetId: string; range: PivotRange }
@@ -71,7 +71,7 @@ export type PivotSource =
 /**
  * Discriminated union for pivot value fields.
  *   - "column": aggregate a raw column from the source data.
- *   - "measure": evaluate a DAX measure from the Coco Data Model.
+ *   - "measure": evaluate a DAX measure from the Nicel Data Model.
  */
 export type PivotValueField =
   | { kind: "column"; field: string; agg: PivotAggregator }
@@ -610,7 +610,7 @@ export function computePivot(
  * (`addPivot` doesn't itself write cells — the caller does that — but we
  * record the dimensions of the matrix the caller will write.)
  *
- * @param cocoModel  Required when `entry.source.kind === 'model'` so that the
+ * @param nicelModel  Required when `entry.source.kind === 'model'` so that the
  *   footprint seed can call `computeModelPivot`.
  * @param destSheetId  The sheet id where the output will be written (required
  *   for model pivots; ignored for sheet pivots which derive it from the source).
@@ -618,7 +618,7 @@ export function computePivot(
 export function addPivot(
   workbook: WorkbookPivotSnapshot,
   entry: PivotEntry,
-  cocoModel?: CocoDataModel,
+  nicelModel?: NicelDataModel,
   destSheetId?: string,
 ): WorkbookPivotSnapshot {
   normalizePivotEntry(entry);
@@ -640,9 +640,9 @@ export function addPivot(
   // the data later shrinks.
   if (entry.lastOutputRows === undefined || entry.lastOutputCols === undefined) {
     try {
-      if (entry.source.kind === "model" && cocoModel) {
-        const runtimeModel = applyCalculatedColumnsForPivot(cocoModel);
-        const result = computeModelPivot(runtimeModel, cocoModel, entry);
+      if (entry.source.kind === "model" && nicelModel) {
+        const runtimeModel = applyCalculatedColumnsForPivot(nicelModel);
+        const result = computeModelPivot(runtimeModel, nicelModel, entry);
         entry.lastOutputRows = result.rowCount;
         entry.lastOutputCols = result.colCount;
       } else if (entry.source.kind === "sheet") {
@@ -719,12 +719,12 @@ function readSourceMatrix(
 
 // ---------- model pivot engine ----------
 
-function applyCalculatedColumnsForPivot(cocoModel: CocoDataModel): DataModel {
-  return applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+function applyCalculatedColumnsForPivot(nicelModel: NicelDataModel): DataModel {
+  return applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
 }
 
 /**
- * Compute the pivot 2-D matrix from a Coco Data Model table.
+ * Compute the pivot 2-D matrix from a Nicel Data Model table.
  *
  * Unlike `computePivot` (which reads from a flat cellData rectangle), this
  * function operates directly on the in-memory model rows. Value fields may be
@@ -735,12 +735,12 @@ function applyCalculatedColumnsForPivot(cocoModel: CocoDataModel): DataModel {
  *
  * @param runtimeModel  DataModel produced by `applyCalculatedColumns` — has
  *   calculated columns already injected into table rows.
- * @param cocoModel  CocoDataModel used to look up measure definitions.
+ * @param nicelModel  NicelDataModel used to look up measure definitions.
  * @param config  PivotConfig with `source.kind === 'model'`.
  */
 export function computeModelPivot(
   runtimeModel: DataModel,
-  cocoModel: CocoDataModel,
+  nicelModel: NicelDataModel,
   config: PivotConfig,
 ): PivotResult {
   if (config.source.kind !== "model") {
@@ -847,7 +847,7 @@ export function computeModelPivot(
   ): unknown {
     if (vf.kind === "measure") {
       const filterContext = new Map([[tableName, cellRows]]);
-      return evaluateStoredMeasure(runtimeModel, cocoModel, vf.measureName, filterContext);
+      return evaluateStoredMeasure(runtimeModel, nicelModel, vf.measureName, filterContext);
     }
     // column aggregation
     const nums = cellRows.map((r) => toNumber(r[vf.field]));
@@ -946,7 +946,7 @@ export function computeModelPivot(
  * Returns `{ ok: true }` when the pivot was found and rewritten,
  * `{ ok: false }` when the pivot doesn't exist or the source sheet is gone.
  *
- * @param cocoModel  Required for model-source pivots (`source.kind === 'model'`).
+ * @param nicelModel  Required for model-source pivots (`source.kind === 'model'`).
  *   Without it, model pivots return `{ ok: false }`.
  * @param destSheetId  The sheet id where the pivot output should be written.
  *   Required for model-source pivots; for sheet-source pivots the destination
@@ -955,7 +955,7 @@ export function computeModelPivot(
 export function refreshPivot(
   workbook: WorkbookPivotSnapshot,
   name: string,
-  cocoModel?: CocoDataModel,
+  nicelModel?: NicelDataModel,
   destSheetId?: string,
 ): { ok: boolean } {
   const sheets = workbook?.sheets;
@@ -982,13 +982,13 @@ export function refreshPivot(
   let destSheet: SheetWithPivots;
 
   if (entry.source.kind === "model") {
-    if (!cocoModel) return { ok: false };
+    if (!nicelModel) return { ok: false };
     const resolvedDestSheetId = destSheetId ?? Object.keys(sheets)[0];
     const ds = sheets[resolvedDestSheetId];
     if (!ds) return { ok: false };
     destSheet = ds;
-    const runtimeModel = applyCalculatedColumnsForPivot(cocoModel);
-    result = computeModelPivot(runtimeModel, cocoModel, entry);
+    const runtimeModel = applyCalculatedColumnsForPivot(nicelModel);
+    result = computeModelPivot(runtimeModel, nicelModel, entry);
   } else {
     const sourceSheet = sheets[entry.source.sheetId];
     if (!sourceSheet) return { ok: false };

@@ -1,6 +1,6 @@
 // Minimal hand-rolled i18n bundle.
 //
-// Coco currently ships Japanese-only strings throughout the UI. To support
+// Nicel currently ships Japanese-only strings throughout the UI. To support
 // FR-013 (multinational reuse) we extract the most visible toolbar labels
 // and a handful of dialog titles here so they can be flipped between
 // ja-JP and en-US via a localStorage setting. This is intentionally a
@@ -38,7 +38,7 @@ const jaJP = {
   "toolbar.help": "?",
   // Dialog titles
   "dialog.settings": "設定",
-  "dialog.help": "Coco — ヘルプ",
+  "dialog.help": "Nicel — ヘルプ",
   "dialog.namedRanges": "名前付き範囲",
   "dialog.numberFormat": "表示形式",
   "dialog.sort": "並べ替え",
@@ -155,7 +155,7 @@ const jaJP = {
   "confirm.convertToRange":
     "テーブル {0} を通常の範囲に変換します。スタイルは保持されますか？",
   "confirm.documentInspector.strip":
-    "「{0}」({1} 件) をすべて削除します。よろしいですか？\n(この操作は Coco の元に戻す履歴に記録されます。)",
+    "「{0}」({1} 件) をすべて削除します。よろしいですか？\n(この操作は Nicel の元に戻す履歴に記録されます。)",
   "confirm.cell.overwrite":
     "アクティブセルに値 \"{0}\" があります。{1} で上書きしますか？",
   "confirm.csvExport.overwrite":
@@ -437,7 +437,7 @@ const enUS: Record<StringKey, string> = {
   "toolbar.settings": "⚙",
   "toolbar.help": "?",
   "dialog.settings": "Settings",
-  "dialog.help": "Coco — Help",
+  "dialog.help": "Nicel — Help",
   "dialog.namedRanges": "Named Ranges",
   "dialog.numberFormat": "Number Format",
   "dialog.sort": "Sort",
@@ -549,7 +549,7 @@ const enUS: Record<StringKey, string> = {
   "confirm.convertToRange":
     "Convert table {0} to a normal range. Keep the styles?",
   "confirm.documentInspector.strip":
-    "Remove all of \"{0}\" ({1} item(s))?\n(This action is recorded in Coco's undo history.)",
+    "Remove all of \"{0}\" ({1} item(s))?\n(This action is recorded in Nicel's undo history.)",
   "confirm.cell.overwrite":
     "The active cell already contains \"{0}\". Overwrite it with {1}?",
   "confirm.csvExport.overwrite":
@@ -823,13 +823,13 @@ export function getLocale(): Locale {
 }
 
 // #179 (area E): in-process subscribers notified when the locale changes,
-// so the Coco UI layer can re-render immediately without a page reload.
+// so the Nicel UI layer can re-render immediately without a page reload.
 const localeListeners = new Set<(locale: Locale) => void>();
 
 /**
  * Register a callback fired whenever `setLocale` changes the active locale.
  * Returns an unsubscribe function. Used by `useLocale()` to re-render the
- * Coco UI layer on a language switch.
+ * Nicel UI layer on a language switch.
  */
 export function subscribeLocale(listener: (locale: Locale) => void): () => void {
   localeListeners.add(listener);

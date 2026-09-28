@@ -5,7 +5,7 @@ import { deflateSync, crc32 } from "node:zlib";
 import { Buffer } from "node:buffer";
 
 const SIZE = 512;
-// Coco brand green (#217346)
+// Nicel brand green (#217346)
 const R = 0x21, G = 0x73, B = 0x46;
 
 function chunk(type, data) {

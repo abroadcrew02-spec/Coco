@@ -8,8 +8,8 @@
 //! `<dimension>` element / `<f>` tag counts to be present. Generating a
 //! literal 1M-row body would balloon test time for no benefit.
 
-use coco_lib::commands::security::security_scan_xlsx;
-use coco_lib::commands::xlsx_io::import_xlsx_core;
+use nicel_lib::commands::security::security_scan_xlsx;
+use nicel_lib::commands::xlsx_io::import_xlsx_core;
 use std::io::Write;
 use tempfile::TempDir;
 use zip::write::FileOptions;

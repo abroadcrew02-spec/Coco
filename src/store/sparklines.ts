@@ -1,6 +1,6 @@
 // Sparkline helpers (Phase 2 — inline mini-charts).
 //
-// Snapshot shape (Coco extension to Univer 0.5.x workbook data):
+// Snapshot shape (Nicel extension to Univer 0.5.x workbook data):
 //   {
 //     sheets: {
 //       <sheetId>: {

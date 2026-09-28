@@ -10,16 +10,16 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: var(--coco-bg);
+  background: var(--nicel-bg);
 }
 
 .editor-init-error {
   width: min(560px, 100%);
-  border: 1px solid var(--coco-border);
+  border: 1px solid var(--nicel-border);
   border-radius: 6px;
-  background: var(--coco-bg-elevated);
+  background: var(--nicel-bg-elevated);
   padding: 20px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .editor-init-error h2 {
@@ -38,7 +38,7 @@
   margin: 0 0 14px;
   padding: 10px;
   border-radius: 4px;
-  background: var(--coco-surface);
+  background: var(--nicel-surface);
   font-size: 12px;
   white-space: pre-wrap;
 }
@@ -50,17 +50,17 @@
   padding: 4px 10px;
   font-size: 12px;
   font-weight: 500;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
 .toolbar-btn:hover:not(:disabled) {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-text-faint);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-text-faint);
 }
 
 .toolbar-btn:disabled {
@@ -69,27 +69,27 @@
 }
 
 .toolbar-btn--primary {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .toolbar-btn--primary:hover:not(:disabled) {
-  background-color: var(--coco-accent-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
 }
 
 /* Pressed/active state for toggles (Format Painter, etc.) */
 .toolbar-btn--active {
-  background-color: var(--coco-accent-subtle);
-  border-color: var(--coco-accent);
-  color: var(--coco-accent);
-  box-shadow: inset 0 1px 2px var(--coco-shadow);
+  background-color: var(--nicel-accent-subtle);
+  border-color: var(--nicel-accent);
+  color: var(--nicel-accent);
+  box-shadow: inset 0 1px 2px var(--nicel-shadow);
 }
 
 .toolbar-btn--active:hover:not(:disabled) {
-  background-color: var(--coco-accent-subtle);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-subtle);
+  border-color: var(--nicel-accent-hover);
 }
 
 /* Format-painter cursor over the Univer grid while the tool is armed. */
@@ -105,8 +105,8 @@
   justify-content: space-between;
   gap: 12px;
   padding: 8px 16px;
-  background-color: var(--coco-warning-bg);
-  border-bottom: 1px solid var(--coco-warning);
+  background-color: var(--nicel-warning-bg);
+  border-bottom: 1px solid var(--nicel-warning);
   flex-shrink: 0;
   z-index: 10;
 }
@@ -127,18 +127,18 @@
 }
 
 .warning-banner__item--warning {
-  color: var(--coco-warning);
+  color: var(--nicel-warning);
   font-weight: 500;
 }
 
 .warning-banner__item--blocking {
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
   font-weight: 600;
 }
 
 .warning-banner--export {
-  background-color: var(--coco-accent-subtle);
-  border-bottom-color: var(--coco-accent);
+  background-color: var(--nicel-accent-subtle);
+  border-bottom-color: var(--nicel-accent);
 }
 
 .warning-banner__more {
@@ -165,7 +165,7 @@
   border: none;
   font-size: 18px;
   line-height: 1;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
@@ -173,7 +173,7 @@
 }
 
 .warning-banner__dismiss:hover {
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 /* Wrapper that hosts the Univer grid and the busy overlay (which is absolutely
@@ -202,14 +202,14 @@
   gap: 10px;
   padding: 4px 14px;
   height: 28px;
-  background-color: var(--coco-statusbar-bg);
+  background-color: var(--nicel-statusbar-bg);
   flex-shrink: 0;
 }
 
 .status-bar__status {
   font-size: 12px;
   font-weight: 500;
-  color: var(--coco-statusbar-text);
+  color: var(--nicel-statusbar-text);
 }
 
 .status-bar__status--save_failed,
@@ -292,7 +292,7 @@
   padding-left: 12px;
 }
 
-/* #198: hide Univer's built-in formula bar — Coco's `ribbon/FormulaBar.tsx`
+/* #198: hide Univer's built-in formula bar — Nicel's `ribbon/FormulaBar.tsx`
  * replaces it, so leaving Univer's would double-render the bar.
  * Univer 0.8.x (Tailwind refactor) replaced the semantic `.univer-formula-box`
  * wrapper with `data-u-comp="formula-bar"` (rendered by @univerjs/sheets-ui).

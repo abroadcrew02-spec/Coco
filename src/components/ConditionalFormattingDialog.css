@@ -1,7 +1,7 @@
 .cf-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .cf-modal {
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
   width: 100%;
   max-width: 600px;
   max-height: 85vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .cf-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .cf-close:hover {
-  color: var(--coco-text);
-  background-color: var(--coco-surface-hover);
+  color: var(--nicel-text);
+  background-color: var(--nicel-surface-hover);
 }
 
 .cf-body {
@@ -63,7 +63,7 @@
 
 .cf-empty {
   font-size: 13px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   margin: 0;
   padding: 16px 0;
   text-align: center;
@@ -84,15 +84,15 @@
   justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
-  background-color: var(--coco-surface);
-  border: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border: 1px solid var(--nicel-border);
   border-radius: 4px;
 }
 
 .cf-item--editing {
-  background-color: var(--coco-accent-subtle);
-  border-color: var(--coco-accent);
-  box-shadow: 0 0 0 1px var(--coco-accent) inset;
+  background-color: var(--nicel-accent-subtle);
+  border-color: var(--nicel-accent);
+  box-shadow: 0 0 0 1px var(--nicel-accent) inset;
 }
 
 .cf-item-text {
@@ -106,18 +106,18 @@
 .cf-item-sqref {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   font-weight: 600;
 }
 
 .cf-item-summary {
   font-size: 12px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .cf-item-style {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .cf-item-actions {
@@ -130,16 +130,16 @@
   padding: 5px 12px;
   font-size: 12px;
   font-weight: 500;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .cf-btn:hover:not(:disabled) {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-border-strong);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-border-strong);
 }
 
 .cf-btn:disabled {
@@ -148,44 +148,44 @@
 }
 
 .cf-btn--primary {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .cf-btn--primary:hover:not(:disabled) {
-  background-color: var(--coco-accent-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
 }
 
 .cf-btn--danger {
-  color: var(--coco-danger);
-  border-color: var(--coco-danger);
+  color: var(--nicel-danger);
+  border-color: var(--nicel-danger);
 }
 
 .cf-btn--danger:hover:not(:disabled) {
-  background-color: var(--coco-danger-bg);
-  border-color: var(--coco-danger);
+  background-color: var(--nicel-danger-bg);
+  border-color: var(--nicel-danger);
 }
 
 .cf-btn--add {
   align-self: flex-start;
   padding: 7px 14px;
   font-size: 13px;
-  color: var(--coco-accent);
-  border-color: var(--coco-accent);
-  background-color: var(--coco-accent-subtle);
+  color: var(--nicel-accent);
+  border-color: var(--nicel-accent);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .cf-btn--add:hover:not(:disabled) {
-  background-color: var(--coco-accent-subtle);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent-subtle);
+  border-color: var(--nicel-accent);
 }
 
 .cf-form {
-  border: 1px solid var(--coco-border);
+  border: 1px solid var(--nicel-border);
   border-radius: 6px;
-  background-color: var(--coco-accent-subtle);
+  background-color: var(--nicel-accent-subtle);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -195,7 +195,7 @@
 .cf-form-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-text);
+  color: var(--nicel-text);
   margin: 0;
 }
 
@@ -213,20 +213,20 @@
 
 .cf-field-label {
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .cf-input {
   padding: 6px 8px;
   font-size: 13px;
-  border: 1px solid var(--coco-border);
+  border: 1px solid var(--nicel-border);
   border-radius: 3px;
   font-family: inherit;
 }
 
 .cf-input:focus {
   outline: none;
-  border-color: var(--coco-accent);
+  border-color: var(--nicel-accent);
   box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
 }
 
@@ -235,39 +235,39 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .cf-color {
   width: 36px;
   height: 24px;
   padding: 0;
-  border: 1px solid var(--coco-border);
+  border: 1px solid var(--nicel-border);
   border-radius: 3px;
   background: none;
   cursor: pointer;
 }
 
 .cf-style {
-  border: 1px solid var(--coco-border);
+  border: 1px solid var(--nicel-border);
   border-radius: 4px;
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
 }
 
 .cf-style legend {
   padding: 0 4px;
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }
 
 .cf-error {
   margin: 0;
   font-size: 12px;
-  color: var(--coco-danger);
+  color: var(--nicel-danger);
 }
 
 .cf-form-actions {
@@ -278,8 +278,8 @@
 
 .cf-footer {
   padding: 12px 20px;
-  background-color: var(--coco-surface);
-  border-top: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border-top: 1px solid var(--nicel-border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -288,7 +288,7 @@
 .cf-hint {
   margin: 0;
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   line-height: 1.5;
 }
 

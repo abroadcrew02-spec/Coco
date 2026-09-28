@@ -1,7 +1,7 @@
 .sid-backdrop {
   position: fixed;
   inset: 0;
-  background-color: var(--coco-overlay);
+  background-color: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,9 +9,9 @@
 }
 
 .sid-modal {
-  background-color: var(--coco-bg-elevated);
+  background-color: var(--nicel-bg-elevated);
   border-radius: 8px;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
   width: 100%;
   max-width: 560px;
   max-height: 80vh;
@@ -25,14 +25,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-surface);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-surface);
 }
 
 .sid-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   margin: 0;
 }
 
@@ -41,15 +41,15 @@
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
 }
 
 .sid-close:hover {
-  color: var(--coco-text);
-  background-color: var(--coco-surface-hover);
+  color: var(--nicel-text);
+  background-color: var(--nicel-surface-hover);
 }
 
 .sid-body {
@@ -71,10 +71,10 @@
   flex: 1;
   padding: 6px 10px;
   font-size: 13px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
-  background-color: var(--coco-surface);
-  color: var(--coco-text);
+  background-color: var(--nicel-surface);
+  color: var(--nicel-text);
   font-family: inherit;
   min-width: 0;
 }
@@ -82,22 +82,22 @@
 .sid-status {
   margin: 6px 0;
   font-size: 13px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   text-align: center;
 }
 
 .sid-error {
   margin: 6px 0;
   font-size: 13px;
-  color: var(--coco-danger);
-  background-color: var(--coco-danger-bg);
-  border: 1px solid var(--coco-danger);
+  color: var(--nicel-danger);
+  background-color: var(--nicel-danger-bg);
+  border: 1px solid var(--nicel-danger);
   border-radius: 4px;
   padding: 6px 10px;
 }
 
 .sid-list-header {
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .sid-list {
@@ -117,27 +117,27 @@
   gap: 8px;
   padding: 8px 10px;
   font-size: 13px;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
   border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
 }
 
 .sid-row:hover {
-  background-color: var(--coco-accent-subtle);
-  border-color: var(--coco-border);
+  background-color: var(--nicel-accent-subtle);
+  border-color: var(--nicel-border);
 }
 
 .sid-row--active {
-  background-color: var(--coco-accent-subtle);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent-subtle);
+  border-color: var(--nicel-accent);
 }
 
 .sid-row--header {
   cursor: default;
   font-weight: 600;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   background-color: transparent;
 }
 
@@ -154,7 +154,7 @@
 
 .sid-meta {
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -164,8 +164,8 @@
 
 .sid-footer {
   padding: 12px 20px;
-  background-color: var(--coco-surface);
-  border-top: 1px solid var(--coco-border);
+  background-color: var(--nicel-surface);
+  border-top: 1px solid var(--nicel-border);
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -176,16 +176,16 @@
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--coco-text);
-  background-color: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .sid-btn:hover:not(:disabled) {
-  background-color: var(--coco-surface-hover);
-  border-color: var(--coco-text-faint);
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-text-faint);
 }
 
 .sid-btn:disabled {
@@ -194,12 +194,12 @@
 }
 
 .sid-btn--primary {
-  background-color: var(--coco-accent);
-  color: var(--coco-accent-text);
-  border-color: var(--coco-accent);
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
 }
 
 .sid-btn--primary:hover:not(:disabled) {
-  background-color: var(--coco-accent-hover);
-  border-color: var(--coco-accent-hover);
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
 }

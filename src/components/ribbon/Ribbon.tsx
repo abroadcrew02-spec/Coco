@@ -4,7 +4,7 @@
 // one `role="tabpanel"` per tab. Only the active panel is mounted. Buttons
 // dispatch one of three action kinds:
 //
-//   editorCommand — re-emits `coco:editor-command` so the existing 108-command
+//   editorCommand — re-emits `nicel:editor-command` so the existing 108-command
 //                   surface in EditorScreen handles it. No new ids invented.
 //   univer        — forwarded to `onUniverAction`, which EditorScreen wires
 //                   to facade calls (FRange.setFontWeight, FWorkbook.undo...).
@@ -98,7 +98,7 @@ export default function Ribbon({
     (action: RibbonAction) => {
       if (action.kind === "editorCommand") {
         window.dispatchEvent(
-          new CustomEvent("coco:editor-command", { detail: action.commandId }),
+          new CustomEvent("nicel:editor-command", { detail: action.commandId }),
         );
       } else if (action.kind === "menuAction") {
         // #202: re-emit the same `menu-action` event the native menu fired so

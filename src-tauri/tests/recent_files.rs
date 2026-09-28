@@ -1,7 +1,7 @@
-use coco_lib::db::operations::{
+use nicel_lib::db::operations::{
     list_recent_files, record_recent_file, remove_recent_file, RECENT_FILES_LIMIT,
 };
-use coco_lib::db::schema::initialize;
+use nicel_lib::db::schema::initialize;
 use rusqlite::Connection;
 
 fn new_db() -> Connection {

@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useCallback } from "react";
-import type { StoredMeasure, StoredCalculatedColumn } from "../store/cocoDataModel";
-import { readDataModel } from "../store/cocoDataModel";
+import type { StoredMeasure, StoredCalculatedColumn } from "../store/nicelDataModel";
+import { readDataModel } from "../store/nicelDataModel";
 import type { ModelTable } from "../store/daxEngine";
 import "./MeasureListPanel.css";
 

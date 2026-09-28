@@ -4,7 +4,7 @@
 //! different P0 elements from §4.4 (formulas), §4.5 (formats), and §10 (the
 //! compatibility matrix). Every fixture is imported via `import_xlsx_core`,
 //! re-exported via `export_xlsx_core`, then re-imported so we can assert the
-//! observable P0 elements survive the full round-trip (Coco -> xlsx -> Coco).
+//! observable P0 elements survive the full round-trip (Nicel -> xlsx -> Nicel).
 //!
 //! Each fixture lives in its own `#[test]` so failures are isolated and easy
 //! to triage.
@@ -23,7 +23,7 @@
 //!  - "Everything bagel" combining values + styles + formulas + merges
 
 use calamine::{open_workbook, Data, Reader, Xlsx};
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::{
     Color, ExcelDateTime, Format, FormatAlign, FormatBorder, FormatPattern, Workbook,
 };
@@ -42,7 +42,7 @@ fn path_str(p: &Path) -> String {
 /// Round-trip: import the freshly-written fixture, export it, then re-import
 /// and return the final snapshot. We assert the final snapshot in each test
 /// — anything that survives a *re-import* of an *exported* file is what we
-/// can claim round-trips through Coco.
+/// can claim round-trips through Nicel.
 fn round_trip(fixture: &Path, exported: &Path) -> Value {
     let imported = import_xlsx_core(path_str(fixture)).expect("import fixture");
     let snapshot_json = imported
@@ -450,7 +450,7 @@ fn fixture_07_column_row_sizing() {
         row_data.is_object(),
         "rowData object required, got {row_data}"
     );
-    // Widths: rust_xlsxwriter applies a char-width conversion, but Coco's
+    // Widths: rust_xlsxwriter applies a char-width conversion, but Nicel's
     // inverse_col_width_for_xlsxwriter step should keep the round-trip stable.
     let w0 = col_data["0"]["w"].as_f64().unwrap_or(0.0);
     let w2 = col_data["2"]["w"].as_f64().unwrap_or(0.0);

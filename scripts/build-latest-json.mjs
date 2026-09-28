@@ -165,7 +165,7 @@ const {
 
 // -----------------------------------------------------------------------------
 // Version from package.json (single source of truth, matches Tauri's bundle
-// filename — `Coco_<version>_x64-setup.nsis.zip`).
+// filename — `Nicel_<version>_x64-setup.nsis.zip`).
 // -----------------------------------------------------------------------------
 const pkgVersion = (() => {
   try {

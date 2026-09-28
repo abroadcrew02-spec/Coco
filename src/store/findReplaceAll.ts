@@ -4,9 +4,9 @@
 // module provides a workbook-wide alternative that walks every sheet's
 // `cellData` directly off the snapshot. All exports are side-effect free so
 // the dialog can call them deterministically (no Univer dependency) and so
-// `replaceAll` can be wrapped by the Coco checkpoint machinery for undo.
+// `replaceAll` can be wrapped by the Nicel checkpoint machinery for undo.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension) the helpers walk:
+// Snapshot shape (Univer 0.5.x + Nicel extension) the helpers walk:
 //   {
 //     sheets: {
 //       <sheetId>: {
@@ -269,7 +269,7 @@ function applyReplaceToValue(
 }
 
 // Deep-clone the snapshot object (JSON round-trip is safe — snapshots are
-// already JSON-serialised throughout Coco). Returning a fresh tree lets the
+// already JSON-serialised throughout Nicel). Returning a fresh tree lets the
 // caller hand the result to `updateSnapshot` without aliasing live state.
 function cloneSnapshot(snapshot: unknown): Snapshot {
   if (!snapshot || typeof snapshot !== "object") return {};

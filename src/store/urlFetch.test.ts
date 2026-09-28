@@ -391,7 +391,7 @@ describe("wsConnect (#182)", () => {
     lastEventHandler = null;
   });
 
-  /** Push a `coco:ws-message` event into the last-registered handler. */
+  /** Push a `nicel:ws-message` event into the last-registered handler. */
   const emitWs = (ev: WsMessageEvent): void => {
     if (!lastEventHandler) throw new Error("no event handler registered");
     lastEventHandler({ payload: ev });

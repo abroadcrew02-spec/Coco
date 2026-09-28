@@ -9,7 +9,7 @@ import {
   upsertQueryOnSnapshot,
   writeQueries,
   type SavedQuery,
-} from "./cocoQueries";
+} from "./nicelQueries";
 
 function makeQuery(id: string, name: string = id): SavedQuery {
   const now = "2026-05-26T00:00:00.000Z";

@@ -1,11 +1,11 @@
 // Pure helpers for the "Snapshot Diff" feature — comparing two saved
 // snapshots from .coco history and surfacing per-cell added / removed /
 // changed entries. Excel itself doesn't ship this in the box (the closest
-// is the Inquire add-in's Compare Workbooks); Coco's twist is that the
+// is the Inquire add-in's Compare Workbooks); Nicel's twist is that the
 // inputs are always two snapshots from the same workbook's history, so the
 // diff list jumps you straight to the cell in the currently-open file.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension) the helpers walk — same
+// Snapshot shape (Univer 0.5.x + Nicel extension) the helpers walk — same
 // shape consumed by formulaAudit.ts so the cell-traversal pattern matches:
 //   {
 //     sheets: {

@@ -1,7 +1,7 @@
 .snapshot-backdrop {
   position: fixed;
   inset: 0;
-  background: var(--coco-overlay);
+  background: var(--nicel-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,14 +9,14 @@
 }
 
 .snapshot-modal {
-  background: var(--coco-bg-elevated);
+  background: var(--nicel-bg-elevated);
   border-radius: 6px;
   width: 480px;
   max-width: 90vw;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 8px 32px var(--coco-shadow);
+  box-shadow: 0 8px 32px var(--nicel-shadow);
 }
 
 .snapshot-header {
@@ -24,7 +24,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 18px;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .snapshot-title {
@@ -37,13 +37,13 @@
   background: none;
   border: none;
   font-size: 22px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   cursor: pointer;
   padding: 0 6px;
 }
 
 .snapshot-close:hover {
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .snapshot-body {
@@ -53,7 +53,7 @@
 
 .snapshot-hint {
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   margin: 0 0 12px;
   line-height: 1.5;
 }
@@ -62,12 +62,12 @@
   display: block;
   margin-top: 4px;
   font-size: 11px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
 }
 
 .snapshot-empty {
   font-size: 13px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
   margin: 12px 0;
   text-align: center;
 }
@@ -86,15 +86,15 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border: 1px solid var(--coco-border);
+  border: 1px solid var(--nicel-border);
   border-radius: 4px;
-  background: var(--coco-surface);
+  background: var(--nicel-surface);
   cursor: default;
 }
 
 .snapshot-item--selected {
-  border-color: var(--coco-focus-ring);
-  background: var(--coco-info-bg);
+  border-color: var(--nicel-focus-ring);
+  background: var(--nicel-info-bg);
 }
 
 .snapshot-item__meta {
@@ -106,24 +106,24 @@
 .snapshot-item__when {
   font-size: 13px;
   font-weight: 500;
-  color: var(--coco-text);
+  color: var(--nicel-text);
 }
 
 .snapshot-item__current {
   margin-left: 8px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
 }
 
 .snapshot-item__reason {
   font-size: 11px;
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
 }
 
 .snapshot-item__open {
-  background: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  background: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   padding: 5px 11px;
   font-size: 12px;
@@ -131,7 +131,7 @@
 }
 
 .snapshot-item__open:hover {
-  background: var(--coco-surface-hover);
+  background: var(--nicel-surface-hover);
 }
 
 .snapshot-diag {
@@ -141,25 +141,25 @@
   gap: 6px;
   padding: 8px 18px;
   font-size: 11px;
-  color: var(--coco-text-faint);
-  border-top: 1px solid var(--coco-border);
-  background: var(--coco-bg);
+  color: var(--nicel-text-faint);
+  border-top: 1px solid var(--nicel-border);
+  background: var(--nicel-bg);
 }
 
 .snapshot-diag-copy {
   margin-left: auto;
   background: none;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
   padding: 2px 8px;
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   cursor: pointer;
 }
 
 .snapshot-diag-copy:hover {
-  background: var(--coco-bg-elevated);
-  color: var(--coco-text);
+  background: var(--nicel-bg-elevated);
+  color: var(--nicel-text);
 }
 
 .snapshot-footer {
@@ -167,13 +167,13 @@
   align-items: center;
   gap: 10px;
   padding: 12px 18px;
-  border-top: 1px solid var(--coco-border);
-  background: var(--coco-surface);
+  border-top: 1px solid var(--nicel-border);
+  background: var(--nicel-surface);
 }
 
 .snapshot-footer-btn {
-  background: var(--coco-bg-elevated);
-  border: 1px solid var(--coco-border-strong);
+  background: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 4px;
   padding: 5px 11px;
   font-size: 12px;
@@ -181,7 +181,7 @@
 }
 
 .snapshot-footer-btn:hover:not(:disabled) {
-  background: var(--coco-surface-hover);
+  background: var(--nicel-surface-hover);
 }
 
 .snapshot-footer-btn:disabled {
@@ -191,5 +191,5 @@
 
 .snapshot-footer-status {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
 }

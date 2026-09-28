@@ -1,10 +1,10 @@
-// Unit test for the Coco context-menu helper. We don't try to drive the
+// Unit test for the Nicel context-menu helper. We don't try to drive the
 // real Univer renderer (right-click → menu) — that's an e2e concern. We
 // just assert:
-//   - `buildCocoContextMenuSchema` slots our 3 commands under
+//   - `buildNicelContextMenuSchema` slots our 3 commands under
 //     ContextMenuPosition.MAIN_AREA / ContextMenuGroup.OTHERS with stable
 //     order numbers and correct JA titles.
-//   - `registerCocoContextMenu` resolves IMenuManagerService +
+//   - `registerNicelContextMenu` resolves IMenuManagerService +
 //     ICommandService from the injector, registers 3 commands, merges the
 //     schema once, and disposes cleanly.
 //   - The registered command handlers route to the latest callback ref
@@ -23,16 +23,16 @@ import {
   MenuItemType,
 } from "@univerjs/ui";
 import {
-  buildCocoContextMenuSchema,
-  registerCocoContextMenu,
-  COCO_INSERT_COMMENT_COMMAND_ID,
-  COCO_INSERT_HYPERLINK_COMMAND_ID,
-  COCO_OPEN_NUMBER_FORMAT_COMMAND_ID,
-  COCO_CAMERA_CAPTURE_COMMAND_ID,
+  buildNicelContextMenuSchema,
+  registerNicelContextMenu,
+  NICEL_INSERT_COMMENT_COMMAND_ID,
+  NICEL_INSERT_HYPERLINK_COMMAND_ID,
+  NICEL_OPEN_NUMBER_FORMAT_COMMAND_ID,
+  NICEL_CAMERA_CAPTURE_COMMAND_ID,
 } from "./univerContextMenu";
 
 interface MergedSchemaCall {
-  source: ReturnType<typeof buildCocoContextMenuSchema>;
+  source: ReturnType<typeof buildNicelContextMenuSchema>;
 }
 
 // Minimal fake Univer that returns a fake injector whose .get() routes to
@@ -55,7 +55,7 @@ function makeFakeUniver() {
   };
 
   const menuManagerService = {
-    mergeMenu(source: ReturnType<typeof buildCocoContextMenuSchema>) {
+    mergeMenu(source: ReturnType<typeof buildNicelContextMenuSchema>) {
       merged.push({ source });
     },
   };
@@ -71,50 +71,50 @@ function makeFakeUniver() {
   return {
     univer: {
       __getInjector: () => injector,
-    } as unknown as Parameters<typeof registerCocoContextMenu>[0],
+    } as unknown as Parameters<typeof registerNicelContextMenu>[0],
     commands,
     merged,
     disposed,
   };
 }
 
-describe("buildCocoContextMenuSchema", () => {
-  const schema = buildCocoContextMenuSchema();
+describe("buildNicelContextMenuSchema", () => {
+  const schema = buildNicelContextMenuSchema();
   const others =
     schema[ContextMenuPosition.MAIN_AREA][ContextMenuGroup.OTHERS];
 
   it("places four entries under MAIN_AREA → OTHERS", () => {
     const ids = Object.keys(others);
     expect(ids).toEqual([
-      COCO_INSERT_COMMENT_COMMAND_ID,
-      COCO_INSERT_HYPERLINK_COMMAND_ID,
-      COCO_OPEN_NUMBER_FORMAT_COMMAND_ID,
-      COCO_CAMERA_CAPTURE_COMMAND_ID,
+      NICEL_INSERT_COMMENT_COMMAND_ID,
+      NICEL_INSERT_HYPERLINK_COMMAND_ID,
+      NICEL_OPEN_NUMBER_FORMAT_COMMAND_ID,
+      NICEL_CAMERA_CAPTURE_COMMAND_ID,
     ]);
   });
 
   it("uses ascending order numbers so the items keep a stable order", () => {
-    expect(others[COCO_INSERT_COMMENT_COMMAND_ID].order).toBe(100);
-    expect(others[COCO_INSERT_HYPERLINK_COMMAND_ID].order).toBe(101);
-    expect(others[COCO_OPEN_NUMBER_FORMAT_COMMAND_ID].order).toBe(102);
-    expect(others[COCO_CAMERA_CAPTURE_COMMAND_ID].order).toBe(103);
+    expect(others[NICEL_INSERT_COMMENT_COMMAND_ID].order).toBe(100);
+    expect(others[NICEL_INSERT_HYPERLINK_COMMAND_ID].order).toBe(101);
+    expect(others[NICEL_OPEN_NUMBER_FORMAT_COMMAND_ID].order).toBe(102);
+    expect(others[NICEL_CAMERA_CAPTURE_COMMAND_ID].order).toBe(103);
   });
 
   it("produces BUTTON menu items with JA titles", () => {
-    const comment = others[COCO_INSERT_COMMENT_COMMAND_ID].menuItemFactory();
+    const comment = others[NICEL_INSERT_COMMENT_COMMAND_ID].menuItemFactory();
     expect(comment.type).toBe(MenuItemType.BUTTON);
     expect(comment.title).toBe("コメントを挿入...");
 
-    const hyper = others[COCO_INSERT_HYPERLINK_COMMAND_ID].menuItemFactory();
+    const hyper = others[NICEL_INSERT_HYPERLINK_COMMAND_ID].menuItemFactory();
     expect(hyper.type).toBe(MenuItemType.BUTTON);
     expect(hyper.title).toBe("ハイパーリンク...");
 
     const numFmt =
-      others[COCO_OPEN_NUMBER_FORMAT_COMMAND_ID].menuItemFactory();
+      others[NICEL_OPEN_NUMBER_FORMAT_COMMAND_ID].menuItemFactory();
     expect(numFmt.type).toBe(MenuItemType.BUTTON);
     expect(numFmt.title).toBe("表示形式...");
 
-    const camera = others[COCO_CAMERA_CAPTURE_COMMAND_ID].menuItemFactory();
+    const camera = others[NICEL_CAMERA_CAPTURE_COMMAND_ID].menuItemFactory();
     expect(camera.type).toBe(MenuItemType.BUTTON);
     expect(camera.title).toBe("カメラ撮影");
   });
@@ -122,22 +122,22 @@ describe("buildCocoContextMenuSchema", () => {
   it("aligns menu item ids with command ids so dispatch resolves", () => {
     // The menu renderer dispatches by IMenuItem.id (or commandId fallback)
     // — verify our items don't drift from the registered command ids.
-    expect(others[COCO_INSERT_COMMENT_COMMAND_ID].menuItemFactory().id).toBe(
-      COCO_INSERT_COMMENT_COMMAND_ID,
+    expect(others[NICEL_INSERT_COMMENT_COMMAND_ID].menuItemFactory().id).toBe(
+      NICEL_INSERT_COMMENT_COMMAND_ID,
     );
-    expect(others[COCO_INSERT_HYPERLINK_COMMAND_ID].menuItemFactory().id).toBe(
-      COCO_INSERT_HYPERLINK_COMMAND_ID,
+    expect(others[NICEL_INSERT_HYPERLINK_COMMAND_ID].menuItemFactory().id).toBe(
+      NICEL_INSERT_HYPERLINK_COMMAND_ID,
     );
     expect(
-      others[COCO_OPEN_NUMBER_FORMAT_COMMAND_ID].menuItemFactory().id,
-    ).toBe(COCO_OPEN_NUMBER_FORMAT_COMMAND_ID);
+      others[NICEL_OPEN_NUMBER_FORMAT_COMMAND_ID].menuItemFactory().id,
+    ).toBe(NICEL_OPEN_NUMBER_FORMAT_COMMAND_ID);
     expect(
-      others[COCO_CAMERA_CAPTURE_COMMAND_ID].menuItemFactory().id,
-    ).toBe(COCO_CAMERA_CAPTURE_COMMAND_ID);
+      others[NICEL_CAMERA_CAPTURE_COMMAND_ID].menuItemFactory().id,
+    ).toBe(NICEL_CAMERA_CAPTURE_COMMAND_ID);
   });
 });
 
-describe("registerCocoContextMenu", () => {
+describe("registerNicelContextMenu", () => {
   it("registers four OPERATION commands and merges the schema once", () => {
     const { univer, commands, merged } = makeFakeUniver();
     const cb = {
@@ -147,13 +147,13 @@ describe("registerCocoContextMenu", () => {
       captureCamera: vi.fn(),
     };
 
-    registerCocoContextMenu(univer, cb);
+    registerNicelContextMenu(univer, cb);
 
     expect(commands.map((c) => c.id)).toEqual([
-      COCO_INSERT_COMMENT_COMMAND_ID,
-      COCO_INSERT_HYPERLINK_COMMAND_ID,
-      COCO_OPEN_NUMBER_FORMAT_COMMAND_ID,
-      COCO_CAMERA_CAPTURE_COMMAND_ID,
+      NICEL_INSERT_COMMENT_COMMAND_ID,
+      NICEL_INSERT_HYPERLINK_COMMAND_ID,
+      NICEL_OPEN_NUMBER_FORMAT_COMMAND_ID,
+      NICEL_CAMERA_CAPTURE_COMMAND_ID,
     ]);
     expect(merged).toHaveLength(1);
   });
@@ -166,7 +166,7 @@ describe("registerCocoContextMenu", () => {
       openNumberFormatDialog: vi.fn(),
       captureCamera: vi.fn(),
     };
-    registerCocoContextMenu(univer, cb);
+    registerNicelContextMenu(univer, cb);
 
     // Univer's command handler signature is `(accessor, params?) → R`.
     // For our OPERATION commands we just bounce to the JS callback —
@@ -174,10 +174,10 @@ describe("registerCocoContextMenu", () => {
     const stubAccessor = {} as Parameters<ICommand["handler"]>[0];
 
     const byId = new Map(commands.map((c) => [c.id, c]));
-    byId.get(COCO_INSERT_COMMENT_COMMAND_ID)!.handler(stubAccessor);
-    byId.get(COCO_INSERT_HYPERLINK_COMMAND_ID)!.handler(stubAccessor);
-    byId.get(COCO_OPEN_NUMBER_FORMAT_COMMAND_ID)!.handler(stubAccessor);
-    byId.get(COCO_CAMERA_CAPTURE_COMMAND_ID)!.handler(stubAccessor);
+    byId.get(NICEL_INSERT_COMMENT_COMMAND_ID)!.handler(stubAccessor);
+    byId.get(NICEL_INSERT_HYPERLINK_COMMAND_ID)!.handler(stubAccessor);
+    byId.get(NICEL_OPEN_NUMBER_FORMAT_COMMAND_ID)!.handler(stubAccessor);
+    byId.get(NICEL_CAMERA_CAPTURE_COMMAND_ID)!.handler(stubAccessor);
 
     expect(cb.openCommentDialog).toHaveBeenCalledTimes(1);
     expect(cb.openHyperlinkDialog).toHaveBeenCalledTimes(1);
@@ -196,10 +196,10 @@ describe("registerCocoContextMenu", () => {
       openNumberFormatDialog: vi.fn(),
       captureCamera: vi.fn(),
     };
-    registerCocoContextMenu(univer, cb);
+    registerNicelContextMenu(univer, cb);
 
     const stubAccessor = {} as Parameters<ICommand["handler"]>[0];
-    const target = commands.find((c) => c.id === COCO_INSERT_COMMENT_COMMAND_ID)!;
+    const target = commands.find((c) => c.id === NICEL_INSERT_COMMENT_COMMAND_ID)!;
     const result = target.handler(stubAccessor);
 
     expect(result).toBe(false);
@@ -215,16 +215,16 @@ describe("registerCocoContextMenu", () => {
       openNumberFormatDialog: vi.fn(),
       captureCamera: vi.fn(),
     };
-    const reg = registerCocoContextMenu(univer, cb);
+    const reg = registerNicelContextMenu(univer, cb);
     expect(disposed).toEqual([]);
 
     reg.dispose();
 
     expect(disposed).toEqual([
-      COCO_INSERT_COMMENT_COMMAND_ID,
-      COCO_INSERT_HYPERLINK_COMMAND_ID,
-      COCO_OPEN_NUMBER_FORMAT_COMMAND_ID,
-      COCO_CAMERA_CAPTURE_COMMAND_ID,
+      NICEL_INSERT_COMMENT_COMMAND_ID,
+      NICEL_INSERT_HYPERLINK_COMMAND_ID,
+      NICEL_OPEN_NUMBER_FORMAT_COMMAND_ID,
+      NICEL_CAMERA_CAPTURE_COMMAND_ID,
     ]);
   });
 });

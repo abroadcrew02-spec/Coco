@@ -10,7 +10,7 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::Workbook;
 use tempfile::TempDir;
 use zip::write::FileOptions;

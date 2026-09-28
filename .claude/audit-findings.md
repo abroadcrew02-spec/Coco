@@ -30,7 +30,7 @@ xlsx round-trip (`src-tauri/tests/xlsx_roundtrip.rs`):
 13. `sheet_with_31_char_name_not_truncated` — exact-boundary test
 
 Frontend store (`src/store/useWorkbookStore.test.ts`):
-14. Concurrent openCoco vs importXlsx race — newer wins
+14. Concurrent openNicel vs importXlsx race — newer wins
 15. autoSave swallows invoke rejection without flipping saveStatus
 16. setAutoSaveInterval ignores NaN and Infinity
 17. loadPinnedPaths handles non-array JSON

@@ -19,10 +19,10 @@ export const flushPendingSnapshot = async () => {
 };
 
 /**
- * Workbook-root keys that Coco layers on top of Univer's `IWorkbookData`.
+ * Workbook-root keys that Nicel layers on top of Univer's `IWorkbookData`.
  * Univer 0.5.x doesn't know about these — they're written into the store
- * snapshot by Coco (camera links, scenarios) and round-tripped through xlsx
- * by `xlsx_io.rs` (`COCO_EXTENSION_ROOT_FIELDS`).
+ * snapshot by Nicel (camera links, scenarios) and round-tripped through xlsx
+ * by `xlsx_io.rs` (`NICEL_EXTENSION_ROOT_FIELDS`).
  *
  * Because `FWorkbook.save()` reconstructs the snapshot purely from Univer's
  * internal models, it DROPS every key in this list. Any path that overwrites
@@ -30,7 +30,7 @@ export const flushPendingSnapshot = async () => {
  * must re-graft these keys from the prior snapshot or the user's camera links
  * / scenarios silently vanish on the next cell edit (#184 C-1).
  */
-export const COCO_ROOT_EXTENSION_KEYS = [
+export const NICEL_ROOT_EXTENSION_KEYS = [
   "_cameraLinks",
   "_scenarios",
   // #233/Phase 4d: image/textbox inserts mutate `_preservedParts` directly
@@ -39,20 +39,20 @@ export const COCO_ROOT_EXTENSION_KEYS = [
   // — without this graft the inserted drawing parts vanish on the next cell
   // edit, breaking xlsx export round-trip.
   "_preservedParts",
-  // #239 Step 5 — Coco-native Data Model (tables + relationships + measures).
+  // #239 Step 5 — Nicel-native Data Model (tables + relationships + measures).
   // Distinct from `xl/model/item.data` (Excel's binary Vertipaq store, which
-  // we byte-preserve via _preservedParts). The Coco model is JSON and can be
+  // we byte-preserve via _preservedParts). The Nicel model is JSON and can be
   // edited from the DataModelDialog (planned). Both layers can coexist.
   "_cocoDataModel",
-  // #238 Step 5 — Coco-native Get & Transform queries (data source + step
+  // #238 Step 5 — Nicel-native Get & Transform queries (data source + step
   // pipeline). Saved so the user can refresh a query after a reload. Excel
-  // stores connection metadata in xl/queryTables/ (byte-preserved); Coco's
+  // stores connection metadata in xl/queryTables/ (byte-preserved); Nicel's
   // queries are a separate JSON-typed layer.
   "_cocoQueries",
 ] as const;
 
 /**
- * Carry Coco's workbook-root extension keys forward from `prevJson` into
+ * Carry Nicel's workbook-root extension keys forward from `prevJson` into
  * `nextJson`. `nextJson` is fresh `FWorkbook.save()` output that has lost
  * those keys; `prevJson` is the last store snapshot that still holds them.
  *
@@ -78,7 +78,7 @@ export const carryForwardRootExtensions = (
     return nextJson;
   }
   let changed = false;
-  for (const key of COCO_ROOT_EXTENSION_KEYS) {
+  for (const key of NICEL_ROOT_EXTENSION_KEYS) {
     const prevVal = prev[key];
     // Only graft when the prior snapshot actually had the key and Univer's
     // save() output doesn't (it never does — but stay defensive).

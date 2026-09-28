@@ -1,6 +1,6 @@
 // Pure helpers for hiding / unhiding sheets in a Univer workbook snapshot.
 // Excel models per-sheet visibility via the workbook-level `<sheet state="...">`
-// attribute (visible / hidden / veryHidden). Coco's xlsx round-trip already
+// attribute (visible / hidden / veryHidden). Nicel's xlsx round-trip already
 // honors this via the `_sheetState` field on each sheet object — see
 // `src-tauri/src/commands/xlsx_io.rs::parse_xlsx_sheet_visibility` (load) and
 // the corresponding writer block ("Apply sheet visibility from `_sheetState`")
@@ -8,7 +8,7 @@
 // store for hidden state so this work surfaces in saved xlsx files without
 // any backend changes.
 //
-// Snapshot shape (Univer 0.5.x + Coco extension):
+// Snapshot shape (Univer 0.5.x + Nicel extension):
 //   {
 //     sheetOrder?: string[];                       // ordered sheet ids
 //     sheets: {
@@ -22,7 +22,7 @@
 //
 // `hideSheet` only writes "hidden" (not "veryHidden") because the dialog flow
 // can't surface very-hidden sheets to the user — they're typically reserved
-// for VBA-only access, which Coco doesn't expose. `unhideSheet` accepts both:
+// for VBA-only access, which Nicel doesn't expose. `unhideSheet` accepts both:
 // it deletes the `_sheetState` key regardless of which value it carried.
 //
 // Kept side-effect free so it can be unit-tested without Univer.

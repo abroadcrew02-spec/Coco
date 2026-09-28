@@ -3,8 +3,8 @@
   flex-direction: column;
   width: 100%;
   height: 100%;
-  background-color: var(--coco-bg-elevated);
-  border-left: 1px solid var(--coco-border);
+  background-color: var(--nicel-bg-elevated);
+  border-left: 1px solid var(--nicel-border);
   overflow: hidden;
   font-family: inherit;
 }
@@ -14,21 +14,21 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--coco-border);
-  background-color: var(--coco-accent-subtle);
+  border-bottom: 1px solid var(--nicel-border);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .tip-title {
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
 }
 
 .tip-count {
   font-size: 11px;
-  color: var(--coco-accent-text);
-  background-color: var(--coco-accent);
+  color: var(--nicel-accent-text);
+  background-color: var(--nicel-accent);
   border-radius: 10px;
   padding: 1px 8px;
   min-width: 22px;
@@ -39,7 +39,7 @@
   margin: 0;
   padding: 16px 14px;
   font-size: 12px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   line-height: 1.5;
 }
 
@@ -56,7 +56,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--coco-border);
+  border-bottom: 1px solid var(--nicel-border);
 }
 
 .tip-item:last-child {
@@ -76,7 +76,7 @@
   padding: 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--coco-accent);
+  color: var(--nicel-accent);
   cursor: pointer;
   text-align: left;
   flex: 1;
@@ -95,7 +95,7 @@
   min-width: 0;
   padding: 4px 6px;
   font-size: 12px;
-  border: 1px solid var(--coco-accent);
+  border: 1px solid var(--nicel-accent);
   border-radius: 3px;
   font-family: inherit;
 }
@@ -114,51 +114,51 @@
 .tip-btn {
   padding: 2px 8px;
   font-size: 11px;
-  border: 1px solid var(--coco-border-strong);
+  border: 1px solid var(--nicel-border-strong);
   border-radius: 3px;
-  background-color: var(--coco-bg-elevated);
-  color: var(--coco-text);
+  background-color: var(--nicel-bg-elevated);
+  color: var(--nicel-text);
   cursor: pointer;
 }
 
 .tip-btn:hover:not(:disabled) {
-  background-color: var(--coco-surface-hover);
+  background-color: var(--nicel-surface-hover);
 }
 
 .tip-btn--ghost {
-  border-color: var(--coco-border);
-  color: var(--coco-accent);
-  background-color: var(--coco-accent-subtle);
+  border-color: var(--nicel-border);
+  color: var(--nicel-accent);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .tip-btn--ghost:hover:not(:disabled) {
-  background-color: var(--coco-accent-subtle);
+  background-color: var(--nicel-accent-subtle);
 }
 
 .tip-btn--danger {
-  color: var(--coco-danger);
-  border-color: var(--coco-border);
+  color: var(--nicel-danger);
+  border-color: var(--nicel-border);
 }
 
 .tip-btn--danger:hover:not(:disabled) {
-  background-color: var(--coco-danger-bg);
+  background-color: var(--nicel-danger-bg);
 }
 
 .tip-btn--model {
-  color: var(--coco-accent);
-  border-color: var(--coco-border);
-  background-color: var(--coco-accent-subtle);
+  color: var(--nicel-accent);
+  border-color: var(--nicel-border);
+  background-color: var(--nicel-accent-subtle);
   white-space: nowrap;
 }
 
 .tip-btn--model:hover:not(:disabled) {
-  background-color: var(--coco-accent-subtle);
+  background-color: var(--nicel-accent-subtle);
   text-decoration: underline;
 }
 
 .tip-meta {
   font-size: 11px;
-  color: var(--coco-text-muted);
+  color: var(--nicel-text-muted);
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
@@ -166,12 +166,12 @@
 }
 
 .tip-sheet {
-  color: var(--coco-text);
+  color: var(--nicel-text);
   font-weight: 500;
 }
 
 .tip-sep {
-  color: var(--coco-text-faint);
+  color: var(--nicel-text-faint);
 }
 
 .tip-range,
@@ -190,9 +190,9 @@
 
 .tip-col-chip {
   font-size: 11px;
-  color: var(--coco-accent-hover);
-  background-color: var(--coco-accent-subtle);
-  border: 1px solid var(--coco-border);
+  color: var(--nicel-accent-hover);
+  background-color: var(--nicel-accent-subtle);
+  border: 1px solid var(--nicel-border);
   border-radius: 10px;
   padding: 1px 8px;
   max-width: 120px;
@@ -203,9 +203,9 @@
 
 .tip-ref-sample {
   font-size: 11px;
-  color: var(--coco-accent-hover);
-  background-color: var(--coco-accent-subtle);
-  border: 1px dashed var(--coco-border);
+  color: var(--nicel-accent-hover);
+  background-color: var(--nicel-accent-subtle);
+  border: 1px dashed var(--nicel-border);
   border-radius: 3px;
   padding: 2px 6px;
   font-family: "Consolas", "Menlo", monospace;

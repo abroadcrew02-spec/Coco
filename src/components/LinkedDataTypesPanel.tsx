@@ -10,13 +10,13 @@
 //   3. Cell lookup card — shows data for the currently selected cell value
 //      + "範囲を一括展開" button for multi-row selections
 //
-// No external API calls: fully local / serverless per Coco's policy.
+// No external API calls: fully local / serverless per Nicel's policy.
 
 import { useState, useCallback, useRef } from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  type CocoLinkedDataTypes,
+  type NicelLinkedDataTypes,
   type LinkedDataTypeSource,
   addSource,
   removeSource,
@@ -37,9 +37,9 @@ export interface LookupResult {
 
 interface Props {
   /** Current registered model (derived from snapshot). */
-  model: CocoLinkedDataTypes;
+  model: NicelLinkedDataTypes;
   /** Called when the model changes (caller persists to snapshot). */
-  onModelChange: (next: CocoLinkedDataTypes) => void;
+  onModelChange: (next: NicelLinkedDataTypes) => void;
   /** Cell value to look up (typically the active cell's text). */
   activeCellValue: string;
   /**

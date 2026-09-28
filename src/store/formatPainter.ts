@@ -89,7 +89,7 @@ export function extractCellStyle(
 /**
  * Apply a style object to every cell in the given inclusive rectangle. Returns
  * a *new* snapshot JSON string (we re-parse + re-stringify so the caller's
- * input is left untouched — matches the pattern used by the rest of Coco's
+ * input is left untouched — matches the pattern used by the rest of Nicel's
  * snapshot helpers).
  *
  * Creates missing cells: applying formatting to a blank cell is legitimate

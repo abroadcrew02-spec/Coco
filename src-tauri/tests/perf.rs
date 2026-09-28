@@ -9,9 +9,9 @@
 //   assert on timings (different dev machines run at different speeds).
 // - Each test generates its own fixture and is independent.
 
-use coco_lib::commands::csv_io::import_csv_core;
-use coco_lib::commands::workbook::save_core;
-use coco_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
+use nicel_lib::commands::csv_io::import_csv_core;
+use nicel_lib::commands::workbook::save_core;
+use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::{Formula, Workbook};
 use serde_json::{json, Map, Value};
 use std::io::Write;
@@ -342,9 +342,9 @@ fn build_save_snapshot_50k() -> String {
 
 #[test]
 #[ignore]
-fn coco_save_50k_cells() {
+fn nicel_save_50k_cells() {
     const ITERATIONS: usize = 10;
-    print_header("coco_save_50k_cells");
+    print_header("nicel_save_50k_cells");
 
     let snapshot_json = build_save_snapshot_50k();
     println!(

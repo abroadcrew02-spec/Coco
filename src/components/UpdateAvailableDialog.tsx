@@ -80,7 +80,7 @@ export default function UpdateAvailableDialog({
       >
         <header className="uad-header">
           <h2 id="uad-title" className="uad-title">
-            Coco v{newVersion} が利用可能です
+            Nicel v{newVersion} が利用可能です
           </h2>
           {!isForced && (
             <button

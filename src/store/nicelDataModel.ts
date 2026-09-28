@@ -1,18 +1,18 @@
-// #239 Step 5 — Coco-native Data Model storage.
+// #239 Step 5 — Nicel-native Data Model storage.
 //
 // The DAX engine (`src/store/daxEngine.ts`) operates on an in-memory
 // `DataModel` (tables + relationships + measures). This module persists
-// that structure into the Coco snapshot as a root-level `_cocoDataModel`
+// that structure into the Nicel snapshot as a root-level `_cocoDataModel`
 // key so it survives save/reload and travels with the workbook.
 //
 // Distinct from Excel's binary `xl/model/item.data` (Vertipaq columnstore):
-//   - Excel's model is opaque binary, only Power Pivot writes it; Coco
+//   - Excel's model is opaque binary, only Power Pivot writes it; Nicel
 //     preserves it byte-for-byte via _preservedParts.
-//   - Coco's model is structured JSON, authored by the user via Coco's
-//     DataModelDialog (planned). Editable in Coco, ignored by Excel.
+//   - Nicel's model is structured JSON, authored by the user via Nicel's
+//     DataModelDialog (planned). Editable in Nicel, ignored by Excel.
 //
 // Both layers coexist: opening an Excel-authored model workbook gives the
-// user Excel's binary model (untouched) AND lets them add a Coco-native
+// user Excel's binary model (untouched) AND lets them add a Nicel-native
 // model alongside it.
 //
 // Pure / framework-free.
@@ -58,11 +58,11 @@ export interface StoredCalculatedColumn extends StoredMeasure {
 }
 
 /**
- * Full Coco-native data model. Tables themselves can reference workbook
+ * Full Nicel-native data model. Tables themselves can reference workbook
  * sheets by id (the rows are sliced from sheet cellData at evaluation time)
  * OR hold inline rows (for ad-hoc data not on any sheet).
  */
-export interface CocoDataModel {
+export interface NicelDataModel {
   tables: ModelTable[];
   relationships: ModelRelationship[];
   measures: StoredMeasure[];
@@ -72,7 +72,7 @@ export interface CocoDataModel {
 }
 
 /** Empty model — used as the implicit "no model" state. */
-export const EMPTY_DATA_MODEL: CocoDataModel = {
+export const EMPTY_DATA_MODEL: NicelDataModel = {
   tables: [],
   relationships: [],
   measures: [],
@@ -80,12 +80,12 @@ export const EMPTY_DATA_MODEL: CocoDataModel = {
 };
 
 interface SnapshotWithModel {
-  _cocoDataModel?: CocoDataModel;
+  _cocoDataModel?: NicelDataModel;
   [k: string]: unknown;
 }
 
 /** Read the model out of a snapshot. Returns EMPTY_DATA_MODEL when missing. */
-export function readDataModel(snapshot: unknown): CocoDataModel {
+export function readDataModel(snapshot: unknown): NicelDataModel {
   if (!snapshot || typeof snapshot !== "object") return EMPTY_DATA_MODEL;
   const m = (snapshot as SnapshotWithModel)._cocoDataModel;
   if (!m || typeof m !== "object") return EMPTY_DATA_MODEL;
@@ -106,7 +106,7 @@ export function readDataModel(snapshot: unknown): CocoDataModel {
  */
 export function writeDataModel(
   snapshot: unknown,
-  model: CocoDataModel,
+  model: NicelDataModel,
 ): Record<string, unknown> {
   const base =
     snapshot && typeof snapshot === "object"
@@ -129,7 +129,7 @@ export function writeDataModel(
 }
 
 /** Convert the stored model into the runtime DataModel the DAX engine wants. */
-export function toDataModel(stored: CocoDataModel): DataModel {
+export function toDataModel(stored: NicelDataModel): DataModel {
   return {
     tables: stored.tables.map((t) => ({ ...t, rows: t.rows.slice() })),
     relationships: stored.relationships.slice(),
@@ -137,16 +137,16 @@ export function toDataModel(stored: CocoDataModel): DataModel {
 }
 
 // ---------------------------------------------------------------------------
-// Mutation helpers — return new CocoDataModel objects (never mutate input).
+// Mutation helpers — return new NicelDataModel objects (never mutate input).
 // ---------------------------------------------------------------------------
 
-export function addTable(model: CocoDataModel, table: ModelTable): CocoDataModel {
+export function addTable(model: NicelDataModel, table: ModelTable): NicelDataModel {
   // Replace same-named tables idempotently — keeps "create or update" simple.
   const filtered = model.tables.filter((t) => t.name !== table.name);
   return { ...model, tables: [...filtered, table] };
 }
 
-export function removeTable(model: CocoDataModel, name: string): CocoDataModel {
+export function removeTable(model: NicelDataModel, name: string): NicelDataModel {
   return {
     ...model,
     tables: model.tables.filter((t) => t.name !== name),
@@ -159,9 +159,9 @@ export function removeTable(model: CocoDataModel, name: string): CocoDataModel {
 }
 
 export function addRelationship(
-  model: CocoDataModel,
+  model: NicelDataModel,
   rel: ModelRelationship,
-): CocoDataModel {
+): NicelDataModel {
   // Idempotent on (fromTable, fromColumn, toTable, toColumn) — replace.
   const filtered = model.relationships.filter(
     (r) =>
@@ -176,10 +176,10 @@ export function addRelationship(
 }
 
 export function removeRelationship(
-  model: CocoDataModel,
+  model: NicelDataModel,
   fromTable: string,
   toTable: string,
-): CocoDataModel {
+): NicelDataModel {
   return {
     ...model,
     relationships: model.relationships.filter(
@@ -189,29 +189,29 @@ export function removeRelationship(
 }
 
 export function addMeasure(
-  model: CocoDataModel,
+  model: NicelDataModel,
   measure: StoredMeasure,
-): CocoDataModel {
+): NicelDataModel {
   const filtered = model.measures.filter((m) => m.id !== measure.id);
   return { ...model, measures: [...filtered, measure] };
 }
 
-export function removeMeasure(model: CocoDataModel, id: string): CocoDataModel {
+export function removeMeasure(model: NicelDataModel, id: string): NicelDataModel {
   return { ...model, measures: model.measures.filter((m) => m.id !== id) };
 }
 
 export function addCalculatedColumn(
-  model: CocoDataModel,
+  model: NicelDataModel,
   col: StoredCalculatedColumn,
-): CocoDataModel {
+): NicelDataModel {
   const filtered = model.calculatedColumns.filter((c) => c.id !== col.id);
   return { ...model, calculatedColumns: [...filtered, col] };
 }
 
 export function removeCalculatedColumn(
-  model: CocoDataModel,
+  model: NicelDataModel,
   id: string,
-): CocoDataModel {
+): NicelDataModel {
   return {
     ...model,
     calculatedColumns: model.calculatedColumns.filter((c) => c.id !== id),
@@ -232,10 +232,10 @@ export function removeCalculatedColumn(
  * `renameMeasureReferences` from `pivots.ts`).
  */
 export function renameMeasure(
-  model: CocoDataModel,
+  model: NicelDataModel,
   oldName: string,
   newName: string,
-): { model: CocoDataModel; nameChanged: boolean; collided: boolean } {
+): { model: NicelDataModel; nameChanged: boolean; collided: boolean } {
   if (oldName === newName) {
     return { model, nameChanged: false, collided: false };
   }
@@ -276,10 +276,10 @@ export function renameMeasure(
  * `ModelTable.id`, update this lookup and the matching `tableId` writers.
  */
 export function renameCalculatedColumn(
-  model: CocoDataModel,
+  model: NicelDataModel,
   id: string,
   newColumnName: string,
-): { model: CocoDataModel; nameChanged: boolean; collided: boolean } {
+): { model: NicelDataModel; nameChanged: boolean; collided: boolean } {
   const target = model.calculatedColumns.find((c) => c.id === id);
   if (!target) {
     return { model, nameChanged: false, collided: false };
@@ -318,23 +318,23 @@ export function renameCalculatedColumn(
 // ---------------------------------------------------------------------------
 
 /**
- * Convert `CocoDataModel.calculatedColumns` into the engine-facing
+ * Convert `NicelDataModel.calculatedColumns` into the engine-facing
  * `CalculatedColumnDef[]` shape and apply them to `base` via
  * `evaluateCalculatedColumns`.
  *
  * Returns a *new* DataModel with calculated-column values injected into
- * each table's rows. The stored `CocoDataModel` is not mutated.
+ * each table's rows. The stored `NicelDataModel` is not mutated.
  *
  * Typical call-site:
  * ```ts
- * const runtimeModel = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+ * const runtimeModel = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
  * ```
  */
 export function applyCalculatedColumns(
   base: DataModel,
-  cocoModel: CocoDataModel,
+  nicelModel: NicelDataModel,
 ): DataModel {
-  const defs: CalculatedColumnDef[] = cocoModel.calculatedColumns.map((cc) => ({
+  const defs: CalculatedColumnDef[] = nicelModel.calculatedColumns.map((cc) => ({
     tableId: cc.tableId,
     columnName: cc.columnName,
     expression: cc.expression,
@@ -347,28 +347,28 @@ export function applyCalculatedColumns(
 // ---------------------------------------------------------------------------
 
 /**
- * Convert `CocoDataModel.measures` into the engine-facing `MeasureDef[]`
+ * Convert `NicelDataModel.measures` into the engine-facing `MeasureDef[]`
  * and evaluate a single named measure via `evaluateMeasure`.
  *
- * `base` should normally be the result of `applyCalculatedColumns(toDataModel(cocoModel), cocoModel)`
+ * `base` should normally be the result of `applyCalculatedColumns(toDataModel(nicelModel), nicelModel)`
  * so that calculated columns are visible to measure expressions.
  *
  * `filterContext` maps table names to pre-filtered row arrays. Pass `undefined`
  * to evaluate against the full dataset (no filter context).
  *
  * Returns MEASURE_ERROR ("#ERROR!") when:
- *   - The measure name is not found in `cocoModel.measures`.
+ *   - The measure name is not found in `nicelModel.measures`.
  *   - The DAX expression fails to parse.
  *   - Runtime evaluation throws.
  *   - A circular reference is detected.
  */
 export function evaluateStoredMeasure(
   base: DataModel,
-  cocoModel: CocoDataModel,
+  nicelModel: NicelDataModel,
   measureName: string,
   filterContext?: Map<string, Array<Record<string, unknown>>>,
 ): unknown {
-  const defs: MeasureDef[] = cocoModel.measures.map((m) => ({
+  const defs: MeasureDef[] = nicelModel.measures.map((m) => ({
     name: m.name,
     expression: m.expression,
   }));
@@ -376,20 +376,20 @@ export function evaluateStoredMeasure(
 }
 
 /**
- * Evaluate ALL measures in `cocoModel` and return a map of name → value.
+ * Evaluate ALL measures in `nicelModel` and return a map of name → value.
  *
  * Typical call-site (e.g., Pivot Table refresh):
  * ```ts
- * const rt = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
- * const vals = evaluateAllStoredMeasures(rt, cocoModel);
+ * const rt = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
+ * const vals = evaluateAllStoredMeasures(rt, nicelModel);
  * ```
  */
 export function evaluateAllStoredMeasures(
   base: DataModel,
-  cocoModel: CocoDataModel,
+  nicelModel: NicelDataModel,
   filterContext?: Map<string, Array<Record<string, unknown>>>,
 ): Map<string, unknown> {
-  const defs: MeasureDef[] = cocoModel.measures.map((m) => ({
+  const defs: MeasureDef[] = nicelModel.measures.map((m) => ({
     name: m.name,
     expression: m.expression,
   }));
@@ -413,13 +413,13 @@ export type { MeasureDef };
  * Returns MEASURE_ERROR ("#ERROR!") on any parse or runtime failure.
  */
 export function evaluateTransientMeasure(
-  cocoModel: CocoDataModel,
+  nicelModel: NicelDataModel,
   transient: { name: string; expression: string },
 ): unknown {
-  const base = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+  const base = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
   // Merge stored measures + transient, transient wins on name collision.
   const defs: MeasureDef[] = [
-    ...cocoModel.measures
+    ...nicelModel.measures
       .filter((m) => m.name !== transient.name)
       .map((m) => ({ name: m.name, expression: m.expression })),
     { name: transient.name, expression: transient.expression },
@@ -437,11 +437,11 @@ export function evaluateTransientMeasure(
  * Returns null when the target table is not found in the model.
  */
 export function evaluateTransientCalculatedColumn(
-  cocoModel: CocoDataModel,
+  nicelModel: NicelDataModel,
   transient: { tableId: string; columnName: string; expression: string },
   maxRows = 5,
 ): unknown[] | null {
-  const base = applyCalculatedColumns(toDataModel(cocoModel), cocoModel);
+  const base = applyCalculatedColumns(toDataModel(nicelModel), nicelModel);
   const table = base.tables.find((t) => t.name === transient.tableId);
   if (!table) return null;
 

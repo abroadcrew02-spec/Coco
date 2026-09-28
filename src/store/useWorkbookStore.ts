@@ -223,6 +223,9 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   nicelUndoStack: [],
   nicelRedoStack: [],
 
+  // A freshly created / opened workbook starts clean ("saved"): the dirty
+  // marker, the close guard and the updater guard only engage after a
+  // user edit (markDirty). Until v0.8.2 every open started as "unsaved".
   newWorkbook: async () => {
     const mySeq = ++openSeq;
     try {
@@ -232,7 +235,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         screen: "editor",
         currentHandle: handle,
         editorRevision: get().editorRevision + 1,
-        saveStatus: "unsaved",
+        saveStatus: "saved",
         wasDirtyBeforeExport: false,
         importWarnings: [],
         exportWarnings: [],
@@ -308,7 +311,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         screen: "editor",
         currentHandle: result.handle,
         editorRevision: get().editorRevision + 1,
-        saveStatus: "unsaved",
+        saveStatus: "saved",
         wasDirtyBeforeExport: false,
         importWarnings: result.warnings,
         exportWarnings: [],
@@ -347,7 +350,7 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         screen: "editor",
         currentHandle: result.handle,
         editorRevision: get().editorRevision + 1,
-        saveStatus: "unsaved",
+        saveStatus: "saved",
         wasDirtyBeforeExport: false,
         importWarnings: filteredWarnings,
         exportWarnings: [],

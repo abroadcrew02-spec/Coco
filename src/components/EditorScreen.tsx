@@ -615,6 +615,19 @@ const BUSY_LABELS: Partial<Record<string, { label: string; blocking: boolean }>>
   exporting: { label: "エクスポート中...", blocking: false },
 };
 
+/** Univer-internal mutations that happen without a user edit: the formula
+ *  engine writing calculation results / registering formulas, and the
+ *  renderer auto-fitting row heights. Matched by substring so minor id
+ *  renames across Univer versions keep working. */
+function isPassiveMutation(commandId: string): boolean {
+  return (
+    commandId.includes("formula-calculation") ||
+    commandId.includes("array-formula") ||
+    commandId === "sheet.mutation.set-formula-data" ||
+    commandId.includes("auto-height")
+  );
+}
+
 const SAVE_STATUS_LABELS: Record<string, string> = {
   loading: "読み込み中...",
   import_warning: "インポート警告あり",
@@ -8734,6 +8747,11 @@ export default function EditorScreen() {
     // legacy callback's `info` argument exposed.
     const disposable = fUniver.addEvent(fUniver.Event.CommandExecuted, (info) => {
       if (info.type !== CommandType.MUTATION) return;
+      // Mutations Univer fires on its own while a workbook loads (formula
+      // recalculation results, auto-fitted row heights) are not user edits.
+      // They must not flip a freshly opened workbook to "unsaved", or the
+      // dirty marker, the close guard and the updater guard all misfire.
+      if (isPassiveMutation(info.id)) return;
       markDirty();
       cancelPendingSnapshotSync();
       debounceTimer = setTimeout(() => {
@@ -9307,7 +9325,12 @@ export default function EditorScreen() {
     [smartChipState],
   );
 
-  const statusLabel = SAVE_STATUS_LABELS[saveStatus] ?? saveStatus;
+  // An untitled workbook that has not been edited is clean but has never
+  // been written anywhere, so "保存済み" would be misleading.
+  const statusLabel =
+    saveStatus === "saved" && !currentHandle?.path
+      ? "新規ブック"
+      : SAVE_STATUS_LABELS[saveStatus] ?? saveStatus;
   const statusClass = `status-bar__status status-bar__status--${saveStatus}`;
   // #94: memoize the stats parse so unrelated re-renders don't pay the cost
   // of re-parsing the full snapshot.
@@ -10772,8 +10795,7 @@ export default function EditorScreen() {
             // The Windows updater terminates the app while it installs, and
             // that path does not go through the close-requested guard, so
             // refuse to start with unsaved edits instead of losing them.
-            if (isWorkbookDirty()) {
-              setEditorOperationError(t("update.blockedUnsaved"));
+            if (isWorkbookDirty() && !window.confirm(t("confirm.update.unsavedProceed"))) {
               return;
             }
             // Capture the target version so progress events can label it.
@@ -10807,9 +10829,10 @@ export default function EditorScreen() {
                 // button stays visible until they restart manually). Edits
                 // made during the download must be saved first: relaunch
                 // bypasses the close-requested guard.
-                if (isWorkbookDirty()) {
-                  setEditorOperationError(t("update.readyUnsaved"));
-                } else if (window.confirm(t("confirm.update.relaunch"))) {
+                const relaunchPrompt = isWorkbookDirty()
+                  ? t("confirm.update.relaunchUnsaved")
+                  : t("confirm.update.relaunch");
+                if (window.confirm(relaunchPrompt)) {
                   await relaunchApp();
                 }
               } catch (e) {

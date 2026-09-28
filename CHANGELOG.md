@@ -4,6 +4,16 @@ All notable changes to Nicel (formerly Coco) are documented in this file. The fo
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-09-28
+
+Patch release. A freshly created or opened workbook no longer starts as "unsaved", and the updater asks instead of refusing when there are unsaved edits. Delivered to v0.8.2 users through the auto-updater.
+
+### Fixed
+
+- **Opened / new workbooks start clean.** `newWorkbook`, `importXlsx` and `importCsv` set `saveStatus: "saved"`; only `markDirty` (a user mutation) makes the workbook dirty. Univer-internal mutations that fire while a workbook loads (`formula-calculation*`, `array-formula`, `set-formula-data`, `*auto-height*`) are ignored by the dirty tracker. Previously every open started as "unsaved", so the `•` marker, the close guard and the v0.8.1 updater guard all fired without any edit.
+- **Updater guard is a confirmation, not a block.** With unsaved edits, "Update" and the post-download "Restart" now ask `confirm.update.unsavedProceed` / `confirm.update.relaunchUnsaved` (continue / cancel) instead of refusing.
+- An untitled, unedited workbook shows "新規ブック" in the status bar instead of "保存済み".
+
 ## [0.8.2] - 2026-09-28
 
 Patch release. Cell formatting from existing Excel files is now rendered, and formatting applied in Nicel is now written back to xlsx. Delivered to v0.8.1 users through the auto-updater.

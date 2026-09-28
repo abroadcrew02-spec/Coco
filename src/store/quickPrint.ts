@@ -74,6 +74,63 @@ interface CellData {
   s?: string;
 }
 
+/** Univer `IStyleData` subset — the shape the xlsx importer emits since
+ *  v0.8.2 and the grid writes when the user formats cells. */
+interface UniverStyle {
+  bl?: number | boolean;
+  it?: number | boolean;
+  cl?: { rgb?: string };
+  bg?: { rgb?: string };
+  ht?: number;
+  vt?: number;
+  bd?: Partial<Record<"t" | "b" | "l" | "r", { s?: number; cl?: { rgb?: string } }>>;
+}
+
+const UNIVER_H_ALIGN: Record<number, string> = { 1: "left", 2: "center", 3: "right", 4: "justify" };
+const UNIVER_V_ALIGN: Record<number, string> = { 1: "top", 2: "middle", 3: "bottom" };
+const UNIVER_BORDER: Record<number, string> = {
+  1: "thin", 2: "hair", 3: "dotted", 4: "dashed", 5: "dashDot", 6: "dashDotDot",
+  7: "double", 8: "medium", 9: "mediumDashed", 10: "mediumDashDot",
+  11: "mediumDashDotDot", 12: "slantDashDot", 13: "thick",
+};
+
+/** Accept both the Univer `IStyleData` shape and the legacy private
+ *  `{font, fill, alignment, borders}` shape (v0.8.1 `.coco` files). */
+function normalizeStyle(raw: unknown): StyleObject | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const legacy = raw as StyleObject;
+  const u = raw as UniverStyle;
+  const isUniver = "bl" in u || "it" in u || "cl" in u || "bg" in u || "ht" in u || "vt" in u || "bd" in u;
+  if (!isUniver) return legacy;
+  const out: StyleObject = { ...legacy };
+  const font: StyleFont = { ...(legacy.font ?? {}) };
+  if (u.bl === 1 || u.bl === true) font.bold = true;
+  if (u.it === 1 || u.it === true) font.italic = true;
+  if (typeof u.cl?.rgb === "string") font.color = u.cl.rgb;
+  if (Object.keys(font).length > 0) out.font = font;
+  if (typeof u.bg?.rgb === "string") out.fill = { color: u.bg.rgb };
+  const align: StyleAlign = { ...(legacy.alignment ?? {}) };
+  if (typeof u.ht === "number" && UNIVER_H_ALIGN[u.ht]) align.horizontal = UNIVER_H_ALIGN[u.ht];
+  if (typeof u.vt === "number" && UNIVER_V_ALIGN[u.vt]) align.vertical = UNIVER_V_ALIGN[u.vt];
+  if (Object.keys(align).length > 0) out.alignment = align;
+  if (u.bd) {
+    const borders: StyleBorders = {};
+    const map: Array<[keyof NonNullable<UniverStyle["bd"]>, keyof StyleBorders]> = [
+      ["t", "top"], ["b", "bottom"], ["l", "left"], ["r", "right"],
+    ];
+    for (const [from, to] of map) {
+      const side = u.bd[from];
+      if (!side) continue;
+      borders[to] = {
+        style: typeof side.s === "number" ? UNIVER_BORDER[side.s] ?? "thin" : "thin",
+        color: typeof side.cl?.rgb === "string" ? side.cl.rgb : undefined,
+      };
+    }
+    if (Object.keys(borders).length > 0) out.borders = borders;
+  }
+  return out;
+}
+
 interface MergeEntry {
   startRow?: number;
   endRow?: number;
@@ -185,7 +242,7 @@ function renderCell(
     return;
   }
   const text = renderCellText(cell);
-  const style = cell.s ? styles?.[cell.s] : undefined;
+  const style = normalizeStyle(cell.s ? styles?.[cell.s] : undefined);
   let styleStr = "";
   let wrapBold = false;
   let wrapItalic = false;

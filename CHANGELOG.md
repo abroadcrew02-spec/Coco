@@ -4,6 +4,24 @@ All notable changes to Nicel (formerly Coco) are documented in this file. The fo
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-09-28
+
+Patch release. Cell formatting from existing Excel files is now rendered, and formatting applied in Nicel is now written back to xlsx. Delivered to v0.8.1 users through the auto-updater.
+
+### Fixed
+
+- **Imported cell styles are emitted in Univer's `IStyleData` shape.** `CellStyle::to_json` used to write a private `{font, fill, alignment, borders}` object that the grid ignored, so every xlsx opened without bold / colors / fills / borders / alignment. It now writes `bl` / `it` / `un` / `st`, `cl.rgb` / `bg.rgb`, `ff` / `fs`, `ht` / `vt` / `tb`, `bd.{t,b,l,r}` and `n.pattern`. `CellStyle::from_json` reads that shape as well as the legacy one, which also means styles applied in Nicel (the grid writes `bl` / `bg` / ...) finally reach the xlsx on save.
+- **Font name, font size, underline, strikethrough and wrap text** are parsed from `styles.xml` and exported through rust_xlsxwriter.
+- **Theme and indexed colors are resolved.** `<color theme="N" tint="t"/>` uses the workbook's `xl/theme/theme1.xml` palette (Excel index order lt1, dk1, lt2, dk2, accent1-6, hlink, folHlink; tint applied in HSL) and `<color indexed="N"/>` uses the default 64-entry palette. Only `rgb` colors were honoured before, so Excel's default palette ("テーマの色") vanished on import.
+- **Number formats render**: `@univerjs/sheets-numfmt` is registered so `s.n.pattern` (dates, percentages, thousands separators, currency) is displayed instead of the raw value.
+- Quick print (HTML) accepts both style shapes.
+
+### Known issues
+
+- Number formats set through Nicel's own dialog are written to the per-cell `_fmt` key (exported correctly) but not to the style's `n.pattern`, so the on-screen rendering updates on the next open.
+- Tint math can differ from Excel by 1/255 per channel.
+- `.coco` workbooks saved by v0.8.1 or earlier keep the legacy style shape; they export correctly but do not render styled until re-opened from xlsx.
+
 ## [0.8.1] - 2026-09-28
 
 Patch release. Fixes how xlsx column widths and row heights are shown and saved. Delivered to v0.8.0 users through the auto-updater.

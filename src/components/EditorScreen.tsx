@@ -18,6 +18,7 @@ import { UniverUIPlugin } from "@univerjs/ui";
 import { UniverDocsPlugin } from "@univerjs/docs";
 import { UniverDocsUIPlugin } from "@univerjs/docs-ui";
 import { UniverSheetsPlugin } from "@univerjs/sheets";
+import { UniverSheetsNumfmtPlugin } from "@univerjs/sheets-numfmt";
 import { UniverSheetsUIPlugin } from "@univerjs/sheets-ui";
 import { UniverSheetsFormulaPlugin } from "@univerjs/sheets-formula";
 import { UniverSheetsFormulaUIPlugin } from "@univerjs/sheets-formula-ui";
@@ -8448,6 +8449,10 @@ export default function EditorScreen() {
       univer.registerPlugin(UniverDocsPlugin, { hasScroll: false });
       univer.registerPlugin(UniverDocsUIPlugin);
       univer.registerPlugin(UniverSheetsPlugin);
+      // Renders `s.n.pattern` (number formats imported from xlsx: dates,
+      // percentages, thousands separators). Without it every formatted
+      // number showed its raw value (a date as 46293).
+      univer.registerPlugin(UniverSheetsNumfmtPlugin);
       univer.registerPlugin(UniverSheetsUIPlugin);
       univer.registerPlugin(UniverSheetsFormulaPlugin);
       univer.registerPlugin(UniverSheetsFormulaUIPlugin);

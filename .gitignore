@@ -29,3 +29,5 @@ coco-updater.key
 coco-updater.key.pub
 *.minisign.key
 .secrets/
+/worklog/
+*updater.key*

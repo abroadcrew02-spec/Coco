@@ -184,6 +184,24 @@ describe("autoSave race prevention", () => {
     expect(s.lastError).toBe("バックアップのローテーションに失敗しました (os error 32)");
   });
 
+  it("snapshot sync and markDirty keep save_failed instead of downgrading it to unsaved", () => {
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.xlsx", sourceType: "xlsx" }),
+      saveStatus: "save_failed",
+      lastError: "locked",
+      currentSnapshotJson: "{}",
+    });
+    useWorkbookStore.getState().updateSnapshot("{\"v\":2}");
+    expect(useWorkbookStore.getState().saveStatus).toBe("save_failed");
+    expect(useWorkbookStore.getState().currentSnapshotJson).toBe("{\"v\":2}");
+    useWorkbookStore.getState().markDirty();
+    expect(useWorkbookStore.getState().saveStatus).toBe("save_failed");
+    // Once the user closes the dialog the ordinary dirty flow resumes.
+    useWorkbookStore.getState().dismissSaveError();
+    useWorkbookStore.getState().updateSnapshot("{\"v\":3}");
+    expect(useWorkbookStore.getState().saveStatus).toBe("unsaved");
+  });
+
   it("waits for pending .coco autosave before manual save writes the same path", async () => {
     const autoSaveResult = deferred<SaveResult>();
     invokeMock.mockImplementation((cmd: string) => {

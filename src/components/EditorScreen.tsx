@@ -621,6 +621,12 @@ const BUSY_LABELS: Partial<Record<string, { label: string; blocking: boolean }>>
  *  renames across Univer versions keep working. */
 function isPassiveMutation(commandId: string): boolean {
   return (
+    // Formula engine: calculation start / notification / result, formula
+    // registration, array formula data (`formula.mutation.*`).
+    commandId.startsWith("formula.") ||
+    // Doc units are only the cell editor / formula bar in Nicel; their
+    // rich-text mutations fire on every selection change.
+    commandId.startsWith("doc.") ||
     commandId.includes("formula-calculation") ||
     commandId.includes("array-formula") ||
     commandId === "sheet.mutation.set-formula-data" ||
@@ -8669,11 +8675,26 @@ export default function EditorScreen() {
     };
   }, []);
 
+  // True once the user has touched the editor (pointer / keyboard / paste /
+  // drop) after the current workbook mounted. Mutations that arrive before
+  // that are load-time work (formula recalculation writing results, plugins
+  // normalising the loaded sheet, live-render patches) and must not mark the
+  // workbook dirty; there is nothing to save yet.
+  const userInteractedRef = useRef(false);
+
   // Sync snapshot to store on data mutations (skip selection/scroll operations).
   // Debounce by 300ms so rapid typing doesn't thrash the store on every keystroke.
   useEffect(() => {
     if (!fUniverRef.current) return;
     const fUniver = fUniverRef.current;
+    userInteractedRef.current = false;
+    const markInteracted = () => {
+      userInteractedRef.current = true;
+    };
+    const interactionEvents = ["pointerdown", "keydown", "paste", "drop"] as const;
+    for (const ev of interactionEvents) {
+      document.addEventListener(ev, markInteracted, true);
+    }
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     let idleCallback: number | null = null;
     let idleFallbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -8751,7 +8772,7 @@ export default function EditorScreen() {
       // recalculation results, auto-fitted row heights) are not user edits.
       // They must not flip a freshly opened workbook to "unsaved", or the
       // dirty marker, the close guard and the updater guard all misfire.
-      if (isPassiveMutation(info.id)) return;
+      if (isPassiveMutation(info.id) || !userInteractedRef.current) return;
       markDirty();
       cancelPendingSnapshotSync();
       debounceTimer = setTimeout(() => {
@@ -8761,6 +8782,9 @@ export default function EditorScreen() {
     });
 
     return () => {
+      for (const ev of interactionEvents) {
+        document.removeEventListener(ev, markInteracted, true);
+      }
       cancelPendingSnapshotSync();
       unregisterSnapshotFlush();
       disposable.dispose();

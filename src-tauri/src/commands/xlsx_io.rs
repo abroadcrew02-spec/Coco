@@ -33,10 +33,17 @@ const MAX_EXPORT_CELLS: usize = 500_000;
 /// per-cell `_richRuns` array because each cell carries its own text — sharing
 /// a "rich-text style" across cells would require splitting style from text,
 /// which is a separate refactor.
-#[derive(Default, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 struct CellStyle {
     bold: bool,
     italic: bool,
+    underline: bool,
+    strike: bool,
+    wrap_text: bool,
+    /// Font size in hundredths of a point (10.5 pt -> 1050) so the struct
+    /// stays `Eq + Hash` for the workbook-level style dedup.
+    font_size_x100: Option<u32>,
+    font_name: Option<String>,
     font_color: Option<String>, // "#RRGGBB"
     fill_color: Option<String>, // "#RRGGBB"
     h_align: Option<String>,    // "left" | "center" | "right" | "fill" | "justify"
@@ -48,7 +55,7 @@ struct CellStyle {
     num_format: Option<String>,
 }
 
-#[derive(Default, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 struct CellBorders {
     top: Option<BorderSide>,
     bottom: Option<BorderSide>,
@@ -62,7 +69,7 @@ impl CellBorders {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct BorderSide {
     style: String,         // "thin" | "medium" | "thick" | "double" | "dotted" | "dashed"
     color: Option<String>, // "#RRGGBB"
@@ -127,6 +134,11 @@ impl CellStyle {
     fn is_empty(&self) -> bool {
         !self.bold
             && !self.italic
+            && !self.underline
+            && !self.strike
+            && !self.wrap_text
+            && self.font_size_x100.is_none()
+            && self.font_name.is_none()
             && self.font_color.is_none()
             && self.fill_color.is_none()
             && self.h_align.is_none()
@@ -135,107 +147,484 @@ impl CellStyle {
             && self.num_format.is_none()
     }
 
+    /// Serialise as a Univer `IStyleData` object, the shape the grid renders
+    /// directly: `bl` / `it` / `un` / `st`, `cl.rgb` / `bg.rgb`, `ff` / `fs`,
+    /// `ht` / `vt` / `tb`, `bd.{t,b,l,r}` and `n.pattern`. Until v0.8.1 this
+    /// emitted a private `{font, fill, alignment, borders}` shape that Univer
+    /// ignored, so every imported workbook rendered without formatting.
     fn to_json(&self) -> Value {
         let mut obj = Map::new();
-        if self.bold || self.italic || self.font_color.is_some() {
-            let mut f = Map::new();
-            if self.bold {
-                f.insert("bold".into(), Value::Bool(true));
-            }
-            if self.italic {
-                f.insert("italic".into(), Value::Bool(true));
-            }
-            if let Some(c) = &self.font_color {
-                f.insert("color".into(), Value::String(c.clone()));
-            }
-            obj.insert("font".into(), Value::Object(f));
+        if self.bold {
+            obj.insert("bl".into(), json!(1));
+        }
+        if self.italic {
+            obj.insert("it".into(), json!(1));
+        }
+        if self.underline {
+            obj.insert("un".into(), json!({ "s": 1 }));
+        }
+        if self.strike {
+            obj.insert("st".into(), json!({ "s": 1 }));
+        }
+        if let Some(c) = &self.font_color {
+            obj.insert("cl".into(), json!({ "rgb": c }));
         }
         if let Some(c) = &self.fill_color {
-            let mut fl = Map::new();
-            fl.insert("color".into(), Value::String(c.clone()));
-            obj.insert("fill".into(), Value::Object(fl));
+            obj.insert("bg".into(), json!({ "rgb": c }));
         }
-        if self.h_align.is_some() || self.v_align.is_some() {
-            let mut a = Map::new();
-            if let Some(h) = &self.h_align {
-                a.insert("horizontal".into(), Value::String(h.clone()));
-            }
-            if let Some(v) = &self.v_align {
-                a.insert("vertical".into(), Value::String(v.clone()));
-            }
-            obj.insert("alignment".into(), Value::Object(a));
+        if let Some(n) = &self.font_name {
+            obj.insert("ff".into(), Value::String(n.clone()));
+        }
+        if let Some(sz) = self.font_size_x100 {
+            obj.insert("fs".into(), json!(f64::from(sz) / 100.0));
+        }
+        if let Some(h) = self.h_align.as_deref().and_then(univer_h_align) {
+            obj.insert("ht".into(), json!(h));
+        }
+        if let Some(v) = self.v_align.as_deref().and_then(univer_v_align) {
+            obj.insert("vt".into(), json!(v));
+        }
+        if self.wrap_text {
+            obj.insert("tb".into(), json!(UNIVER_WRAP_STRATEGY_WRAP));
         }
         if let Some(b) = &self.borders {
-            let mut bobj = Map::new();
+            let mut bd = Map::new();
             for (key, side) in [
-                ("top", &b.top),
-                ("bottom", &b.bottom),
-                ("left", &b.left),
-                ("right", &b.right),
+                ("t", &b.top),
+                ("b", &b.bottom),
+                ("l", &b.left),
+                ("r", &b.right),
             ] {
-                if let Some(s) = side {
-                    let mut sobj = Map::new();
-                    sobj.insert("style".into(), Value::String(s.style.clone()));
-                    if let Some(c) = &s.color {
-                        sobj.insert("color".into(), Value::String(c.clone()));
-                    }
-                    bobj.insert(key.into(), Value::Object(sobj));
+                if let Some(side) = side {
+                    let color = side.color.clone().unwrap_or_else(|| "#000000".to_string());
+                    bd.insert(
+                        key.into(),
+                        json!({ "s": univer_border_style(&side.style), "cl": { "rgb": color } }),
+                    );
                 }
             }
-            obj.insert("borders".into(), Value::Object(bobj));
+            if !bd.is_empty() {
+                obj.insert("bd".into(), Value::Object(bd));
+            }
+        }
+        if let Some(nf) = &self.num_format {
+            obj.insert("n".into(), json!({ "pattern": nf }));
         }
         Value::Object(obj)
     }
 
+    /// Read a style object. Accepts the Univer `IStyleData` shape (written by
+    /// the grid when the user formats cells, and by `to_json`) and the legacy
+    /// private `{font, fill, alignment, borders}` shape still present in
+    /// `.coco` files and recovery snapshots saved by v0.8.1 or earlier.
     fn from_json(v: &Value) -> Option<CellStyle> {
         let obj = v.as_object()?;
         let mut s = CellStyle::default();
-        if let Some(f) = obj.get("font").and_then(|x| x.as_object()) {
-            s.bold = f.get("bold").and_then(|x| x.as_bool()).unwrap_or(false);
-            s.italic = f.get("italic").and_then(|x| x.as_bool()).unwrap_or(false);
-            s.font_color = f
-                .get("color")
-                .and_then(|x| x.as_str())
-                .map(|s| s.to_string());
-        }
-        if let Some(fl) = obj.get("fill").and_then(|x| x.as_object()) {
-            s.fill_color = fl
-                .get("color")
-                .and_then(|x| x.as_str())
-                .map(|s| s.to_string());
-        }
-        if let Some(a) = obj.get("alignment").and_then(|x| x.as_object()) {
-            s.h_align = a
-                .get("horizontal")
-                .and_then(|x| x.as_str())
-                .map(|s| s.to_string());
-            s.v_align = a
-                .get("vertical")
-                .and_then(|x| x.as_str())
-                .map(|s| s.to_string());
-        }
-        if let Some(b) = obj.get("borders").and_then(|x| x.as_object()) {
+
+        // --- Univer IStyleData shape ---
+        let flag = |key: &str| -> bool {
+            match obj.get(key) {
+                Some(Value::Number(n)) => n.as_i64() == Some(1),
+                Some(Value::Bool(b)) => *b,
+                _ => false,
+            }
+        };
+        s.bold = flag("bl");
+        s.italic = flag("it");
+        s.underline = obj.get("un").and_then(|u| u.get("s")).and_then(Value::as_i64) == Some(1);
+        s.strike = obj.get("st").and_then(|u| u.get("s")).and_then(Value::as_i64) == Some(1);
+        s.font_color = obj.get("cl").and_then(color_style_rgb);
+        s.fill_color = obj.get("bg").and_then(color_style_rgb);
+        s.font_name = obj.get("ff").and_then(Value::as_str).map(str::to_string);
+        s.font_size_x100 = obj
+            .get("fs")
+            .and_then(Value::as_f64)
+            .filter(|f| f.is_finite() && *f > 0.0)
+            .map(|f| (f * 100.0).round() as u32);
+        s.h_align = obj
+            .get("ht")
+            .and_then(Value::as_i64)
+            .and_then(h_align_from_univer)
+            .map(str::to_string);
+        s.v_align = obj
+            .get("vt")
+            .and_then(Value::as_i64)
+            .and_then(v_align_from_univer)
+            .map(str::to_string);
+        s.wrap_text = obj.get("tb").and_then(Value::as_i64) == Some(UNIVER_WRAP_STRATEGY_WRAP);
+        if let Some(bd) = obj.get("bd").and_then(|x| x.as_object()) {
             let read_side = |key: &str| -> Option<BorderSide> {
-                let side_obj = b.get(key)?.as_object()?;
-                let style = side_obj.get("style").and_then(|v| v.as_str())?.to_string();
-                let color = side_obj
-                    .get("color")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                Some(BorderSide { style, color })
+                let side = bd.get(key)?.as_object()?;
+                let style = border_style_from_univer(side.get("s").and_then(Value::as_i64)?)?;
+                let color = side.get("cl").and_then(color_style_rgb);
+                Some(BorderSide {
+                    style: style.to_string(),
+                    color,
+                })
             };
             let borders = CellBorders {
-                top: read_side("top"),
-                bottom: read_side("bottom"),
-                left: read_side("left"),
-                right: read_side("right"),
+                top: read_side("t"),
+                bottom: read_side("b"),
+                left: read_side("l"),
+                right: read_side("r"),
             };
             if !borders.is_empty() {
                 s.borders = Some(borders);
             }
         }
+        s.num_format = obj
+            .get("n")
+            .and_then(|n| n.get("pattern"))
+            .and_then(Value::as_str)
+            .filter(|p| !p.is_empty())
+            .map(str::to_string);
+
+        // --- legacy private shape (v0.8.1 and earlier) ---
+        if let Some(f) = obj.get("font").and_then(|x| x.as_object()) {
+            s.bold |= f.get("bold").and_then(|x| x.as_bool()).unwrap_or(false);
+            s.italic |= f.get("italic").and_then(|x| x.as_bool()).unwrap_or(false);
+            if s.font_color.is_none() {
+                s.font_color = f
+                    .get("color")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string());
+            }
+        }
+        if let Some(fl) = obj.get("fill").and_then(|x| x.as_object()) {
+            if s.fill_color.is_none() {
+                s.fill_color = fl
+                    .get("color")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string());
+            }
+        }
+        if let Some(a) = obj.get("alignment").and_then(|x| x.as_object()) {
+            if s.h_align.is_none() {
+                s.h_align = a
+                    .get("horizontal")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string());
+            }
+            if s.v_align.is_none() {
+                s.v_align = a
+                    .get("vertical")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string());
+            }
+        }
+        if s.borders.is_none() {
+            if let Some(b) = obj.get("borders").and_then(|x| x.as_object()) {
+                let read_side = |key: &str| -> Option<BorderSide> {
+                    let side_obj = b.get(key)?.as_object()?;
+                    let style = side_obj.get("style").and_then(|v| v.as_str())?.to_string();
+                    let color = side_obj
+                        .get("color")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    Some(BorderSide { style, color })
+                };
+                let borders = CellBorders {
+                    top: read_side("top"),
+                    bottom: read_side("bottom"),
+                    left: read_side("left"),
+                    right: read_side("right"),
+                };
+                if !borders.is_empty() {
+                    s.borders = Some(borders);
+                }
+            }
+        }
         Some(s)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Univer IStyleData enum values (@univerjs/core `HorizontalAlign`,
+// `VerticalAlign`, `BorderStyleTypes`, `WrapStrategy`).
+// ---------------------------------------------------------------------------
+
+const UNIVER_WRAP_STRATEGY_WRAP: i64 = 3;
+
+fn univer_h_align(h: &str) -> Option<i64> {
+    match h {
+        "left" => Some(1),
+        "center" | "centerContinuous" => Some(2),
+        "right" => Some(3),
+        "justify" => Some(4),
+        "distributed" => Some(6),
+        _ => None,
+    }
+}
+
+fn h_align_from_univer(v: i64) -> Option<&'static str> {
+    match v {
+        1 => Some("left"),
+        2 => Some("center"),
+        3 => Some("right"),
+        4 => Some("justify"),
+        6 => Some("distributed"),
+        _ => None,
+    }
+}
+
+fn univer_v_align(v: &str) -> Option<i64> {
+    match v {
+        "top" => Some(1),
+        "middle" | "center" => Some(2),
+        "bottom" => Some(3),
+        _ => None,
+    }
+}
+
+fn v_align_from_univer(v: i64) -> Option<&'static str> {
+    match v {
+        1 => Some("top"),
+        2 => Some("middle"),
+        3 => Some("bottom"),
+        _ => None,
+    }
+}
+
+/// OOXML `ST_BorderStyle` name -> Univer `BorderStyleTypes`.
+fn univer_border_style(s: &str) -> i64 {
+    match s {
+        "hair" => 2,
+        "dotted" => 3,
+        "dashed" => 4,
+        "dashDot" => 5,
+        "dashDotDot" => 6,
+        "double" => 7,
+        "medium" => 8,
+        "mediumDashed" => 9,
+        "mediumDashDot" => 10,
+        "mediumDashDotDot" => 11,
+        "slantDashDot" => 12,
+        "thick" => 13,
+        _ => 1, // thin
+    }
+}
+
+fn border_style_from_univer(v: i64) -> Option<&'static str> {
+    match v {
+        1 => Some("thin"),
+        2 => Some("hair"),
+        3 => Some("dotted"),
+        4 => Some("dashed"),
+        5 => Some("dashDot"),
+        6 => Some("dashDotDot"),
+        7 => Some("double"),
+        8 => Some("medium"),
+        9 => Some("mediumDashed"),
+        10 => Some("mediumDashDot"),
+        11 => Some("mediumDashDotDot"),
+        12 => Some("slantDashDot"),
+        13 => Some("thick"),
+        _ => None,
+    }
+}
+
+/// `{ rgb: "#RRGGBB" }` / `{ rgb: "rgb(r, g, b)" }` -> "#RRGGBB". Theme
+/// references (`{ th: n }`) have no workbook palette on this side and are
+/// ignored.
+fn color_style_rgb(v: &Value) -> Option<String> {
+    let rgb = v.get("rgb")?.as_str()?.trim();
+    if let Some(hex) = rgb.strip_prefix('#') {
+        return normalize_argb_hex(hex);
+    }
+    let inner = rgb
+        .strip_prefix("rgba(")
+        .or_else(|| rgb.strip_prefix("rgb("))?
+        .trim_end_matches(')');
+    let parts: Vec<u8> = inner
+        .split(',')
+        .take(3)
+        .filter_map(|p| p.trim().parse::<f64>().ok())
+        .map(|f| f.round().clamp(0.0, 255.0) as u8)
+        .collect();
+    if parts.len() == 3 {
+        Some(format!("#{:02X}{:02X}{:02X}", parts[0], parts[1], parts[2]))
+    } else {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Workbook colour resolution: rgb / theme (+tint) / indexed.
+// ---------------------------------------------------------------------------
+
+/// Colours of the workbook theme (`xl/theme/theme1.xml` `<a:clrScheme>`),
+/// indexed the way `<color theme="N"/>` refers to them. Excel's theme index
+/// order differs from the element order in the file: 0 = lt1 (window),
+/// 1 = dk1 (window text), 2 = lt2, 3 = dk2, 4..=9 = accent1..6, 10 = hlink,
+/// 11 = folHlink.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ThemePalette {
+    colors: Vec<Option<String>>,
+}
+
+impl ThemePalette {
+    fn theme_rgb(&self, idx: usize) -> Option<&str> {
+        self.colors.get(idx).and_then(|c| c.as_deref())
+    }
+}
+
+const THEME_INDEX_ORDER: [&str; 12] = [
+    "lt1", "dk1", "lt2", "dk2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6",
+    "hlink", "folHlink",
+];
+
+pub(crate) fn parse_theme_palette(theme_xml: &str) -> ThemePalette {
+    let mut colors: Vec<Option<String>> = vec![None; THEME_INDEX_ORDER.len()];
+    let Some(scheme) = extract_block(theme_xml, "<a:clrScheme", "</a:clrScheme>") else {
+        return ThemePalette { colors };
+    };
+    for (i, name) in THEME_INDEX_ORDER.iter().enumerate() {
+        let open = format!("<a:{name}>");
+        let close = format!("</a:{name}>");
+        let Some(start) = scheme.find(&open) else {
+            continue;
+        };
+        let body_start = start + open.len();
+        let Some(len) = scheme[body_start..].find(&close) else {
+            continue;
+        };
+        let body = &scheme[body_start..body_start + len];
+        let raw = if let Some(tag) = find_tag(body, "<a:srgbClr") {
+            parse_attr(&tag, "val")
+        } else if let Some(tag) = find_tag(body, "<a:sysClr") {
+            parse_attr(&tag, "lastClr")
+        } else {
+            None
+        };
+        colors[i] = raw.and_then(|v| normalize_argb_hex(&v));
+    }
+    ThemePalette { colors }
+}
+
+/// Excel's default indexed colour palette (`<color indexed="N"/>`, N < 64).
+/// 64 / 65 are the system foreground / background and resolve to "automatic".
+const INDEXED_COLORS: [&str; 64] = [
+    "000000", "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF", "000000",
+    "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF", "800000", "008000",
+    "000080", "808000", "800080", "008080", "C0C0C0", "808080", "9999FF", "993366", "FFFFCC",
+    "CCFFFF", "660066", "FF8080", "0066CC", "CCCCFF", "000080", "FF00FF", "FFFF00", "00FFFF",
+    "800080", "800000", "008080", "0000FF", "00CCFF", "CCFFFF", "CCFFCC", "FFFF99", "99CCFF",
+    "FF99CC", "CC99FF", "FFCC99", "3366FF", "33CCCC", "99CC00", "FFCC00", "FF9900", "FF6600",
+    "666699", "969696", "003366", "339966", "003300", "333300", "993300", "993366", "333399",
+    "333333",
+];
+
+/// Resolve a `<color>` / `<fgColor>` / `<bgColor>` element to "#RRGGBB":
+/// `rgb="AARRGGBB"`, `theme="N" [tint="t"]` (tint applied in HSL space per
+/// ECMA-376 §18.8.19) or `indexed="N"`. Returns None for "automatic" and for
+/// anything the workbook does not define.
+fn resolve_style_color(tag: &str, palette: &ThemePalette) -> Option<String> {
+    if let Some(rgb) = parse_attr(tag, "rgb") {
+        return normalize_argb_hex(&rgb);
+    }
+    if let Some(theme) = parse_attr(tag, "theme").and_then(|t| t.parse::<usize>().ok()) {
+        let base = palette.theme_rgb(theme)?.to_string();
+        let tint = parse_attr(tag, "tint")
+            .and_then(|t| t.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        return Some(if tint.abs() > 1e-9 {
+            apply_tint(&base, tint)
+        } else {
+            base
+        });
+    }
+    if let Some(idx) = parse_attr(tag, "indexed").and_then(|t| t.parse::<usize>().ok()) {
+        return INDEXED_COLORS.get(idx).map(|h| format!("#{h}"));
+    }
+    None
+}
+
+/// Apply an OOXML tint (-1.0 ..= 1.0) to "#RRGGBB": lighten towards white for
+/// positive values, darken towards black for negative ones, in HSL space.
+fn apply_tint(rgb: &str, tint: f64) -> String {
+    let hex = rgb.trim_start_matches('#');
+    let parsed = if hex.len() == 6 {
+        (
+            u8::from_str_radix(&hex[0..2], 16),
+            u8::from_str_radix(&hex[2..4], 16),
+            u8::from_str_radix(&hex[4..6], 16),
+        )
+    } else {
+        return rgb.to_string();
+    };
+    let (Ok(r), Ok(g), Ok(b)) = parsed else {
+        return rgb.to_string();
+    };
+    let (h, s, l) = rgb_to_hsl(r, g, b);
+    let tint = tint.clamp(-1.0, 1.0);
+    let l2 = if tint < 0.0 {
+        l * (1.0 + tint)
+    } else {
+        l * (1.0 - tint) + tint
+    };
+    let (r2, g2, b2) = hsl_to_rgb(h, s, l2.clamp(0.0, 1.0));
+    format!("#{r2:02X}{g2:02X}{b2:02X}")
+}
+
+fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f64, f64, f64) {
+    let (r, g, b) = (
+        f64::from(r) / 255.0,
+        f64::from(g) / 255.0,
+        f64::from(b) / 255.0,
+    );
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let l = (max + min) / 2.0;
+    if (max - min).abs() < 1e-12 {
+        return (0.0, 0.0, l);
+    }
+    let d = max - min;
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
+    let h = if (max - r).abs() < 1e-12 {
+        ((g - b) / d + if g < b { 6.0 } else { 0.0 }) / 6.0
+    } else if (max - g).abs() < 1e-12 {
+        ((b - r) / d + 2.0) / 6.0
+    } else {
+        ((r - g) / d + 4.0) / 6.0
+    };
+    (h, s, l)
+}
+
+fn hsl_to_rgb(h: f64, s: f64, l: f64) -> (u8, u8, u8) {
+    fn hue(p: f64, q: f64, mut t: f64) -> f64 {
+        if t < 0.0 {
+            t += 1.0;
+        }
+        if t > 1.0 {
+            t -= 1.0;
+        }
+        if t < 1.0 / 6.0 {
+            p + (q - p) * 6.0 * t
+        } else if t < 0.5 {
+            q
+        } else if t < 2.0 / 3.0 {
+            p + (q - p) * (2.0 / 3.0 - t) * 6.0
+        } else {
+            p
+        }
+    }
+    let (r, g, b) = if s.abs() < 1e-12 {
+        (l, l, l)
+    } else {
+        let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+        let p = 2.0 * l - q;
+        (
+            hue(p, q, h + 1.0 / 3.0),
+            hue(p, q, h),
+            hue(p, q, h - 1.0 / 3.0),
+        )
+    };
+    let to8 = |v: f64| (v * 255.0).round().clamp(0.0, 255.0) as u8;
+    (to8(r), to8(g), to8(b))
 }
 
 /// Workbook-wide raw style indexes parsed from `xl/styles.xml`.
@@ -258,12 +647,40 @@ fn builtin_num_format(id: u32) -> Option<&'static str> {
         0 => None, // "General" — no fmt
         1 => Some("0"),
         2 => Some("0.00"),
+        3 => Some("#,##0"),
+        4 => Some("#,##0.00"),
         9 => Some("0%"),
         10 => Some("0.00%"),
+        11 => Some("0.00E+00"),
+        12 => Some("# ?/?"),
+        13 => Some("# ??/??"),
         14 => Some("yyyy-mm-dd"), // normalize locale-dependent dates
+        15 => Some("d-mmm-yy"),
+        16 => Some("d-mmm"),
+        17 => Some("mmm-yy"),
+        18 => Some("h:mm AM/PM"),
+        19 => Some("h:mm:ss AM/PM"),
+        20 => Some("h:mm"),
+        21 => Some("h:mm:ss"),
         22 => Some("yyyy-mm-dd hh:mm:ss"),
-        38 => Some("#,##0;(#,##0)"),
+        // 27-36 / 50-58 are the ja-JP locale built-ins (Excel 0411). The
+        // Japanese-era variants (ge.m.d / ggge年) map to their Gregorian
+        // equivalents because the renderer has no era calendar.
+        27 | 36 | 50 | 57 => Some("yyyy/m/d"),
+        28 | 29 | 31 | 51 | 54 | 58 => Some("yyyy\"年\"m\"月\"d\"日\""),
+        30 => Some("m/d/yy"),
+        32 => Some("h\"時\"mm\"分\""),
+        33 => Some("h\"時\"mm\"分\"ss\"秒\""),
+        34 | 52 | 55 => Some("yyyy\"年\"m\"月\""),
+        35 | 53 | 56 => Some("m\"月\"d\"日\""),
+        37 => Some("#,##0;(#,##0)"),
+        38 => Some("#,##0;[Red](#,##0)"),
         39 => Some("#,##0.00;(#,##0.00)"),
+        40 => Some("#,##0.00;[Red](#,##0.00)"),
+        45 => Some("mm:ss"),
+        46 => Some("[h]:mm:ss"),
+        47 => Some("mmss.0"),
+        48 => Some("##0.0E+0"),
         49 => Some("@"), // text
         _ => None,
     }
@@ -281,7 +698,15 @@ fn parse_xlsx_styles<R: Read + Seek>(
             .read_to_string(&mut styles_xml)
             .map_err(|e| e.to_string())?;
     }
-    let (fonts, fills, borders, cell_xfs_raw, custom_num_fmts) = parse_styles_xml(&styles_xml);
+    // Theme palette (`xl/theme/theme1.xml`) resolves `<color theme="N"/>`
+    // references, which is how Excel's default palette is stored.
+    let mut theme_xml = String::new();
+    if let Ok(mut entry) = archive.by_name("xl/theme/theme1.xml") {
+        let _ = entry.read_to_string(&mut theme_xml);
+    }
+    let palette = parse_theme_palette(&theme_xml);
+    let (fonts, fills, borders, cell_xfs_raw, custom_num_fmts) =
+        parse_styles_xml(&styles_xml, &palette);
 
     // 2. resolve each cellXf to a normalized CellStyle (which now carries its
     //    own num_format per #40 — kept parallel cell_num_formats for callers
@@ -512,6 +937,7 @@ fn parse_sheet_rich_text(xml: &str, shared: &[Option<Vec<RichRun>>]) -> SheetRic
 /// `numFmtId -> formatCode` for `<numFmt>` entries (typically id >= 164).
 fn parse_styles_xml(
     xml: &str,
+    palette: &ThemePalette,
 ) -> (
     Vec<RawFont>,
     Vec<RawFill>,
@@ -543,9 +969,20 @@ fn parse_styles_xml(
             // <b/> or <b val="1"/> means bold; absence means not bold.
             f.bold = has_self_or_open_tag(&font_el, "<b");
             f.italic = has_self_or_open_tag(&font_el, "<i");
-            // <color rgb="FF000000"/> or <color theme=".."/> — we only honor rgb.
+            f.underline = has_self_or_open_tag(&font_el, "<u");
+            f.strike = has_self_or_open_tag(&font_el, "<strike");
+            f.size = find_tag(&font_el, "<sz")
+                .and_then(|t| parse_attr(&t, "val"))
+                .and_then(|v| v.parse::<f64>().ok())
+                .filter(|v| v.is_finite() && *v > 0.0);
+            f.name = find_tag(&font_el, "<name")
+                .and_then(|t| parse_attr(&t, "val"))
+                .map(|v| decode_xml_entities(&v))
+                .filter(|v| !v.is_empty());
+            // <color rgb="FF000000"/>, <color theme="1" tint="-0.25"/> or
+            // <color indexed="64"/> — all three resolve through the palette.
             if let Some(color_el) = find_tag(&font_el, "<color") {
-                f.color = parse_attr(&color_el, "rgb").map(normalize_argb);
+                f.color = resolve_style_color(&color_el, palette);
             }
             fonts.push(f);
         }
@@ -560,7 +997,7 @@ fn parse_styles_xml(
                 if pattern == "solid" {
                     // Excel quirk: in "solid" fills the color is in fgColor.
                     if let Some(fg) = find_tag(&fill_el, "<fgColor") {
-                        f.color = parse_attr(&fg, "rgb").map(normalize_argb);
+                        f.color = resolve_style_color(&fg, palette);
                     }
                 }
             }
@@ -572,10 +1009,10 @@ fn parse_styles_xml(
     if let Some(borders_block) = extract_block(xml, "<borders", "</borders>") {
         for border_el in extract_elements(&borders_block, "<border", "</border>") {
             let mut b = RawBorder::default();
-            b.top = parse_border_side(&border_el, "<top");
-            b.bottom = parse_border_side(&border_el, "<bottom");
-            b.left = parse_border_side(&border_el, "<left");
-            b.right = parse_border_side(&border_el, "<right");
+            b.top = parse_border_side(&border_el, "<top", palette);
+            b.bottom = parse_border_side(&border_el, "<bottom", palette);
+            b.left = parse_border_side(&border_el, "<left", palette);
+            b.right = parse_border_side(&border_el, "<right", palette);
             borders.push(b);
         }
     }
@@ -596,6 +1033,7 @@ fn parse_styles_xml(
             if let Some(align) = find_tag(&xf_el, "<alignment") {
                 x.h_align = parse_attr(&align, "horizontal");
                 x.v_align = parse_attr(&align, "vertical");
+                x.wrap_text = parse_attr(&align, "wrapText").as_deref() == Some("1");
             }
             xfs.push(x);
         }
@@ -617,6 +1055,7 @@ fn parse_styles_xml(
                 if let Some(align) = find_tag(&xf_el, "<alignment") {
                     x.h_align = parse_attr(&align, "horizontal");
                     x.v_align = parse_attr(&align, "vertical");
+                    x.wrap_text = parse_attr(&align, "wrapText").as_deref() == Some("1");
                 }
                 xfs.push(x);
             }
@@ -678,7 +1117,11 @@ fn decode_xml_entities(s: &str) -> String {
 /// Parse a `<top style="thin"><color rgb="FF000000"/></top>` (or similar side
 /// tag) into a BorderSide. Returns None if the tag is absent, the `style`
 /// attribute is missing/empty, or the style is "none".
-fn parse_border_side(border_xml: &str, side_open: &str) -> Option<BorderSide> {
+fn parse_border_side(
+    border_xml: &str,
+    side_open: &str,
+    palette: &ThemePalette,
+) -> Option<BorderSide> {
     let tag_open = find_tag(border_xml, side_open)?;
     let style = parse_attr(&tag_open, "style")?;
     if style.is_empty() || style == "none" {
@@ -688,7 +1131,7 @@ fn parse_border_side(border_xml: &str, side_open: &str) -> Option<BorderSide> {
     // `<color .../>`. Extract the full element body so we can look for color.
     let elements = extract_elements(border_xml, side_open, &format!("</{}>", &side_open[1..]));
     let body = elements.into_iter().next().unwrap_or(tag_open);
-    let color = find_tag(&body, "<color").and_then(|c| parse_attr(&c, "rgb").map(normalize_argb));
+    let color = find_tag(&body, "<color").and_then(|c| resolve_style_color(&c, palette));
     Some(BorderSide { style, color })
 }
 
@@ -696,6 +1139,10 @@ fn parse_border_side(border_xml: &str, side_open: &str) -> Option<BorderSide> {
 struct RawFont {
     bold: bool,
     italic: bool,
+    underline: bool,
+    strike: bool,
+    size: Option<f64>,     // points (`<sz val="10.5"/>`)
+    name: Option<String>,  // `<name val="..."/>`
     color: Option<String>, // "#RRGGBB"
 }
 
@@ -731,6 +1178,7 @@ struct RawXf {
     apply_alignment: bool,
     h_align: Option<String>,
     v_align: Option<String>,
+    wrap_text: bool,
 }
 
 /// Resolve a cellXf's `numFmtId` into a format string. Built-in ids (0..163)
@@ -762,6 +1210,10 @@ fn resolve_xf(
         if let Some(f) = fonts.get(idx) {
             s.bold = f.bold;
             s.italic = f.italic;
+            s.underline = f.underline;
+            s.strike = f.strike;
+            s.font_size_x100 = f.size.map(|v| (v * 100.0).round() as u32);
+            s.font_name = f.name.clone();
             s.font_color = f.color.clone();
         }
     }
@@ -786,6 +1238,7 @@ fn resolve_xf(
             }
         }
     }
+    s.wrap_text = xf.wrap_text;
     if xf.apply_alignment || xf.h_align.is_some() || xf.v_align.is_some() {
         s.h_align = xf.h_align.clone();
         // Normalize OOXML's "center" → keep as-is; "middle" only exists in some writers.
@@ -1277,6 +1730,21 @@ fn build_format(style: &CellStyle, num_format: Option<&str>) -> Format {
     }
     if style.italic {
         fmt = fmt.set_italic();
+    }
+    if style.underline {
+        fmt = fmt.set_underline(rust_xlsxwriter::FormatUnderline::Single);
+    }
+    if style.strike {
+        fmt = fmt.set_font_strikethrough();
+    }
+    if let Some(sz) = style.font_size_x100 {
+        fmt = fmt.set_font_size(f64::from(sz) / 100.0);
+    }
+    if let Some(name) = style.font_name.as_deref() {
+        fmt = fmt.set_font_name(name);
+    }
+    if style.wrap_text {
+        fmt = fmt.set_text_wrap();
     }
     if let Some(c) = style.font_color.as_deref().and_then(parse_color) {
         fmt = fmt.set_font_color(c);
@@ -11137,5 +11605,144 @@ mod external_ref_tests {
             cached_formula_result(&json!({ "f": "=[1]S!A1", "v": null })),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod style_shape_tests {
+    use super::{
+        apply_tint, parse_styles_xml, parse_theme_palette, resolve_style_color, resolve_xf,
+        CellStyle, ThemePalette,
+    };
+    use serde_json::json;
+
+    const THEME: &str = r#"<a:theme xmlns:a="x"><a:themeElements><a:clrScheme name="Office"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="44546A"/></a:dk2><a:lt2><a:srgbClr val="E7E6E6"/></a:lt2><a:accent1><a:srgbClr val="4472C4"/></a:accent1><a:accent2><a:srgbClr val="ED7D31"/></a:accent2><a:accent3><a:srgbClr val="A5A5A5"/></a:accent3><a:accent4><a:srgbClr val="FFC000"/></a:accent4><a:accent5><a:srgbClr val="5B9BD5"/></a:accent5><a:accent6><a:srgbClr val="70AD47"/></a:accent6><a:hlink><a:srgbClr val="0563C1"/></a:hlink><a:folHlink><a:srgbClr val="954F72"/></a:folHlink></a:clrScheme></a:themeElements></a:theme>"#;
+
+    #[test]
+    fn theme_palette_uses_excel_index_order() {
+        let p = parse_theme_palette(THEME);
+        assert_eq!(p.theme_rgb(0), Some("#FFFFFF")); // lt1 (window)
+        assert_eq!(p.theme_rgb(1), Some("#000000")); // dk1 (window text)
+        assert_eq!(p.theme_rgb(3), Some("#44546A")); // dk2
+        assert_eq!(p.theme_rgb(4), Some("#4472C4")); // accent1
+        assert_eq!(p.theme_rgb(9), Some("#70AD47")); // accent6
+        assert_eq!(p.theme_rgb(11), Some("#954F72"));
+        assert_eq!(parse_theme_palette("").theme_rgb(4), None);
+    }
+
+    #[test]
+    fn color_element_resolution() {
+        let p = parse_theme_palette(THEME);
+        assert_eq!(resolve_style_color(r#"<color rgb="FF9C0006"/>"#, &p).as_deref(), Some("#9C0006"));
+        assert_eq!(resolve_style_color(r#"<color theme="1"/>"#, &p).as_deref(), Some("#000000"));
+        assert_eq!(resolve_style_color(r#"<fgColor theme="4"/>"#, &p).as_deref(), Some("#4472C4"));
+        // Excel "accent 1, lighter 40%" (Excel itself writes 8EAADB; the HSL
+        // round trip lands within 1/255 per channel).
+        assert_eq!(
+            resolve_style_color(r#"<fgColor theme="4" tint="0.39997558519241921"/>"#, &p).as_deref(),
+            Some("#8FAADC")
+        );
+        // Excel "white, darker 15%"
+        assert_eq!(
+            resolve_style_color(r#"<fgColor theme="0" tint="-0.1499984740745262"/>"#, &p).as_deref(),
+            Some("#D9D9D9")
+        );
+        assert_eq!(resolve_style_color(r#"<color indexed="10"/>"#, &p).as_deref(), Some("#FF0000"));
+        assert_eq!(resolve_style_color(r#"<color indexed="64"/>"#, &p), None); // automatic
+        assert_eq!(resolve_style_color(r#"<color theme="4"/>"#, &ThemePalette::default()), None);
+        assert_eq!(resolve_style_color(r#"<color auto="1"/>"#, &p), None);
+    }
+
+    #[test]
+    fn tint_lightens_and_darkens() {
+        assert_eq!(apply_tint("#000000", 0.5), "#808080");
+        assert_eq!(apply_tint("#FFFFFF", -0.5), "#808080");
+        assert_eq!(apply_tint("#4472C4", 0.0), "#4472C4");
+    }
+
+    #[test]
+    fn styles_xml_font_fill_border_details() {
+        let p = parse_theme_palette(THEME);
+        let xml = r#"<styleSheet><fonts count="2"><font><sz val="11"/><color theme="1"/><name val="Meiryo"/></font><font><b/><u/><strike/><sz val="14"/><color rgb="FFFF0000"/><name val="Meiryo UI"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor theme="4" tint="0.39997558519241921"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/></border><border><left style="thin"><color theme="1"/></left><right style="medium"><color rgb="FF0000FF"/></right><top/><bottom/></border></borders><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf></cellXfs></styleSheet>"#;
+        let (fonts, fills, borders, xfs, custom) = parse_styles_xml(xml, &p);
+        assert_eq!(fonts.len(), 2);
+        assert_eq!(fonts[0].name.as_deref(), Some("Meiryo"));
+        assert_eq!(fonts[0].size, Some(11.0));
+        assert_eq!(fonts[0].color.as_deref(), Some("#000000"));
+        assert!(fonts[1].bold && fonts[1].underline && fonts[1].strike);
+        assert_eq!(fills[2].color.as_deref(), Some("#8FAADC"));
+        assert_eq!(borders[1].left.as_ref().unwrap().color.as_deref(), Some("#000000"));
+        assert_eq!(borders[1].right.as_ref().unwrap().color.as_deref(), Some("#0000FF"));
+
+        let style = resolve_xf(&xfs[1], &fonts, &fills, &borders, &custom);
+        assert!(style.wrap_text);
+        assert_eq!(style.font_size_x100, Some(1400));
+        let j = style.to_json();
+        assert_eq!(j["bl"], 1);
+        assert_eq!(j["un"]["s"], 1);
+        assert_eq!(j["st"]["s"], 1);
+        assert_eq!(j["fs"], 14.0);
+        assert_eq!(j["ff"], "Meiryo UI");
+        assert_eq!(j["cl"]["rgb"], "#FF0000");
+        assert_eq!(j["bg"]["rgb"], "#8FAADC");
+        assert_eq!(j["ht"], 2);
+        assert_eq!(j["vt"], 2);
+        assert_eq!(j["tb"], 3);
+        assert_eq!(j["bd"]["l"]["s"], 1);
+        assert_eq!(j["bd"]["r"]["s"], 8);
+        assert_eq!(j["bd"]["r"]["cl"]["rgb"], "#0000FF");
+        assert!(j.get("n").is_none());
+
+        // Round trip through from_json keeps every field.
+        let back = CellStyle::from_json(&j).unwrap();
+        assert_eq!(back, style);
+    }
+
+    #[test]
+    fn from_json_reads_univer_and_legacy_shapes() {
+        // What the grid writes when the user formats a cell.
+        let univer = json!({
+            "bl": 1, "it": 0, "cl": { "rgb": "rgb(255, 0, 0)" }, "bg": { "rgb": "#ffff00" },
+            "ht": 3, "vt": 1, "tb": 3, "ff": "Arial", "fs": 10.5,
+            "bd": { "b": { "s": 13, "cl": { "rgb": "#000000" } } }, "n": { "pattern": "0.0%" }
+        });
+        let s = CellStyle::from_json(&univer).unwrap();
+        assert!(s.bold && !s.italic && s.wrap_text);
+        assert_eq!(s.font_color.as_deref(), Some("#FF0000"));
+        assert_eq!(s.fill_color.as_deref(), Some("#FFFF00"));
+        assert_eq!(s.h_align.as_deref(), Some("right"));
+        assert_eq!(s.v_align.as_deref(), Some("top"));
+        assert_eq!(s.font_name.as_deref(), Some("Arial"));
+        assert_eq!(s.font_size_x100, Some(1050));
+        assert_eq!(s.borders.as_ref().unwrap().bottom.as_ref().unwrap().style, "thick");
+        assert_eq!(s.num_format.as_deref(), Some("0.0%"));
+
+        // What v0.8.1 and earlier wrote into .coco files.
+        let legacy = json!({
+            "font": { "bold": true, "color": "#00FF00" }, "fill": { "color": "#123456" },
+            "alignment": { "horizontal": "center", "vertical": "middle" },
+            "borders": { "top": { "style": "double", "color": "#111111" } }
+        });
+        let l = CellStyle::from_json(&legacy).unwrap();
+        assert!(l.bold);
+        assert_eq!(l.font_color.as_deref(), Some("#00FF00"));
+        assert_eq!(l.fill_color.as_deref(), Some("#123456"));
+        assert_eq!(l.h_align.as_deref(), Some("center"));
+        assert_eq!(l.v_align.as_deref(), Some("middle"));
+        assert_eq!(l.borders.as_ref().unwrap().top.as_ref().unwrap().style, "double");
+    }
+
+    #[test]
+    fn builtin_number_formats_cover_common_ids() {
+        use super::builtin_num_format;
+        assert_eq!(builtin_num_format(0), None);
+        assert_eq!(builtin_num_format(3), Some("#,##0"));
+        assert_eq!(builtin_num_format(4), Some("#,##0.00"));
+        assert_eq!(builtin_num_format(10), Some("0.00%"));
+        assert_eq!(builtin_num_format(20), Some("h:mm"));
+        assert_eq!(builtin_num_format(31), Some("yyyy\"年\"m\"月\"d\"日\""));
+        assert_eq!(builtin_num_format(46), Some("[h]:mm:ss"));
+        assert_eq!(builtin_num_format(49), Some("@"));
+        assert_eq!(builtin_num_format(163), None);
     }
 }

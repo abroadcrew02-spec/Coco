@@ -128,7 +128,7 @@ fn bold_roundtrip() {
     // Styles map should mark this id as bold.
     let style_obj = &snapshot["styles"][s_id];
     assert_eq!(
-        style_obj["font"]["bold"], true,
+        style_obj["bl"], 1,
         "style {} should be bold, got {}",
         s_id, style_obj
     );
@@ -178,7 +178,7 @@ fn background_color_roundtrip() {
         .expect("A1 should have a style id");
 
     let style_obj = &snapshot["styles"][s_id];
-    let color = style_obj["fill"]["color"].as_str().unwrap_or("");
+    let color = style_obj["bg"]["rgb"].as_str().unwrap_or("");
     assert_eq!(
         color.to_ascii_uppercase(),
         "#FFFF00",
@@ -223,7 +223,7 @@ fn horizontal_alignment_roundtrip() {
 
     let style_obj = &snapshot["styles"][s_id];
     assert_eq!(
-        style_obj["alignment"]["horizontal"], "center",
+        style_obj["ht"], 2,
         "horizontal alignment should be 'center', got {}",
         style_obj
     );

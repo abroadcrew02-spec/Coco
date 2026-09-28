@@ -67,17 +67,17 @@ fn thin_black_border_all_four_sides_roundtrip() {
         .and_then(|v| v.as_str())
         .expect("B2 should have a style id");
 
-    let borders = &snapshot["styles"][s_id]["borders"];
+    let borders = &snapshot["styles"][s_id]["bd"];
     assert!(
         borders.is_object(),
         "borders should be present, got: {snapshot}"
     );
-    for side in ["top", "bottom", "left", "right"] {
+    for side in ["t", "b", "l", "r"] {
         assert_eq!(
-            borders[side]["style"], "thin",
+            borders[side]["s"], 1,
             "side {side} should be thin, got {borders}"
         );
-        let color = borders[side]["color"]
+        let color = borders[side]["cl"]["rgb"]
             .as_str()
             .unwrap_or("")
             .to_ascii_uppercase();
@@ -129,19 +129,19 @@ fn only_top_border_one_sided() {
         .and_then(|v| v.as_str())
         .expect("B2 should have a style id");
 
-    let borders = &snapshot["styles"][s_id]["borders"];
+    let borders = &snapshot["styles"][s_id]["bd"];
     assert!(borders.is_object(), "borders should be present");
-    assert_eq!(borders["top"]["style"], "thin");
+    assert_eq!(borders["t"]["s"], 1);
     assert!(
-        borders.get("bottom").is_none(),
+        borders.get("b").is_none(),
         "bottom side should be absent, got {borders}"
     );
     assert!(
-        borders.get("left").is_none(),
+        borders.get("l").is_none(),
         "left side should be absent, got {borders}"
     );
     assert!(
-        borders.get("right").is_none(),
+        borders.get("r").is_none(),
         "right side should be absent, got {borders}"
     );
 
@@ -184,7 +184,7 @@ fn cells_without_borders_have_no_borders_field() {
         .expect("styles should be object");
     for (sid, sval) in styles_map.iter() {
         assert!(
-            sval.get("borders").is_none(),
+            sval.get("bd").is_none(),
             "style {sid} should NOT have a borders field, got {sval}"
         );
     }
@@ -215,11 +215,11 @@ fn mixed_border_styles_per_side() {
         .and_then(|v| v.as_str())
         .expect("B2 should have a style id");
 
-    let borders = &snapshot["styles"][s_id]["borders"];
-    assert_eq!(borders["top"]["style"], "thin", "got {borders}");
-    assert_eq!(borders["bottom"]["style"], "thick", "got {borders}");
-    assert_eq!(borders["left"]["style"], "medium", "got {borders}");
-    assert_eq!(borders["right"]["style"], "dashed", "got {borders}");
+    let borders = &snapshot["styles"][s_id]["bd"];
+    assert_eq!(borders["t"]["s"], 1, "got {borders}");
+    assert_eq!(borders["b"]["s"], 13, "got {borders}");
+    assert_eq!(borders["l"]["s"], 8, "got {borders}");
+    assert_eq!(borders["r"]["s"], 4, "got {borders}");
 
     let export_res = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
     assert!(

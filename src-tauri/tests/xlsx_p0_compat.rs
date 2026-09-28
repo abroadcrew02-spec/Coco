@@ -312,21 +312,21 @@ fn fixture_04_mixed_styles() {
         snap["styles"][sid].clone()
     };
 
-    assert_eq!(style_for(0, 0)["font"]["bold"], true, "Bold cell");
-    assert_eq!(style_for(0, 1)["font"]["italic"], true, "Italic cell");
-    let red = style_for(0, 2)["font"]["color"]
+    assert_eq!(style_for(0, 0)["bl"], 1, "Bold cell");
+    assert_eq!(style_for(0, 1)["it"], 1, "Italic cell");
+    let red = style_for(0, 2)["cl"]["rgb"]
         .as_str()
         .unwrap_or("")
         .to_ascii_uppercase();
     assert_eq!(red, "#FF0000", "Red font color");
-    let yellow = style_for(0, 3)["fill"]["color"]
+    let yellow = style_for(0, 3)["bg"]["rgb"]
         .as_str()
         .unwrap_or("")
         .to_ascii_uppercase();
     assert_eq!(yellow, "#FFFF00", "Yellow fill");
     assert_eq!(
-        style_for(0, 4)["alignment"]["horizontal"],
-        "center",
+        style_for(0, 4)["ht"],
+        2,
         "Centered alignment"
     );
 }
@@ -682,11 +682,11 @@ fn fixture_10_everything() {
         .unwrap_or_else(|| panic!("Sales!A1 header should have style id, got {header}"));
     let style = &snap["styles"][s_id];
     assert_eq!(
-        style["font"]["bold"], true,
+        style["bl"], 1,
         "header bold; full style={style}"
     );
     assert_eq!(
-        style["alignment"]["horizontal"], "center",
+        style["ht"], 2,
         "header centered; style={style}"
     );
 

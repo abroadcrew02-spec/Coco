@@ -3,15 +3,19 @@
 // Univer 0.24's facade doesn't expose stable per-cell pixel coordinates
 // (the WorkbookViewService methods are internal). For in-grid overlays
 // (chart canvas, camera link, sparkline preview) we approximate the
-// bounds from the snapshot's column-width / row-height data:
+// bounds from the snapshot's column-width / row-height data. Every size in
+// the snapshot is in pixels:
 //
-//   - Default column width: matches Univer's `DEFAULT_COL_WIDTH` constant
-//     (73 px ≈ 8.43 chars in Calibri 11 — Excel-compatible default).
-//   - Default row height: matches Univer's `DEFAULT_ROW_HEIGHT` (19 px ≈
-//     15 pt). Affected by `defaultRowHeight` on the sheet when present.
-//   - Per-column override: `columnData[c].w` (Excel char width × 7.5 px in
-//     Calibri 11 — Univer stores this as already-converted px).
-//   - Per-row override: `rowData[r].h` (px).
+//   - Default column width: the sheet's `defaultColumnWidth`, else Univer
+//     0.24's `DEFAULT_WORKSHEET_COLUMN_WIDTH` (88 px). Sheets imported from
+//     xlsx always carry `defaultColumnWidth` (Excel's default is 64 px).
+//   - Default row height: the sheet's `defaultRowHeight`, else Univer 0.24's
+//     `DEFAULT_WORKSHEET_ROW_HEIGHT` (24 px). xlsx imports carry the Excel
+//     value (15 pt = 20 px unless the file says otherwise).
+//   - Per-column override: `columnData[c].w` (px). The xlsx importer converts
+//     Excel's character widths to px (ECMA-376 §18.3.1.13, MDW 7 px), and
+//     Univer writes px when the user drags a column border.
+//   - Per-row override: `rowData[r].h` (px; the importer converts points).
 //   - Hidden rows / columns (`hd === 1`) contribute 0 px so they don't
 //     occupy space.
 //
@@ -23,8 +27,11 @@
 // Pure / framework-free so the chart overlay can call it on a parsed
 // snapshot without touching Univer.
 
-const DEFAULT_COL_WIDTH_PX = 73;
-const DEFAULT_ROW_HEIGHT_PX = 19;
+// Mirrors @univerjs/core's DEFAULT_WORKSHEET_COLUMN_WIDTH / _ROW_HEIGHT.
+// Kept as literals so this module stays framework-free; the unit test checks
+// them against the Univer constants.
+export const DEFAULT_COL_WIDTH_PX = 88;
+export const DEFAULT_ROW_HEIGHT_PX = 24;
 const DEFAULT_HEADER_LEFT = 46;
 const DEFAULT_HEADER_TOP = 20;
 
@@ -37,9 +44,9 @@ export interface PixelBounds {
 }
 
 export interface CellPixelOptions {
-  /** Sheet-level default row height override (defaults to 19 px). */
+  /** Sheet-level default row height override (defaults to 24 px). */
   defaultRowHeight?: number;
-  /** Sheet-level default column width override (defaults to 73 px). */
+  /** Sheet-level default column width override (defaults to 88 px). */
   defaultColWidth?: number;
   /** Row-header strip width in px. Defaults to Univer 0.24's 46. */
   headerOffsetLeft?: number;

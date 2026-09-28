@@ -10,9 +10,8 @@
 //   - column widths use snapshot.columnData.<col>.w when present, otherwise a
 //     fixed default; cell text is truncated (with `…`) when it would overflow
 //     its assigned column width
-//   - one column-width unit ≈ 0.5pt; the mapping is approximate because Excel
-//     widths are measured in "characters of the default font" which varies
-//     per workbook. Wide grids spill onto extra horizontal pages by chunking
+//   - column widths are Univer pixels converted at 96 DPI and clamped to
+//     8-80 mm. Wide grids spill onto extra horizontal pages by chunking
 //     columns rather than scaling down.
 //   - sheet name shown as a heading at the top of each sheet's first page
 //   - rows that overflow the bottom margin move to the next page
@@ -322,10 +321,11 @@ fn collect_column_widths(sheet: &Value, n_cols: usize) -> Vec<f64> {
                 .and_then(|v| v.as_f64());
             match raw {
                 Some(w) if w > 0.0 => {
-                    // Univer / Excel column widths are roughly "character units of
-                    // the default font", with one unit ≈ 7px ≈ 1.85mm. Bound the
-                    // result so a malformed snapshot can't blow the page width.
-                    let mm = (w * 7.0) / 3.78; // 1mm ≈ 3.78px at 96 DPI
+                    // Snapshot column widths are Univer pixels (the xlsx
+                    // importer converts Excel's character widths on the way
+                    // in). Bound the result so a malformed snapshot can't blow
+                    // the page width.
+                    let mm = w * 25.4 / 96.0; // 96 px per inch
                     mm.max(MIN_COL_WIDTH_MM).min(MAX_COL_WIDTH_MM)
                 }
                 _ => DEFAULT_COL_WIDTH_MM,

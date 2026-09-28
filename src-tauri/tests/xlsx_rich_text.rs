@@ -308,7 +308,7 @@ fn plain_string_has_no_rich_runs() {
 }
 
 #[test]
-fn poc_banner_lists_rich_text_as_preserved() {
+fn import_does_not_warn_about_rich_text() {
     let tmp = TempDir::new().expect("tempdir");
     let fixture = tmp.path().join("any.xlsx");
 
@@ -321,24 +321,19 @@ fn poc_banner_lists_rich_text_as_preserved() {
     }
 
     let imported = import_xlsx_core(path_str(&fixture)).expect("import");
-    let poc = imported
-        .warnings
-        .iter()
-        .find(|w| w.code == "XLSX_POC_IMPORT")
-        .expect("PoC banner present");
-    // The not-yet-preserved list (everything before "are not yet preserved" /
-    // "is not yet preserved") must NOT contain "rich text" anymore.
-    let lead = poc.message.split("not yet preserved").next().unwrap_or("");
+    // Rich text is preserved, so no import notice may mention it (the
+    // unconditional XLSX_POC_IMPORT banner that used to list it is gone).
     assert!(
-        !lead.contains("rich text"),
-        "import banner should no longer list rich text as not preserved: {}",
-        poc.message
+        !imported.warnings.iter().any(|w| w.code == "XLSX_POC_IMPORT"),
+        "the unconditional PoC banner must not come back: {:?}",
+        imported.warnings
     );
-    // The preserved-list segment (after "are not yet preserved" / "is not yet
-    // preserved") MUST mention rich text.
     assert!(
-        poc.message.contains("rich text"),
-        "import banner should mention rich text as preserved: {}",
-        poc.message
+        !imported
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("rich text")),
+        "no import warning should mention rich text: {:?}",
+        imported.warnings
     );
 }

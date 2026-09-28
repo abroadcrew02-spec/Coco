@@ -95,6 +95,6 @@ fn valid_small_xlsx_imports_without_security_block() {
         "valid small xlsx should not surface any XLSX_SECURITY_WARNING entries, got {:?}",
         result.warnings
     );
-    // The original PoC import info warning should also be there.
-    assert!(result.warnings.iter().any(|w| w.code == "XLSX_POC_IMPORT"));
+    // The unconditional PoC import banner has been removed.
+    assert!(!result.warnings.iter().any(|w| w.code == "XLSX_POC_IMPORT"));
 }

@@ -538,7 +538,7 @@ import {
   requestHelp,
   onMacroPlayRequested,
 } from "../hooks/useGlobalShortcuts";
-import { confirmDiscardIfUnsaved } from "../store/dirtyGuard";
+import { confirmDiscardIfUnsaved, isDirtySaveStatus, isWorkbookDirty } from "../store/dirtyGuard";
 import { routeOpenPath } from "../store/pathRouter";
 import { registerSnapshotFlush, carryForwardRootExtensions } from "../store/snapshotSync";
 import { timeAgoJa } from "./timeAgo";
@@ -9316,7 +9316,9 @@ export default function EditorScreen() {
     : currentHandle?.sourceType === "xlsx"
     ? "xlsx 由来（未保存）"
     : "無題のワークブック";
-  const isDirty = saveStatus === "unsaved";
+  // Same rule as the window title (useWindowTitle): a failed save is still
+  // unsaved work, so the marker must not disappear while save_failed.
+  const isDirty = isDirtySaveStatus(saveStatus);
   const fileLabel = isDirty ? `${fileName} •` : fileName;
   const isNicelFile = (currentHandle?.path ?? "").toLowerCase().endsWith(".coco");
   const goHomeAfterConfirm = () => {
@@ -10762,6 +10764,13 @@ export default function EditorScreen() {
           notes={updaterState.notes}
           isForced={updaterState.isForced}
           onUpdate={() => {
+            // The Windows updater terminates the app while it installs, and
+            // that path does not go through the close-requested guard, so
+            // refuse to start with unsaved edits instead of losing them.
+            if (isWorkbookDirty()) {
+              setEditorOperationError(t("update.blockedUnsaved"));
+              return;
+            }
             // Capture the target version so progress events can label it.
             const targetVersion = updaterState.kind === "available"
               ? updaterState.version
@@ -10790,8 +10799,12 @@ export default function EditorScreen() {
                 }, true);
                 setUpdaterState({ kind: "ready", version: targetVersion });
                 // Offer immediate relaunch; user can decline (status bar
-                // button stays visible until they restart manually).
-                if (window.confirm(t("confirm.update.relaunch"))) {
+                // button stays visible until they restart manually). Edits
+                // made during the download must be saved first: relaunch
+                // bypasses the close-requested guard.
+                if (isWorkbookDirty()) {
+                  setEditorOperationError(t("update.readyUnsaved"));
+                } else if (window.confirm(t("confirm.update.relaunch"))) {
                   await relaunchApp();
                 }
               } catch (e) {

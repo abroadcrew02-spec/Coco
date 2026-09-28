@@ -28,10 +28,14 @@ fn validate_workbook_id(workbook_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `original_path` is the user's file the snapshot belongs to (None for a
+/// workbook that was never saved); it is stored on the recovery candidate so
+/// the home screen can name it instead of showing "無題のワークブック".
 pub fn autosave_temp_core(
     data_dir: &std::path::Path,
     workbook_id: &str,
     snapshot_json: &str,
+    original_path: Option<&str>,
 ) -> Result<SaveResult, String> {
     validate_workbook_id(workbook_id)?;
 
@@ -105,7 +109,7 @@ pub fn autosave_temp_core(
     crate::db::operations::save_recovery_candidate(
         &app_conn,
         workbook_id,
-        None,
+        original_path,
         &temp_path_str,
         "auto_save",
     )
@@ -202,9 +206,15 @@ pub fn workbook_autosave_temp(
     app: tauri::AppHandle,
     workbook_id: String,
     snapshot_json: String,
+    original_path: Option<String>,
 ) -> Result<SaveResult, String> {
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    autosave_temp_core(&data_dir, &workbook_id, &snapshot_json)
+    autosave_temp_core(
+        &data_dir,
+        &workbook_id,
+        &snapshot_json,
+        original_path.as_deref(),
+    )
 }
 
 #[tauri::command]

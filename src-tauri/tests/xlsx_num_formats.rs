@@ -212,7 +212,7 @@ fn text_format_at_sign_round_trips() {
 }
 
 #[test]
-fn poc_warning_no_longer_lists_number_formats() {
+fn import_does_not_warn_about_number_formats() {
     let tmp = TempDir::new().unwrap();
     let fixture = tmp.path().join("any.xlsx");
 
@@ -225,27 +225,19 @@ fn poc_warning_no_longer_lists_number_formats() {
     }
 
     let imported = import_xlsx_core(path_str(&fixture)).unwrap();
-    let poc = imported
-        .warnings
-        .iter()
-        .find(|w| w.code == "XLSX_POC_IMPORT")
-        .expect("import PoC banner present");
-    // The "not preserved" list (everything before "are not yet preserved") must
-    // not contain "number formats" — but the "preserved" list (after) may.
-    let not_preserved_segment = poc
-        .message
-        .split("are not yet preserved")
-        .next()
-        .unwrap_or("");
+    // Number formats are preserved, so no import notice may mention them (the
+    // unconditional XLSX_POC_IMPORT banner that used to list them is gone).
     assert!(
-        !not_preserved_segment.contains("number formats"),
-        "import PoC banner should no longer list 'number formats' as not-preserved: {}",
-        poc.message
+        !imported.warnings.iter().any(|w| w.code == "XLSX_POC_IMPORT"),
+        "the unconditional PoC banner must not come back: {:?}",
+        imported.warnings
     );
-    // And it should explicitly mention number formats as preserved.
     assert!(
-        poc.message.contains("number formats"),
-        "import PoC banner should mention number formats: {}",
-        poc.message
+        !imported
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("number formats")),
+        "no import warning should mention number formats: {:?}",
+        imported.warnings
     );
 }

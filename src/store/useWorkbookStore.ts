@@ -606,13 +606,21 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
           const result = await invoke<SaveResult>("workbook_autosave_temp", {
             workbookId: currentHandle.workbookId,
             snapshotJson: currentSnapshotJson,
+            // Lets the home screen label the recovery candidate with the
+            // file it belongs to instead of "無題のワークブック".
+            originalPath: currentHandle.path,
           });
           if (result.success) {
             // #75: temp autosave writes a hidden recovery .coco — the user's
             // xlsx is NOT saved. Don't bump lastSavedAt or the status bar
             // shows "未保存 · 最終保存 X秒前" (misleading: user thinks xlsx
             // is safe). Only explicit Ctrl+S of the xlsx updates lastSavedAt.
-            set({ saveStatus: "unsaved", lastError: null });
+            // A failed explicit save must stay visible (SaveFailureDialog is
+            // rendered while saveStatus === "save_failed"); a successful
+            // recovery write does not mean the user's file was saved.
+            set((s) =>
+              s.saveStatus === "save_failed" ? {} : { saveStatus: "unsaved", lastError: null },
+            );
           } else {
             // #42: temp autosave failure also flips saveStatus + surfaces error.
             set({
@@ -886,7 +894,13 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   updateSnapshot: (snapshotJson: string) => {
     set((s) => ({
       currentSnapshotJson: snapshotJson,
-      saveStatus: "unsaved",
+      // A failed explicit save stays visible (SaveFailureDialog is rendered
+      // while saveStatus === "save_failed") until the user retries, saves
+      // elsewhere or closes it. The snapshot sync that precedes every
+      // autosave tick must not downgrade it to plain "unsaved" — that is
+      // how the dialog used to vanish by itself within 30 s. save_failed
+      // already counts as dirty for the close guard.
+      saveStatus: s.saveStatus === "save_failed" ? "save_failed" : "unsaved",
       dirtyRevision: s.dirtyRevision + 1,
     }));
   },
@@ -952,7 +966,11 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       set((s) => ({ dirtyRevision: s.dirtyRevision + 1 }));
       return;
     }
-    set((s) => ({ saveStatus: "unsaved", dirtyRevision: s.dirtyRevision + 1 }));
+    // Keep a failed save visible (see updateSnapshot); it is dirty either way.
+    set((s) => ({
+      saveStatus: s.saveStatus === "save_failed" ? "save_failed" : "unsaved",
+      dirtyRevision: s.dirtyRevision + 1,
+    }));
   },
 
   loadRecentFiles: async () => {

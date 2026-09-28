@@ -450,29 +450,19 @@ fn fixture_07_column_row_sizing() {
         row_data.is_object(),
         "rowData object required, got {row_data}"
     );
-    // Widths: rust_xlsxwriter applies a char-width conversion, but Nicel's
-    // inverse_col_width_for_xlsxwriter step should keep the round-trip stable.
+    // The snapshot stores pixels. 20 / 30 characters are 20*7+5 = 145 px and
+    // 30*7+5 = 215 px; the pixel width must survive import -> export -> import.
     let w0 = col_data["0"]["w"].as_f64().unwrap_or(0.0);
     let w2 = col_data["2"]["w"].as_f64().unwrap_or(0.0);
-    assert!(
-        (w0 - 20.0).abs() < 1.0,
-        "col 0 width should be ~20, got {w0}"
-    );
-    assert!(
-        (w2 - 30.0).abs() < 1.0,
-        "col 2 width should be ~30, got {w2}"
-    );
+    assert_eq!(w0, 145.0, "col 0 width should be 145 px, got {w0}");
+    assert_eq!(w2, 215.0, "col 2 width should be 215 px, got {w2}");
 
+    // 25 pt → round(33.33) = 33 px; 40 pt → round(53.33) = 53 px. Heights
+    // snap to whole pixels, so the second import still reads 33 / 53 px.
     let h1 = row_data["1"]["h"].as_f64().unwrap_or(0.0);
     let h4 = row_data["4"]["h"].as_f64().unwrap_or(0.0);
-    assert!(
-        (h1 - 25.0).abs() < 0.01,
-        "row 1 height should be 25, got {h1}"
-    );
-    assert!(
-        (h4 - 40.0).abs() < 0.01,
-        "row 4 height should be 40, got {h4}"
-    );
+    assert_eq!(h1, 33.0, "row 1 height should be 33 px, got {h1}");
+    assert_eq!(h4, 53.0, "row 4 height should be 53 px, got {h4}");
 }
 
 // --------------------------------------------------------------------------

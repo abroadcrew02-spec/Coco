@@ -161,10 +161,10 @@ const jaJP = {
   "confirm.csvExport.overwrite":
     "既存の CSV ファイル {0} 件を上書きします。続行しますか？",
   "confirm.update.relaunch": "更新を適用するため再起動しますか?",
-  "update.blockedUnsaved":
-    "未保存の変更があります。保存してから更新してください。",
-  "update.readyUnsaved":
-    "更新の準備ができました。未保存の変更を保存してから、ステータスバーの「再起動」で適用してください。",
+  "confirm.update.unsavedProceed":
+    "未保存の変更があります。保存せずに更新を続けると変更は失われます。続けますか？",
+  "confirm.update.relaunchUnsaved":
+    "未保存の変更があります。保存せずに再起動すると変更は失われます。再起動しますか？",
   "confirm.discardUnsaved.continue":
     "未保存の変更があります。破棄して続行しますか？",
   "confirm.discardUnsaved.exit": "未保存の変更があります。破棄して終了しますか？",
@@ -559,9 +559,10 @@ const enUS: Record<StringKey, string> = {
   "confirm.csvExport.overwrite":
     "Overwrite {0} existing CSV file(s)?",
   "confirm.update.relaunch": "Restart now to apply the update?",
-  "update.blockedUnsaved": "You have unsaved changes. Save them before updating.",
-  "update.readyUnsaved":
-    "The update is ready. Save your changes, then apply it with the Restart button in the status bar.",
+  "confirm.update.unsavedProceed":
+    "You have unsaved changes. Continuing the update without saving will lose them. Continue?",
+  "confirm.update.relaunchUnsaved":
+    "You have unsaved changes. Restarting without saving will lose them. Restart now?",
   "confirm.discardUnsaved.continue":
     "You have unsaved changes. Discard them and continue?",
   "confirm.discardUnsaved.exit":

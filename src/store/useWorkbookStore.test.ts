@@ -467,7 +467,7 @@ describe("importXlsx", () => {
     const s = useWorkbookStore.getState();
     expect(s.screen).toBe("editor");
     expect(s.currentHandle?.workbookId).toBe("wb-xlsx");
-    expect(s.saveStatus).toBe("unsaved");
+    expect(s.saveStatus).toBe("saved");
     expect(s.importWarnings).toHaveLength(1);
     expect(s.blockingImport).toBeNull();
   });
@@ -787,7 +787,7 @@ describe("newWorkbook", () => {
     expect(s.currentHandle?.workbookId).toBe("wb-new-1");
     expect(s.currentHandle?.requiresSaveAsOnFirstSave).toBe(true);
     expect(s.currentSnapshotJson).toBe(EMPTY_WORKBOOK_SNAPSHOT);
-    expect(s.saveStatus).toBe("unsaved");
+    expect(s.saveStatus).toBe("saved");
     expect(s.importWarnings).toEqual([]);
     expect(s.exportWarnings).toEqual([]);
     expect(s.blockingImport).toBeNull();
@@ -829,7 +829,7 @@ describe("openNicel", () => {
 });
 
 describe("importCsv", () => {
-  it("routes to editor with snapshot and unsaved status", async () => {
+  it("routes to editor with snapshot and a clean status", async () => {
     invokeMock.mockResolvedValue({
       handle: {
         workbookId: "wb-csv",
@@ -848,7 +848,7 @@ describe("importCsv", () => {
       encoding: undefined,
     });
     expect(s.screen).toBe("editor");
-    expect(s.saveStatus).toBe("unsaved");
+    expect(s.saveStatus).toBe("saved");
     expect(s.importWarnings).toHaveLength(1);
     expect(s.currentHandle?.sourceType).toBe("csv");
     expect(s.currentHandle?.requiresSaveAsOnFirstSave).toBe(true);

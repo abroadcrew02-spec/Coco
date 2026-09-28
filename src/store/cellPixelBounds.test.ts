@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
+  DEFAULT_WORKSHEET_COLUMN_WIDTH,
+  DEFAULT_WORKSHEET_ROW_HEIGHT,
+} from "@univerjs/core";
+import {
   cellBoundsPx,
   defaultChartAnchorPx,
+  DEFAULT_COL_WIDTH_PX,
+  DEFAULT_ROW_HEIGHT_PX,
   pixelToCell,
   rangeBoundsPx,
   type SheetPixelLayout,
@@ -9,10 +15,29 @@ import {
 
 // #236 In-grid chart foundation — pure pixel-bounds helper tests.
 
-const DEFAULT_COL = 73;
-const DEFAULT_ROW = 19;
+const DEFAULT_COL = 88;
+const DEFAULT_ROW = 24;
 const HEADER_LEFT = 46;
 const HEADER_TOP = 20;
+
+describe("default sizes", () => {
+  it("match Univer's worksheet defaults", () => {
+    expect(DEFAULT_COL_WIDTH_PX).toBe(DEFAULT_WORKSHEET_COLUMN_WIDTH);
+    expect(DEFAULT_ROW_HEIGHT_PX).toBe(DEFAULT_WORKSHEET_ROW_HEIGHT);
+    expect(DEFAULT_COL_WIDTH_PX).toBe(DEFAULT_COL);
+    expect(DEFAULT_ROW_HEIGHT_PX).toBe(DEFAULT_ROW);
+  });
+
+  it("an xlsx-imported sheet uses its own Excel defaults", () => {
+    // xlsx import always writes Excel's 64 px / 20 px (or the file's values).
+    const layout: SheetPixelLayout = { defaultColumnWidth: 64, defaultRowHeight: 20 };
+    const b = cellBoundsPx(layout, 2, 3);
+    expect(b.left).toBe(HEADER_LEFT + 3 * 64);
+    expect(b.top).toBe(HEADER_TOP + 2 * 20);
+    expect(b.width).toBe(64);
+    expect(b.height).toBe(20);
+  });
+});
 
 describe("cellBoundsPx", () => {
   it("A1 is just past the header offsets", () => {
@@ -38,7 +63,7 @@ describe("cellBoundsPx", () => {
   it("per-column width override is honoured", () => {
     const layout: SheetPixelLayout = { columnData: { "0": { w: 100 } } };
     const b = cellBoundsPx(layout, 0, 1);
-    // B1.left = headerLeft + 100 (not + 73).
+    // B1.left = headerLeft + 100 (not + the 88 px default).
     expect(b.left).toBe(HEADER_LEFT + 100);
     expect(b.width).toBe(DEFAULT_COL);
   });

@@ -153,10 +153,10 @@ describe("snapAnchorToPixel", () => {
   });
 
   it("snaps to row 1 col 1 for a pixel inside B2", () => {
-    // DEFAULT_COL=73, DEFAULT_ROW=19, HEADER_LEFT=46, HEADER_TOP=20
-    // B2 left = 46+73=119, top = 20+19=39; pick (125, 45) inside B2
+    // DEFAULT_COL=88, DEFAULT_ROW=24, HEADER_LEFT=46, HEADER_TOP=20
+    // B2 left = 46+88=134, top = 20+24=44; pick (140, 50) inside B2
     const entry = makeEntry({ anchorRow: 0, anchorCol: 0 });
-    const snapped = snapAnchorToPixel(entry, 125, 45, {});
+    const snapped = snapAnchorToPixel(entry, 140, 50, {});
     expect(snapped.anchorRow).toBe(1);
     expect(snapped.anchorCol).toBe(1);
   });

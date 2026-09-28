@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { resolveInGridChartsForSheet } from "./inGridChartLayout";
 
 // Default pixel constants from cellPixelBounds:
-//   DEFAULT_COL_WIDTH_PX = 73, DEFAULT_ROW_HEIGHT_PX = 19
+//   DEFAULT_COL_WIDTH_PX = 88, DEFAULT_ROW_HEIGHT_PX = 24 (Univer 0.24 defaults)
 //   DEFAULT_HEADER_LEFT = 46, DEFAULT_HEADER_TOP = 20
 
 function makeSnapshot(

@@ -1588,6 +1588,7 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
     let mut has_embeddings = false;
     let mut has_drawings = false;
     let mut has_form_controls = false;
+    let mut has_threaded_comments = false;
     // Collect worksheet entry indices first; per-sheet content scans need a
     // mutable borrow of the archive that can't coexist with the iteration borrow.
     let mut worksheet_indices: Vec<usize> = Vec::new();
@@ -1616,6 +1617,11 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
         }
         if name.starts_with("xl/ctrlProps/") {
             has_form_controls = true;
+        }
+        // Excel's modern comment threads. Nicel's own round-trip extras live
+        // under `xl/cocoExtensions/`, so they never match this prefix.
+        if name.starts_with("xl/threadedComments/") && !name.ends_with('/') {
+            has_threaded_comments = true;
         }
         if name.starts_with("xl/worksheets/sheet") && name.ends_with(".xml") {
             worksheet_indices.push(i);
@@ -1714,6 +1720,16 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
             affected_sheets: None,
         });
     }
+    if has_threaded_comments {
+        // The comment text itself survives through the legacy `comments*.xml`
+        // part Excel writes alongside every thread (see `CommentEntry`).
+        warnings.push(CompatibilityWarning {
+            severity: "warning".to_string(),
+            code: "XLSX_THREADED_COMMENTS_FLATTENED".to_string(),
+            message: "スレッド形式のコメントが含まれています。Nicel では本文のみ保持し、返信・解決状態などの形式は保存時に失われます。".to_string(),
+            affected_sheets: None,
+        });
+    }
     if has_conditional_formatting {
         warnings.push(CompatibilityWarning {
             severity: "warning".to_string(),
@@ -1735,15 +1751,111 @@ pub fn detect_unsupported_features_in<R: std::io::Read + std::io::Seek>(
     Ok(warnings)
 }
 
-/// Per-sheet column widths and row heights parsed straight out of the xlsx
-/// worksheet XML. calamine 0.24 does not expose this metadata, so we parse the
-/// raw zip ourselves.
-#[derive(Debug, Default, Clone)]
+/// Maximum digit width, in pixels, of Excel's default font (Calibri 11 at
+/// 96 DPI). ECMA-376 Part 1 §18.3.1.13 expresses column widths in multiples
+/// of this value, so it is the pivot for every width <-> pixel conversion.
+const EXCEL_MAX_DIGIT_WIDTH_PX: f64 = 7.0;
+/// Excel's upper bound for a column width, in characters.
+const EXCEL_MAX_COL_WIDTH_CHARS: f64 = 255.0;
+/// Excel's upper bound for a row height, in points.
+const EXCEL_MAX_ROW_HEIGHT_PT: f64 = 409.0;
+/// `<sheetFormatPr baseColWidth>` default when the attribute is absent.
+const EXCEL_DEFAULT_BASE_COL_WIDTH: f64 = 8.0;
+/// `<sheetFormatPr defaultRowHeight>` default when the attribute is absent.
+const EXCEL_DEFAULT_ROW_HEIGHT_PT: f64 = 15.0;
+/// Excel's default column width in pixels (8.43 characters of Calibri 11).
+pub(crate) const EXCEL_DEFAULT_COL_WIDTH_PX: u32 = 64;
+/// Excel's default row height in pixels (15 pt).
+pub(crate) const EXCEL_DEFAULT_ROW_HEIGHT_PX: u32 = 20;
+
+/// Convert an xlsx column width (the `width` attribute of `<col>` or
+/// `<sheetFormatPr defaultColWidth>`, in characters including cell padding)
+/// to pixels, per ECMA-376 Part 1 §18.3.1.13:
+///
+/// `px = Truncate(((256 * width + Truncate(128 / MDW)) / 256) * MDW)`
+///
+/// Examples with MDW = 7: 9.140625 -> 64, 10.5 -> 73, 30 -> 210.
+/// Non-finite and negative inputs map to 0; widths above Excel's 255-character
+/// limit are clamped.
+pub(crate) fn xlsx_col_width_to_px(width: f64) -> u32 {
+    if !width.is_finite() || width <= 0.0 {
+        return 0;
+    }
+    let mdw = EXCEL_MAX_DIGIT_WIDTH_PX;
+    let width = width.min(EXCEL_MAX_COL_WIDTH_CHARS);
+    let px = (((256.0 * width + (128.0 / mdw).trunc()) / 256.0) * mdw).trunc();
+    px as u32
+}
+
+/// Convert an xlsx row height in points (`<row ht>`,
+/// `<sheetFormatPr defaultRowHeight>`) to pixels at 96 DPI: `round(pt * 96 / 72)`.
+/// Example: 15 -> 20, 18.75 -> 25.
+pub(crate) fn xlsx_row_height_to_px(points: f64) -> u32 {
+    if !points.is_finite() || points <= 0.0 {
+        return 0;
+    }
+    let points = points.min(EXCEL_MAX_ROW_HEIGHT_PT);
+    (points * 96.0 / 72.0).round() as u32
+}
+
+/// Default column width in pixels derived from `<sheetFormatPr baseColWidth>`
+/// (a character count without padding). The padded width is
+/// `Truncate((base * MDW + 5) / MDW * 256) / 256`; Excel then rounds the
+/// resulting pixel width up to a multiple of 8, which is how the default
+/// `baseColWidth="8"` becomes the familiar 64 px (8.43 characters).
+fn xlsx_base_col_width_to_px(base_chars: f64) -> u32 {
+    let mdw = EXCEL_MAX_DIGIT_WIDTH_PX;
+    let base = if base_chars.is_finite() && base_chars >= 0.0 {
+        base_chars.min(EXCEL_MAX_COL_WIDTH_CHARS)
+    } else {
+        EXCEL_DEFAULT_BASE_COL_WIDTH
+    };
+    let padded = ((base * mdw + 5.0) / mdw * 256.0).trunc() / 256.0;
+    let px = xlsx_col_width_to_px(padded);
+    px.div_ceil(8) * 8
+}
+
+/// Per-sheet column widths, row heights, hidden flags and sheet defaults parsed
+/// straight out of the xlsx worksheet XML. calamine 0.24 does not expose this
+/// metadata, so we parse the raw zip ourselves. All sizes are in pixels, the
+/// unit Univer uses for `columnData[c].w`, `rowData[r].h`,
+/// `defaultColumnWidth` and `defaultRowHeight`.
+#[derive(Debug, Clone)]
 pub(crate) struct SheetDimensions {
-    /// Map of 0-based column index -> width (in character units, as stored in xlsx XML).
-    pub columns: HashMap<u32, f64>,
-    /// Map of 0-based row index -> height (in point units).
-    pub rows: HashMap<u32, f64>,
+    /// Map of 0-based column index -> width in pixels (`<col customWidth="1">`).
+    pub columns: HashMap<u32, u32>,
+    /// 0-based column indices declared `hidden="1"`.
+    pub hidden_columns: HashSet<u32>,
+    /// Map of 0-based row index -> height in pixels (`<row customHeight="1">`).
+    pub rows: HashMap<u32, u32>,
+    /// 0-based row indices declared `hidden="1"`.
+    pub hidden_rows: HashSet<u32>,
+    /// Sheet default column width in pixels (from `<sheetFormatPr>`).
+    pub default_col_width_px: u32,
+    /// Sheet default row height in pixels (from `<sheetFormatPr>`).
+    pub default_row_height_px: u32,
+}
+
+impl Default for SheetDimensions {
+    fn default() -> Self {
+        Self {
+            columns: HashMap::new(),
+            hidden_columns: HashSet::new(),
+            rows: HashMap::new(),
+            hidden_rows: HashSet::new(),
+            default_col_width_px: EXCEL_DEFAULT_COL_WIDTH_PX,
+            default_row_height_px: EXCEL_DEFAULT_ROW_HEIGHT_PX,
+        }
+    }
+}
+
+impl SheetDimensions {
+    fn has_column_or_row_overrides(&self) -> bool {
+        !self.columns.is_empty()
+            || !self.hidden_columns.is_empty()
+            || !self.rows.is_empty()
+            || !self.hidden_rows.is_empty()
+    }
 }
 
 /// Read `xl/workbook.xml` and the rels file to build a `sheet name -> worksheet
@@ -1809,10 +1921,40 @@ fn extract_attr(tag: &str, key: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-/// Parse one sheet's XML, returning the dimensions block (or default/empty if
-/// no custom widths/heights are declared).
+/// Excel's column limit (XFD). `<col max>` values beyond it are clamped so a
+/// malformed span cannot make the importer iterate billions of indices.
+const XLSX_MAX_COLS: u32 = 16_384;
+
+/// Parse one sheet's XML, returning the dimensions block. Widths and heights
+/// are converted to pixels here; the sheet defaults always carry a value
+/// (Excel's 64 px / 20 px when `<sheetFormatPr>` is absent).
 fn parse_sheet_dimensions_xml(xml: &str) -> SheetDimensions {
     let mut dims = SheetDimensions::default();
+
+    // --- sheet defaults ---
+    if let Some(s) = xml.find("<sheetFormatPr") {
+        let rest = &xml[s..];
+        if let Some(end) = rest.find('>') {
+            let tag = &rest[..end];
+            let default_col_width: Option<f64> = extract_attr(tag, "defaultColWidth")
+                .and_then(|v| v.parse().ok())
+                .filter(|w: &f64| w.is_finite() && *w > 0.0);
+            dims.default_col_width_px = match default_col_width {
+                Some(w) => xlsx_col_width_to_px(w),
+                None => {
+                    let base = extract_attr(tag, "baseColWidth")
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(EXCEL_DEFAULT_BASE_COL_WIDTH);
+                    xlsx_base_col_width_to_px(base)
+                }
+            };
+            let default_row_pt: f64 = extract_attr(tag, "defaultRowHeight")
+                .and_then(|v| v.parse().ok())
+                .filter(|h: &f64| h.is_finite() && *h > 0.0)
+                .unwrap_or(EXCEL_DEFAULT_ROW_HEIGHT_PT);
+            dims.default_row_height_px = xlsx_row_height_to_px(default_row_pt);
+        }
+    }
 
     // --- columns ---
     if let (Some(s), Some(e)) = (xml.find("<cols"), xml.find("</cols>")) {
@@ -1828,17 +1970,28 @@ fn parse_sheet_dimensions_xml(xml: &str) -> SheetDimensions {
                 };
                 let tag = &rest[..end];
                 let is_custom = extract_attr(tag, "customWidth").as_deref() == Some("1");
-                if is_custom {
-                    let min: Option<u32> = extract_attr(tag, "min").and_then(|s| s.parse().ok());
-                    let max: Option<u32> = extract_attr(tag, "max").and_then(|s| s.parse().ok());
-                    let width: Option<f64> =
-                        extract_attr(tag, "width").and_then(|s| s.parse().ok());
-                    if let (Some(min), Some(max), Some(w)) = (min, max, width) {
-                        // min/max are 1-based, inclusive; convert to 0-based.
-                        let start_col = min.saturating_sub(1);
-                        let end_col = max.saturating_sub(1);
-                        for c in start_col..=end_col {
-                            dims.columns.insert(c, w);
+                let is_hidden = extract_attr(tag, "hidden").as_deref() == Some("1");
+                let min: Option<u32> = extract_attr(tag, "min").and_then(|s| s.parse().ok());
+                let max: Option<u32> = extract_attr(tag, "max").and_then(|s| s.parse().ok());
+                if let (Some(min), Some(max)) = (min, max) {
+                    // min/max are 1-based, inclusive; convert to 0-based.
+                    let start_col = min.saturating_sub(1);
+                    let end_col = max.min(XLSX_MAX_COLS).saturating_sub(1);
+                    let width_px: Option<u32> = if is_custom {
+                        extract_attr(tag, "width")
+                            .and_then(|s| s.parse::<f64>().ok())
+                            .map(xlsx_col_width_to_px)
+                    } else {
+                        None
+                    };
+                    // A zero width is Excel's other spelling of "hidden".
+                    let zero_width = width_px == Some(0);
+                    for c in start_col..=end_col {
+                        if is_hidden || zero_width {
+                            dims.hidden_columns.insert(c);
+                        }
+                        if let Some(px) = width_px.filter(|px| *px > 0) {
+                            dims.columns.insert(c, px);
                         }
                     }
                 }
@@ -1860,12 +2013,24 @@ fn parse_sheet_dimensions_xml(xml: &str) -> SheetDimensions {
         };
         let tag = &rest[..end];
         let is_custom = extract_attr(tag, "customHeight").as_deref() == Some("1");
-        if is_custom {
-            let r: Option<u32> = extract_attr(tag, "r").and_then(|s| s.parse().ok());
-            let h: Option<f64> = extract_attr(tag, "ht").and_then(|s| s.parse().ok());
-            if let (Some(r), Some(h)) = (r, h) {
+        let is_hidden = extract_attr(tag, "hidden").as_deref() == Some("1");
+        if is_custom || is_hidden {
+            if let Some(r) = extract_attr(tag, "r").and_then(|s| s.parse::<u32>().ok()) {
                 // `r` is 1-based; convert to 0-based.
-                dims.rows.insert(r.saturating_sub(1), h);
+                let row = r.saturating_sub(1);
+                let height_px: Option<u32> = if is_custom {
+                    extract_attr(tag, "ht")
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .map(xlsx_row_height_to_px)
+                } else {
+                    None
+                };
+                if is_hidden || height_px == Some(0) {
+                    dims.hidden_rows.insert(row);
+                }
+                if let Some(px) = height_px.filter(|px| *px > 0) {
+                    dims.rows.insert(row, px);
+                }
             }
         }
         cursor = abs_start + end + 1;
@@ -1884,7 +2049,7 @@ pub(crate) fn parse_xlsx_dimensions(
     let mut out: HashMap<String, SheetDimensions> = HashMap::new();
     for (sheet_name, xml) in sheet_xmls {
         let dims = parse_sheet_dimensions_xml(xml);
-        if !dims.columns.is_empty() || !dims.rows.is_empty() {
+        if dims.has_column_or_row_overrides() {
             out.insert(sheet_name.clone(), dims);
         }
     }
@@ -4145,22 +4310,21 @@ fn apply_text_length_rule(
     }
 }
 
-/// rust_xlsxwriter converts the input width to a character-width-with-padding
-/// before serialising, so calling `set_column_width(N)` actually writes a
-/// different `width` attribute. This function inverts that conversion so the
-/// xlsx ends up with the requested raw value.
-///
-/// Conversion (for width >= 1): `out = (((in*7) + 5) / 7 * 256).floor() / 256`.
-/// Plain inverse (`in = N - 5/7`) lands right on the edge of a floor() step
-/// and fp rounding can drop us down to `N - 1/256`. Adding `1/512` puts us
-/// safely inside the (1/256 wide) acceptance window so `out == N` exactly.
-fn inverse_col_width_for_xlsxwriter(target_raw_width: f64) -> f64 {
-    if target_raw_width >= 1.0 {
-        target_raw_width - 5.0 / 7.0 + 1.0 / 512.0
-    } else {
-        target_raw_width
+/// Round a snapshot pixel size (`columnData.w`, `rowData.h`,
+/// `defaultRowHeight`) to the `u16` the rust_xlsxwriter pixel setters take.
+/// Returns `None` for non-finite or negative values so a corrupt snapshot
+/// entry is skipped instead of failing the whole export.
+fn px_to_u16(px: f64) -> Option<u16> {
+    if !px.is_finite() || px < 0.0 {
+        return None;
     }
+    Some(px.round().min(f64::from(u16::MAX)) as u16)
 }
+
+/// Largest column width Excel accepts, in pixels (255 characters * MDW 7 + 5).
+const EXCEL_MAX_COL_WIDTH_PX: u16 = 1790;
+/// Largest row height Excel accepts, in pixels (409 pt at 96 DPI, floored).
+const EXCEL_MAX_ROW_HEIGHT_PX: u16 = 545;
 
 /// Tauri command wrapper. Calls the pure-Rust core and records the file in recent files.
 #[tauri::command]
@@ -4397,10 +4561,10 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             }
         }
 
+        // Always keep the parsed block: even a sheet without per-column /
+        // per-row overrides carries its `<sheetFormatPr>` defaults.
         let dims = parse_sheet_dimensions_xml(&xml);
-        if !dims.columns.is_empty() || !dims.rows.is_empty() {
-            dimensions_by_sheet.insert(sheet_name.clone(), dims);
-        }
+        dimensions_by_sheet.insert(sheet_name.clone(), dims);
 
         let merges = parse_sheet_merge_cells(&xml);
         if !merges.is_empty() {
@@ -4647,24 +4811,61 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
             "cellData": Value::Object(cell_data),
         });
 
+        // Univer reads every size below as pixels. A sheet whose XML could not
+        // be read falls back to Excel's defaults (64 px / 20 px) rather than
+        // Univer's own (88 px / 24 px) so it still looks like Excel.
+        let (default_col_px, default_row_px) = dimensions_by_sheet
+            .get(name)
+            .map(|d| (d.default_col_width_px, d.default_row_height_px))
+            .unwrap_or((EXCEL_DEFAULT_COL_WIDTH_PX, EXCEL_DEFAULT_ROW_HEIGHT_PX));
+        sheet_obj["defaultColumnWidth"] = json!(default_col_px);
+        sheet_obj["defaultRowHeight"] = json!(default_row_px);
+
         if let Some(dims) = dimensions_by_sheet.get(name) {
-            if !dims.columns.is_empty() {
+            if !dims.columns.is_empty() || !dims.hidden_columns.is_empty() {
                 let mut col_data: Map<String, Value> = Map::new();
-                let mut keys: Vec<u32> = dims.columns.keys().copied().collect();
+                let mut keys: Vec<u32> = dims
+                    .columns
+                    .keys()
+                    .chain(dims.hidden_columns.iter())
+                    .copied()
+                    .collect();
                 keys.sort_unstable();
+                keys.dedup();
                 for k in keys {
-                    let w = dims.columns[&k];
-                    col_data.insert(k.to_string(), json!({ "w": w }));
+                    let mut entry = Map::new();
+                    if let Some(w) = dims.columns.get(&k) {
+                        entry.insert("w".into(), json!(w));
+                    }
+                    if dims.hidden_columns.contains(&k) {
+                        entry.insert("hd".into(), json!(1));
+                    }
+                    col_data.insert(k.to_string(), Value::Object(entry));
                 }
                 sheet_obj["columnData"] = Value::Object(col_data);
             }
-            if !dims.rows.is_empty() {
+            if !dims.rows.is_empty() || !dims.hidden_rows.is_empty() {
                 let mut row_data: Map<String, Value> = Map::new();
-                let mut keys: Vec<u32> = dims.rows.keys().copied().collect();
+                let mut keys: Vec<u32> = dims
+                    .rows
+                    .keys()
+                    .chain(dims.hidden_rows.iter())
+                    .copied()
+                    .collect();
                 keys.sort_unstable();
+                keys.dedup();
                 for k in keys {
-                    let h = dims.rows[&k];
-                    row_data.insert(k.to_string(), json!({ "h": h }));
+                    let mut entry = Map::new();
+                    if let Some(h) = dims.rows.get(&k) {
+                        entry.insert("h".into(), json!(h));
+                        // customHeight="1": the explicit height wins over
+                        // Univer's auto-fit height (`ia` = is-auto-height).
+                        entry.insert("ia".into(), json!(0));
+                    }
+                    if dims.hidden_rows.contains(&k) {
+                        entry.insert("hd".into(), json!(1));
+                    }
+                    row_data.insert(k.to_string(), Value::Object(entry));
                 }
                 sheet_obj["rowData"] = Value::Object(row_data);
             }
@@ -5160,14 +5361,6 @@ pub fn import_xlsx_core(path: String) -> Result<ImportWorkbookResult, String> {
     let mut warnings: Vec<CompatibilityWarning> = prepended_warnings;
     warnings.extend(feature_warnings);
     warnings.extend(image_warnings);
-    warnings.push(CompatibilityWarning {
-        severity: "info".to_string(),
-        code: "XLSX_POC_IMPORT".to_string(),
-        message:
-            "xlsx import compatibility notice: threaded comments are not yet preserved (named ranges + font/fill/alignment/border styles + merged cells + number formats + column widths + row heights + rich text + data validations + conditional formatting + charts (blob-preserved) + pivot tables (blob-preserved) + images/drawings (blob-preserved) are preserved)"
-                .to_string(),
-        affected_sheets: None,
-    });
 
     if is_xlsm {
         // AD-02b / req 5.3.2: VBA macros are never loaded or persisted.
@@ -5568,7 +5761,26 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                 }
             }
 
-            // Apply per-column widths from snapshot.columnData.
+            // Sheet default row height (`defaultRowHeight`, px). Applied before
+            // the per-row loop because rust_xlsxwriter gives rows that are only
+            // hidden (no explicit height) the current default height.
+            // The sheet default column width (`defaultColumnWidth`) is not
+            // written: rust_xlsxwriter 0.77 has no setter for
+            // `<sheetFormatPr defaultColWidth>`, so columns without an explicit
+            // width open at Excel's own default (64 px).
+            if let Some(px) = sheet_obj
+                .and_then(|s| s.get("defaultRowHeight"))
+                .and_then(|v| v.as_f64())
+                .and_then(px_to_u16)
+                .filter(|px| *px > 0)
+            {
+                worksheet.set_default_row_height_pixels(px.min(EXCEL_MAX_ROW_HEIGHT_PX));
+            }
+
+            // Per-column widths / hidden flags from snapshot.columnData. Univer
+            // stores `w` in pixels; rust_xlsxwriter converts pixels to Excel's
+            // character-width `width` attribute (MDW 7, 5 px padding), which is
+            // the exact inverse of `xlsx_col_width_to_px` on import.
             if let Some(col_map) = sheet_obj
                 .and_then(|s| s.get("columnData"))
                 .and_then(|c| c.as_object())
@@ -5577,20 +5789,21 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                     let Some(col_idx): Option<u16> = col_key.parse().ok() else {
                         continue;
                     };
-                    let Some(w) = val.get("w").and_then(|w| w.as_f64()) else {
-                        continue;
-                    };
-                    // Compensate for rust_xlsxwriter's internal char-width
-                    // conversion so the on-disk xlsx records the same width
-                    // we read on import.
-                    let raw = inverse_col_width_for_xlsxwriter(w);
-                    worksheet
-                        .set_column_width(col_idx, raw)
-                        .map_err(|e| e.to_string())?;
+                    if let Some(px) = val.get("w").and_then(|w| w.as_f64()).and_then(px_to_u16) {
+                        worksheet
+                            .set_column_width_pixels(col_idx, px.min(EXCEL_MAX_COL_WIDTH_PX))
+                            .map_err(|e| e.to_string())?;
+                    }
+                    if val.get("hd").and_then(|v| v.as_i64()) == Some(1) {
+                        worksheet
+                            .set_column_hidden(col_idx)
+                            .map_err(|e| e.to_string())?;
+                    }
                 }
             }
 
-            // Apply per-row heights from snapshot.rowData.
+            // Per-row heights / hidden flags from snapshot.rowData. `h` is in
+            // pixels; rust_xlsxwriter writes `ht` as px * 0.75 points.
             if let Some(row_map) = sheet_obj
                 .and_then(|s| s.get("rowData"))
                 .and_then(|c| c.as_object())
@@ -5599,12 +5812,16 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                     let Some(row_idx): Option<u32> = row_key.parse().ok() else {
                         continue;
                     };
-                    let Some(h) = val.get("h").and_then(|h| h.as_f64()) else {
-                        continue;
-                    };
-                    worksheet
-                        .set_row_height(row_idx, h)
-                        .map_err(|e| e.to_string())?;
+                    if let Some(px) = val.get("h").and_then(|h| h.as_f64()).and_then(px_to_u16) {
+                        worksheet
+                            .set_row_height_pixels(row_idx, px.min(EXCEL_MAX_ROW_HEIGHT_PX))
+                            .map_err(|e| e.to_string())?;
+                    }
+                    if val.get("hd").and_then(|v| v.as_i64()) == Some(1) {
+                        worksheet
+                            .set_row_hidden(row_idx)
+                            .map_err(|e| e.to_string())?;
+                    }
                 }
             }
 
@@ -9039,6 +9256,96 @@ mod camera_link_tests {
     fn passes_non_array_through_unchanged() {
         let input = json!({ "not": "an array" });
         assert_eq!(strip_camera_data_urls(&input), input);
+    }
+}
+
+#[cfg(test)]
+mod dimension_unit_tests {
+    use super::{
+        parse_sheet_dimensions_xml, px_to_u16, xlsx_base_col_width_to_px, xlsx_col_width_to_px,
+        xlsx_row_height_to_px,
+    };
+
+    #[test]
+    fn column_width_follows_ecma_formula_with_mdw_7() {
+        assert_eq!(xlsx_col_width_to_px(9.140625), 64);
+        assert_eq!(xlsx_col_width_to_px(10.5), 73);
+        assert_eq!(xlsx_col_width_to_px(17.140625), 120);
+        assert_eq!(xlsx_col_width_to_px(30.0), 210);
+        assert_eq!(xlsx_col_width_to_px(0.0), 0);
+        assert_eq!(xlsx_col_width_to_px(-3.0), 0);
+        assert_eq!(xlsx_col_width_to_px(f64::NAN), 0);
+        // Clamped at Excel's 255-character limit.
+        assert_eq!(xlsx_col_width_to_px(1.0e9), xlsx_col_width_to_px(255.0));
+    }
+
+    #[test]
+    fn row_height_points_to_pixels() {
+        assert_eq!(xlsx_row_height_to_px(15.0), 20);
+        assert_eq!(xlsx_row_height_to_px(18.75), 25);
+        assert_eq!(xlsx_row_height_to_px(40.0), 53);
+        assert_eq!(xlsx_row_height_to_px(0.0), 0);
+        assert_eq!(xlsx_row_height_to_px(f64::INFINITY), 0);
+    }
+
+    #[test]
+    fn base_col_width_8_is_the_familiar_64px() {
+        assert_eq!(xlsx_base_col_width_to_px(8.0), 64);
+    }
+
+    #[test]
+    fn sheet_format_defaults() {
+        let absent = parse_sheet_dimensions_xml("<worksheet><sheetData/></worksheet>");
+        assert_eq!(absent.default_col_width_px, 64);
+        assert_eq!(absent.default_row_height_px, 20);
+
+        let explicit = parse_sheet_dimensions_xml(
+            r#"<worksheet><sheetFormatPr defaultColWidth="10.7109375" defaultRowHeight="18.75"/><sheetData/></worksheet>"#,
+        );
+        assert_eq!(explicit.default_col_width_px, 75);
+        assert_eq!(explicit.default_row_height_px, 25);
+
+        let base_only = parse_sheet_dimensions_xml(
+            r#"<worksheet><sheetFormatPr baseColWidth="8" defaultRowHeight="15"/><sheetData/></worksheet>"#,
+        );
+        assert_eq!(base_only.default_col_width_px, 64);
+        assert_eq!(base_only.default_row_height_px, 20);
+    }
+
+    #[test]
+    fn hidden_columns_and_rows_are_collected() {
+        let dims = parse_sheet_dimensions_xml(
+            r#"<worksheet><cols><col min="2" max="3" width="12.7109375" hidden="1" customWidth="1"/><col min="5" max="5" width="0" customWidth="1"/></cols><sheetData><row r="4" hidden="1"/><row r="6" ht="30" customHeight="1" hidden="1"/></sheetData></worksheet>"#,
+        );
+        // 12.7109375 is Excel's spelling of "12 characters" = 12 * 7 + 5 = 89 px.
+        assert_eq!(dims.columns.get(&1), Some(&89));
+        assert_eq!(dims.columns.get(&2), Some(&89));
+        assert!(dims.hidden_columns.contains(&1));
+        assert!(dims.hidden_columns.contains(&2));
+        // width="0" means hidden and carries no width of its own.
+        assert!(dims.hidden_columns.contains(&4));
+        assert!(!dims.columns.contains_key(&4));
+        assert!(dims.hidden_rows.contains(&3));
+        assert!(!dims.rows.contains_key(&3));
+        assert!(dims.hidden_rows.contains(&5));
+        assert_eq!(dims.rows.get(&5), Some(&40));
+    }
+
+    #[test]
+    fn col_span_is_clamped_to_excel_column_limit() {
+        let dims = parse_sheet_dimensions_xml(
+            r#"<worksheet><cols><col min="16380" max="4294967295" width="20" customWidth="1"/></cols></worksheet>"#,
+        );
+        assert_eq!(dims.columns.len(), 5);
+    }
+
+    #[test]
+    fn px_to_u16_rejects_garbage() {
+        assert_eq!(px_to_u16(72.6), Some(73));
+        assert_eq!(px_to_u16(0.0), Some(0));
+        assert_eq!(px_to_u16(-1.0), None);
+        assert_eq!(px_to_u16(f64::NAN), None);
+        assert_eq!(px_to_u16(1.0e12), Some(u16::MAX));
     }
 }
 

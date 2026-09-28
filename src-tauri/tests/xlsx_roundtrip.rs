@@ -35,8 +35,9 @@ fn simple_values_roundtrip() {
     // Import
     let result = import_xlsx_core(path_str(&fixture_path)).expect("import ok");
     assert!(
-        result.warnings.iter().any(|w| w.code == "XLSX_POC_IMPORT"),
-        "expected XLSX_POC_IMPORT info warning"
+        !result.warnings.iter().any(|w| w.severity == "info"),
+        "a plain xlsx must not produce an info banner, got {:?}",
+        result.warnings
     );
     assert_eq!(
         result.handle.source_type, "xlsx",

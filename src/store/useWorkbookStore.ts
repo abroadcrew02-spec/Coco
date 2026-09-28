@@ -606,13 +606,21 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
           const result = await invoke<SaveResult>("workbook_autosave_temp", {
             workbookId: currentHandle.workbookId,
             snapshotJson: currentSnapshotJson,
+            // Lets the home screen label the recovery candidate with the
+            // file it belongs to instead of "無題のワークブック".
+            originalPath: currentHandle.path,
           });
           if (result.success) {
             // #75: temp autosave writes a hidden recovery .coco — the user's
             // xlsx is NOT saved. Don't bump lastSavedAt or the status bar
             // shows "未保存 · 最終保存 X秒前" (misleading: user thinks xlsx
             // is safe). Only explicit Ctrl+S of the xlsx updates lastSavedAt.
-            set({ saveStatus: "unsaved", lastError: null });
+            // A failed explicit save must stay visible (SaveFailureDialog is
+            // rendered while saveStatus === "save_failed"); a successful
+            // recovery write does not mean the user's file was saved.
+            set((s) =>
+              s.saveStatus === "save_failed" ? {} : { saveStatus: "unsaved", lastError: null },
+            );
           } else {
             // #42: temp autosave failure also flips saveStatus + surfaces error.
             set({

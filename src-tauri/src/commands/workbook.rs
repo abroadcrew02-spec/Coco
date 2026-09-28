@@ -153,11 +153,51 @@ pub fn bak_path(target: &Path, n: u32) -> PathBuf {
     PathBuf::from(s)
 }
 
+/// Staging path for the next backup generation: `<target>.bak.tmp`, in the
+/// same directory as the target so the final rename to `.bak.1` stays on one
+/// volume.
+pub fn bak_staging_path(target: &Path) -> PathBuf {
+    let mut s = target.as_os_str().to_owned();
+    s.push(".bak.tmp");
+    PathBuf::from(s)
+}
+
+/// Shift `.bak.1..N` down one generation and record the current target as
+/// the new `.bak.1`.
+///
+/// The target is copied to a staging file first. Existing generations are
+/// only evicted / renamed after that copy succeeds, so a failing copy (target
+/// locked by another process, unreadable, disk full) leaves every existing
+/// `.bak.N` untouched. A staging file left behind by an interrupted run is
+/// replaced on the next call.
 pub fn rotate_backups(target: &Path) -> io::Result<()> {
     if !target.exists() {
         return Ok(());
     }
 
+    let staged = bak_staging_path(target);
+    // A leftover from an interrupted rotation is stale; drop it so the copy
+    // below starts from a clean slot. If it cannot be removed the copy fails
+    // too, which still aborts before any generation is touched.
+    let _ = std::fs::remove_file(&staged);
+    if let Err(e) = std::fs::copy(target, &staged) {
+        let _ = std::fs::remove_file(&staged);
+        return Err(e);
+    }
+
+    if let Err(e) = shift_backup_generations(target, &staged) {
+        let _ = std::fs::remove_file(&staged);
+        return Err(e);
+    }
+
+    // req 5.4.3: enforce total-size cap by evicting oldest generations.
+    enforce_backup_size_cap(target, MAX_TOTAL_BACKUP_BYTES)?;
+    Ok(())
+}
+
+/// Evict `.bak.MAX`, rename `.bak.N` to `.bak.N+1`, then move `staged` into
+/// the `.bak.1` slot.
+fn shift_backup_generations(target: &Path, staged: &Path) -> io::Result<()> {
     let oldest = bak_path(target, MAX_BACKUPS);
     if oldest.exists() {
         std::fs::remove_file(&oldest)?;
@@ -171,11 +211,7 @@ pub fn rotate_backups(target: &Path) -> io::Result<()> {
         }
     }
 
-    std::fs::copy(target, bak_path(target, 1))?;
-
-    // req 5.4.3: enforce total-size cap by evicting oldest generations.
-    enforce_backup_size_cap(target, MAX_TOTAL_BACKUP_BYTES)?;
-    Ok(())
+    std::fs::rename(staged, bak_path(target, 1))
 }
 
 pub fn checkpoint_existing_wal(target: &Path) -> Result<(), String> {

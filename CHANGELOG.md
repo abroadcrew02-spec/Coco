@@ -4,6 +4,33 @@ All notable changes to Nicel (formerly Coco) are documented in this file. The fo
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-28
+
+Patch release. Fixes how xlsx column widths and row heights are shown and saved. Delivered to v0.8.0 users through the auto-updater.
+
+### Fixed
+
+- **Column widths are converted between Excel character units and pixels.** The importer copied the `<col width>` attribute (characters of the default font) straight into Univer's `columnData[c].w`, which Univer reads as pixels, so a 10.5-character column was drawn 10.5 px wide. Import now applies ECMA-376 §18.3.1.13 with a maximum digit width of 7 px (`px = floor(((256 * width + floor(128 / 7)) / 256) * 7)`: 10.5 → 73 px, 30 → 210 px). Export writes pixels back with rust_xlsxwriter's `set_column_width_pixels`, so a column dragged to 120 px in Nicel is saved as `width="17.140625"` (16.43 characters in Excel) instead of `width="120"`. The `inverse_col_width_for_xlsxwriter` helper is gone.
+- **Row heights are converted between points and pixels** (`px = round(pt * 96 / 72)`: 18.75 pt → 25 px; export via `set_row_height_pixels`). Imported custom-height rows carry `ia: 0` so Univer's auto height does not override them.
+- **Sheet defaults come from `<sheetFormatPr>`.** Every xlsx-imported sheet now carries `defaultColumnWidth` / `defaultRowHeight` in pixels: `defaultColWidth` when present, else `baseColWidth` (default 8 → 64 px), and `defaultRowHeight` (default 15 pt → 20 px). Previously unsized columns and rows fell back to Univer's 88 px / 24 px. On export the sheet default row height is written with `set_default_row_height_pixels`; rust_xlsxwriter 0.77 has no setter for the default column width, so it is not written.
+- **Hidden columns and rows** (`hidden="1"`, or a zero width / height) import as `hd: 1` and export with `set_column_hidden` / `set_row_hidden`. Rows or columns hidden in Nicel (filters, outline collapse) are therefore saved hidden.
+- **PDF export** treats `columnData.w` as pixels (96 DPI) instead of character units.
+- **Unconditional `XLSX_POC_IMPORT` banner removed.** Every xlsx import used to show an English "compatibility notice". A warning (`XLSX_THREADED_COMMENTS_FLATTENED`, Japanese message) is now raised only when the archive contains `xl/threadedComments/*` parts; the comment text still survives through the legacy `comments*.xml` part.
+- `src/store/cellPixelBounds.ts` fallback defaults updated to Univer 0.24's 88 px / 24 px (were 73 / 19 from Univer 0.5), with a unit test pinning them to `DEFAULT_WORKSHEET_COLUMN_WIDTH` / `DEFAULT_WORKSHEET_ROW_HEIGHT`.
+- **A failed save stays visible.** The recovery autosave that runs every 30 s reset `saveStatus` to `unsaved` on success, which unmounted `SaveFailureDialog` and hid the "save failed" status without any user action. The temp-autosave path now leaves `save_failed` / `lastError` untouched.
+- **Backup rotation is copy-first.** `rotate_backups` used to evict `.bak.5` and shift the generations before copying the target, so a save that failed at the copy (target locked by another process) lost one backup generation per attempt; five failures wiped them all. The target is now copied to `<file>.bak.tmp` first and the generations are only shifted after that copy succeeds.
+- The in-editor file label uses `isDirtySaveStatus`, so the `•` marker no longer disappears while a save has failed (matches the window title).
+- The updater refuses to start `downloadAndInstall` while the workbook is dirty (the Windows installer terminates the app without going through the close guard), and does not offer the post-download relaunch while unsaved edits exist.
+- Recovery candidates record the workbook's original path (`workbook_autosave_temp` now takes `originalPath`), so the home screen names them instead of showing "無題のワークブック" for every entry.
+
+### Known issues
+
+- `.coco` workbooks saved from an xlsx import by v0.8.0 or earlier still hold character widths in `columnData.w` and open with the old narrow columns. They are not converted automatically.
+- The default column width of a workbook created in Nicel (88 px) is not written to xlsx; untouched columns open at Excel's 64 px.
+- A sheet whose default row height is not 15 pt gets `customHeight="1"` on every row with data when saved (rust_xlsxwriter behaviour), so Excel no longer auto-fits those rows.
+- Row heights without `customHeight="1"` (auto-fitted by Excel) are still ignored on import.
+- The conversion assumes Calibri 11 (maximum digit width 7 px). Workbooks whose Normal style uses another font (e.g. Yu Gothic) can differ from Excel's on-screen widths.
+
 ## [0.8.0] - 2026-09-28
 
 Minor release. The application is renamed from **Coco** to **Nicel**. Delivered to v0.7.0 users through the auto-updater.

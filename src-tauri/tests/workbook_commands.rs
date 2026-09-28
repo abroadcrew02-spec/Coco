@@ -29,7 +29,7 @@ fn open_nicel_missing_path_returns_err() {
 #[test]
 fn restore_backup_missing_temp_file_clears_candidate() {
     let app_dir = TempDir::new().unwrap();
-    let r = autosave_temp_core(app_dir.path(), "wb-missing", "{}").unwrap();
+    let r = autosave_temp_core(app_dir.path(), "wb-missing", "{}", None).unwrap();
     // #72: recovery file now carries a per-session suffix; use the path the
     // autosave returned rather than reconstructing it from workbook_id.
     let nicel_path = std::path::PathBuf::from(r.path);
@@ -163,8 +163,8 @@ fn list_recent_empty_when_no_app_dir_used() {
 fn list_recovery_returns_autosave_candidates() {
     let app_dir = TempDir::new().unwrap();
 
-    autosave_temp_core(app_dir.path(), "wb-a", "{\"a\":1}").unwrap();
-    autosave_temp_core(app_dir.path(), "wb-b", "{\"b\":2}").unwrap();
+    autosave_temp_core(app_dir.path(), "wb-a", "{\"a\":1}", None).unwrap();
+    autosave_temp_core(app_dir.path(), "wb-b", "{\"b\":2}", None).unwrap();
 
     let candidates = list_recovery_core(app_dir.path()).unwrap();
     assert_eq!(candidates.len(), 2);
@@ -180,7 +180,7 @@ fn list_recovery_returns_autosave_candidates() {
 fn restore_backup_opens_temp_nicel_snapshot() {
     let app_dir = TempDir::new().unwrap();
 
-    autosave_temp_core(app_dir.path(), "wb-r", "{\"restored\":true}").unwrap();
+    autosave_temp_core(app_dir.path(), "wb-r", "{\"restored\":true}", None).unwrap();
 
     let result = restore_backup_core(app_dir.path(), "wb-r").unwrap();
     assert_eq!(result.handle.workbook_id, "wb-r");

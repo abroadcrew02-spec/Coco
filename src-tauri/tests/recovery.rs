@@ -39,7 +39,7 @@ fn find_recovery_file(data_dir: &std::path::Path, workbook_id: &str) -> std::pat
 #[test]
 fn autosave_creates_temp_nicel_and_candidate_row() {
     let tmp = TempDir::new().unwrap();
-    let result = autosave_temp_core(tmp.path(), "wb-1", "{\"x\":1}").unwrap();
+    let result = autosave_temp_core(tmp.path(), "wb-1", "{\"x\":1}", None).unwrap();
     assert!(result.success);
 
     // Temp .coco exists; locate via the per-session suffix.
@@ -69,7 +69,7 @@ fn autosave_creates_temp_nicel_and_candidate_row() {
 #[test]
 fn autosave_uses_auto_save_reason() {
     let tmp = TempDir::new().unwrap();
-    autosave_temp_core(tmp.path(), "wb-2", "{}").unwrap();
+    autosave_temp_core(tmp.path(), "wb-2", "{}", None).unwrap();
 
     let nicel_path = find_recovery_file(tmp.path(), "wb-2");
     let conn = Connection::open(&nicel_path).unwrap();
@@ -86,9 +86,9 @@ fn autosave_uses_auto_save_reason() {
 #[test]
 fn second_autosave_overwrites_candidate_row_not_creating_duplicates() {
     let tmp = TempDir::new().unwrap();
-    autosave_temp_core(tmp.path(), "wb-3", "{\"v\":1}").unwrap();
-    autosave_temp_core(tmp.path(), "wb-3", "{\"v\":2}").unwrap();
-    autosave_temp_core(tmp.path(), "wb-3", "{\"v\":3}").unwrap();
+    autosave_temp_core(tmp.path(), "wb-3", "{\"v\":1}", None).unwrap();
+    autosave_temp_core(tmp.path(), "wb-3", "{\"v\":2}", None).unwrap();
+    autosave_temp_core(tmp.path(), "wb-3", "{\"v\":3}", None).unwrap();
 
     // Same workbook_id used as candidate_id (per implementation) — should be 1 row.
     assert_eq!(count_candidates(tmp.path(), "wb-3"), 1);
@@ -99,7 +99,7 @@ fn repeated_autosave_prunes_snapshots_to_cap_and_keeps_latest() {
     let tmp = TempDir::new().unwrap();
     let iterations = MAX_SNAPSHOTS_PER_WORKBOOK + 3;
     for i in 0..iterations {
-        autosave_temp_core(tmp.path(), "wb-retention", &format!("{{\"v\":{i}}}")).unwrap();
+        autosave_temp_core(tmp.path(), "wb-retention", &format!("{{\"v\":{i}}}"), None).unwrap();
     }
 
     let nicel_path = find_recovery_file(tmp.path(), "wb-retention");
@@ -126,7 +126,7 @@ fn repeated_autosave_prunes_snapshots_to_cap_and_keeps_latest() {
 #[test]
 fn clear_recovery_removes_file_and_row() {
     let tmp = TempDir::new().unwrap();
-    autosave_temp_core(tmp.path(), "wb-4", "{}").unwrap();
+    autosave_temp_core(tmp.path(), "wb-4", "{}", None).unwrap();
 
     let nicel_path = find_recovery_file(tmp.path(), "wb-4");
     assert!(nicel_path.exists());
@@ -153,7 +153,7 @@ fn clear_recovery_on_missing_candidate_is_noop() {
 #[test]
 fn clear_recovery_tolerates_missing_temp_file() {
     let tmp = TempDir::new().unwrap();
-    autosave_temp_core(tmp.path(), "wb-5", "{}").unwrap();
+    autosave_temp_core(tmp.path(), "wb-5", "{}", None).unwrap();
 
     // Manually delete the temp file BEFORE calling clear_recovery.
     let nicel_path = find_recovery_file(tmp.path(), "wb-5");
@@ -172,9 +172,41 @@ fn autosave_preserves_existing_recovery_dir_files() {
     std::fs::create_dir_all(&recovery_dir).unwrap();
     std::fs::write(recovery_dir.join("stranger.txt"), b"hello").unwrap();
 
-    autosave_temp_core(tmp.path(), "wb-6", "{}").unwrap();
+    autosave_temp_core(tmp.path(), "wb-6", "{}", None).unwrap();
 
     assert!(recovery_dir.join("stranger.txt").exists());
     // #72: find the suffixed file rather than the bare workbook_id name.
     assert!(find_recovery_file(tmp.path(), "wb-6").exists());
+}
+
+#[test]
+fn autosave_records_original_path_on_candidate() {
+    let tmp = TempDir::new().unwrap();
+    autosave_temp_core(
+        tmp.path(),
+        "wb-op",
+        "{\"v\":1}",
+        Some("C:/work/quarterly.xlsx"),
+    )
+    .unwrap();
+
+    let stored: Option<String> = app_db(tmp.path())
+        .query_row(
+            "SELECT original_path FROM recovery_candidates WHERE candidate_id = ?1",
+            rusqlite::params!["wb-op"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored.as_deref(), Some("C:/work/quarterly.xlsx"));
+
+    // A workbook that was never saved has no path to record.
+    autosave_temp_core(tmp.path(), "wb-nopath", "{}", None).unwrap();
+    let none: Option<String> = app_db(tmp.path())
+        .query_row(
+            "SELECT original_path FROM recovery_candidates WHERE candidate_id = ?1",
+            rusqlite::params!["wb-nopath"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(none, None);
 }

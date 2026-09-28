@@ -238,3 +238,50 @@ fn save_core_replaces_existing_nicel_target() {
         "second save should create bak.1"
     );
 }
+
+/// A save that cannot read the target (locked by another process) must fail
+/// before any existing backup generation is evicted or renamed. Before the
+/// copy-first rotation, each failed save silently dropped one generation.
+#[cfg(windows)]
+#[test]
+fn test_failed_copy_leaves_existing_generations_untouched() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let target = tmp.path().join("data.coco");
+    fs::write(&target, b"current").expect("write target");
+    for n in 1..=3 {
+        fs::write(bak_path(&target, n), format!("gen{n}")).expect("seed generation");
+    }
+
+    // Exclusive lock (share_mode 0): the copy inside rotate_backups fails.
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(0)
+        .open(&target)
+        .expect("lock target");
+
+    let err = rotate_backups(&target).expect_err("rotation must fail while locked");
+    // ERROR_SHARING_VIOLATION (32) surfaces as ErrorKind::Uncategorized.
+    assert_eq!(err.raw_os_error(), Some(32), "unexpected error: {err:?}");
+
+    for n in 1..=3 {
+        assert_eq!(
+            fs::read(bak_path(&target, n)).unwrap(),
+            format!("gen{n}").as_bytes(),
+            "generation {n} must be untouched"
+        );
+    }
+    assert!(!bak_path(&target, 4).exists(), "no generation may have been shifted");
+    assert!(
+        !tmp.path().join("data.coco.bak.tmp").exists(),
+        "staging file must be cleaned up after a failed copy"
+    );
+
+    drop(lock);
+    rotate_backups(&target).expect("rotation succeeds once the lock is released");
+    assert_eq!(fs::read(bak_path(&target, 1)).unwrap(), b"current");
+    assert_eq!(fs::read(bak_path(&target, 2)).unwrap(), b"gen1");
+    assert_eq!(fs::read(bak_path(&target, 4)).unwrap(), b"gen3");
+}

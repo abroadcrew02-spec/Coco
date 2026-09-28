@@ -157,6 +157,33 @@ describe("autoSave race prevention", () => {
     expect(useWorkbookStore.getState().saveStatus).toBe("unsaved");
   });
 
+  it("passes the workbook path to workbook_autosave_temp so the recovery candidate is named", async () => {
+    invokeMock.mockResolvedValue({ success: true, path: "/app_data/recovery/wb-test.coco", error: null });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.xlsx", sourceType: "xlsx" }),
+      saveStatus: "unsaved",
+      currentSnapshotJson: "{}",
+    });
+    await useWorkbookStore.getState().autoSave();
+    expect(invokeMock).toHaveBeenCalledWith("workbook_autosave_temp", expect.objectContaining({
+      originalPath: "/tmp/data.xlsx",
+    }));
+  });
+
+  it("temp autosave success keeps a failed explicit save visible (save_failed + lastError)", async () => {
+    invokeMock.mockResolvedValue({ success: true, path: "/app_data/recovery/wb-test.coco", error: null });
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.xlsx", sourceType: "xlsx" }),
+      saveStatus: "save_failed",
+      lastError: "バックアップのローテーションに失敗しました (os error 32)",
+      currentSnapshotJson: "{}",
+    });
+    await useWorkbookStore.getState().autoSave();
+    const s = useWorkbookStore.getState();
+    expect(s.saveStatus).toBe("save_failed");
+    expect(s.lastError).toBe("バックアップのローテーションに失敗しました (os error 32)");
+  });
+
   it("waits for pending .coco autosave before manual save writes the same path", async () => {
     const autoSaveResult = deferred<SaveResult>();
     invokeMock.mockImplementation((cmd: string) => {
@@ -411,7 +438,11 @@ describe("importXlsx", () => {
         snapshotJson: "{\"sheetOrder\":[\"sheet-1\"]}",
       },
       warnings: [
-        { severity: "info", code: "XLSX_POC_IMPORT", message: "PoC notice" },
+        {
+          severity: "warning",
+          code: "XLSX_THREADED_COMMENTS_FLATTENED",
+          message: "threaded comments notice",
+        },
       ],
     });
     await useWorkbookStore.getState().importXlsx("/tmp/data.xlsx");

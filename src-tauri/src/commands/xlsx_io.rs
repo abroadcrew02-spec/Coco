@@ -647,12 +647,40 @@ fn builtin_num_format(id: u32) -> Option<&'static str> {
         0 => None, // "General" — no fmt
         1 => Some("0"),
         2 => Some("0.00"),
+        3 => Some("#,##0"),
+        4 => Some("#,##0.00"),
         9 => Some("0%"),
         10 => Some("0.00%"),
+        11 => Some("0.00E+00"),
+        12 => Some("# ?/?"),
+        13 => Some("# ??/??"),
         14 => Some("yyyy-mm-dd"), // normalize locale-dependent dates
+        15 => Some("d-mmm-yy"),
+        16 => Some("d-mmm"),
+        17 => Some("mmm-yy"),
+        18 => Some("h:mm AM/PM"),
+        19 => Some("h:mm:ss AM/PM"),
+        20 => Some("h:mm"),
+        21 => Some("h:mm:ss"),
         22 => Some("yyyy-mm-dd hh:mm:ss"),
-        38 => Some("#,##0;(#,##0)"),
+        // 27-36 / 50-58 are the ja-JP locale built-ins (Excel 0411). The
+        // Japanese-era variants (ge.m.d / ggge年) map to their Gregorian
+        // equivalents because the renderer has no era calendar.
+        27 | 36 | 50 | 57 => Some("yyyy/m/d"),
+        28 | 29 | 31 | 51 | 54 | 58 => Some("yyyy\"年\"m\"月\"d\"日\""),
+        30 => Some("m/d/yy"),
+        32 => Some("h\"時\"mm\"分\""),
+        33 => Some("h\"時\"mm\"分\"ss\"秒\""),
+        34 | 52 | 55 => Some("yyyy\"年\"m\"月\""),
+        35 | 53 | 56 => Some("m\"月\"d\"日\""),
+        37 => Some("#,##0;(#,##0)"),
+        38 => Some("#,##0;[Red](#,##0)"),
         39 => Some("#,##0.00;(#,##0.00)"),
+        40 => Some("#,##0.00;[Red](#,##0.00)"),
+        45 => Some("mm:ss"),
+        46 => Some("[h]:mm:ss"),
+        47 => Some("mmss.0"),
+        48 => Some("##0.0E+0"),
         49 => Some("@"), // text
         _ => None,
     }
@@ -11702,5 +11730,19 @@ mod style_shape_tests {
         assert_eq!(l.h_align.as_deref(), Some("center"));
         assert_eq!(l.v_align.as_deref(), Some("middle"));
         assert_eq!(l.borders.as_ref().unwrap().top.as_ref().unwrap().style, "double");
+    }
+
+    #[test]
+    fn builtin_number_formats_cover_common_ids() {
+        use super::builtin_num_format;
+        assert_eq!(builtin_num_format(0), None);
+        assert_eq!(builtin_num_format(3), Some("#,##0"));
+        assert_eq!(builtin_num_format(4), Some("#,##0.00"));
+        assert_eq!(builtin_num_format(10), Some("0.00%"));
+        assert_eq!(builtin_num_format(20), Some("h:mm"));
+        assert_eq!(builtin_num_format(31), Some("yyyy\"年\"m\"月\"d\"日\""));
+        assert_eq!(builtin_num_format(46), Some("[h]:mm:ss"));
+        assert_eq!(builtin_num_format(49), Some("@"));
+        assert_eq!(builtin_num_format(163), None);
     }
 }

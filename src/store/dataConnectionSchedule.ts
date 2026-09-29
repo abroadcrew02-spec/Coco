@@ -1,26 +1,60 @@
 // #190 Phase 5 / #355 — scheduled data-connection refresh, behind the trust gate.
 //
-// Connections with `schedule.onOpen` refresh once when the workbook opens and
-// connections with `schedule.intervalMinutes > 0` refresh periodically. Both
+// Connections with `schedule.onOpen === true` refresh once when the workbook
+// opens and connections with a valid `schedule.intervalMinutes` (see
+// `autoIntervalMinutes`) refresh periodically. Both
 // run without a user action, so they only run when the current execution grant
 // covers the connection's signature.
 //
 // The same predicates and the same signature are used by the trust fingerprint
 // (`scriptTrust.ts`), so "what the user approved" and "what the scheduler runs"
-// cannot drift apart. Manual refresh from the dialog is not gated here.
+// cannot drift apart. The connections dialog also reads the schedule through
+// these predicates (badge and edit form), so what the user sees and saves is
+// what actually runs. Manual refresh from the dialog is not gated here.
 
 import { checkConnectionGrant } from "./scriptGrant";
 import type { DataConnection } from "./dataConnections";
+
+/** Shortest accepted refresh interval, in minutes. */
+export const MIN_INTERVAL_MINUTES = 1;
+/**
+ * Longest accepted refresh interval, in minutes. Larger values overflow the
+ * 32-bit `setInterval` delay (2^31 - 1 ms) and would fire almost immediately.
+ */
+export const MAX_INTERVAL_MINUTES = Math.floor((2 ** 31 - 1) / 60_000);
 
 /** True when the connection refreshes by itself when the workbook opens. */
 export function isAutoOnOpen(c: DataConnection): boolean {
   return c.schedule?.onOpen === true;
 }
 
-/** Interval in minutes when the connection refreshes periodically, else 0. */
+/**
+ * Interval in minutes when the connection refreshes periodically, else 0.
+ * Only a finite number within [MIN_INTERVAL_MINUTES, MAX_INTERVAL_MINUTES]
+ * counts; anything else (strings, booleans, arrays, out-of-range numbers)
+ * means "no periodic refresh".
+ */
 export function autoIntervalMinutes(c: DataConnection): number {
-  const m = c.schedule?.intervalMinutes;
-  return typeof m === "number" && Number.isFinite(m) && m > 0 ? m : 0;
+  const m: unknown = c.schedule?.intervalMinutes;
+  return typeof m === "number" &&
+    Number.isFinite(m) &&
+    m >= MIN_INTERVAL_MINUTES &&
+    m <= MAX_INTERVAL_MINUTES
+    ? m
+    : 0;
+}
+
+/**
+ * Convert a value typed into the edit form into a stored interval: whole
+ * minutes, 0 for "none", capped at MAX_INTERVAL_MINUTES. The result always
+ * satisfies `autoIntervalMinutes` (or is 0).
+ */
+export function normalizeIntervalMinutesInput(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return 0;
+  const whole = Math.floor(n);
+  if (whole < MIN_INTERVAL_MINUTES) return 0;
+  return Math.min(whole, MAX_INTERVAL_MINUTES);
 }
 
 /** True when the connection runs without a user action. */

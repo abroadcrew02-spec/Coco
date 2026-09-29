@@ -4,7 +4,9 @@ import {
   computeActiveContent,
   createMemoryTrustPersistence,
   createScriptTrustStore,
+  getScriptTrustStore,
   normalizeTrustPath,
+  setScriptTrustPersistence,
   trustRecordKey,
   SCRIPT_TRUST_KEY_PREFIX,
   type ActiveContent,
@@ -371,13 +373,111 @@ describe("createScriptTrustStore — revoke / endSession / list", () => {
     expect(await store.list()).toEqual([]);
   });
 
-  it("revoke leaves allow-once decisions of the session alone", async () => {
+  it("revoke drops allow-once decisions of the open workbook at that path", async () => {
     const { store } = newStore();
     const sub = subject();
     const json = snap([A]);
-    await store.trust(sub, (await store.evaluate(sub, json)).content, "session");
+    const { grant } = await store.trust(sub, (await store.evaluate(sub, json)).content, "session");
     await store.revoke(sub.path!);
-    expect((await store.evaluate(sub, json)).state).toEqual({ kind: "trusted", scope: "session" });
+    expect(checkGrant(grant, A.source).ok).toBe(false);
+    expect((await store.evaluate(sub, json)).state.kind).toBe("untrusted");
+  });
+
+  it("revoke drops self decisions made by in-app edits (M2)", async () => {
+    const { store } = newStore();
+    const sub = subject();
+    const prev = snap([A]);
+    await store.trust(sub, (await store.evaluate(sub, prev)).content, "always");
+    const next = snap([{ ...A, source: "api.log('edited');" }]);
+    await store.adoptLocalEdit(sub, prev, next);
+    const selfEval = await store.evaluate(sub, next);
+    expect(selfEval.state).toEqual({ kind: "trusted", scope: "self" });
+
+    await store.revoke(sub.path!);
+    expect(checkGrant(selfEval.grant, "api.log('edited');").ok).toBe(false);
+    const after = await store.evaluate(sub, next);
+    expect(after.state.kind).toBe("untrusted");
+    expect(after.grant).toBeNull();
+    // Also the pre-edit content, whose record is gone now.
+    expect((await store.evaluate(sub, prev)).state.kind).toBe("untrusted");
+  });
+
+  it("revoke drops a restored copy trusted through its lookup path", async () => {
+    const { store } = newStore();
+    const orig = subject({ path: "C:\\Books\\Report.coco" });
+    const json = snap([A]);
+    await store.trust(orig, (await store.evaluate(orig, json)).content, "always");
+    const restored = subject({ path: null, lookupPath: "C:\\Books\\Report.coco" });
+    expect((await store.evaluate(restored, json)).state.kind).toBe("trusted");
+    await store.revoke("C:\\Books\\Report.coco");
+    expect((await store.evaluate(restored, json)).state.kind).toBe("untrusted");
+  });
+
+  it("revoke leaves open workbooks at other paths alone", async () => {
+    const { store } = newStore();
+    const other = subject({ path: "C:\\Books\\Other.coco" });
+    const json = snap([A]);
+    const { grant } = await store.trust(other, (await store.evaluate(other, json)).content, "session");
+    await store.revoke("C:\\Books\\Report.coco");
+    expect(checkGrant(grant, A.source).ok).toBe(true);
+    expect((await store.evaluate(other, json)).state).toEqual({ kind: "trusted", scope: "session" });
+  });
+
+  it("revoke still drops session decisions when deleting the record fails", async () => {
+    const base = createMemoryTrustPersistence();
+    const p: TrustPersistence = {
+      ...base,
+      delete: async () => {
+        throw new Error("locked");
+      },
+    };
+    const { store } = newStore(p);
+    const sub = subject();
+    const json = snap([A]);
+    const { grant } = await store.trust(sub, (await store.evaluate(sub, json)).content, "session");
+    await expect(store.revoke(sub.path!)).rejects.toThrow("locked");
+    expect(checkGrant(grant, A.source).ok).toBe(false);
+    expect((await store.evaluate(sub, json)).state.kind).toBe("untrusted");
+  });
+
+  it("an adoption that is deciding while a revoke lands does not promote", async () => {
+    const json = snap([A]);
+    const fp = (await computeActiveContent(json)).fingerprint;
+    const pathNorm = "c:/books/report.coco";
+    const key = await trustRecordKey(pathNorm);
+    const base = createMemoryTrustPersistence({
+      [key]: JSON.stringify({
+        v: 1,
+        path: pathNorm,
+        pathNorm,
+        fingerprint: fp,
+        trustedAt: "2026-09-29T00:00:00.000Z",
+        summary: { scripts: 1, autoConnections: 0 },
+      }),
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let entered!: () => void;
+    const readStarted = new Promise<void>((r) => (entered = r));
+    const p: TrustPersistence = {
+      ...base,
+      get: async (k) => {
+        const v = await base.get(k); // the record as it was before the revoke
+        entered();
+        await gate;
+        return v;
+      },
+    };
+    const { store } = newStore(p);
+    const sub = subject();
+    const next = snap([A, B]);
+    // prev is trusted only through the record, so the adoption has to read it.
+    const adopting = store.adoptLocalEdit(sub, json, next);
+    await readStarted;
+    await store.revoke(sub.path!); // lands while the adoption holds the old record
+    release();
+    await adopting;
+    expect((await store.evaluate(sub, next)).state.kind).toBe("untrusted");
   });
 
   it("endSession revokes grants and refuses further decisions for that key", async () => {
@@ -497,7 +597,23 @@ describe("createScriptTrustStore — fail closed", () => {
     expect(r.grant).toBeNull();
   });
 
-  it("only trusts content produced by computeActiveContent", async () => {
+  it("only trusts content this store evaluated for the same session (L5)", async () => {
+    const { store } = newStore();
+    const json = snap([A]);
+    const s1 = subject();
+    const s2 = subject();
+    const fromS1 = (await store.evaluate(s1, json)).content;
+    await expect(store.trust(s2, fromS1, "session")).rejects.toThrow(/session/);
+    // Computed directly (not through evaluate), or by another store instance.
+    await expect(store.trust(s1, await computeActiveContent(json), "session")).rejects.toThrow();
+    const other = newStore().store;
+    const fromOther = (await other.evaluate(s1, json)).content;
+    await expect(store.trust(s1, fromOther, "session")).rejects.toThrow();
+    // The matching session still works.
+    await expect(store.trust(s1, fromS1, "session")).resolves.toMatchObject({ degraded: false });
+  });
+
+  it("rejects hand-made or failed content", async () => {
     const { store } = newStore();
     const fake: ActiveContent = {
       fingerprint: "sha256:" + "0".repeat(64),
@@ -522,5 +638,28 @@ describe("createScriptTrustStore — fail closed", () => {
     expect(await store.isTrusted(sub, r.content.fingerprint)).toBe(true);
     expect(await store.isTrusted(subject(), r.content.fingerprint)).toBe(true);
     expect(await store.isTrusted(subject({ path: "C:\\x.coco" }), r.content.fingerprint)).toBe(false);
+  });
+});
+
+describe("setScriptTrustPersistence", () => {
+  it("installs the backend once and ignores later calls", async () => {
+    const pathNorm = "c:/books/once.coco";
+    const key = await trustRecordKey(pathNorm);
+    const record = JSON.stringify({
+      v: 1,
+      path: pathNorm,
+      pathNorm,
+      fingerprint: "sha256:" + "c".repeat(64),
+      trustedAt: "2026-09-29T00:00:00.000Z",
+      summary: { scripts: 1, autoConnections: 0 },
+    });
+    const first = createMemoryTrustPersistence({ [key]: record });
+    const second = createMemoryTrustPersistence();
+
+    expect(() => setScriptTrustPersistence({} as TrustPersistence)).toThrow();
+    expect(setScriptTrustPersistence(first)).toBe(true);
+    expect(setScriptTrustPersistence(second)).toBe(false);
+    const listed = await getScriptTrustStore().list();
+    expect(listed.map((r) => r.pathNorm)).toEqual([pathNorm]);
   });
 });

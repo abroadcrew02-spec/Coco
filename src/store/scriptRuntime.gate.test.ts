@@ -237,6 +237,28 @@ describe("gate details", () => {
     expect((globalThis as Record<string, unknown>)[EVAL_FLAG]).toBeUndefined();
   });
 
+  it("marks refusals with blockedByGate; a script throwing the same text is not marked (L3)", async () => {
+    const refused = await runScript(SOURCE, { grant: null });
+    expect(refused.blockedByGate).toBe(true);
+
+    const imitation = `throw new Error(${JSON.stringify(SCRIPT_NOT_TRUSTED)});`;
+    const ran = await runScript(imitation, {
+      grant: grantFor(imitation),
+      executor: inlineExecutor,
+    });
+    expect(ran.ok).toBe(false);
+    expect(ran.error).toBe(SCRIPT_NOT_TRUSTED);
+    expect(ran.blockedByGate).not.toBe(true);
+
+    const fired = await fireTrigger(
+      { ...entry, source: `Nicel.onOpen(() => { ${imitation} });` },
+      "onOpen",
+      { grant: grantFor(`Nicel.onOpen(() => { ${imitation} });`), executor: inlineExecutor },
+    );
+    expect(fired.error).toBe(SCRIPT_NOT_TRUSTED);
+    expect(fired.blockedByGate).not.toBe(true);
+  });
+
   it("refuses when options are missing entirely", async () => {
     const r = await (runScript as unknown as (s: string) => ReturnType<typeof runScript>)(SOURCE);
     expect(r.error).toBe(SCRIPT_NOT_TRUSTED);

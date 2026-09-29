@@ -2376,6 +2376,40 @@ describe("#355 document session key", () => {
     expect(useWorkbookStore.getState().docSessionKey).toBe(winner);
   });
 
+  it("every open path clears the previous document's undo / redo history (L1)", async () => {
+    const opens: [string, () => Promise<void>][] = [
+      ["newWorkbook", () => useWorkbookStore.getState().newWorkbook()],
+      ["openNicel", () => useWorkbookStore.getState().openNicel("/tmp/a.coco")],
+      ["importXlsx", () => useWorkbookStore.getState().importXlsx("/tmp/a.xlsx")],
+      ["importCsv", () => useWorkbookStore.getState().importCsv("/tmp/a.csv")],
+      ["restoreCandidate", () => useWorkbookStore.getState().restoreCandidate("cand")],
+      ["openSnapshot", () => useWorkbookStore.getState().openSnapshot(3)],
+    ];
+    for (const [name, open] of opens) {
+      useWorkbookStore.setState({
+        currentHandle: makeHandle({ path: "/tmp/prev.coco" }),
+        nicelUndoStack: ["{\"prev\":1}"],
+        nicelRedoStack: ["{\"prev\":2}"],
+      });
+      invokeMock.mockResolvedValue(
+        name === "newWorkbook"
+          ? { ...makeHandle({ path: null }), snapshotJson: "{}" }
+          : openResult("/tmp/a.coco"),
+      );
+      await open();
+      const s = useWorkbookStore.getState();
+      expect([name, s.nicelUndoStack]).toEqual([name, []]);
+      expect([name, s.nicelRedoStack]).toEqual([name, []]);
+    }
+  });
+
+  it("a failed open keeps the current undo history", async () => {
+    useWorkbookStore.setState({ nicelUndoStack: ["{\"keep\":1}"], nicelRedoStack: [] });
+    invokeMock.mockRejectedValue("File not found: /missing.coco");
+    await useWorkbookStore.getState().openNicel("/missing.coco");
+    expect(useWorkbookStore.getState().nicelUndoStack).toEqual(["{\"keep\":1}"]);
+  });
+
   it("undo / redo, snapshot updates and save keep the key", async () => {
     useWorkbookStore.setState({
       docSessionKey: "stable",

@@ -5,12 +5,7 @@ const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 
 import { createTauriTrustPersistence, TRUST_RECORD_KEY_RE } from "./scriptTrustPersistence";
-import {
-  computeActiveContent,
-  createScriptTrustStore,
-  normalizeTrustPath,
-  trustRecordKey,
-} from "./scriptTrust";
+import { createScriptTrustStore, normalizeTrustPath, trustRecordKey } from "./scriptTrust";
 
 const KEY = "script_trust.v1." + "a".repeat(64);
 const PATH = "C:\\books\\report.coco";
@@ -105,7 +100,7 @@ describe("trust store over the Tauri persistence (fail closed)", () => {
     });
     const store = createScriptTrustStore(createTauriTrustPersistence());
     const subject = { sessionKey: "p-2", path: PATH, lookupPath: null };
-    const content = await computeActiveContent(snap("api.log(2)"));
+    const content = (await store.evaluate(subject, snap("api.log(2)"))).content;
     const r = await store.trust(subject, content, "always");
     expect(r.degraded).toBe(true);
     expect(r.grant.scope).toBe("session");
@@ -122,8 +117,9 @@ describe("trust store over the Tauri persistence (fail closed)", () => {
     });
     const store = createScriptTrustStore(createTauriTrustPersistence());
     const json = snap("api.log(3)");
-    const content = await computeActiveContent(json);
-    await store.trust({ sessionKey: "p-3", path: PATH, lookupPath: null }, content, "always");
+    const p3 = { sessionKey: "p-3", path: PATH, lookupPath: null };
+    const content = (await store.evaluate(p3, json)).content;
+    await store.trust(p3, content, "always");
 
     const again = await store.evaluate({ sessionKey: "p-4", path: PATH, lookupPath: null }, json);
     expect(again.state).toEqual({ kind: "trusted", scope: "always" });

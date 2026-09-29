@@ -277,6 +277,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: handle,
         docSessionKey: rotateDocSession(get().docSessionKey),
         trustLookupPath: null,
+        // #355: history belongs to the previous document; undoing into it would
+        // show that content under this document session.
+        nicelUndoStack: [],
+        nicelRedoStack: [],
         editorRevision: get().editorRevision + 1,
         saveStatus: "saved",
         wasDirtyBeforeExport: false,
@@ -307,6 +311,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: result.handle,
         docSessionKey: rotateDocSession(get().docSessionKey),
         trustLookupPath: null,
+        // #355: history belongs to the previous document; undoing into it would
+        // show that content under this document session.
+        nicelUndoStack: [],
+        nicelRedoStack: [],
         editorRevision: get().editorRevision + 1,
         saveStatus: "saved",
         wasDirtyBeforeExport: false,
@@ -357,6 +365,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: result.handle,
         docSessionKey: rotateDocSession(get().docSessionKey),
         trustLookupPath: null,
+        // #355: history belongs to the previous document; undoing into it would
+        // show that content under this document session.
+        nicelUndoStack: [],
+        nicelRedoStack: [],
         editorRevision: get().editorRevision + 1,
         saveStatus: "saved",
         wasDirtyBeforeExport: false,
@@ -398,6 +410,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: result.handle,
         docSessionKey: rotateDocSession(get().docSessionKey),
         trustLookupPath: null,
+        // #355: history belongs to the previous document; undoing into it would
+        // show that content under this document session.
+        nicelUndoStack: [],
+        nicelRedoStack: [],
         editorRevision: get().editorRevision + 1,
         saveStatus: "saved",
         wasDirtyBeforeExport: false,
@@ -1079,6 +1095,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         currentHandle: { ...result.handle, path: null },
         docSessionKey: rotateDocSession(get().docSessionKey),
         trustLookupPath: originalPath,
+        // #355: history belongs to the previous document; undoing into it would
+        // show that content under this document session.
+        nicelUndoStack: [],
+        nicelRedoStack: [],
         editorRevision: get().editorRevision + 1,
         saveStatus: "unsaved",
         wasDirtyBeforeExport: false,
@@ -1369,6 +1389,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
         // used only to look up an existing trust record.
         docSessionKey: rotateDocSession(get().docSessionKey),
         trustLookupPath: currentHandle.path,
+        // #355: history belongs to the previous document; undoing into it would
+        // show that content under this document session.
+        nicelUndoStack: [],
+        nicelRedoStack: [],
         editorRevision: get().editorRevision + 1,
         saveStatus: "unsaved",
         wasDirtyBeforeExport: false,

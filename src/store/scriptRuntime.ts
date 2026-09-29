@@ -64,6 +64,12 @@ export interface ScriptRunResult {
   elapsedMs: number;
   /** タイムアウトで打ち切られたか。 */
   timedOut: boolean;
+  /**
+   * #355: true only when the trust gate refused the run (nothing was
+   * evaluated). Set by the runtime itself, never derived from script output,
+   * so a script cannot produce it by throwing a matching error message.
+   */
+  blockedByGate?: boolean;
 }
 
 // ---------- トリガー (#189) --------------------------------------------------
@@ -743,9 +749,13 @@ export interface RunScriptOptions {
   fUniver?: FUniver | null;
   /** 既に開いた logs バッファ (テスト用; 通常は undefined)。 */
   initialLogs?: string[];
-  /** Function コンストラクタの代わりに任意の評価関数を注入 (テスト用)。 */
+  /** Function コンストラクタの代わりに任意の評価関数を注入 (テスト用)。
+   *  Test only (#355): it evaluates in the main frame, outside the sandbox.
+   *  Production code must not pass it; EditorScreen.test.tsx checks that no
+   *  file other than this one sets `factory:` or `executor:` for the runtime. */
   factory?: (source: string) => (api: ScriptApi, log: ScriptApi["log"]) => unknown;
-  /** 評価方式。未指定なら DOM があれば iframe、無ければ inline。 */
+  /** 評価方式。未指定なら DOM があれば iframe、無ければ inline。
+   *  Test only (#355), same rule as `factory`. */
   executor?: ScriptExecutor;
   /** 保護判定用の最新 snapshot JSON。 */
   snapshotJson?: string | null;
@@ -790,6 +800,7 @@ function notTrustedResult(): ScriptRunResult {
     errorLine: null,
     elapsedMs: 0,
     timedOut: false,
+    blockedByGate: true,
   };
 }
 

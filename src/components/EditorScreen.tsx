@@ -620,12 +620,12 @@ import {
   collectTriggers,
   fireTrigger,
   recordRun,
-  SCRIPT_NOT_TRUSTED,
 } from "../store/scriptRuntime";
 import { useScriptTrustGate } from "../hooks/useScriptTrustGate";
 import ScriptTrustBanner from "./ScriptTrustBanner";
 import {
   type ConnectionGuard,
+  normalizeIntervalMinutesInput,
   startDataConnectionSchedule,
 } from "../store/dataConnectionSchedule";
 import "./EditorScreen.css";
@@ -5344,9 +5344,11 @@ export default function EditorScreen() {
         name: patch.name,
         targetSheetName: patch.targetSheetName,
         steps: patch.steps,
+        // #355: store only values the scheduler accepts, so the saved
+        // schedule is exactly what the trust fingerprint and the badge show.
         schedule: {
-          onOpen: patch.scheduleOnOpen,
-          intervalMinutes: patch.scheduleIntervalMinutes,
+          onOpen: patch.scheduleOnOpen === true,
+          intervalMinutes: normalizeIntervalMinutesInput(patch.scheduleIntervalMinutes),
         },
       });
       const nextJson = JSON.stringify(snap);
@@ -9011,7 +9013,9 @@ export default function EditorScreen() {
           editEvent: extra.editEvent,
         });
         // #355: a refused run did not run; keep it out of the execution log.
-        if (result.error === SCRIPT_NOT_TRUSTED) continue;
+        // The runtime-set flag is used, not the error text, so a script cannot
+        // hide its own failures by throwing a matching message.
+        if (result.blockedByGate === true) continue;
         // M1 — after unmount, don't record runs or write logs.
         if (disposed) return;
         recordRun(entry, kind, result);

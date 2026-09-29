@@ -1,10 +1,13 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
+  MAX_INTERVAL_MINUTES,
+  MIN_INTERVAL_MINUTES,
   autoIntervalMinutes,
   connectionSignature,
   isAutoOnOpen,
   isAutoRefreshConnection,
+  normalizeIntervalMinutesInput,
   startDataConnectionSchedule,
   type ConnectionGuard,
 } from "./dataConnectionSchedule";
@@ -62,6 +65,60 @@ describe("auto-refresh predicates", () => {
       expect(autoIntervalMinutes(conn({ schedule: { onOpen: false, intervalMinutes: bad } }))).toBe(0);
     }
     expect(isAutoRefreshConnection(conn())).toBe(false);
+  });
+
+  it("rejects non-number intervals of every shape (M1)", () => {
+    for (const bad of ["5", true, [5], { m: 5 }, null] as unknown[]) {
+      const c = conn({ schedule: { onOpen: false, intervalMinutes: bad as number } });
+      expect(autoIntervalMinutes(c)).toBe(0);
+      expect(isAutoRefreshConnection(c)).toBe(false);
+    }
+  });
+
+  it("accepts only intervals the timer can represent (L4)", () => {
+    const at = (m: number) =>
+      autoIntervalMinutes(conn({ schedule: { onOpen: false, intervalMinutes: m } }));
+    expect(MAX_INTERVAL_MINUTES).toBe(35791);
+    expect(MAX_INTERVAL_MINUTES * 60_000).toBeLessThanOrEqual(2 ** 31 - 1);
+    expect(at(MIN_INTERVAL_MINUTES)).toBe(1);
+    expect(at(1.5)).toBe(1.5);
+    expect(at(MAX_INTERVAL_MINUTES)).toBe(MAX_INTERVAL_MINUTES);
+    expect(at(0.5)).toBe(0);
+    expect(at(0.00001)).toBe(0);
+    expect(at(MAX_INTERVAL_MINUTES + 1)).toBe(0);
+    expect(at(1e9)).toBe(0);
+  });
+
+  it("normalizes form input to a value the scheduler accepts", () => {
+    expect(normalizeIntervalMinutesInput(5)).toBe(5);
+    expect(normalizeIntervalMinutesInput(5.9)).toBe(5);
+    expect(normalizeIntervalMinutesInput("7")).toBe(7);
+    expect(normalizeIntervalMinutesInput(0)).toBe(0);
+    expect(normalizeIntervalMinutesInput(0.5)).toBe(0);
+    expect(normalizeIntervalMinutesInput(-3)).toBe(0);
+    expect(normalizeIntervalMinutesInput(Number.NaN)).toBe(0);
+    expect(normalizeIntervalMinutesInput("abc")).toBe(0);
+    expect(normalizeIntervalMinutesInput(99_999)).toBe(MAX_INTERVAL_MINUTES);
+    for (const v of [5, 5.9, "7", 99_999, 1]) {
+      const n = normalizeIntervalMinutesInput(v);
+      expect(autoIntervalMinutes(conn({ schedule: { onOpen: false, intervalMinutes: n } }))).toBe(n);
+    }
+  });
+
+  it("does not schedule an out-of-range interval even with a grant", async () => {
+    const huge = conn({ id: "huge", schedule: { onOpen: false, intervalMinutes: 50_000 } });
+    const tiny = conn({ id: "tiny", sourcePath: "C:\\t.csv", schedule: { onOpen: false, intervalMinutes: 0.001 } });
+    const { refresh } = refreshStub(() => [huge, tiny]);
+    const handle = startDataConnectionSchedule({
+      connections: [huge, tiny],
+      getGrant: () => grantFor([huge, tiny]),
+      onOpenPending: true,
+      refresh,
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(refresh).not.toHaveBeenCalled();
+    handle.stop();
   });
 
   it("signature ignores display fields and header order", () => {

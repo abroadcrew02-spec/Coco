@@ -83,12 +83,20 @@ export interface TrustEvaluation {
 
 export interface ScriptTrustStore {
   isTrusted(subject: TrustSubject, fingerprint: string): Promise<boolean>;
-  /** "always" rejects without a path. A failed save falls back to "session". */
+  /**
+   * `content` must come from `evaluate` for the same session. "always"
+   * rejects without a path. A failed save falls back to "session".
+   */
   trust(
     subject: TrustSubject,
     content: ActiveContent,
     scope: TrustScope,
   ): Promise<{ grant: ScriptExecutionGrant; degraded: boolean }>;
+  /**
+   * Delete the record for `path`. Open documents at that path (or trusted
+   * through it) lose every decision of their session, including "allow once"
+   * and in-app edits, and become untrusted immediately.
+   */
   revoke(path: string): Promise<void>;
   list(): Promise<TrustRecord[]>;
   evaluate(subject: TrustSubject, snapshotJson: string | null): Promise<TrustEvaluation>;
@@ -150,18 +158,12 @@ export async function trustRecordKey(pathNorm: string): Promise<string> {
 
 // ---------- fingerprint ---------------------------------------------------------
 
-// Contents built by `computeActiveContent`. `trust()` only accepts these, so a
-// caller cannot hand in a hand-made approval list.
-const producedContents = new WeakSet<ActiveContent>();
-
 function freezeContent(c: ActiveContent): ActiveContent {
-  const frozen = Object.freeze({
+  return Object.freeze({
     ...c,
     scriptSources: Object.freeze([...c.scriptSources]),
     connectionSignatures: Object.freeze([...c.connectionSignatures]),
   });
-  producedContents.add(frozen);
-  return frozen;
 }
 
 const EMPTY_CONTENT: ActiveContent = freezeContent({
@@ -173,8 +175,8 @@ const EMPTY_CONTENT: ActiveContent = freezeContent({
   isEmpty: true,
 });
 
-// Returned when evaluation failed. Not registered in `producedContents`, so it
-// can never be trusted.
+// Returned when evaluation failed. Never bound to a session by `evaluate`, so
+// it can never be trusted.
 const UNAVAILABLE_CONTENT: ActiveContent = Object.freeze({
   fingerprint: UNAVAILABLE_FINGERPRINT,
   scriptSources: Object.freeze([]) as readonly string[],
@@ -296,6 +298,9 @@ interface SessionMemory {
   grants: Map<string, ScriptExecutionGrant>;
   /** Pending local-edit adoptions; evaluate waits for them. */
   pending: Promise<void>;
+  /** Normalized path / lookup path of the document as last seen, used to
+   *  find the open documents a revoked path applies to. */
+  pathNorms: string[];
 }
 
 const GRANT_CACHE_SIZE = 8;
@@ -325,7 +330,21 @@ export function createScriptTrustStore(persistence: TrustPersistence): ScriptTru
   const sessions = new Map<string, SessionMemory>();
   const endedSessions = new Set<string>();
   const listeners = new Set<() => void>();
+  // Content returned by `evaluate`, mapped to the session it was evaluated
+  // for. `trust()` only accepts content evaluated by this store for the same
+  // session, so neither a hand-made approval list nor content from another
+  // document can be trusted.
+  const evaluatedFor = new WeakMap<ActiveContent, string>();
   let revocations = 0;
+
+  const bindToSession = (content: ActiveContent, key: string): ActiveContent => {
+    if (!content.isEmpty) evaluatedFor.set(content, key);
+    return content;
+  };
+
+  const touchSubject = (s: SessionMemory, subject: TrustSubject) => {
+    s.pathNorms = subjectPathNorms(subject);
+  };
 
   const notify = () => {
     for (const l of [...listeners]) {
@@ -341,7 +360,7 @@ export function createScriptTrustStore(persistence: TrustPersistence): ScriptTru
     if (endedSessions.has(key)) return null;
     let s = sessions.get(key);
     if (!s) {
-      s = { trusted: new Map(), grants: new Map(), pending: Promise.resolve() };
+      s = { trusted: new Map(), grants: new Map(), pending: Promise.resolve(), pathNorms: [] };
       sessions.set(key, s);
     }
     return s;
@@ -417,9 +436,10 @@ export function createScriptTrustStore(persistence: TrustPersistence): ScriptTru
     const key = subject.sessionKey;
     const s = sessionFor(key);
     if (!s) return failClosed();
+    touchSubject(s, subject);
     await s.pending;
     const startRevocations = revocations;
-    const content = await computeActiveContent(snapshotJson);
+    const content = bindToSession(await computeActiveContent(snapshotJson), key);
     if (content.isEmpty) return { state: { kind: "none" }, content, grant: null };
     if (!isAlive(key, s)) return failClosed();
 
@@ -482,13 +502,17 @@ export function createScriptTrustStore(persistence: TrustPersistence): ScriptTru
 
   const trust: ScriptTrustStore["trust"] = async (subject, content, scope) => {
     assertSubject(subject);
-    if (!producedContents.has(content) || content.isEmpty) {
+    if (content === null || typeof content !== "object" || content.isEmpty) {
       throw new Error("Only evaluated, non-empty content can be trusted");
+    }
+    if (evaluatedFor.get(content) !== subject.sessionKey) {
+      throw new Error("The content was not evaluated for this document session");
     }
     if (scope !== "session" && scope !== "always") throw new Error("Unknown trust scope");
     const key = subject.sessionKey;
     const s = sessionFor(key);
     if (!s) throw new Error("The document session has ended");
+    touchSubject(s, subject);
 
     if (scope === "always") {
       if (!hasSavedPath(subject)) {
@@ -530,26 +554,35 @@ export function createScriptTrustStore(persistence: TrustPersistence): ScriptTru
     return { grant, degraded: false };
   };
 
+  /**
+   * Drop every decision (always, allow once, self) of the open documents the
+   * revoked path applies to, and revoke their grants, so they fall back to
+   * untrusted and their timers stop. Other documents are not touched.
+   */
+  const dropSessionsFor = (pathNorm: string) => {
+    for (const [key, s] of sessions) {
+      const affected =
+        s.pathNorms.includes(pathNorm) ||
+        [...s.trusted.values()].some((e) => e.fromPathNorm === pathNorm);
+      if (!affected) continue;
+      s.trusted.clear();
+      s.grants.clear();
+      revokeSessionGrants(key);
+    }
+  };
+
   const revoke: ScriptTrustStore["revoke"] = async (path) => {
     const pathNorm = normalizeTrustPath(path);
     if (!pathNorm) return;
-    revocations += 1;
-    for (const [key, s] of sessions) {
-      let hit = false;
-      for (const [fp, entry] of [...s.trusted]) {
-        if (entry.scope === "always" && entry.fromPathNorm === pathNorm) {
-          s.trusted.delete(fp);
-          hit = true;
-        }
-      }
-      if (hit) {
-        revokeSessionGrants(key);
-        s.grants.clear();
-      }
-    }
     try {
+      // Delete first: an evaluation that reads the record before this point
+      // is caught by the revocation counter below and runs again.
       await persistence.delete(await trustRecordKey(pathNorm));
     } finally {
+      // Also on failure: the open documents lose their session decisions; if
+      // the record survived, re-evaluation restores only "always".
+      revocations += 1;
+      dropSessionsFor(pathNorm);
       notify();
     }
   };
@@ -590,9 +623,11 @@ export function createScriptTrustStore(persistence: TrustPersistence): ScriptTru
     if (!s) return Promise.resolve();
     const session = s;
     const key = subject.sessionKey;
+    touchSubject(session, subject);
     // Registered synchronously so an evaluate() started right after this call
     // (by the store update that follows the edit) waits for the decision.
     const run = session.pending.then(async () => {
+      const startRevocations = revocations;
       const prev = await computeActiveContent(prevJson);
       const next = await computeActiveContent(nextJson);
       if (next.isEmpty || next.fingerprint === prev.fingerprint) return;
@@ -600,6 +635,9 @@ export function createScriptTrustStore(persistence: TrustPersistence): ScriptTru
       if (!prevTrusted) {
         prevTrusted = (await lookupRecords(subject, prev.fingerprint)).matchPathNorm !== null;
       }
+      // A revoke while deciding means the basis for "prev was trusted" may be
+      // gone; do not promote.
+      if (revocations !== startRevocations) return;
       if (!prevTrusted || !isAlive(key, session)) return;
       remember(session, next.fingerprint, { scope: "self", fromPathNorm: null });
       notify();
@@ -669,6 +707,7 @@ const delegatingPersistence: TrustPersistence = {
 };
 
 let appStore: ScriptTrustStore | null = null;
+let backendInstalled = false;
 
 /** The store used by the app. */
 export function getScriptTrustStore(): ScriptTrustStore {
@@ -676,7 +715,24 @@ export function getScriptTrustStore(): ScriptTrustStore {
   return appStore;
 }
 
-/** Replace the storage backend of the app-wide store (durable storage lane). */
-export function setScriptTrustPersistence(next: TrustPersistence): void {
+/**
+ * Install the durable storage backend of the app-wide store. Meant to be
+ * called once at startup (main.tsx). Only the first call takes effect; later
+ * calls are ignored and return false, so the backend cannot be swapped while
+ * the app runs.
+ */
+export function setScriptTrustPersistence(next: TrustPersistence): boolean {
+  if (backendInstalled) return false;
+  if (
+    !next ||
+    typeof next.get !== "function" ||
+    typeof next.set !== "function" ||
+    typeof next.list !== "function" ||
+    typeof next.delete !== "function"
+  ) {
+    throw new Error("setScriptTrustPersistence: invalid persistence");
+  }
   backend = next;
+  backendInstalled = true;
+  return true;
 }

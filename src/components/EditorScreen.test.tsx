@@ -268,6 +268,19 @@ describe("#355 script trust gate wiring", () => {
     expect(users).toEqual([]);
   });
 
+  it("never passes the test-only factory / executor options from production code (L2)", () => {
+    // `factory` and `executor` evaluate outside the sandbox iframe. Only the
+    // runtime and tests may set them.
+    const runtimeUsers = sources.filter(
+      (s) => s.file !== "store/scriptRuntime.ts" && /from "[./]*(store\/)?scriptRuntime"/.test(s.text),
+    );
+    expect(runtimeUsers.map((s) => s.file)).toContain("components/EditorScreen.tsx");
+    const offenders = runtimeUsers
+      .filter((s) => /\b(factory|executor)\s*:/.test(s.text))
+      .map((s) => s.file);
+    expect(offenders).toEqual([]);
+  });
+
   it("keeps sandbox iframe creation inside the runtime", () => {
     const users = sources
       .filter((s) => /createElement\(\s*["']iframe["']/.test(s.text))
@@ -287,8 +300,10 @@ describe("#355 script trust gate wiring", () => {
     expect(triggerEffectSource).toMatch(/fireTrigger\(entry, kind, \{\s*grant,/);
     expect(triggerEffectSource.match(/collectTriggers\(/g)?.length).toBe(1);
     expect(triggerEffectSource.match(/fireTrigger\(/g)?.length).toBe(1);
-    // A refused run is not written to the execution log.
-    expect(triggerEffectSource).toMatch(/if \(result\.error === SCRIPT_NOT_TRUSTED\) continue;/);
+    // A refused run is not written to the execution log. The runtime-set flag
+    // decides, not the error text a script could imitate (L3).
+    expect(triggerEffectSource).toMatch(/if \(result\.blockedByGate === true\) continue;/);
+    expect(triggerEffectSource).not.toMatch(/SCRIPT_NOT_TRUSTED/);
   });
 
   it("data-connection schedule: gated, re-checked per refresh, on-open marker set only when fired", () => {
@@ -310,6 +325,12 @@ describe("#355 script trust gate wiring", () => {
     expect(scriptEditorDialogSource).toMatch(/grant=\{scriptGrant\}/);
     expect(scriptEditorDialogSource).toMatch(
       /adoptLocalEdit\(currentSnapshotJson, nextJson\);\s*updateSnapshot\(nextJson\);/,
+    );
+  });
+
+  it("stores only scheduler-accepted schedule values when a connection is edited (M1)", () => {
+    expect(editorSource).toMatch(
+      /schedule: \{\s*onOpen: patch\.scheduleOnOpen === true,\s*intervalMinutes: normalizeIntervalMinutesInput\(patch\.scheduleIntervalMinutes\),\s*\}/,
     );
   });
 

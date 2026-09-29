@@ -4,6 +4,21 @@ All notable changes to Nicel (formerly Coco) are documented in this file. The fo
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-09-29
+
+Patch release. Number formats applied in Nicel show on the grid immediately, `.coco` workbooks saved by v0.8.1 or earlier open with their formatting, and the script iframe gets a Content-Security-Policy. Delivered to v0.8.3 users through the auto-updater.
+
+### Fixed
+
+- **Number formats render as soon as they are applied** (#343). The Number Format dialog, the quick-format buttons, the Comma / Currency / Percent presets, the ribbon comma / decimal buttons and the Number Format Manager wrote only the per-cell `_fmt` key, while the `@univerjs/sheets-numfmt` renderer reads the pattern from the cell style (`n.pattern`), so the grid only caught up after a save and reopen. A shared helper, `writeCellNumberFormat`, now writes both. A shared style id is copied onto the target cell only, so other cells using the same style keep their formatting. The Number Format Manager's "apply to range" wrote into a non-existent `_fmt[row][col]` table and had no effect; it now goes through the same helper.
+- **`.coco` workbooks with legacy-shaped styles render formatted** (#344). Styles saved by v0.8.1 or earlier in the `{font, fill, alignment, borders}` shape are normalised to Univer's shape in memory when the workbook is opened, on the normal open, backup-restore and snapshot-history paths. A snapshot with no legacy entries is returned as the original string. The file itself is not rewritten.
+- **Script sandbox iframe has a Content-Security-Policy**: `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; form-action 'none'`. Scripts embedded in a workbook (`Nicel.onOpen` etc.) can no longer make network requests from their execution environment. Script execution and the sheet API work as before.
+
+### Known issues
+
+- Two paths still write number formats to `_fmt` only: `smartDate.ts` and `templates.ts`, so those formats may not show on the grid until the workbook is reopened (#347).
+- The rust_xlsxwriter limits on the sheet default column width and default row height listed under 0.8.1 remain (#346).
+
 ## [0.8.3] - 2026-09-28
 
 Patch release. A freshly created or opened workbook no longer starts as "unsaved", and the updater asks instead of refusing when there are unsaved edits. Delivered to v0.8.2 users through the auto-updater.
@@ -28,9 +43,9 @@ Patch release. Cell formatting from existing Excel files is now rendered, and fo
 
 ### Known issues
 
-- Number formats set through Nicel's own dialog are written to the per-cell `_fmt` key (exported correctly) but not to the style's `n.pattern`, so the on-screen rendering updates on the next open.
+- Number formats set through Nicel's own dialog are written to the per-cell `_fmt` key (exported correctly) but not to the style's `n.pattern`, so the on-screen rendering updates on the next open. (fixed in 0.8.4)
 - Tint math can differ from Excel by 1/255 per channel.
-- `.coco` workbooks saved by v0.8.1 or earlier keep the legacy style shape; they export correctly but do not render styled until re-opened from xlsx.
+- `.coco` workbooks saved by v0.8.1 or earlier keep the legacy style shape; they export correctly but do not render styled until re-opened from xlsx. (fixed in 0.8.4)
 
 ## [0.8.1] - 2026-09-28
 

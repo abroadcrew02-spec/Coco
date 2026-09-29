@@ -1,10 +1,12 @@
 # Nicel — current state
 
-Snapshot 2026-09-28 against the v0.8.0 rename branch (based on `main` `fd38912`).
+Snapshot 2026-09-29 against v0.8.4 (branch `fix/v0.8.4`, based on `main` `fce3bedd`).
 
 ## Headline
 
 **v0.8.0: the app is renamed Coco → Nicel.** Product name, UI strings, installer, crate, CSS, file names and docs use the new name. Persisted identifiers keep the old spelling for compatibility: `.coco` extension, `_coco*` snapshot keys, `xl/cocoExtensions/`, `com.coco.app`, `coco.*` localStorage keys, `coco-urlfetch` keyring service, updater endpoint / pubkey. The NSIS installer removes the legacy per-user `Coco` install before installing and re-creates shortcuts (`src-tauri/windows/hooks.nsh`; MSI upgrade code pinned to the Coco value in `tauri.conf.json`). Script API is `Nicel.*` with `Coco` kept as an alias. Details: `CHANGELOG.md` 0.8.0.
+
+**v0.8.1–v0.8.4 patch releases** (all delivered through the auto-updater). 0.8.1 converts xlsx column widths and row heights between Excel units and pixels, and keeps a failed save visible. 0.8.2 renders and exports cell formatting from xlsx, including theme / indexed colors and number formats. 0.8.3 opens and creates workbooks in the saved state and turns the updater's unsaved-edits guard into a confirmation. 0.8.4 shows number formats on the grid as soon as they are applied (#343), renders legacy-shaped styles in `.coco` workbooks saved by v0.8.1 or earlier (#344), and sets a Content-Security-Policy on the script sandbox iframe. Details and known issues: `CHANGELOG.md` 0.8.1–0.8.4.
 
 **Upgrade test (S2) — PASS on 2026-09-28** (dev machine, Coco 0.7.0 per-user install → locally built `Nicel_0.8.0_x64-setup.exe`, sha256 `F32484D6…87FEF`, Tauri CLI 2.11.1, throw-away updater key). Command: `Nicel_0.8.0_x64-setup.exe /P /R /UPDATE /ARGS` (the exact switches the auto-updater passes; `/S` alone does not reproduce the update-mode shortcut path). Observed: installer exit 0; `nicel.exe` auto-restarted from `%LOCALAPPDATA%\Nicel` with the last workbook reopened; `HKCU\...\Uninstall\Coco` gone, `...\Uninstall\Nicel` = 0.8.0 (one entry); `%LOCALAPPDATA%\Coco` gone; Start-menu + desktop `Nicel.lnk` present, `Coco.lnk` gone; all 25 files under `%AppData%\com.coco.app` still present (`app_state.db` same size), `%LocalAppData%\com.coco.app` intact. A second run with `/S` exited 0 with the hook a no-op (still one entry, shortcuts unchanged). Not covered: the GUI prompt path with Coco still open, MSI-installed machines. Re-run S2 after any Tauri CLI upgrade (the hook depends on the template's `$UpdateMode` variable and the `CheckIfAppIsRunning` macro).
 
@@ -12,12 +14,15 @@ Snapshot 2026-09-28 against the v0.8.0 rename branch (based on `main` `fd38912`)
 
 ## Key counts
 
+Rows marked "2026-09-28" were measured on the v0.8.0 branch and have not been re-run for v0.8.4 (※未検証 for v0.8.4). Rows marked "2026-09-29" are file / grep counts on the `fix/v0.8.4` working tree, not test runs.
+
 | | Count | Source |
 |-|-|-|
-| Vitest test files | 134 | `npx vitest --run` |
-| Vitest tests passing | 2,844 | same run |
-| Cargo integration test files | 57 | `src-tauri/tests/` |
-| Cargo `#[test]` / `#[tokio::test]` annotations | 537 | grep across `src-tauri/tests/` + `src-tauri/src/` |
+| Vitest test files | 134 (2026-09-28, v0.8.0 branch) | `npx vitest --run` |
+| Test files under `src/` (`*.test.ts` / `*.test.tsx`) | 137 (2026-09-29) | `find src -name "*.test.ts" -o -name "*.test.tsx" \| wc -l` |
+| Vitest tests passing | 2,844 (2026-09-28, v0.8.0 branch) | same run |
+| Cargo integration test files | 59 (2026-09-29) | `ls src-tauri/tests/*.rs \| wc -l` |
+| Cargo `#[test]` / `#[tokio::test]` annotations | 583 (2026-09-29) | `grep -rE "#\[(tokio::)?test\]" src-tauri/tests src-tauri/src \| wc -l` |
 | Distbin artifacts produced by `npm run pack` | Windows: `Nicel.exe` + `.msi` + `.exe` (NSIS) + `SHA256SUMS.txt` + `manifest.json` + `README.md`; macOS: `.dmg` + raw `Nicel` binary + same metadata; Linux: `.deb` / `.AppImage` / `.rpm` + same metadata | `scripts/pack-distbin.mjs` |
 | Phase 2 dialogs + toolbar tools | 10 + 2 | `docs/COVERAGE.md` Phase 2 table |
 

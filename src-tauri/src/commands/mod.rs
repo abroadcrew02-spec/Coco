@@ -8,6 +8,7 @@ pub mod http_fetch_stream;
 pub mod pdf_export;
 pub mod url_fetch_credentials;
 pub mod recovery;
+pub mod script_trust;
 pub mod security;
 pub mod settings;
 pub mod sheet_import;

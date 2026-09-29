@@ -8,6 +8,11 @@ pub enum NicelError {
     Io(#[from] std::io::Error),
     #[error("Serialization error: {0}")]
     Json(#[from] serde_json::Error),
+    /// #355: a write/delete through a generic, non-dedicated path was
+    /// refused because it targeted a reserved key range (currently only
+    /// `script_trust.*` — see `db::operations::SCRIPT_TRUST_KEY_PREFIX`).
+    #[error("{0}")]
+    Rejected(String),
 }
 
 // Tauri commands must return serializable errors

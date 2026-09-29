@@ -208,7 +208,10 @@ fn open_nicel_preserves_co_located_univer_only_keys_when_migrating_legacy() {
     assert_eq!(style["bg"]["rgb"], "#123456");
     assert!(style.get("font").is_none());
     assert!(style.get("fill").is_none());
-    // ...and the co-located keys `CellStyle` doesn't model survive untouched.
+    // ...and the co-located keys survive untouched: `tr` because `CellStyle`
+    // doesn't model it at all, `ul` because it's already set and the merge
+    // never overwrites an existing key — even one `CellStyle` does model,
+    // since #350 made `ul` mean underline.
     assert_eq!(style["ul"], json!({ "s": 1 }));
     assert_eq!(style["tr"], json!({ "a": 45, "v": 0 }));
 }

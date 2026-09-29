@@ -57,6 +57,72 @@ fn delete_setting_on_missing_key_is_noop() {
     delete_setting_core(tmp.path(), "nonexistent").unwrap();
 }
 
+// ── #355: the generic settings surface must not touch `script_trust.*` ─────
+// (that's reserved for the dedicated script_trust_* commands — see
+// db::operations::SCRIPT_TRUST_KEY_PREFIX and commands::script_trust for the
+// full "why": a generic write path here would let a script grant itself
+// execution by writing its own "always trust" record.)
+
+#[test]
+fn set_setting_rejects_script_trust_prefixed_keys() {
+    let tmp = TempDir::new().unwrap();
+    let result = set_setting_core(
+        tmp.path(),
+        "script_trust.v1.deadbeef",
+        r#"{"v":1,"path":"C:\\evil.coco"}"#,
+    );
+    assert!(result.is_err(), "set_setting must reject a script_trust.* key");
+    // And the rejection must not have written anything.
+    assert_eq!(
+        get_setting_core(tmp.path(), "script_trust.v1.deadbeef").unwrap(),
+        None
+    );
+}
+
+#[test]
+fn delete_setting_rejects_script_trust_prefixed_keys() {
+    let tmp = TempDir::new().unwrap();
+    // Seed a row the normal way (bypassing the guard, as script_trust.rs's
+    // own commands do) so there's something a buggy delete_setting could
+    // have removed.
+    {
+        use rusqlite::Connection;
+        let conn = Connection::open(tmp.path().join("app_state.db")).unwrap();
+        nicel_lib::db::schema::initialize(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["script_trust.v1.deadbeef", "{}", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+    }
+    let result = delete_setting_core(tmp.path(), "script_trust.v1.deadbeef");
+    assert!(
+        result.is_err(),
+        "delete_setting must reject a script_trust.* key"
+    );
+}
+
+#[test]
+fn list_settings_never_returns_script_trust_prefixed_keys() {
+    let tmp = TempDir::new().unwrap();
+    set_setting_core(tmp.path(), "ordinary.setting", "1").unwrap();
+    // Seed a script_trust row directly (bypassing the guard) so we can prove
+    // list_settings excludes it even though it exists in the same table.
+    {
+        use rusqlite::Connection;
+        let conn = Connection::open(tmp.path().join("app_state.db")).unwrap();
+        nicel_lib::db::schema::initialize(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["script_trust.v1.deadbeef", "{}", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+    }
+    let entries = list_settings_core(tmp.path()).unwrap();
+    assert_eq!(entries.len(), 1, "only the ordinary setting should be listed");
+    assert_eq!(entries[0].key, "ordinary.setting");
+}
+
 #[test]
 fn settings_are_isolated_between_data_dirs() {
     let tmp_a = TempDir::new().unwrap();

@@ -243,9 +243,14 @@ impl CellStyle {
         s.italic = flag("it");
         // #350: `ul` is Univer's real underline key; `un` is a private key
         // this project wrote through v0.8.4 that the grid never rendered.
-        // Prefer `ul`, but keep reading `un` for backward compatibility with
-        // `.coco` files saved by v0.8.2-0.8.4 so their underline formatting
-        // isn't silently dropped on open.
+        // Prefer `ul`, but keep reading `un` too so callers that round-trip
+        // a style through `CellStyle` (e.g. xlsx export) don't silently drop
+        // an old file's underline. This fallback runs here only — it does
+        // NOT by itself fix a plain `.coco` *open*, which hands the raw
+        // snapshot JSON straight to the grid without going through
+        // `CellStyle` at all; that needs the JSON itself rewritten (see
+        // `migrate_un_to_ul_in_place`, run as part of
+        // `normalize_legacy_style_snapshot`).
         s.underline = obj
             .get("ul")
             .or_else(|| obj.get("un"))
@@ -399,30 +404,17 @@ impl CellStyle {
 /// byte-for-byte.
 pub(crate) fn normalize_legacy_style_snapshot(snapshot_json: &str) -> Result<String, String> {
     // #354: parsing the entire snapshot into serde_json::Value just to find
-    // out nothing needs rewriting is the expensive part — on Windows, JSON
-    // parse throughput of ~5-15 MB/s means a multi-MB snapshot (perf's
-    // measurement: 100k+ cells) can pause this synchronous command's calling
-    // thread for 3-6s. A legacy style object is only ever detected below by
-    // one of these four keys (see `normalize_style_value_in_place`), and they
-    // always appear as a *quoted* JSON object key (`"font":...`) in a
-    // legacy-shaped `.coco`. An already-migrated or Univer-native snapshot
-    // never contains any of them, so a plain substring scan of the raw string
-    // — no parsing — is enough to rule that out and skip straight to
-    // returning the input unchanged.
-    //
-    // A false positive is possible (e.g. a cell's text value happens to be
-    // exactly "font") but harmless: it only falls through to the full parse
-    // below, which finds nothing to migrate and returns the original string
-    // anyway. A false negative is not possible: if none of the four substrings
-    // occur anywhere in the raw text, they cannot occur as an object key
-    // either. Note the trailing quote in each needle — `"fontFamily"` does not
-    // contain the substring `"font"` because the closing quote lands after
-    // `Family`, not right after `font`.
-    const LEGACY_KEY_NEEDLES: [&str; 4] = ["\"font\"", "\"fill\"", "\"alignment\"", "\"borders\""];
-    if !LEGACY_KEY_NEEDLES
-        .iter()
-        .any(|needle| snapshot_json.contains(needle))
-    {
+    // out nothing needs rewriting is the expensive part. Performance's own
+    // spike measurement put serde_json parse throughput on Windows at
+    // roughly 5-15 MB/s (serde_json 1.0.149 per Cargo.lock as of this
+    // writing; exact build profile wasn't pinned down further, and a debug
+    // build is markedly slower than release — see perf_smoke.rs's own
+    // ceilings for that gap), so a multi-MB snapshot (100k+ cells) can pause
+    // this synchronous command's calling thread for several seconds. See
+    // `may_contain_legacy_style_keys` for the cheap substring pre-check that
+    // lets an already-migrated or Univer-native snapshot skip the parse
+    // entirely.
+    if !may_contain_legacy_style_keys(snapshot_json) {
         return Ok(snapshot_json.to_string());
     }
 
@@ -478,17 +470,59 @@ pub(crate) fn normalize_legacy_style_snapshot(snapshot_json: &str) -> Result<Str
     serde_json::to_string(&root).map_err(|e| e.to_string())
 }
 
-/// Rewrites `v` in place if it is a legacy-shaped style object (detected by
-/// the presence of a legacy-only key). Returns whether anything changed.
+/// #354: whether `s` might contain a legacy-shaped style key — `"font"`,
+/// `"fill"`, `"alignment"`, `"borders"` (v0.8.1 and earlier's private style
+/// shape) — or the pre-#350 private underline key `"un"` (still written as
+/// of v0.8.4). Used as the cheap pre-check in `normalize_legacy_style_snapshot`:
+/// that function only pays for the full `serde_json::Value` parse when this
+/// returns true.
 ///
-/// This merges rather than replaces (reviewer finding B2): every key already
-/// present on `v` — including a co-located Univer-only key like `tr` that
-/// `CellStyle` doesn't model, or a Univer key `CellStyle` does model (e.g.
-/// `ul`) that the object already set directly — wins over the value
-/// `CellStyle::to_json` would derive and is never overwritten. Only the four
-/// legacy-only keys are ever removed; everything else on the object survives
-/// untouched.
+/// This is a plain substring search on the *quoted* key text (e.g. `"font"`
+/// with both quote characters), never a JSON parse:
+/// - A false positive is possible — a cell's text value happens to equal one
+///   of these words exactly, e.g. `{"v":"font"}` — but harmless: the caller
+///   falls through to the full parse, which finds nothing to migrate under
+///   that key and returns the original string unmodified either way.
+/// - A false negative is not possible for a key spelled the ordinary way: if
+///   none of these substrings occur anywhere in the raw text, they cannot
+///   occur as an object key either. Note the trailing quote in each needle —
+///   `"fontFamily"` does not contain the substring `"font"` because the
+///   closing quote lands after `Family`, not right after `font`. The one
+///   theoretical exception is a key written with a JSON `\uXXXX` escape
+///   (e.g. `"font"` for `"font"`): this function would miss it, since
+///   the escape sequence — not the literal letters — appears in the raw
+///   text. Neither `JSON.stringify` (the frontend) nor `serde_json` (this
+///   file's own writer) ever escapes a plain ASCII letter that way, so this
+///   can't happen from any file Nicel itself produced; only a hand-edited or
+///   foreign-tool-written `.coco` could trigger it, and the effect is the
+///   same "renders without the old formatting" degradation as any other
+///   unrecognized shape, not a crash or data loss.
+fn may_contain_legacy_style_keys(s: &str) -> bool {
+    const NEEDLES: [&str; 5] = [
+        "\"font\"",
+        "\"fill\"",
+        "\"alignment\"",
+        "\"borders\"",
+        "\"un\"",
+    ];
+    NEEDLES.iter().any(|needle| s.contains(needle))
+}
+
+/// Rewrites `v` in place if it is a legacy-shaped style object (detected by
+/// the presence of a legacy-only key) and/or still carries the pre-#350
+/// private underline key `un`. Returns whether anything changed.
+///
+/// The legacy-key case merges rather than replaces (reviewer finding B2):
+/// every key already present on `v` — including a co-located Univer-only key
+/// like `tr` that `CellStyle` doesn't model, or a Univer key `CellStyle` does
+/// model (e.g. `ul`) that the object already set directly — wins over the
+/// value `CellStyle::to_json` would derive and is never overwritten. Only
+/// the four legacy-only keys are ever removed; everything else on the object
+/// survives untouched. The `un`/`ul` rename is independent of that and runs
+/// first — see `migrate_un_to_ul_in_place`.
 fn normalize_style_value_in_place(v: &mut Value) -> bool {
+    let renamed_underline_key = migrate_un_to_ul_in_place(v);
+
     let is_legacy = v
         .as_object()
         .map(|o| {
@@ -499,18 +533,18 @@ fn normalize_style_value_in_place(v: &mut Value) -> bool {
         })
         .unwrap_or(false);
     if !is_legacy {
-        return false;
+        return renamed_underline_key;
     }
     let Some(style) = CellStyle::from_json(v) else {
-        return false;
+        return renamed_underline_key;
     };
     // `CellStyle::to_json` always returns `Value::Object(..)`; the `let else`
     // is defensive rather than reachable.
     let Value::Object(derived) = style.to_json() else {
-        return false;
+        return renamed_underline_key;
     };
     let Some(obj) = v.as_object_mut() else {
-        return false;
+        return renamed_underline_key;
     };
     for key in ["font", "fill", "alignment", "borders"] {
         obj.remove(key);
@@ -522,6 +556,31 @@ fn normalize_style_value_in_place(v: &mut Value) -> bool {
         // precedence over what `CellStyle` would derive from the legacy keys.
         obj.entry(key).or_insert(value);
     }
+    true
+}
+
+/// #350 follow-up: `.coco` files saved by v0.8.2-0.8.4 wrote underline as the
+/// private `un` key (see `CellStyle::to_json`'s doc comment for why `ul` is
+/// Univer's real key). `CellStyle::from_json`'s `un` fallback only helps
+/// code paths that round-trip a style through `CellStyle` (e.g. xlsx
+/// export) — a plain `.coco` *open* hands this raw JSON straight to the
+/// grid, which only ever reads `ul`, so those files still rendered without
+/// underline even with that fallback in place. This renames `un` -> `ul` in
+/// the snapshot JSON itself so the grid picks it up too.
+///
+/// Only when `ul` isn't already present: an object that already has `ul` is
+/// left completely untouched — `un` and all. There's nothing to fix on such
+/// an object, and picking which of two present values is "right" isn't this
+/// function's job.
+fn migrate_un_to_ul_in_place(v: &mut Value) -> bool {
+    let Some(obj) = v.as_object_mut() else {
+        return false;
+    };
+    if obj.contains_key("ul") || !obj.contains_key("un") {
+        return false;
+    }
+    let value = obj.remove("un").expect("contains_key checked above");
+    obj.insert("ul".to_string(), value);
     true
 }
 
@@ -12028,6 +12087,135 @@ mod normalize_legacy_style_snapshot_tests {
                 "sheet-1": {
                     "id": "sheet-1",
                     "cellData": { "0": { "0": { "v": "font" } } }
+                }
+            },
+            "styles": { "s1": { "bl": 1 } }
+        })
+        .to_string();
+        let out = normalize_legacy_style_snapshot(&input).unwrap();
+        assert_eq!(out, input);
+    }
+
+    // ── may_contain_legacy_style_keys: direct truth table ───────────────────
+    //
+    // The previous coverage only asserted the *timing* of the fast path
+    // (`large_univer_snapshot_without_legacy_keys_returns_input_fast`), which
+    // a reviewer (マリン) pointed out wouldn't actually fail if the pre-check
+    // silently started matching everything — a 100k-cell snapshot is small
+    // enough that even the slow (parse-everything) path finishes inside the
+    // timing test's 2s budget on most machines. These test the boolean
+    // directly instead.
+
+    use super::may_contain_legacy_style_keys;
+
+    #[test]
+    fn quoted_legacy_key_is_detected() {
+        assert!(may_contain_legacy_style_keys(r#"{"font":{"bold":true}}"#));
+        assert!(may_contain_legacy_style_keys(r##"{"fill":{"color":"#fff"}}"##));
+        assert!(may_contain_legacy_style_keys(r#"{"alignment":{}}"#));
+        assert!(may_contain_legacy_style_keys(r#"{"borders":{}}"#));
+        assert!(may_contain_legacy_style_keys(r#"{"un":{"s":1}}"#));
+    }
+
+    #[test]
+    fn key_with_a_longer_name_sharing_a_prefix_is_not_detected() {
+        // `"fontFamily"` must not be mistaken for `"font"` — the closing
+        // quote lands after "Family", not right after "font".
+        assert!(!may_contain_legacy_style_keys(
+            r#"{"fontFamily":"Arial"}"#
+        ));
+    }
+
+    #[test]
+    fn bare_unquoted_word_is_not_detected() {
+        // The needle requires the surrounding quote characters, so plain
+        // text that happens to spell one of the words (not present as a JSON
+        // key at all here) does not trigger it.
+        assert!(!may_contain_legacy_style_keys("font"));
+        assert!(!may_contain_legacy_style_keys("un"));
+    }
+
+    #[test]
+    fn string_with_none_of_the_needles_is_not_detected() {
+        assert!(!may_contain_legacy_style_keys(
+            r##"{"bl":1,"cl":{"rgb":"#000"},"n":{"pattern":"0.00%"}}"##
+        ));
+    }
+
+    // ── un -> ul migration (#350 follow-up) ─────────────────────────────────
+
+    #[test]
+    fn un_only_style_is_migrated_to_ul_on_open() {
+        // The scenario this follow-up fixes: a v0.8.2-0.8.4 `.coco` whose
+        // style is otherwise already Univer-shaped (no legacy font/fill/
+        // alignment/borders keys) but still has the private `un` key. Before
+        // this fix, `is_legacy` was false for such an object so it was never
+        // touched at all, and the grid — which only reads `ul` — rendered it
+        // without underline forever.
+        let input = json!({
+            "id": "wb",
+            "sheets": {},
+            "styles": { "s1": { "bl": 1, "un": { "s": 1 } } }
+        })
+        .to_string();
+        let out = normalize_legacy_style_snapshot(&input).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["styles"]["s1"]["ul"], json!({ "s": 1 }));
+        assert!(parsed["styles"]["s1"].get("un").is_none());
+        assert_eq!(parsed["styles"]["s1"]["bl"], 1);
+    }
+
+    #[test]
+    fn style_with_both_un_and_ul_is_left_completely_untouched() {
+        // An object that already has `ul` is not this function's problem to
+        // reconcile — leave `un` sitting there too rather than guess which
+        // value is authoritative.
+        let input = json!({
+            "id": "wb",
+            "sheets": {},
+            "styles": { "s1": { "ul": { "s": 1 }, "un": { "s": 0 } } }
+        })
+        .to_string();
+        let out = normalize_legacy_style_snapshot(&input).unwrap();
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn inline_cell_style_with_un_only_is_also_migrated() {
+        // Same rename, but on an inline `cellData[r][c].s` object rather than
+        // a top-level `styles` table entry — the other place a style can
+        // live (see the doc comment on `normalize_legacy_style_snapshot`).
+        let input = json!({
+            "id": "wb",
+            "sheets": {
+                "sheet-1": {
+                    "id": "sheet-1",
+                    "cellData": { "0": { "0": { "v": "x", "s": { "un": { "s": 1 } } } } }
+                }
+            },
+            "styles": {}
+        })
+        .to_string();
+        let out = normalize_legacy_style_snapshot(&input).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let s = &parsed["sheets"]["sheet-1"]["cellData"]["0"]["0"]["s"];
+        assert_eq!(s["ul"], json!({ "s": 1 }));
+        assert!(s.get("un").is_none());
+    }
+
+    #[test]
+    fn cell_value_equal_to_un_is_not_mistaken_for_legacy_style() {
+        // Mirrors `cell_value_equal_to_a_legacy_key_word_is_not_mistaken_for_legacy_style`
+        // for the new `"un"` needle: a cell whose text is literally "un"
+        // triggers the substring pre-check (accepted false-positive cost)
+        // but must not be treated as a style to rewrite — only `s` objects
+        // are ever candidates, never a cell's `v`.
+        let input = json!({
+            "id": "wb",
+            "sheets": {
+                "sheet-1": {
+                    "id": "sheet-1",
+                    "cellData": { "0": { "0": { "v": "un" } } }
                 }
             },
             "styles": { "s1": { "bl": 1 } }

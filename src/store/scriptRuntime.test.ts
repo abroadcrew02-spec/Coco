@@ -610,7 +610,7 @@ describe("buildIframeHtml — CSP による外部送信遮断", () => {
     expect(html).toContain("script-src 'unsafe-inline' 'unsafe-eval'");
   });
 
-  it("#355: CSP refuses nested frames explicitly (child-src / frame-src 'none')", () => {
+  it("#355: CSP declares child-src / frame-src 'none' explicitly", () => {
     const html = buildIframeHtml();
     expect(IFRAME_CSP).toContain("child-src 'none'");
     expect(IFRAME_CSP).toContain("frame-src 'none'");

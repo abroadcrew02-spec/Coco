@@ -424,3 +424,68 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* #355 — trusted workbooks */
+.trusted-wb {
+  padding: 10px 12px 12px;
+}
+
+.trusted-wb-list-wrap:focus {
+  outline: none;
+}
+
+.trusted-wb-list-wrap:focus-visible {
+  outline: 2px solid var(--nicel-focus-ring);
+  outline-offset: 2px;
+}
+
+.trusted-wb-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trusted-wb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--nicel-border);
+  border-radius: 4px;
+  background-color: var(--nicel-bg-elevated);
+}
+
+.trusted-wb-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trusted-wb-path {
+  font-size: 13px;
+  color: var(--nicel-text);
+  overflow-wrap: anywhere;
+}
+
+.trusted-wb-date {
+  font-size: 12px;
+  color: var(--nicel-text-muted);
+}
+
+.trusted-wb-row .settings-btn {
+  flex-shrink: 0;
+  padding: 4px 12px;
+}
+
+.trusted-wb-error {
+  color: var(--nicel-danger);
+}
+
+.trusted-wb-ok {
+  color: var(--nicel-text);
+}

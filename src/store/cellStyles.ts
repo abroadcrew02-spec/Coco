@@ -37,7 +37,7 @@
  *    cl: { rgb }            -- font color
  *    bl: 0|1                -- bold
  *    it: 0|1                -- italic
- *    un: { s }              -- underline
+ *    ul: { s }              -- underline
  *    ff: string             -- font family
  *    fs: number             -- font size (pt)
  *    bd: { t/b/l/r: { s, cl: { rgb } } }  -- borders

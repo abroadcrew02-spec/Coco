@@ -194,6 +194,69 @@ export function rectCellCount(rect: CellRect): number {
   return (rect.endRow - rect.startRow + 1) * (rect.endCol - rect.startCol + 1);
 }
 
+/** Sheet size used to expand whole-column / whole-row references. */
+export interface SheetBounds {
+  rowCount: number;
+  colCount: number;
+}
+
+function columnIndex(letters: string): number {
+  let n = 0;
+  for (const ch of letters.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n - 1;
+}
+
+/**
+ * Parse "A1" / "A1:C10" (optionally sheet-qualified, `$` allowed) into an
+ * inclusive rectangle. With `bounds`, whole columns ("A:A", "B:D") and whole
+ * rows ("1:1", "3:5") — what Univer's getA1Notation() returns for a column or
+ * row selection — expand to the sheet's rows / columns. Returns null when the
+ * text is not a reference (or is a whole column / row without `bounds`).
+ * Large results are fine: the planners switch to existing cells only past
+ * NUMBER_FORMAT_MAX_CELLS.
+ */
+export function parseA1Rect(ref: string, bounds?: SheetBounds): CellRect | null {
+  const cleaned = (ref.includes("!") ? ref.split("!").slice(1).join("!") : ref).trim();
+  const cell = /^\$?([A-Za-z]+)\$?(\d+)(?::\$?([A-Za-z]+)\$?(\d+))?$/.exec(cleaned);
+  if (cell) {
+    const c1 = columnIndex(cell[1]);
+    const r1 = parseInt(cell[2], 10) - 1;
+    const c2 = cell[3] ? columnIndex(cell[3]) : c1;
+    const r2 = cell[4] ? parseInt(cell[4], 10) - 1 : r1;
+    return {
+      startRow: Math.min(r1, r2),
+      endRow: Math.max(r1, r2),
+      startCol: Math.min(c1, c2),
+      endCol: Math.max(c1, c2),
+    };
+  }
+  if (!bounds || !(bounds.rowCount >= 1) || !(bounds.colCount >= 1)) return null;
+  const cols = /^\$?([A-Za-z]+):\$?([A-Za-z]+)$/.exec(cleaned);
+  if (cols) {
+    const c1 = columnIndex(cols[1]);
+    const c2 = columnIndex(cols[2]);
+    return {
+      startRow: 0,
+      endRow: Math.floor(bounds.rowCount) - 1,
+      startCol: Math.min(c1, c2),
+      endCol: Math.max(c1, c2),
+    };
+  }
+  const rows = /^\$?(\d+):\$?(\d+)$/.exec(cleaned);
+  if (rows) {
+    const r1 = parseInt(rows[1], 10) - 1;
+    const r2 = parseInt(rows[2], 10) - 1;
+    if (r1 < 0 || r2 < 0) return null;
+    return {
+      startRow: Math.min(r1, r2),
+      endRow: Math.max(r1, r2),
+      startCol: 0,
+      endCol: Math.floor(bounds.colCount) - 1,
+    };
+  }
+  return null;
+}
+
 /** Cells that already exist in `cellData` inside `rect`, row-major. Walks the
  *  populated keys only, so a whole-column rectangle stays cheap. */
 export function existingCellsInRect(

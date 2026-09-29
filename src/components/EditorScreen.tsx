@@ -567,6 +567,7 @@ import {
 import { inferAutoSumRange, buildSumFormula } from "../store/autoSum";
 import { QUICK_FMT_CURRENCY, QUICK_FMT_PERCENT } from "../store/quickNumberFormat";
 import {
+  parseA1Rect,
   planUniformNumberFormat,
   planSteppedNumberFormat,
   resolveCellNumberFormat,
@@ -575,6 +576,7 @@ import {
   type LiveCellAccess,
   type NumberFormatDeps,
   type NumberFormatJob,
+  type SheetBounds,
   type SheetCellData,
 } from "../store/numberFormat";
 import {
@@ -621,6 +623,7 @@ import {
   SCRIPT_NOT_TRUSTED,
 } from "../store/scriptRuntime";
 import { useScriptTrustGate } from "../hooks/useScriptTrustGate";
+import ScriptTrustBanner from "./ScriptTrustBanner";
 import {
   type ConnectionGuard,
   startDataConnectionSchedule,
@@ -703,29 +706,6 @@ function facadeRangeRect(range: {
 }): CellRect {
   const r = range.getRange();
   return { startRow: r.startRow, endRow: r.endRow, startCol: r.startColumn, endCol: r.endColumn };
-}
-
-/** Parse "A1" / "A1:C10" (optionally sheet-qualified, `$` allowed) into an
- *  inclusive rectangle; null when the text is not a cell reference. */
-function parseA1Rect(ref: string): CellRect | null {
-  const cleaned = ref.includes("!") ? ref.split("!").slice(1).join("!") : ref;
-  const m = /^\$?([A-Za-z]+)\$?(\d+)(?::\$?([A-Za-z]+)\$?(\d+))?$/.exec(cleaned.trim());
-  if (!m) return null;
-  const colToIdx = (s: string) => {
-    let n = 0;
-    for (const ch of s.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
-    return n - 1;
-  };
-  const c1 = colToIdx(m[1]);
-  const r1 = parseInt(m[2], 10) - 1;
-  const c2 = m[3] ? colToIdx(m[3]) : c1;
-  const r2 = m[4] ? parseInt(m[4], 10) - 1 : r1;
-  return {
-    startRow: Math.min(r1, r2),
-    endRow: Math.max(r1, r2),
-    startCol: Math.min(c1, c2),
-    endCol: Math.max(c1, c2),
-  };
 }
 
 // #198: derive the next number-format code for the ribbon's comma / decimal
@@ -5496,7 +5476,12 @@ export default function EditorScreen() {
     };
     readSelection();
     const disposable = fUniver.addEvent(fUniver.Event.SelectionChanged, readSelection);
-    return () => disposable.dispose();
+    return () => {
+      disposable.dispose();
+      // Forget the range on close so the next open does not show the
+      // previous selection for its first frame.
+      setActiveSelectionA1("");
+    };
   }, [trackActiveSelection]);
 
   // Number Format Manager actions. Rename / delete scan a fresh `save()` of
@@ -5538,10 +5523,19 @@ export default function EditorScreen() {
       if (!ready) return;
       const sheet = ready.workbook.getActiveSheet();
       if (!sheet) return;
-      const rect = parseA1Rect(range);
+      // Whole-column / whole-row selections arrive as "A:A" / "1:1"; the
+      // sheet size turns them into a rectangle (the planner limits the dense
+      // write to NUMBER_FORMAT_MAX_CELLS and formats existing cells past it).
+      let bounds: SheetBounds | undefined;
+      try {
+        bounds = { rowCount: sheet.getMaxRows(), colCount: sheet.getMaxColumns() };
+      } catch {
+        bounds = undefined;
+      }
+      const rect = parseA1Rect(range, bounds);
       if (!rect) {
         setEditorOperationError(
-          `表示形式の管理: 範囲「${range}」を読み取れませんでした。A1 や A1:C10 の形式で指定してください。`,
+          `表示形式の管理: 範囲「${range}」を読み取れませんでした。A1、A1:C10、A:A、1:1 の形式で指定してください。`,
         );
         return;
       }
@@ -8484,6 +8478,8 @@ export default function EditorScreen() {
           if (!isInRolloutBucket(r.rollout)) {
             // User isn't in this rollout bucket yet — silently skip and wait
             // for either a higher percent or a manual check from Settings.
+            // Also the path when the manifest could not be read or did not
+            // match the update (ROLLOUT_HELD, #359).
             setUpdaterState({ kind: "idle" });
             return;
           }
@@ -9570,6 +9566,9 @@ export default function EditorScreen() {
           }}
         />
       )}
+      {/* #355: non-modal permission banner for content that runs by itself.
+          Renders nothing unless the gate reports "untrusted". */}
+      <ScriptTrustBanner gate={trustGate} onNotice={setEditorOperationError} />
       {importWarnings.length > 0 && (
         <div className="warning-banner">
           <div className="warning-banner__content">

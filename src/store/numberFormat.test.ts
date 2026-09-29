@@ -6,6 +6,7 @@ import {
   clearPatternFor,
   existingCellsInRect,
   normalizeNumberFormatCode,
+  parseA1Rect,
   planSteppedNumberFormat,
   planUniformNumberFormat,
   resolveCellNumberFormat,
@@ -186,12 +187,75 @@ describe("resolveCellNumberFormat", () => {
     expect(resolveCellNumberFormat({ v: 0.5, _fmt: "0%" }, lookup)).toBe("0%");
   });
 
+  // Lexical rules shared with the Rust writers (xlsx_io.rs effective_num_format).
+  describe("lexical rules", () => {
+    it("(a) returns a style pattern with surrounding spaces untrimmed", () => {
+      const styles = styleLookupFromTable({ padded: { n: { pattern: " 0.0 " } } });
+      expect(resolveCellNumberFormat({ s: "padded", _fmt: "0%" }, styles)).toBe(" 0.0 ");
+      expect(resolveCellNumberFormat({ s: { n: { pattern: " 0.0 " } } }, lookup)).toBe(" 0.0 ");
+    });
+
+    it("(b) reads a style pattern of \" General \" as no format, hiding _fmt", () => {
+      const styles = styleLookupFromTable({ g: { n: { pattern: " General " } } });
+      expect(resolveCellNumberFormat({ s: "g", _fmt: "0%" }, styles)).toBe("");
+      expect(resolveCellNumberFormat({ s: { n: { pattern: " General " } }, _fmt: "0%" }, lookup)).toBe("");
+    });
+
+    it("(c) treats a non-string n.pattern as empty and falls back to _fmt", () => {
+      for (const pattern of [14, null, true, {}, ["0.0"]]) {
+        expect(resolveCellNumberFormat({ s: { n: { pattern } }, _fmt: "0.0" }, lookup)).toBe("0.0");
+      }
+      const styles = styleLookupFromTable({ numeric: { n: { pattern: 14 } } });
+      expect(resolveCellNumberFormat({ s: "numeric", _fmt: "0%" }, styles)).toBe("0%");
+    });
+
+    it("(d) known issue (#343 の (a)) also holds when s is null", () => {
+      expect(resolveCellNumberFormat({ v: 0.5, s: null, _fmt: "0%" }, lookup)).toBe("0%");
+    });
+  });
+
   it("returns '' for no format, unknown ids and non-objects", () => {
     expect(resolveCellNumberFormat({ v: 1 }, lookup)).toBe("");
     expect(resolveCellNumberFormat({ s: "missing" }, lookup)).toBe("");
     expect(resolveCellNumberFormat({ _fmt: "   " }, lookup)).toBe("");
     expect(resolveCellNumberFormat(null, lookup)).toBe("");
     expect(resolveCellNumberFormat("x", lookup)).toBe("");
+  });
+});
+
+describe("parseA1Rect", () => {
+  const bounds = { rowCount: 1000, colCount: 26 };
+
+  it("reads cells and ranges, sheet-qualified and absolute", () => {
+    expect(parseA1Rect("B3")).toEqual({ startRow: 2, endRow: 2, startCol: 1, endCol: 1 });
+    expect(parseA1Rect("C10:A1")).toEqual({ startRow: 0, endRow: 9, startCol: 0, endCol: 2 });
+    expect(parseA1Rect("Sheet1!$A$1:$B$2")).toEqual({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
+  });
+
+  it("expands whole columns to every row of the sheet", () => {
+    expect(parseA1Rect("A:A", bounds)).toEqual({ startRow: 0, endRow: 999, startCol: 0, endCol: 0 });
+    expect(parseA1Rect("Sheet1!$D:$B", bounds)).toEqual({ startRow: 0, endRow: 999, startCol: 1, endCol: 3 });
+  });
+
+  it("expands whole rows to every column of the sheet", () => {
+    expect(parseA1Rect("1:1", bounds)).toEqual({ startRow: 0, endRow: 0, startCol: 0, endCol: 25 });
+    expect(parseA1Rect("$5:$3", bounds)).toEqual({ startRow: 2, endRow: 4, startCol: 0, endCol: 25 });
+  });
+
+  it("needs the sheet size for whole columns / rows and rejects other text", () => {
+    expect(parseA1Rect("A:A")).toBeNull();
+    expect(parseA1Rect("1:1")).toBeNull();
+    expect(parseA1Rect("0:0", bounds)).toBeNull();
+    expect(parseA1Rect("A:A", { rowCount: 0, colCount: 26 })).toBeNull();
+    expect(parseA1Rect("", bounds)).toBeNull();
+    expect(parseA1Rect("foo", bounds)).toBeNull();
+    expect(parseA1Rect("A1:B", bounds)).toBeNull();
+  });
+
+  it("a whole column past the cap plans the existing-cells-only path", () => {
+    const rect = parseA1Rect("A:B", { rowCount: NUMBER_FORMAT_MAX_CELLS, colCount: 26 })!;
+    const job = planUniformNumberFormat("sh", rect, "0.0", { "0": { "0": { v: 1 } } });
+    expect(job?.kind).toBe("cells");
   });
 });
 

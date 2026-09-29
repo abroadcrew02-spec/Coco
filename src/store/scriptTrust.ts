@@ -185,6 +185,15 @@ const UNAVAILABLE_CONTENT: ActiveContent = Object.freeze({
 });
 
 /**
+ * True when the evaluation behind `content` failed (or there is no content
+ * yet for an untrusted state). Such content can never be trusted; the UI
+ * asks the user to reopen the workbook instead of offering to enable it.
+ */
+export function isContentUnavailable(content: ActiveContent | null): boolean {
+  return content === null || content.fingerprint === UNAVAILABLE_FINGERPRINT;
+}
+
+/**
  * Cheap pre-check that lets snapshots without scripts or connections skip the
  * full parse. A JSON key can be spelled with \u escapes, so any "\u" forces
  * the parse as well; otherwise an escaped key could hide content from this

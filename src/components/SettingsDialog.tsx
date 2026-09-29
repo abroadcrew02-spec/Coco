@@ -26,12 +26,16 @@ import {
   parseAllowedDomains,
   serializeAllowedDomains,
 } from "../store/urlFetch";
+import type { ScriptTrustStore } from "../store/scriptTrust";
 import SmartChipRulesEditor from "./SmartChipRulesEditor";
 import UrlFetchCredentialsEditor from "./UrlFetchCredentialsEditor";
+import TrustedWorkbooksSection from "./TrustedWorkbooksSection";
 import "./SettingsDialog.css";
 
 interface Props {
   onClose: () => void;
+  /** Trust store for the "信頼したブック" section (defaults to the app store). */
+  trustStore?: Pick<ScriptTrustStore, "list" | "revoke">;
 }
 
 type CsvEncoding = "utf8-bom" | "utf8" | "shift_jis";
@@ -57,7 +61,7 @@ const CSV_IMPORT_ENCODING_OPTIONS: Array<{ value: CsvImportEncoding; label: stri
   { value: "shift_jis", label: "Shift_JIS を強制" },
 ];
 
-export default function SettingsDialog({ onClose }: Props) {
+export default function SettingsDialog({ onClose, trustStore }: Props) {
   const intervalMs = useWorkbookStore((s) => s.autoSaveIntervalMs);
   const setAutoSaveInterval = useWorkbookStore((s) => s.setAutoSaveInterval);
   const csvEncoding = useWorkbookStore((s) => s.csvExportEncoding);
@@ -358,6 +362,12 @@ export default function SettingsDialog({ onClose }: Props) {
             </p>
             <h4 className="url-fetch-cred-heading">認証情報</h4>
             <UrlFetchCredentialsEditor />
+          </details>
+          <details className="settings-section">
+            <summary className="settings-section-summary">
+              <h3>{t("settings.section.trustedWorkbooks")}</h3>
+            </summary>
+            <TrustedWorkbooksSection store={trustStore} />
           </details>
           <details className="settings-section">
             <summary className="settings-section-summary">

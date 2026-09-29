@@ -9,6 +9,12 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
 
 import SettingsDialog from "./SettingsDialog";
 import { useWorkbookStore } from "../store/useWorkbookStore";
+import {
+  createMemoryTrustPersistence,
+  normalizeTrustPath,
+  setScriptTrustPersistence,
+  trustRecordKey,
+} from "../store/scriptTrust";
 
 let onClose: ReturnType<typeof vi.fn<() => void>>;
 
@@ -229,15 +235,15 @@ describe("SettingsDialog", () => {
       expect(radio).toBeTruthy();
     });
 
-    it("renders exactly nine collapsible sections, only the first open by default", () => {
+    it("renders exactly ten collapsible sections, only the first open by default", () => {
       const { container } = render(<SettingsDialog onClose={onClose} />);
       const sections = container.querySelectorAll<HTMLDetailsElement>(
         "details.settings-section"
       );
       // Autosave / CSV export / CSV import / CSV PoC banner /
       // Smart-chip custom rules / Language / Theme /
-      // External API (allow list + credentials) / Updates
-      expect(sections.length).toBe(9);
+      // External API (allow list + credentials) / Trusted workbooks / Updates
+      expect(sections.length).toBe(10);
       // Autosave (index 0) is the only one open by default.
       expect(sections[0].open).toBe(true);
       expect(sections[1].open).toBe(false);
@@ -248,6 +254,7 @@ describe("SettingsDialog", () => {
       expect(sections[6].open).toBe(false);
       expect(sections[7].open).toBe(false);
       expect(sections[8].open).toBe(false);
+      expect(sections[9].open).toBe(false);
     });
   });
 
@@ -411,5 +418,94 @@ describe("SettingsDialog", () => {
       },
       15_000,
     );
+  });
+
+  describe("信頼したブック (#355)", () => {
+    const PATH = "C:\\Books\\sales.coco";
+
+    async function recordFor(path: string, trustedAt: string) {
+      const pathNorm = normalizeTrustPath(path);
+      const key = await trustRecordKey(pathNorm);
+      const value = JSON.stringify({
+        v: 1,
+        path,
+        pathNorm,
+        fingerprint: "sha256:" + "b".repeat(64),
+        trustedAt,
+        summary: { scripts: 1, autoConnections: 0 },
+      });
+      return { key, value };
+    }
+
+    afterEach(() => setScriptTrustPersistence(createMemoryTrustPersistence()));
+
+    it("lists always-trusted workbooks and revokes one (app store, stored records)", async () => {
+      const user = userEvent.setup();
+      const rec = await recordFor(PATH, "2026-09-29T01:02:03.000Z");
+      const persistence = createMemoryTrustPersistence({ [rec.key]: rec.value });
+      setScriptTrustPersistence(persistence);
+
+      render(<SettingsDialog onClose={onClose} />);
+      expect(screen.getByText("信頼したブック")).toBeTruthy();
+      expect(screen.getByText("スクリプトや自動更新を常に許可したブックの一覧です")).toBeTruthy();
+      expect(await screen.findByText(PATH)).toBeTruthy();
+      expect(screen.getByText(/^信頼した日時: /)).toBeTruthy();
+      expect(screen.getByText("取り消しは次にブックを開いた時から有効です")).toBeTruthy();
+
+      await user.click(screen.getByRole("button", { name: "取り消す" }));
+      const toast = await screen.findByText(
+        "信頼を取り消しました。次にこのブックを開いた時から有効です",
+      );
+      expect(toast.getAttribute("role")).toBe("status");
+      expect(await screen.findByText("信頼したブックはありません")).toBeTruthy();
+      expect(persistence.dump()).toEqual({});
+      // The generic settings API is never used for trust records.
+      const settingWrites = invokeMock.mock.calls.filter(
+        (c) => c[0] === "set_setting" || c[0] === "delete_setting",
+      );
+      expect(settingWrites).toEqual([]);
+      // Revoking is not a pending setting: 適用 stays disabled.
+      expect((screen.getByRole("button", { name: "適用" }) as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("shows the empty state when nothing is trusted", async () => {
+      render(<SettingsDialog onClose={onClose} trustStore={{ list: async () => [], revoke: vi.fn() }} />);
+      expect(await screen.findByText("信頼したブックはありません")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "取り消す" })).toBeNull();
+    });
+
+    it("reports a failed revoke and keeps the row", async () => {
+      const user = userEvent.setup();
+      const rec = await recordFor(PATH, "2026-09-29T01:02:03.000Z");
+      const record = { ...JSON.parse(rec.value) };
+      const store = {
+        list: vi.fn(async () => [record]),
+        revoke: vi.fn(async () => {
+          throw new Error("locked");
+        }),
+      };
+      render(<SettingsDialog onClose={onClose} trustStore={store} />);
+      await user.click(await screen.findByRole("button", { name: "取り消す" }));
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "取り消せませんでした。もう一度お試しください",
+      );
+      expect(store.revoke).toHaveBeenCalledWith(PATH);
+      expect(screen.getByText(PATH)).toBeTruthy();
+    });
+
+    it("reports a list that cannot be loaded", async () => {
+      render(
+        <SettingsDialog
+          onClose={onClose}
+          trustStore={{
+            list: async () => {
+              throw new Error("db");
+            },
+            revoke: vi.fn(),
+          }}
+        />,
+      );
+      expect((await screen.findByRole("alert")).textContent).toBe("一覧を読み込めませんでした");
+    });
   });
 });

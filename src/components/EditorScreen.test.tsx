@@ -224,6 +224,24 @@ describe("EditorScreen Univer plugin wiring", () => {
   });
 });
 
+describe("Number Format Manager selection (0.8.5 follow-ups)", () => {
+  const applyToRangeSource =
+    editorSource.match(/const applyFormatCodeToRange = useCallback\([\s\S]*?\n  \);/)?.[0] ?? "";
+  const trackSelectionSource =
+    editorSource.match(/const trackActiveSelection = [\s\S]*?\n  \}, \[trackActiveSelection\]\);/)?.[0] ?? "";
+
+  it("passes the sheet size so whole-column / whole-row selections parse", () => {
+    expect(applyToRangeSource).toMatch(/rowCount: sheet\.getMaxRows\(\), colCount: sheet\.getMaxColumns\(\)/);
+    expect(applyToRangeSource).toMatch(/parseA1Rect\(range, bounds\)/);
+    // The parser lives in numberFormat.ts (unit-tested there), not in the editor.
+    expect(editorSource).not.toMatch(/^function parseA1Rect\(/m);
+  });
+
+  it("forgets the tracked selection when the dialogs close", () => {
+    expect(trackSelectionSource).toMatch(/disposable\.dispose\(\);\s*[\s\S]*?setActiveSelectionA1\(""\);\s*\};/);
+  });
+});
+
 describe("#355 script trust gate wiring", () => {
   const sources = productionSources();
 
@@ -299,5 +317,30 @@ describe("#355 script trust gate wiring", () => {
     const adoptThenApply =
       /void trustGateRef\.current\.adoptLocalEdit\((liveSnap|live), nextJson\);\s*applyMutatedSnapshot\(nextJson\);/g;
     expect(editorSource.match(adoptThenApply)?.length).toBe(3);
+  });
+
+  it("renders the permission banner from the gate; its notices go to the status bar", () => {
+    expect(editorSource).toMatch(/import ScriptTrustBanner from "\.\/ScriptTrustBanner";/);
+    expect(editorSource).toMatch(
+      /<ScriptTrustBanner gate=\{trustGate\} onNotice=\{setEditorOperationError\} \/>/,
+    );
+  });
+
+  it("installs the Tauri trust persistence at startup only", () => {
+    const installers = sources
+      .filter((s) => s.file !== "store/scriptTrust.ts" && /\bsetScriptTrustPersistence\(/.test(s.text))
+      .map((s) => s.file);
+    expect(installers).toEqual(["main.tsx"]);
+    const main = sources.find((s) => s.file === "main.tsx")?.text ?? "";
+    expect(main).toMatch(/setScriptTrustPersistence\(createTauriTrustPersistence\(\)\);/);
+  });
+
+  it("stores trust records only through the dedicated script_trust_* commands", () => {
+    const persistence = sources.find((s) => s.file === "store/scriptTrustPersistence.ts")?.text ?? "";
+    expect(persistence).toMatch(/"script_trust_check"/);
+    expect(persistence).toMatch(/"script_trust_grant"/);
+    expect(persistence).toMatch(/"script_trust_list"/);
+    expect(persistence).toMatch(/"script_trust_revoke"/);
+    expect(persistence).not.toMatch(/"(get|set|delete|list)_setting"/);
   });
 });

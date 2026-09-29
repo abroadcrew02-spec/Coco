@@ -12,6 +12,7 @@ import {
   clearExecutionLog,
   recordRun,
   inlineExecutor,
+  buildIframeHtml,
   type ScriptApi,
   type ScriptEntry,
   type ScriptExecutor,
@@ -547,6 +548,45 @@ describe("#189 C1 — onEdit 再発火ガード", () => {
     const emitMutation = () => fireAll();
     expect(() => emitMutation()).toThrow(/loop/);
     expect(fireCount).toBeGreaterThan(50);
+  });
+});
+
+// ---------- セキュリティ: iframe 文書の CSP (外部送信遮断) --------------------
+
+describe("buildIframeHtml — CSP による外部送信遮断", () => {
+  it("<head> の先頭 (charset 直後・最初の <script> より前) に CSP meta を持つ", () => {
+    const html = buildIframeHtml();
+    const headMatch = html.match(/<head>([\s\S]*?)<\/head>/);
+    expect(headMatch).not.toBeNull();
+    const head = headMatch![1];
+
+    const charsetIdx = head.indexOf('<meta charset="utf-8">');
+    const cspIdx = head.indexOf("Content-Security-Policy");
+    const firstScriptIdx = html.indexOf("<script>");
+
+    expect(charsetIdx).toBeGreaterThanOrEqual(0);
+    expect(cspIdx).toBeGreaterThan(charsetIdx);
+    // head 内に CSP meta が収まっている (head を出た後の script より前)。
+    expect(cspIdx).toBeLessThan(head.length);
+    expect(html.indexOf("Content-Security-Policy")).toBeLessThan(firstScriptIdx);
+  });
+
+  it("default-src 'none' と form-action 'none' を含む", () => {
+    const html = buildIframeHtml();
+    expect(html).toContain("default-src 'none'");
+    expect(html).toContain("form-action 'none'");
+  });
+
+  it("script-src はインラインブートストラップと new Function 評価のため unsafe-inline / unsafe-eval を許可する", () => {
+    const html = buildIframeHtml();
+    expect(html).toContain("script-src 'unsafe-inline' 'unsafe-eval'");
+  });
+
+  it("CSP meta は http-equiv 属性で meta タグとして埋め込まれている", () => {
+    const html = buildIframeHtml();
+    expect(html).toMatch(
+      /<meta http-equiv="Content-Security-Policy" content="[^"]*default-src 'none'[^"]*">/,
+    );
   });
 });
 

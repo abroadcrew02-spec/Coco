@@ -18,6 +18,7 @@ Patch release. `.coco` workbooks saved by v0.8.1 or earlier open with their form
 - Number formats set through Nicel's own dialog and buttons still render only after the workbook is reopened (#343, carried over from 0.8.2). The fix is deferred to 0.8.5 while the rule for reconciling the per-cell `_fmt` key with the style `n.pattern` is settled.
 - Two paths write number formats to `_fmt` only: `smartDate.ts` and `templates.ts` (#347).
 - The rust_xlsxwriter limits on the sheet default column width and default row height listed under 0.8.1 remain (#346).
+- Clearing formatting (Univer's "clear format") removes the cell style but not the per-cell `_fmt` key, so a number format that was cleared on screen comes back in the exported xlsx. This predates 0.8.4 and is tracked with #343.
 - Underline is lost in both directions between xlsx and Nicel: the Rust side uses `un`, Univer uses `ul` (#350).
 - CSV export reads number formats from `_fmt` only, so formats applied in the app are not reflected in the CSV (#351).
 

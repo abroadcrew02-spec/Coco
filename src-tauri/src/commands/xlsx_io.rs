@@ -1910,6 +1910,58 @@ fn parse_color(hex: &str) -> Option<Color> {
     Some(Color::RGB(v))
 }
 
+/// #343(b): the format code a cell exports with. Mirrors
+/// `resolveCellNumberFormat` in `src/store/numberFormat.ts` (commit
+/// 57f43a64) lexically — see that function's own doc comment for the full
+/// "read" rule this ports. Short version: the cell's style (`s`, a string id
+/// looked up in `styles`, or an inline style object) decides the format
+/// outright whenever it carries a *non-blank* `n.pattern` (checked before
+/// trimming, matching `isNonEmptyCode` in the TS): "General" there, in any
+/// letter case, means "no format" and `_fmt` is never consulted in that case
+/// — not even when the style's pattern turns out to mean "no format" itself.
+/// Only when the style has no pattern at all, or the pattern is blank /
+/// whitespace-only, does a non-blank, non-"General" `_fmt` count. Either way
+/// the winning format string is returned exactly as stored, not trimmed.
+///
+/// Deliberately takes raw JSON rather than `CellStyle`: `csv_io.rs` needs
+/// this same decision and has no other reason to parse the rest of a cell's
+/// style.
+pub(crate) fn effective_num_format(
+    cell: &Value,
+    styles: Option<&Map<String, Value>>,
+) -> Option<String> {
+    // "effectiveCode" in the TS: None (~ JS's "") for a missing, blank, or
+    // "General" (any letter case) string; the original — untrimmed — string
+    // otherwise.
+    fn effective_code(code: Option<&str>) -> Option<&str> {
+        let code = code?;
+        let trimmed = code.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("general") {
+            None
+        } else {
+            Some(code)
+        }
+    }
+
+    let style_obj: Option<&Value> = match cell.get("s") {
+        Some(Value::String(id)) => styles.and_then(|m| m.get(id.as_str())),
+        Some(v @ Value::Object(_)) => Some(v),
+        _ => None,
+    };
+    let style_pattern = style_obj
+        .and_then(|st| st.get("n"))
+        .and_then(|n| n.get("pattern"))
+        .and_then(Value::as_str);
+
+    // "isNonEmptyCode(pattern)" in the TS: a non-blank pattern on the style
+    // decides the outcome outright — even when that outcome is "no format"
+    // (General) — so `_fmt` is not consulted.
+    if style_pattern.map(|p| !p.trim().is_empty()).unwrap_or(false) {
+        return effective_code(style_pattern).map(str::to_string);
+    }
+    effective_code(cell.get("_fmt").and_then(Value::as_str)).map(str::to_string)
+}
+
 fn build_format(style: &CellStyle, num_format: Option<&str>) -> Format {
     let mut fmt = Format::new();
     if style.bold {
@@ -1992,13 +2044,14 @@ fn build_format(style: &CellStyle, num_format: Option<&str>) -> Format {
             }
         }
     }
-    // #40: prefer the explicit override (per-cell `_fmt`) if present; fall
-    // back to whatever the resolved CellStyle carries. Previously num_format
-    // only flowed through the override channel, so cells that inherited
-    // formatting purely from their xf number-format ref were silently
-    // emitted as General on export.
-    let effective_num_fmt = num_format.or(style.num_format.as_deref());
-    if let Some(nf) = effective_num_fmt {
+    // #343(b): `num_format` is always the caller's precomputed
+    // `effective_num_format` result — the *only* place that decides between
+    // the style's `n.pattern` and the cell's `_fmt`. This function no longer
+    // does any of its own fallback to `style.num_format`; doing so here too
+    // used to let `_fmt` win over a real, non-General `n.pattern` (the #343
+    // bug), because the old rule was "override-or-style" instead of
+    // "style-unless-blank-then-override".
+    if let Some(nf) = num_format {
         fmt = fmt.set_num_format(nf);
     }
     fmt
@@ -6701,22 +6754,42 @@ pub fn export_xlsx_core(path: String, snapshot_json: String) -> Result<ExportRes
                             None => continue,
                         };
 
-                        let fmt_str = cell_val.get("_fmt").and_then(|f| f.as_str());
-                        let style_id = cell_val.get("s").and_then(|f| f.as_str());
-                        let style_obj = style_id.and_then(|id| resolved_styles.get(id));
+                        // #343(b): the format is decided in one place —
+                        // `effective_num_format` — mirroring
+                        // `resolveCellNumberFormat` in numberFormat.ts. It
+                        // reads the raw `s`/`_fmt` JSON directly rather than
+                        // `resolved_styles`, so it works for `s` as either a
+                        // styles-table id or an inline object.
+                        let effective_fmt = effective_num_format(cell_val, styles_obj);
 
-                        // Build (or reuse) a Format combining the cell style + num format.
-                        let fmt_obj: Option<Format> = if style_obj.is_some() || fmt_str.is_some() {
-                            let key = (
-                                style_id.unwrap_or("").to_string(),
-                                fmt_str.unwrap_or("").to_string(),
-                            );
+                        // #352: `s` as an inline style object isn't in
+                        // `resolved_styles` (keyed by the top-level `styles`
+                        // table only), so parse it directly here — otherwise
+                        // an inline-styled cell's bold/fill/etc. silently
+                        // dropped on export. The cache key uses the object's
+                        // own JSON text (rather than "") so two different
+                        // inline styles don't collide on the same cache slot.
+                        let style_val = cell_val.get("s");
+                        let (style_key, style_obj): (String, Option<CellStyle>) = match style_val
+                        {
+                            Some(Value::String(id)) => {
+                                (id.clone(), resolved_styles.get(id.as_str()).cloned())
+                            }
+                            Some(v @ Value::Object(_)) => (v.to_string(), CellStyle::from_json(v)),
+                            _ => (String::new(), None),
+                        };
+
+                        // Build (or reuse) a Format combining the cell style + effective num format.
+                        let fmt_obj: Option<Format> = if style_obj.is_some()
+                            || effective_fmt.is_some()
+                        {
+                            let key = (style_key, effective_fmt.clone().unwrap_or_default());
                             Some(
                                 format_cache
                                     .entry(key)
                                     .or_insert_with(|| {
-                                        let s = style_obj.cloned().unwrap_or_default();
-                                        build_format(&s, fmt_str)
+                                        let s = style_obj.clone().unwrap_or_default();
+                                        build_format(&s, effective_fmt.as_deref())
                                     })
                                     .clone(),
                             )

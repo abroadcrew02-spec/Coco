@@ -7,6 +7,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::commands::workbook::{CompatibilityWarning, ImportWorkbookResult, WorkbookHandle};
+use crate::commands::xlsx_io::effective_num_format;
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -160,6 +161,10 @@ pub fn workbook_export_csv(
     let root: Value = serde_json::from_str(&snapshot_json).map_err(|e| e.to_string())?;
 
     let sheets = root.get("sheets");
+    // #343(b)/#351: workbook-level styles map, so `effective_num_format` can
+    // resolve a cell's `s` when it's a string id (the same map xlsx_io.rs
+    // reads for export).
+    let styles = root.get("styles").and_then(|v| v.as_object());
 
     let resolved_sheet_id: String = match &sheet_id {
         Some(id) => id.clone(),
@@ -306,7 +311,9 @@ pub fn workbook_export_csv(
                 let c_key = c.to_string();
                 let rendered = row_map
                     .and_then(|cols| cols.get(&c_key))
-                    .map(|cell| render_csv_cell(cell, &mut warnings, &mut formula_warning_emitted))
+                    .map(|cell| {
+                        render_csv_cell(cell, styles, &mut warnings, &mut formula_warning_emitted)
+                    })
                     .unwrap_or_default();
                 line.push_str(&escape_csv_field(&rendered, delim_char));
             }
@@ -436,12 +443,18 @@ fn replace_csv_temp_file(temp_path: &Path, target_path: &Path) -> Result<(), Str
 
 fn render_csv_cell(
     cell: &Value,
+    styles: Option<&Map<String, Value>>,
     warnings: &mut Vec<CompatibilityWarning>,
     formula_warning_emitted: &mut bool,
 ) -> String {
     let v_field = cell.get("v");
     let f_field = cell.get("f").and_then(|f| f.as_str());
-    let fmt_field = cell.get("_fmt").and_then(|f| f.as_str());
+    // #343(b)/#351: the format the cell actually renders with is decided by
+    // `effective_num_format` (shared with the xlsx writer), not `_fmt`
+    // alone — a style's non-blank `n.pattern` (applied through Nicel's own
+    // dialog/buttons) wins over a stale imported `_fmt`.
+    let effective_fmt = effective_num_format(cell, styles);
+    let fmt_field = effective_fmt.as_deref();
 
     let (raw, is_string_kind) = if let Some(v) = v_field {
         match v {

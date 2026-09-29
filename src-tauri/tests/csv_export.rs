@@ -798,3 +798,73 @@ fn datetime_cells_export_as_yyyy_mm_dd_hh_mm_ss() {
     // CSV escapes any field containing a comma; spaces are fine.
     assert_eq!(first_line, "2026-05-13 12:00:00");
 }
+
+// ── #343(b)/#351: style `n.pattern` vs `_fmt` precedence, ported from
+// xlsx_io.rs's `effective_num_format` (see that function's doc comment for
+// the full rule, mirrored from src/store/numberFormat.ts's
+// resolveCellNumberFormat, commit 57f43a64). CSV export previously read
+// `_fmt` only (#351), so a format applied through the app's own dialog --
+// which lands on the style's `n.pattern`, not `_fmt` -- never showed up here.
+
+#[test]
+fn style_date_pattern_without_fmt_exports_as_date() {
+    // No `_fmt` at all -- the style's own `n.pattern` must be enough to
+    // stringify the date, matching what the grid itself renders.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "style_date.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": { "0": { "v": 46155.0, "s": "st-date" } }
+                }
+            }
+        },
+        "styles": {
+            "st-date": { "n": { "pattern": "yyyy-mm-dd" } }
+        }
+    }"#;
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    assert!(result.success, "export failed: {:?}", result.error);
+
+    let bytes = fs::read(&path).unwrap();
+    let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
+    let first_line = s.split("\r\n").next().unwrap();
+    assert_eq!(first_line, "2026-05-13");
+}
+
+#[test]
+fn general_style_pattern_beats_stale_date_fmt_and_exports_raw_number() {
+    // The style's own `n.pattern` is "General" -- that means "no format"
+    // outright, so a leftover date `_fmt` (as Univer's "clear format" can
+    // leave behind — see #343's Known issues entry in CHANGELOG) must not
+    // resurrect the date string. The cell exports as a plain number instead.
+    let dir = TempDir::new().unwrap();
+    let path = path_in(&dir, "style_general_beats_fmt.csv");
+    let snapshot = r#"{
+        "sheetOrder": ["s1"],
+        "sheets": {
+            "s1": {
+                "name": "S",
+                "cellData": {
+                    "0": { "0": { "v": 46155.0, "_fmt": "yyyy-mm-dd", "s": "st-general" } }
+                }
+            }
+        },
+        "styles": {
+            "st-general": { "n": { "pattern": "General" } }
+        }
+    }"#;
+    let result = workbook_export_csv(path.clone(), snapshot.to_string(), None, None).unwrap();
+    assert!(result.success, "export failed: {:?}", result.error);
+
+    let bytes = fs::read(&path).unwrap();
+    let s = std::str::from_utf8(strip_bom(&bytes)).unwrap();
+    let first_line = s.split("\r\n").next().unwrap();
+    assert_eq!(
+        first_line, "46155",
+        "General style pattern must win over the stale date `_fmt`"
+    );
+}

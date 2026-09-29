@@ -29,10 +29,14 @@
 //     }
 //   }
 //
-// A cell's code is resolved by resolveCellNumberFormat: a resolvable style id
-// decides (what the grid renders); `_fmt` only counts for cells without one.
+// A cell's code is resolved by resolveCellNumberFormat: a non-empty
+// `n.pattern` on the cell's style decides ("General" there means no format);
+// `_fmt` only counts when the style has no non-empty `n.pattern`. Removing a
+// code (delete, or rename to blank / General) writes clearPatternFor(cell):
+// "General" on cells that carry a non-empty `_fmt`, "" everywhere else.
 
 import {
+  clearPatternFor,
   resolveCellNumberFormat,
   styleLookupFromTable,
   normalizeNumberFormatCode,
@@ -142,7 +146,8 @@ export function listAllFormatCodes(
 /** Plan replacing `oldCode` with `newCode` on every cell whose current code
  *  is `oldCode`. Returns one sparse job per affected sheet plus the number of
  *  cells targeted. A blank / "General" `newCode` is a delete — same as
- *  planFormatCodeDelete. The snapshot itself is not modified. */
+ *  planFormatCodeDelete (clearPatternFor per cell). The snapshot itself is
+ *  not modified. */
 export function planFormatCodeRename(
   snapshot: FmtSnapshot | string | null | undefined,
   oldCode: string,
@@ -152,8 +157,10 @@ export function planFormatCodeRename(
   return planReplace(parseSnapshot(snapshot), oldCode, normalizeNumberFormatCode(newCode));
 }
 
-/** Plan removing the format from every cell whose current code is `code`.
- *  Returns one sparse job per affected sheet plus the number of cells. */
+/** Plan removing the format from every cell whose current code is `code`:
+ *  "General" for cells that carry a non-empty `_fmt`, "" for the rest (see
+ *  clearPatternFor). Returns one sparse job per affected sheet plus the
+ *  number of cells. */
 export function planFormatCodeDelete(
   snapshot: FmtSnapshot | string | null | undefined,
   code: string,
@@ -162,6 +169,8 @@ export function planFormatCodeDelete(
   return planReplace(parseSnapshot(snapshot), code, "");
 }
 
+/** `pattern` is the normalised replacement; "" means "remove the format",
+ *  which is resolved per cell through clearPatternFor. */
 function planReplace(
   snapshot: FmtSnapshot,
   match: string,
@@ -180,11 +189,12 @@ function planReplace(
       const row = rows[rowKey];
       if (!row) continue;
       for (const colKey of Object.keys(row)) {
-        if (readCellCode(row[colKey], lookup) !== match) continue;
+        const cell = row[colKey];
+        if (readCellCode(cell, lookup) !== match) continue;
         const r = Number(rowKey);
         const c = Number(colKey);
         if (!Number.isInteger(r) || !Number.isInteger(c)) continue;
-        writes.push({ row: r, col: c, pattern });
+        writes.push({ row: r, col: c, pattern: pattern !== "" ? pattern : clearPatternFor(cell) });
       }
     }
     if (writes.length === 0) continue;

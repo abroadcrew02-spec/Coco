@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
+import { isDefaultFormat } from "@univerjs/core";
 import {
+  GENERAL_PATTERN,
   NUMBER_FORMAT_MAX_CELLS,
+  clearPatternFor,
   existingCellsInRect,
   normalizeNumberFormatCode,
   planSteppedNumberFormat,
@@ -95,8 +98,23 @@ function fakeWorkbook(styles: Styles, cellData: SheetCellData) {
   const patternAt = (row: number, col: number) =>
     resolveCellNumberFormat(cell(row, col), (id) => styles[id]);
 
-  return { deps, rangeCalls, cellCalls, cell, patternAt, styles };
+  return { deps, rangeCalls, cellCalls, cell, patternAt, styles, cellData };
 }
+
+// Canary for the "General" marker: Nicel writes n.pattern = "General" to mean
+// "no format" on cells with an imported _fmt. That only renders as no format
+// while Univer's isDefaultFormat keeps matching exactly "General".
+describe("Univer isDefaultFormat (canary for GENERAL_PATTERN)", () => {
+  it("treats GENERAL_PATTERN as the default format", () => {
+    expect(GENERAL_PATTERN).toBe("General");
+    expect(isDefaultFormat("General")).toBe(true);
+    expect(isDefaultFormat(GENERAL_PATTERN)).toBe(true);
+  });
+
+  it("is case-sensitive, which is why Nicel always writes the exact spelling", () => {
+    expect(isDefaultFormat("general")).toBe(false);
+  });
+});
 
 describe("normalizeNumberFormatCode", () => {
   it("trims and maps General (any case) to the empty 'no format' code", () => {
@@ -118,18 +136,54 @@ describe("resolveCellNumberFormat", () => {
     expect(resolveCellNumberFormat({ s: { n: { pattern: "#,##0" } } }, lookup)).toBe("#,##0");
   });
 
-  it("prefers the style over the _fmt sidecar (the style is what the grid renders)", () => {
+  it("prefers a non-empty style pattern over the _fmt sidecar", () => {
     expect(resolveCellNumberFormat({ s: "st1", _fmt: "0%" }, lookup)).toBe("0.00%");
   });
 
-  it("lets a resolvable style id decide even when it has no pattern (a stale _fmt after '標準' is ignored)", () => {
-    expect(resolveCellNumberFormat({ s: "st2", _fmt: "yyyy-mm-dd" }, lookup)).toBe("");
+  it("reads _fmt when the style id resolves to a style without n.pattern (bold only)", () => {
+    const styles = styleLookupFromTable({ s1: { bl: 1 } });
+    expect(resolveCellNumberFormat({ v: 0.5, _fmt: "0%", s: "s1" }, styles)).toBe("0%");
+    expect(resolveCellNumberFormat({ s: "st2", _fmt: "yyyy-mm-dd" }, lookup)).toBe("yyyy-mm-dd");
   });
 
-  it("falls back to _fmt only when the cell has no resolvable style id", () => {
+  it("imported cell with a different style pattern reads the style pattern", () => {
+    const styles = styleLookupFromTable({ s1: { n: { pattern: "#,##0.00" } } });
+    expect(resolveCellNumberFormat({ v: 0.5, _fmt: "0%", s: "s1" }, styles)).toBe("#,##0.00");
+  });
+
+  it("reads a style pattern of General (any case) as no format, hiding _fmt", () => {
+    const styles = styleLookupFromTable({
+      s2: { n: { pattern: "General" } },
+      lower: { n: { pattern: "general" } },
+    });
+    expect(resolveCellNumberFormat({ _fmt: "0%", s: "s2" }, styles)).toBe("");
+    expect(resolveCellNumberFormat({ _fmt: "0%", s: "lower" }, styles)).toBe("");
+    expect(resolveCellNumberFormat({ s: "s2" }, styles)).toBe("");
+    expect(resolveCellNumberFormat({ _fmt: "0%", s: { n: { pattern: "General" } } }, styles)).toBe("");
+  });
+
+  it("reads an inline style pattern before _fmt", () => {
+    expect(resolveCellNumberFormat({ s: { n: { pattern: "0.0" } }, _fmt: "0%" }, lookup)).toBe("0.0");
+  });
+
+  it("falls back to _fmt when the style has no non-empty n.pattern", () => {
     expect(resolveCellNumberFormat({ _fmt: "0.0" }, lookup)).toBe("0.0");
-    expect(resolveCellNumberFormat({ s: "missing", _fmt: "0.0" }, lookup)).toBe("0.0");
+    expect(resolveCellNumberFormat({ s: "missing", _fmt: "0%" }, lookup)).toBe("0%");
     expect(resolveCellNumberFormat({ s: { bl: 1 }, _fmt: "0.0" }, lookup)).toBe("0.0");
+    expect(resolveCellNumberFormat({ s: { n: { pattern: "  " } }, _fmt: "0.0" }, lookup)).toBe("0.0");
+  });
+
+  it("reads a _fmt of General (any case) as no format", () => {
+    expect(resolveCellNumberFormat({ _fmt: "General" }, lookup)).toBe("");
+    expect(resolveCellNumberFormat({ _fmt: " GENERAL " }, lookup)).toBe("");
+    expect(resolveCellNumberFormat({ s: "st2", _fmt: "General" }, lookup)).toBe("");
+  });
+
+  // Clear Formatting drops the cell's `s` (and with it the "General" marker)
+  // but keeps `_fmt`, so the imported format shows through again. Pinned here
+  // until #343 の (a) is fixed; update this expectation together with it.
+  it("known issue (#343 の (a)): after Clear Formatting drops s, the imported _fmt shows through", () => {
+    expect(resolveCellNumberFormat({ v: 0.5, _fmt: "0%" }, lookup)).toBe("0%");
   });
 
   it("returns '' for no format, unknown ids and non-objects", () => {
@@ -138,6 +192,17 @@ describe("resolveCellNumberFormat", () => {
     expect(resolveCellNumberFormat({ _fmt: "   " }, lookup)).toBe("");
     expect(resolveCellNumberFormat(null, lookup)).toBe("");
     expect(resolveCellNumberFormat("x", lookup)).toBe("");
+  });
+});
+
+describe("clearPatternFor", () => {
+  it("returns GENERAL_PATTERN for a cell with a real _fmt, '' otherwise", () => {
+    expect(clearPatternFor({ _fmt: "0%", s: "s1" })).toBe(GENERAL_PATTERN);
+    expect(clearPatternFor({ _fmt: "0%" })).toBe(GENERAL_PATTERN);
+    expect(clearPatternFor({ s: "s1" })).toBe("");
+    expect(clearPatternFor({ _fmt: "  " })).toBe("");
+    expect(clearPatternFor({ _fmt: "general" })).toBe("");
+    expect(clearPatternFor(undefined)).toBe("");
   });
 });
 
@@ -180,6 +245,82 @@ describe("planUniformNumberFormat", () => {
   it("plans General / blank as a removal (empty pattern)", () => {
     const job = planUniformNumberFormat("s1", { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }, "General");
     expect(job?.kind === "uniform" && job.pattern).toBe("");
+  });
+
+  it("'標準' on an imported cell plans a General marker, and the result reads as no format", () => {
+    const cellData: SheetCellData = { "0": { "0": { _fmt: "0%", s: "s1" } } };
+    const before = styleLookupFromTable({ s1: { n: { pattern: "0%" } } });
+    expect(resolveCellNumberFormat(cellData["0"]!["0"], before)).toBe("0%");
+
+    const job = planUniformNumberFormat("sheet", { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }, "", cellData);
+    expect(job).toEqual({
+      kind: "grid",
+      sheetId: "sheet",
+      rect: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
+      patterns: [["General"]],
+    });
+
+    // What NumfmtService.setValues leaves behind: a new style id with n.pattern "General".
+    const after = styleLookupFromTable({ s2: { n: { pattern: "General" } } });
+    expect(resolveCellNumberFormat({ _fmt: "0%", s: "s2" }, after)).toBe("");
+  });
+
+  it("'標準' over a range mixing _fmt cells, plain cells and blanks marks only the _fmt cells", () => {
+    const cellData: SheetCellData = {
+      "0": { "0": { v: 1, _fmt: "0%" }, "1": { v: 2, s: "plain" } },
+      "1": { "1": { v: 3, _fmt: "General" } },
+    };
+    const job = planUniformNumberFormat("s1", { startRow: 0, endRow: 1, startCol: 0, endCol: 2 }, "General", cellData);
+    expect(job).toEqual({
+      kind: "grid",
+      sheetId: "s1",
+      rect: { startRow: 0, endRow: 1, startCol: 0, endCol: 2 },
+      patterns: [
+        ["General", "", ""],
+        ["", "", ""],
+      ],
+    });
+  });
+
+  it("'標準' with no _fmt cell in the range stays a single uniform removal", () => {
+    const cellData: SheetCellData = {
+      "0": { "0": { v: 1, s: "st1" } },
+      "9": { "0": { v: 2, _fmt: "0%" } }, // outside the rectangle
+    };
+    const job = planUniformNumberFormat("s1", { startRow: 0, endRow: 2, startCol: 0, endCol: 1 }, "", cellData);
+    expect(job).toEqual({
+      kind: "uniform",
+      sheetId: "s1",
+      rect: { startRow: 0, endRow: 2, startCol: 0, endCol: 1 },
+      pattern: "",
+    });
+  });
+
+  it("applying a real format to _fmt cells stays a uniform job (the style pattern wins on read)", () => {
+    const cellData: SheetCellData = { "0": { "0": { v: 1, _fmt: "0%" } } };
+    const job = planUniformNumberFormat("s1", { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }, "0.00", cellData);
+    expect(job?.kind === "uniform" && job.pattern).toBe("0.00");
+  });
+
+  it("'標準' past the cell cap writes General only to the existing _fmt cells", () => {
+    const cellData: SheetCellData = {
+      "0": { "0": { v: 1 } },
+      "7": { "1": { v: 2, _fmt: "yyyy/m/d" } },
+    };
+    const job = planUniformNumberFormat(
+      "s1",
+      { startRow: 0, endRow: NUMBER_FORMAT_MAX_CELLS, startCol: 0, endCol: 1 },
+      "",
+      cellData,
+    );
+    expect(job).toEqual({
+      kind: "cells",
+      sheetId: "s1",
+      writes: [
+        { row: 0, col: 0, pattern: "" },
+        { row: 7, col: 1, pattern: "General" },
+      ],
+    });
   });
 
   it("past the cell cap, targets only cells that already exist (whole-column selection)", () => {
@@ -255,6 +396,40 @@ describe("planSteppedNumberFormat", () => {
         ["0.0", "0.0"],
       ],
     });
+  });
+
+  it("a step that yields no format writes General to a _fmt cell and '' elsewhere", () => {
+    // Toggling the comma style off: "#,##0" -> "" (as nextNumberFormatCode does).
+    const toggleCommaOff = (prev: string) => (prev.includes(",") ? "" : "#,##0");
+    const styles = styleLookupFromTable({ comma: { n: { pattern: "#,##0" } } });
+    const cellData: SheetCellData = {
+      "0": { "0": { v: 1, s: "comma", _fmt: "#,##0" }, "1": { v: 2, s: "comma" } },
+    };
+    const job = planSteppedNumberFormat(
+      "s1",
+      { startRow: 0, endRow: 0, startCol: 0, endCol: 1 },
+      toggleCommaOff,
+      cellData,
+      styles,
+    );
+    expect(job).toEqual({
+      kind: "grid",
+      sheetId: "s1",
+      rect: { startRow: 0, endRow: 0, startCol: 0, endCol: 1 },
+      patterns: [["General", ""]],
+    });
+  });
+
+  it("past the cell cap, a step that yields no format still marks _fmt cells with General", () => {
+    const cellData: SheetCellData = { "3": { "0": { _fmt: "#,##0" } } };
+    const job = planSteppedNumberFormat(
+      "s1",
+      { startRow: 0, endRow: NUMBER_FORMAT_MAX_CELLS, startCol: 0, endCol: 0 },
+      () => "",
+      cellData,
+      lookup,
+    );
+    expect(job).toEqual({ kind: "cells", sheetId: "s1", writes: [{ row: 3, col: 0, pattern: "General" }] });
   });
 
   it("cap boundary: exactly NUMBER_FORMAT_MAX_CELLS still plans one dense grid job", () => {
@@ -355,9 +530,10 @@ describe("runNumberFormatJob", () => {
     expect(wb.patternAt(3, 0)).toBe("0%");
   });
 
-  // `_fmt` is never written or cleared here: the xlsx exporter (xlsx_io.rs)
-  // prefers the style's n.pattern, and resolveCellNumberFormat lets a
-  // resolvable style id decide, so a leftover `_fmt` no longer counts.
+  // `_fmt` is never written or cleared here. A non-empty style n.pattern
+  // outranks it on read (here, in the xlsx writer and in the CSV writer), and
+  // removing a format writes n.pattern "General" to cells that carry `_fmt`
+  // so the stale sidecar does not show through again.
   it("leaves an imported _fmt in place; the new style pattern is what the cell reads as", () => {
     const styles: Styles = { imported: { bl: 1, n: { pattern: "0%" } } };
     const wb = fakeWorkbook(styles, { "0": { "0": { v: 0.5, s: "imported", _fmt: "0%" } } });
@@ -369,26 +545,41 @@ describe("runNumberFormatJob", () => {
     expect(wb.patternAt(0, 0)).toBe("#,##0.00");
   });
 
-  it("'標準' on an imported cell leaves _fmt but the cell reads as no format", () => {
+  it("'標準' on an imported cell leaves _fmt, stores General through the facade and reads as no format", () => {
     const styles: Styles = { imported: { bl: 1, n: { pattern: "0.00" } } };
     const wb = fakeWorkbook(styles, { "0": { "0": { v: 1, s: "imported", _fmt: "0.00" } } });
     runNumberFormatJob(
-      planUniformNumberFormat("s1", { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }, "")!,
+      planUniformNumberFormat("s1", { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }, "", wb.cellData)!,
       wb.deps,
     );
+    // Written through FRange.setNumberFormats, i.e. SetNumfmtCommand (undoable).
+    expect(wb.rangeCalls).toEqual([{ at: [0, 0, 1, 1], patterns: [["General"]] }]);
     expect(wb.cell(0, 0)?._fmt).toBe("0.00");
+    expect(wb.styles[wb.cell(0, 0)!.s as string]).toEqual({ bl: 1, n: { pattern: "General" } });
     expect(wb.patternAt(0, 0)).toBe("");
+    // The shared imported style is left alone.
+    expect(wb.styles.imported).toEqual({ bl: 1, n: { pattern: "0.00" } });
   });
 
   it("'標準' on a _fmt-only cell (no style yet) also reads as no format afterwards", () => {
     const wb = fakeWorkbook({}, { "0": { "0": { v: 1, _fmt: "yyyy-mm-dd" } } });
     runNumberFormatJob(
-      planUniformNumberFormat("s1", { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }, "")!,
+      planUniformNumberFormat("s1", { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }, "", wb.cellData)!,
       wb.deps,
     );
-    // Like NumfmtService.deleteValues, the cell now carries a style id without n.
+    // Like NumfmtService.setValues, the cell now carries a style id with n.pattern "General".
     expect(typeof wb.cell(0, 0)?.s).toBe("string");
+    expect(wb.styles[wb.cell(0, 0)!.s as string]).toEqual({ n: { pattern: "General" } });
     expect(wb.patternAt(0, 0)).toBe("");
+  });
+
+  it("re-applying a format after '標準' on an imported cell replaces the General marker", () => {
+    const wb = fakeWorkbook({}, { "0": { "0": { v: 0.5, _fmt: "0%" } } });
+    const a1 = { startRow: 0, endRow: 0, startCol: 0, endCol: 0 };
+    runNumberFormatJob(planUniformNumberFormat("s1", a1, "", wb.cellData)!, wb.deps);
+    expect(wb.patternAt(0, 0)).toBe("");
+    runNumberFormatJob(planUniformNumberFormat("s1", a1, "0.0%", wb.cellData)!, wb.deps);
+    expect(wb.patternAt(0, 0)).toBe("0.0%");
   });
 
   it("reports not applied when the sparse command is rejected", () => {

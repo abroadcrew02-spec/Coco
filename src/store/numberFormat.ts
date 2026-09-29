@@ -22,9 +22,26 @@
 // Univer intern the resulting style under a new id, so other cells sharing
 // the previous style id keep their own formatting.
 //
-// A cell keeps its imported `_fmt` after an apply. Export still matches the
-// grid because Rust 側 xlsx_io.rs が style の n.pattern を優先する; `_fmt` is
-// only read for a cell with no resolvable style id (see resolveCellNumberFormat).
+// Which of the two wins (the same rule is implemented by resolveCellNumberFormat
+// here, the xlsx writer in xlsx_io.rs and the CSV writer):
+//   - Read: a non-empty `n.pattern` on the cell's style (`s` looked up in the
+//     styles table when it is a string, used as-is when it is an object) is
+//     the format. "General" in any letter case means "no format". Only when
+//     the style has no non-empty `n.pattern` does a non-empty `_fmt` count,
+//     and a `_fmt` of "General" also means "no format".
+//   - Write: a cell keeps its imported `_fmt` after an apply. Removing a
+//     format (標準, the manager's delete / rename to General, a step whose
+//     result is empty) writes `n.pattern = "General"` to cells that carry a
+//     non-empty `_fmt`, so the stale `_fmt` does not show through again, and
+//     removes `n` from every other cell. The marker is limited to `_fmt`
+//     cells so a workbook without `_fmt` behaves exactly as the styles table
+//     says. See clearPatternFor.
+//   - Univer 0.24 treats "General" as a real pattern: SetNumfmtCommand splits
+//     set / remove on `!!value.pattern`, so "General" is stored in the style
+//     (NumfmtService.setValues) and lands on the undo stack like any other
+//     format, and the renderer skips formatting for it because
+//     `isDefaultFormat` matches "General" exactly (case-sensitive). Write it
+//     as GENERAL_PATTERN, never in another case.
 //
 // Everything in this file is framework-free: Univer is reached only through
 // the small interfaces below, so tests can drive it with plain mocks.
@@ -49,7 +66,9 @@ export interface CellPos {
   col: number;
 }
 
-/** One cell's target format. An empty `pattern` removes the format. */
+/** One cell's target format. An empty `pattern` removes the format;
+ *  GENERAL_PATTERN keeps "no format" on a cell that carries an imported
+ *  `_fmt` (see clearPatternFor). */
 export interface NumberFormatWrite extends CellPos {
   pattern: string;
 }
@@ -76,20 +95,59 @@ export type NumberFormatJob =
 
 // --- Reading formats ---------------------------------------------------------
 
+/** The "no format" marker written to cells that carry an imported `_fmt`.
+ *  Spelled exactly like this: Univer's `isDefaultFormat` compares
+ *  case-sensitively against "General". */
+export const GENERAL_PATTERN = "General";
+
+const GENERAL_CODE = /^general$/i;
+
 /** Normalise a user-supplied format code. Surrounding whitespace is dropped,
- *  and Excel's "General" is treated as "no format" (empty string) so it
- *  removes the pattern instead of storing a literal "General". */
+ *  and Excel's "General" is treated as "no format" (empty string). The
+ *  planners below turn "" back into GENERAL_PATTERN, per cell, only where a
+ *  cell's `_fmt` would otherwise show through (see clearPatternFor). */
 export function normalizeNumberFormatCode(code: string): string {
   const trimmed = code.trim();
-  return /^general$/i.test(trimmed) ? "" : trimmed;
+  return GENERAL_CODE.test(trimmed) ? "" : trimmed;
 }
 
-function patternOfStyle(style: unknown): string {
-  if (!style || typeof style !== "object") return "";
+/** A stored format code as it counts for display: "" for a missing, blank or
+ *  "General" (any letter case) code, the stored string otherwise. */
+function effectiveCode(code: unknown): string {
+  if (typeof code !== "string") return "";
+  const trimmed = code.trim();
+  if (trimmed === "" || GENERAL_CODE.test(trimmed)) return "";
+  return code;
+}
+
+/** True when `code` is a non-empty string (surrounding whitespace ignored). */
+function isNonEmptyCode(code: unknown): code is string {
+  return typeof code === "string" && code.trim() !== "";
+}
+
+function patternOfStyle(style: unknown): unknown {
+  if (!style || typeof style !== "object") return undefined;
   const n = (style as { n?: unknown }).n;
-  if (!n || typeof n !== "object") return "";
-  const pattern = (n as { pattern?: unknown }).pattern;
-  return typeof pattern === "string" ? pattern : "";
+  if (!n || typeof n !== "object") return undefined;
+  return (n as { pattern?: unknown }).pattern;
+}
+
+/** The cell's imported `_fmt` when it is a real format (not blank, not
+ *  "General"); "" otherwise. */
+function importedFmtOf(cell: unknown): string {
+  if (!cell || typeof cell !== "object") return "";
+  return effectiveCode((cell as { _fmt?: unknown })._fmt);
+}
+
+/**
+ * The pattern that removes a cell's format. A cell carrying a real `_fmt`
+ * gets GENERAL_PATTERN, so its style says "no format" explicitly and the
+ * stale `_fmt` stays hidden; every other cell gets "" (the style's `n` is
+ * removed). Always applied through the numfmt facade / SetNumfmtCommand so
+ * the change is on Univer's undo stack.
+ */
+export function clearPatternFor(cell: unknown): string {
+  return importedFmtOf(cell) !== "" ? GENERAL_PATTERN : "";
 }
 
 /** Builds a StyleLookup over a snapshot's `styles` table. */
@@ -100,26 +158,23 @@ export function styleLookupFromTable(
 }
 
 /**
- * The number format a cell currently has, as the grid renders it. When the
- * cell's `s` is a style id that resolves, that style decides — including "no
- * format": after "標準" the numfmt command leaves the cell on a style without
- * `n` while an imported `_fmt` stays behind, and that stale `_fmt` must not
- * count. Otherwise an inline style's pattern, then the `_fmt` sidecar (cells
- * never touched by the numfmt command: CSV import, templates, smart-date
- * conversion, older Nicel builds). Returns "" when the cell has no format.
+ * The number format a cell currently has. The cell's style (`s` looked up
+ * as a style id, or an inline style object) decides whenever it has a
+ * non-empty `n.pattern`; "General" in any letter case there means "no
+ * format" — that is how 標準 is recorded on a cell with an imported `_fmt`
+ * (clearPatternFor). Only a style without a non-empty `n.pattern` (no style,
+ * an unknown id, or a style carrying other keys only, e.g. bold) lets the
+ * `_fmt` sidecar count: xlsx import, CSV import, templates, smart-date
+ * conversion. A `_fmt` of "General" is also "no format". Returns "" when the
+ * cell has no format.
  */
 export function resolveCellNumberFormat(cell: unknown, lookup: StyleLookup): string {
   if (!cell || typeof cell !== "object") return "";
   const s = (cell as { s?: unknown }).s;
-  if (typeof s === "string") {
-    const style = lookup(s);
-    if (style && typeof style === "object") return patternOfStyle(style);
-  } else {
-    const inline = patternOfStyle(s);
-    if (inline.trim() !== "") return inline;
-  }
-  const fmt = (cell as { _fmt?: unknown })._fmt;
-  return typeof fmt === "string" && fmt.trim() !== "" ? fmt : "";
+  const style = typeof s === "string" ? lookup(s) : s;
+  const pattern = patternOfStyle(style);
+  if (isNonEmptyCode(pattern)) return effectiveCode(pattern);
+  return importedFmtOf(cell);
 }
 
 // --- Planning ----------------------------------------------------------------
@@ -166,11 +221,34 @@ export function existingCellsInRect(
   return out;
 }
 
+function cellReader(
+  cellData: SheetCellData | null | undefined,
+): (row: number, col: number) => unknown {
+  return (row, col) => cellData?.[String(row)]?.[String(col)];
+}
+
+/** Dense row-major pattern grid over `r`. */
+function patternGrid(r: CellRect, patternAt: (row: number, col: number) => string): string[][] {
+  const patterns: string[][] = [];
+  for (let row = r.startRow; row <= r.endRow; row++) {
+    const line: string[] = [];
+    for (let col = r.startCol; col <= r.endCol; col++) line.push(patternAt(row, col));
+    patterns.push(line);
+  }
+  return patterns;
+}
+
 /**
  * Plan "apply `code` to every cell in `rect`". Up to NUMBER_FORMAT_MAX_CELLS
  * cells this is one dense `setNumberFormat` (blank cells get the format too,
  * as in Excel). Past the cap only the cells already present in `cellData`
  * are targeted. Returns null when there is nothing to do.
+ *
+ * Removing the format (a blank / "General" code) follows clearPatternFor:
+ * when some existing cell in the rectangle carries an imported `_fmt`, the
+ * dense case becomes a per-cell grid ("General" on those cells, "" on the
+ * rest) and the capped case writes clearPatternFor per cell. Without any
+ * `_fmt` cell it stays a single uniform "" removal.
  */
 export function planUniformNumberFormat(
   sheetId: string,
@@ -181,17 +259,32 @@ export function planUniformNumberFormat(
   const r = normalizeRect(rect);
   if (!r) return null;
   const pattern = normalizeNumberFormatCode(code);
+  const cellAt = cellReader(cellData);
   if (rectCellCount(r) <= NUMBER_FORMAT_MAX_CELLS) {
-    return { kind: "uniform", sheetId, rect: r, pattern };
+    const needsMarker =
+      pattern === "" &&
+      existingCellsInRect(cellData, r).some((p) => clearPatternFor(cellAt(p.row, p.col)) !== "");
+    if (!needsMarker) return { kind: "uniform", sheetId, rect: r, pattern };
+    return {
+      kind: "grid",
+      sheetId,
+      rect: r,
+      patterns: patternGrid(r, (row, col) => clearPatternFor(cellAt(row, col))),
+    };
   }
-  const writes = existingCellsInRect(cellData, r).map((p) => ({ ...p, pattern }));
+  const writes = existingCellsInRect(cellData, r).map((p) => ({
+    ...p,
+    pattern: pattern !== "" ? pattern : clearPatternFor(cellAt(p.row, p.col)),
+  }));
   return writes.length > 0 ? { kind: "cells", sheetId, writes } : null;
 }
 
 /**
  * Plan a per-cell transformation of the current format (the ribbon's comma /
  * increase-decimal / decrease-decimal buttons): each target cell gets
- * `step(currentFormat)`. Same cap rule as planUniformNumberFormat.
+ * `step(currentFormat)`. A step that yields no format (e.g. toggling the
+ * comma style off) writes clearPatternFor(cell). Same cap rule as
+ * planUniformNumberFormat.
  */
 export function planSteppedNumberFormat(
   sheetId: string,
@@ -202,19 +295,15 @@ export function planSteppedNumberFormat(
 ): NumberFormatJob | null {
   const r = normalizeRect(rect);
   if (!r) return null;
-  const cellAt = (row: number, col: number): unknown =>
-    cellData?.[String(row)]?.[String(col)];
-  const nextFor = (row: number, col: number): string =>
-    normalizeNumberFormatCode(step(resolveCellNumberFormat(cellAt(row, col), lookup)));
+  const cellAt = cellReader(cellData);
+  const nextFor = (row: number, col: number): string => {
+    const cell = cellAt(row, col);
+    const next = normalizeNumberFormatCode(step(resolveCellNumberFormat(cell, lookup)));
+    return next !== "" ? next : clearPatternFor(cell);
+  };
 
   if (rectCellCount(r) <= NUMBER_FORMAT_MAX_CELLS) {
-    const patterns: string[][] = [];
-    for (let row = r.startRow; row <= r.endRow; row++) {
-      const line: string[] = [];
-      for (let col = r.startCol; col <= r.endCol; col++) line.push(nextFor(row, col));
-      patterns.push(line);
-    }
-    return { kind: "grid", sheetId, rect: r, patterns };
+    return { kind: "grid", sheetId, rect: r, patterns: patternGrid(r, nextFor) };
   }
   const writes = existingCellsInRect(cellData, r).map((p) => ({
     ...p,

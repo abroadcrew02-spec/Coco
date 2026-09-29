@@ -5453,17 +5453,34 @@ export default function EditorScreen() {
     [currentSnapshotJson],
   );
 
-  const activeSelectionA1 = useMemo(() => {
-    try {
-      const fUniver = fUniverRef.current;
-      const wb = fUniver?.getActiveWorkbook();
-      const sheet = wb?.getActiveSheet();
-      const r = sheet?.getSelection()?.getActiveRange();
-      return r ? r.getA1Notation() : "";
-    } catch {
-      return "";
+  // A1 of the active selection, for the Number Format Manager's "選択範囲へ"
+  // and the Go To dialog. Tracked only while one of them is open (so a
+  // selection change does not re-render the editor otherwise): read once when
+  // it opens, then on every Univer SelectionChanged — pointer, keyboard and
+  // Name Box moves all emit it (selectionMoveEnd$ merged with selectionSet$,
+  // fired after the selection model is updated).
+  const [activeSelectionA1, setActiveSelectionA1] = useState("");
+  const trackActiveSelection = numberFormatManagerOpen || goToOpen;
+  useEffect(() => {
+    if (!trackActiveSelection) return;
+    const fUniver = fUniverRef.current;
+    if (!fUniver) {
+      setActiveSelectionA1("");
+      return;
     }
-  }, []);
+    const readSelection = () => {
+      try {
+        const r = fUniver.getActiveWorkbook()?.getActiveSheet()?.getSelection()?.getActiveRange();
+        setActiveSelectionA1(r ? r.getA1Notation() : "");
+      } catch {
+        // Univer's selection API can throw mid-teardown; treat as no selection.
+        setActiveSelectionA1("");
+      }
+    };
+    readSelection();
+    const disposable = fUniver.addEvent(fUniver.Event.SelectionChanged, readSelection);
+    return () => disposable.dispose();
+  }, [trackActiveSelection]);
 
   // Number Format Manager actions. Rename / delete scan a fresh `save()` of
   // the workbook (the store can lag by the sync debounce) for cells whose

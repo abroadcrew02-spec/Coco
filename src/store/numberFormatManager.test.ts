@@ -44,12 +44,28 @@ describe("listAllFormatCodes", () => {
     expect(listAllFormatCodes(snap).map((e) => e.code)).toEqual(["0.0%"]);
   });
 
-  it("does not list a leftover _fmt on a cell whose style id has no pattern (cleared with '標準')", () => {
+  it("does not list a _fmt hidden by a General style pattern (cleared with '標準')", () => {
     const snap = {
-      styles: { cleared: { bl: 1 } },
+      styles: { cleared: { bl: 1, n: { pattern: "General" } } },
       sheets: { s1: { cellData: { "0": { "0": { s: "cleared", _fmt: "0%" }, "1": { _fmt: "0.0" } } } } },
     };
     expect(listAllFormatCodes(snap).map((e) => e.code)).toEqual(["0.0"]);
+  });
+
+  it("lists the _fmt of a cell whose style has no n.pattern (e.g. bold only)", () => {
+    const snap = {
+      styles: { bold: { bl: 1 } },
+      sheets: { s1: { cellData: { "0": { "0": { s: "bold", _fmt: "0%" } } } } },
+    };
+    expect(listAllFormatCodes(snap).map((e) => e.code)).toEqual(["0%"]);
+  });
+
+  it("never lists General itself", () => {
+    const snap = {
+      styles: { g: { n: { pattern: "General" } } },
+      sheets: { s1: { cellData: { "0": { "0": { s: "g" }, "1": { _fmt: "General" } } } } },
+    };
+    expect(listAllFormatCodes(snap)).toEqual([]);
   });
 
   it("returns [] for malformed input", () => {
@@ -105,12 +121,24 @@ describe("planFormatCodeRename", () => {
     expect(planFormatCodeRename(snap, "0.00", "0.00")).toEqual({ jobs: [], changedCount: 0 });
   });
 
-  it("treats a blank or General newCode as delete (empty pattern)", () => {
-    const snap = { sheets: { s1: { cellData: { "0": { "0": { _fmt: "0.00" } } } } } };
-    for (const blank of ["", "  ", "General"]) {
+  it("treats a blank or General newCode as delete (General on _fmt cells, '' elsewhere)", () => {
+    const snap = {
+      styles: { a: { n: { pattern: "0.00" } } },
+      sheets: { s1: { cellData: { "0": { "0": { _fmt: "0.00" }, "1": { s: "a" } } } } },
+    };
+    for (const blank of ["", "  ", "General", "general"]) {
       const { jobs, changedCount } = planFormatCodeRename(snap, "0.00", blank);
-      expect(changedCount).toBe(1);
-      expect(jobs).toEqual([{ kind: "cells", sheetId: "s1", writes: [{ row: 0, col: 0, pattern: "" }] }]);
+      expect(changedCount).toBe(2);
+      expect(jobs).toEqual([
+        {
+          kind: "cells",
+          sheetId: "s1",
+          writes: [
+            { row: 0, col: 0, pattern: "General" },
+            { row: 0, col: 1, pattern: "" },
+          ],
+        },
+      ]);
     }
   });
 });
@@ -126,6 +154,33 @@ describe("planFormatCodeDelete", () => {
     const { jobs, changedCount } = planFormatCodeDelete(snap, "0.00");
     expect(changedCount).toBe(1);
     expect(jobs).toEqual([{ kind: "cells", sheetId: "s1", writes: [{ row: 0, col: 0, pattern: "" }] }]);
+  });
+
+  it("writes General to matching cells that carry _fmt and '' to the others", () => {
+    const snap = {
+      styles: { imported: { n: { pattern: "0%" } }, bold: { bl: 1 } },
+      sheets: {
+        s1: {
+          cellData: {
+            "0": { "0": { s: "imported", _fmt: "0%", v: 0.5 }, "1": { s: "imported", v: 0.25 } },
+            "1": { "0": { s: "bold", _fmt: "0%", v: 0.75 } },
+          },
+        },
+      },
+    };
+    const { jobs, changedCount } = planFormatCodeDelete(snap, "0%");
+    expect(changedCount).toBe(3);
+    expect(jobs).toEqual([
+      {
+        kind: "cells",
+        sheetId: "s1",
+        writes: [
+          { row: 0, col: 0, pattern: "General" },
+          { row: 0, col: 1, pattern: "" },
+          { row: 1, col: 0, pattern: "General" },
+        ],
+      },
+    ]);
   });
 
   it("no-ops for an empty code or no match", () => {

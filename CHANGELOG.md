@@ -11,7 +11,7 @@ Patch release. `.coco` workbooks saved by v0.8.1 or earlier open with their form
 ### Fixed
 
 - **`.coco` workbooks with legacy-shaped styles render formatted** (#344). Styles saved by v0.8.1 or earlier in the `{font, fill, alignment, borders}` shape are normalised to Univer's shape in memory when the workbook is opened, on the normal open, backup-restore and snapshot-history paths. Only the legacy keys are replaced; Univer keys that share the same style object (for example `ul` or `tr` added after the import) are kept. A snapshot with no legacy entries is returned as the original string. The file itself is not rewritten.
-- **Script sandbox iframe has a Content-Security-Policy**: `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; form-action 'none'`. Scripts embedded in a workbook (`Nicel.onOpen` etc.) can no longer make network requests from their execution environment. Script execution and the sheet API work as before.
+- **Script sandbox iframe has a Content-Security-Policy**: `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; form-action 'none'`. Fetch, XMLHttpRequest, WebSocket, EventSource, beacons, image loads and form submissions from the execution environment of workbook scripts (`Nicel.onOpen` etc.) are refused, including from frames the script creates. Script execution and the sheet API work as before. Further hardening of the script runtime is planned for the next release.
 
 ### Known issues
 

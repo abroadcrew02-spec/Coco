@@ -49,6 +49,13 @@ export const NICEL_ROOT_EXTENSION_KEYS = [
   // stores connection metadata in xl/queryTables/ (byte-preserved); Nicel's
   // queries are a separate JSON-typed layer.
   "_cocoQueries",
+  // #356 — workbook scripts (#136/#189) and data connections (#140/#190) are
+  // written into the store snapshot by Nicel. Without the graft a script or
+  // connection added during the session is dropped (or rolled back to the
+  // opened state) by the next cell edit, which also changes the #355 trust
+  // fingerprint unexpectedly. Grafting here does not make xlsx carry them.
+  "_scripts",
+  "_connections",
 ] as const;
 
 /**

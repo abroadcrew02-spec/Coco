@@ -5,9 +5,9 @@
 // the source by reading the file directly. The check is mechanical but
 // guards against silent regressions (e.g. someone removes the import).
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, relative, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const editorSource = readFileSync(resolve(here, "EditorScreen.tsx"), "utf8");
@@ -22,7 +22,32 @@ const toolbarSource =
   editorSource.match(/<Ribbon[\s\S]*?\n      \{sheetPicker && \(/)?.[0] ?? "";
 // #189 — the script-trigger useEffect (onOpen / onEdit / timer wiring).
 const triggerEffectSource =
-  editorSource.match(/\/\/ #189 — script triggers\.[\s\S]*?\n  \}, \[currentSnapshotJson\]\);/)?.[0] ?? "";
+  editorSource.match(/\/\/ #189 — script triggers\.[\s\S]*?\n  \}, \[currentSnapshotJson, scriptGrant\]\);/)?.[0] ?? "";
+// #190 Phase 5 / #355 — the scheduled data-connection refresh effect.
+const dataConnScheduleSource =
+  editorSource.match(/const dataConnOnOpenFiredRef = [\s\S]*?\n  \}, \[currentHandle, handleDataConnectionRefresh, connScheduleKey\]\);/)?.[0] ?? "";
+const dataConnRefreshSource =
+  editorSource.match(/const handleDataConnectionRefresh = useCallback\([\s\S]*?\n  \);/)?.[0] ?? "";
+const scriptEditorDialogSource =
+  editorSource.match(/<ScriptEditorDialog[\s\S]*?\n        \/>/)?.[0] ?? "";
+
+// Production sources under src/ (tests excluded), for #355 invariants.
+const srcRoot = resolve(here, "..");
+function productionSources(): { file: string; text: string }[] {
+  const out: { file: string; text: string }[] = [];
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) {
+        walk(full);
+      } else if (/\.(ts|tsx)$/.test(name) && !/\.test\.(ts|tsx)$/.test(name)) {
+        out.push({ file: relative(srcRoot, full).replace(/\\/g, "/"), text: readFileSync(full, "utf8") });
+      }
+    }
+  };
+  walk(srcRoot);
+  return out;
+}
 
 describe("EditorScreen Univer plugin wiring", () => {
   it("imports and registers the Find/Replace plugins (Ctrl+F / Ctrl+H)", () => {
@@ -196,5 +221,83 @@ describe("EditorScreen Univer plugin wiring", () => {
     // pre-mutation state is checkpointed for Nicel undo (Ctrl+Alt+Z).
     expect(editorSource).toMatch(/applyMutatedSnapshot\(JSON\.stringify\(fresh\)\)/);
     expect(editorSource).toMatch(/_protected/);
+  });
+});
+
+describe("#355 script trust gate wiring", () => {
+  const sources = productionSources();
+
+  it("finds the source slices it inspects", () => {
+    expect(triggerEffectSource).not.toBe("");
+    expect(dataConnScheduleSource).not.toBe("");
+    expect(dataConnRefreshSource).not.toBe("");
+    expect(scriptEditorDialogSource).not.toBe("");
+    expect(sources.length).toBeGreaterThan(50);
+  });
+
+  it("issues grants only from store/scriptTrust.ts", () => {
+    const users = sources
+      .filter((s) => s.file !== "store/scriptGrant.ts" && /\bissueGrant\b/.test(s.text))
+      .map((s) => s.file);
+    expect(users).toEqual(["store/scriptTrust.ts"]);
+  });
+
+  it("never uses the inline executor or the iframe factory outside the runtime", () => {
+    const users = sources
+      .filter((s) => s.file !== "store/scriptRuntime.ts")
+      .filter((s) => /\binlineExecutor\b|\bcreateIframeExecutor\b/.test(s.text))
+      .map((s) => s.file);
+    expect(users).toEqual([]);
+  });
+
+  it("keeps sandbox iframe creation inside the runtime", () => {
+    const users = sources
+      .filter((s) => /createElement\(\s*["']iframe["']/.test(s.text))
+      .map((s) => s.file);
+    expect(users).toEqual(["store/scriptRuntime.ts"]);
+  });
+
+  it("gets the grant from the trust gate hook", () => {
+    expect(editorSource).toMatch(/import \{ useScriptTrustGate \} from "\.\.\/hooks\/useScriptTrustGate"/);
+    expect(editorSource).toMatch(/const trustGate = useScriptTrustGate\(\);/);
+    expect(editorSource).toMatch(/const scriptGrant = trustGate\.grant;/);
+  });
+
+  it("trigger effect: no grant → nothing armed; grant passed to collect and fire", () => {
+    expect(triggerEffectSource).toMatch(/const grant = scriptGrant;\s*if \(!grant\) return;/);
+    expect(triggerEffectSource).toMatch(/collectTriggers\(s, \{\s*grant,/);
+    expect(triggerEffectSource).toMatch(/fireTrigger\(entry, kind, \{\s*grant,/);
+    expect(triggerEffectSource.match(/collectTriggers\(/g)?.length).toBe(1);
+    expect(triggerEffectSource.match(/fireTrigger\(/g)?.length).toBe(1);
+    // A refused run is not written to the execution log.
+    expect(triggerEffectSource).toMatch(/if \(result\.error === SCRIPT_NOT_TRUSTED\) continue;/);
+  });
+
+  it("data-connection schedule: gated, re-checked per refresh, on-open marker set only when fired", () => {
+    expect(dataConnScheduleSource).toMatch(/if \(connScheduleKey === null\) return;/);
+    expect(dataConnScheduleSource).toMatch(/startDataConnectionSchedule\(\{/);
+    expect(dataConnScheduleSource).toMatch(/getGrant: \(\) => trustGateRef\.current\.grant/);
+    expect(dataConnScheduleSource).toMatch(
+      /if \(schedule\.firedOnOpen\) dataConnOnOpenFiredRef\.current = handleKey;/,
+    );
+    expect(dataConnScheduleSource).not.toMatch(/setInterval\(/);
+    expect(dataConnScheduleSource).not.toMatch(/dataConnOnOpenFiredRef\.current = handleKey;\s*\n\s*for/);
+    // The scheduled refresh checks the guard on the connection before loading it.
+    expect(dataConnRefreshSource).toMatch(
+      /if \(guard && !guard\(conn\)\) throw new Error\([^)]*\);\s*const rawFragment = await loadDataConnectionFragment\(conn\);/,
+    );
+  });
+
+  it("script editor gets the grant and reports in-app edits before the store update", () => {
+    expect(scriptEditorDialogSource).toMatch(/grant=\{scriptGrant\}/);
+    expect(scriptEditorDialogSource).toMatch(
+      /adoptLocalEdit\(currentSnapshotJson, nextJson\);\s*updateSnapshot\(nextJson\);/,
+    );
+  });
+
+  it("connection add / edit / remove report in-app edits before applying", () => {
+    const adoptThenApply =
+      /void trustGateRef\.current\.adoptLocalEdit\((liveSnap|live), nextJson\);\s*applyMutatedSnapshot\(nextJson\);/g;
+    expect(editorSource.match(adoptThenApply)?.length).toBe(3);
   });
 });

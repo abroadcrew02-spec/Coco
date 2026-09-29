@@ -13,9 +13,14 @@
 //
 // EditorScreen 側で FUniver を保持しているため `fUniver` を props で受け取る。
 // 永続化は `onChange(updatedScripts)` で親に伝える。
+//
+// #355: scripts can always be viewed and edited here, but the trigger dry run,
+// "Run" and custom-menu buttons only work when the execution grant from the
+// trust gate covers the selected script's current source.
 
 import { useEffect, useMemo, useState } from "react";
 import type { FUniver } from "@univerjs/core/facade";
+import { checkGrant, type ScriptExecutionGrant } from "../store/scriptGrant";
 import {
   type ScriptEntry,
   type ScriptRunResult,
@@ -38,16 +43,21 @@ interface Props {
   fUniver: FUniver | null;
   /** 保護シート判定用の現在の snapshot JSON。 */
   snapshotJson: string | null;
+  /** #355: execution grant from the trust gate. null = nothing may run. */
+  grant: ScriptExecutionGrant | null;
   onChange: (next: ScriptEntry[]) => void;
   onClose: () => void;
 }
 
 type RightTab = "console" | "log" | "reference";
 
+const NOT_ALLOWED_TITLE = "このブックのスクリプトの実行が許可されていません";
+
 export default function ScriptEditorDialog({
   scripts,
   fUniver,
   snapshotJson,
+  grant,
   onChange,
   onClose,
 }: Props) {
@@ -76,20 +86,24 @@ export default function ScriptEditorDialog({
     [entries, selectedId],
   );
 
+  // #355: whether the grant covers the selected script as currently written.
+  const canRunSelected = !!selected && !!grant && checkGrant(grant, selected.source).ok;
+
   // 選択スクリプトのトリガー登録をドライランで収集して可視化する。
+  // #355: the dry run evaluates the script, so it is skipped without a grant.
   useEffect(() => {
-    if (!selected) {
+    if (!selected || !grant || !checkGrant(grant, selected.source).ok) {
       setTriggers([]);
       return;
     }
     let cancelled = false;
-    void collectTriggers(selected, { fUniver, snapshotJson }).then((r) => {
+    void collectTriggers(selected, { grant, fUniver, snapshotJson }).then((r) => {
       if (!cancelled) setTriggers(r.triggers);
     });
     return () => {
       cancelled = true;
     };
-  }, [selected, fUniver, snapshotJson]);
+  }, [selected, fUniver, snapshotJson, grant]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -142,12 +156,12 @@ export default function ScriptEditorDialog({
   };
 
   const handleRun = async () => {
-    if (!selected || running) return;
+    if (!selected || running || !grant) return;
     setRunning(true);
     setLastResult(null);
     setTab("console");
     try {
-      const result = await runScript(selected.source, { fUniver, snapshotJson });
+      const result = await runScript(selected.source, { grant, fUniver, snapshotJson });
       setLastResult(result);
       recordRun(selected, "manual", result);
       setExecLog(readExecutionLog());
@@ -158,12 +172,13 @@ export default function ScriptEditorDialog({
 
   // カスタムメニュー項目を手動発火する (#189)。
   const handleFireMenu = async (label: string) => {
-    if (!selected || running) return;
+    if (!selected || running || !grant) return;
     setRunning(true);
     setLastResult(null);
     setTab("console");
     try {
       const result = await fireTrigger(selected, "menu", {
+        grant,
         fUniver,
         snapshotJson,
         label,
@@ -269,7 +284,7 @@ export default function ScriptEditorDialog({
                       <TriggerChip
                         key={`${t.kind}-${t.label}-${i}`}
                         trigger={t}
-                        disabled={running}
+                        disabled={running || !canRunSelected}
                         onFire={
                           t.kind === "menu"
                             ? () => void handleFireMenu(t.label)
@@ -285,7 +300,8 @@ export default function ScriptEditorDialog({
                     type="button"
                     className="script-editor-run"
                     onClick={() => void handleRun()}
-                    disabled={running}
+                    disabled={running || !canRunSelected}
+                    title={canRunSelected ? undefined : NOT_ALLOWED_TITLE}
                   >
                     {running ? "実行中..." : "▶ 実行"}
                   </button>

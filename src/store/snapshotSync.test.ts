@@ -83,6 +83,36 @@ describe("carryForwardRootExtensions", () => {
     expect(NICEL_ROOT_EXTENSION_KEYS).toContain("_preservedParts");
   });
 
+  it("re-grafts _scripts and _connections dropped by workbook.save() (#356)", () => {
+    expect(NICEL_ROOT_EXTENSION_KEYS).toContain("_scripts");
+    expect(NICEL_ROOT_EXTENSION_KEYS).toContain("_connections");
+    const scripts = [{ id: "s1", name: "n", source: "api.log(1)", lastModified: 1 }];
+    const connections = [
+      { id: "c1", name: "c", type: "csv", sourcePath: "/d.csv", targetSheetId: null,
+        targetSheetName: "d", lastRefreshedAt: null, schedule: { onOpen: true, intervalMinutes: 0 } },
+    ];
+    const prev = JSON.stringify({ sheets: {}, _scripts: scripts, _connections: connections });
+    const fresh = JSON.stringify({ sheets: { s1: { cellData: {} } } });
+    const merged = JSON.parse(carryForwardRootExtensions(fresh, prev));
+    expect(merged._scripts).toEqual(scripts);
+    expect(merged._connections).toEqual(connections);
+  });
+
+  it("keeps a script added after open across several edits (#356)", () => {
+    let store = JSON.stringify({ sheets: { s1: {} } });
+    // A script is added in the app (writeScripts → updateSnapshot).
+    const parsed = JSON.parse(store);
+    parsed._scripts = [{ id: "s1", name: "n", source: "x", lastModified: 2 }];
+    store = JSON.stringify(parsed);
+    for (let i = 0; i < 3; i++) {
+      const univerSave = JSON.stringify({ sheets: { s1: { cellData: { [i]: {} } } } });
+      store = carryForwardRootExtensions(univerSave, store);
+    }
+    expect(JSON.parse(store)._scripts).toEqual([
+      { id: "s1", name: "n", source: "x", lastModified: 2 },
+    ]);
+  });
+
   it("re-grafts _preservedParts dropped by workbook.save() (Phase 4d)", () => {
     const preserved = {
       parts: { "xl/media/image1.png": "AAAA" },

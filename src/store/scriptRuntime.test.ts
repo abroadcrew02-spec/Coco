@@ -19,10 +19,19 @@ import {
   type ExecuteOptions,
   type RegisteredTrigger,
 } from "./scriptRuntime";
+import { issueGrant } from "./scriptGrant";
+
+/** #355: every run needs a grant covering the exact source text. */
+function grantFor(...sources: string[]) {
+  return issueGrant("script-runtime-test", "sha256:test", "session", {
+    sources,
+    connectionSignatures: [],
+  });
+}
 
 describe("runScript — 基本動作", () => {
   it("api.log を console output に記録する", async () => {
-    const result = await runScript("api.log('hello'); api.log('world', 42);");
+    const result = await runScript("api.log('hello'); api.log('world', 42);", { grant: grantFor("api.log('hello'); api.log('world', 42);") });
     expect(result.ok).toBe(true);
     expect(result.error).toBeNull();
     // 先頭は MVP 警告行。続けて log 行。
@@ -32,13 +41,13 @@ describe("runScript — 基本動作", () => {
   });
 
   it("return 値を `=> ...` として最後に push する", async () => {
-    const result = await runScript("return 1 + 2;");
+    const result = await runScript("return 1 + 2;", { grant: grantFor("return 1 + 2;") });
     expect(result.ok).toBe(true);
     expect(result.logs[result.logs.length - 1]).toBe("=> 3");
   });
 
   it("log は第 2 引数としても渡される (api.log と同じ実体)", async () => {
-    const result = await runScript("log('via-positional');");
+    const result = await runScript("log('via-positional');", { grant: grantFor("log('via-positional');") });
     expect(result.ok).toBe(true);
     expect(result.logs).toContain("via-positional");
   });
@@ -51,6 +60,7 @@ describe("runScript — 基本動作", () => {
       // source は factory で読まれないが、署名一致のため保持。
       "",
       {
+        grant: grantFor(""),
         factory: () => (api: ScriptApi) => {
           api.log("active:", api.getActiveSheet());
           api.setSheetValue("Sheet1", "A1", 123);
@@ -71,6 +81,7 @@ describe("runScript — タイムアウト / watchdog", () => {
     // factory に setTimeout 越しの長い await を仕込み、watchdog が
     // aborted フラグを立てた後に return するパターン。
     const result = await runScript("", {
+      grant: grantFor(""),
       timeoutMs: 30,
       factory: () => async () => {
         await new Promise((r) => setTimeout(r, 60));
@@ -89,6 +100,7 @@ describe("runScript — タイムアウト / watchdog", () => {
   it("同期ループは終了後の aborted チェックで timedOut として記録される", async () => {
     let calls = 0;
     const result = await runScript("", {
+      grant: grantFor(""),
       timeoutMs: 5,
       factory: () => (api: ScriptApi) => {
         const start = Date.now();
@@ -107,7 +119,7 @@ describe("runScript — タイムアウト / watchdog", () => {
 
 describe("runScript — 例外ハンドリング", () => {
   it("throw された Error は error / stack に格納される", async () => {
-    const result = await runScript("throw new Error('boom');");
+    const result = await runScript("throw new Error('boom');", { grant: grantFor("throw new Error('boom');") });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("boom");
     expect(result.stack).toMatch(/boom/);
@@ -115,13 +127,13 @@ describe("runScript — 例外ハンドリング", () => {
   });
 
   it("構文エラーも error に格納される (Function 生成時点で throw)", async () => {
-    const result = await runScript("this is not valid js {{");
+    const result = await runScript("this is not valid js {{", { grant: grantFor("this is not valid js {{") });
     expect(result.ok).toBe(false);
     expect(result.error).toBeTruthy();
   });
 
   it("非 Error の throw も message として記録する", async () => {
-    const result = await runScript("throw 'string-error';");
+    const result = await runScript("throw 'string-error';", { grant: grantFor("throw 'string-error';") });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("string-error");
   });
@@ -213,7 +225,7 @@ describe("#189 — トリガー収集 (collectTriggers)", () => {
         "Nicel.addMenuItem('挨拶', () => {});\n" +
         "Nicel.addTimer(1000, () => {});\n",
     );
-    const out = await collectTriggers(entry);
+    const out = await collectTriggers(entry, { grant: grantFor(entry.source) });
     const kinds = out.triggers.map((t) => t.kind).sort();
     expect(kinds).toEqual(["menu", "onEdit", "onOpen", "timer"]);
     const menu = out.triggers.find((t) => t.kind === "menu");
@@ -223,12 +235,14 @@ describe("#189 — トリガー収集 (collectTriggers)", () => {
   });
 
   it("トリガー未登録のスクリプトは空配列を返す", async () => {
-    const out = await collectTriggers(mkScript("api.log('no triggers');"));
+    const noTriggers = mkScript("api.log('no triggers');");
+    const out = await collectTriggers(noTriggers, { grant: grantFor(noTriggers.source) });
     expect(out.triggers).toEqual([]);
   });
 
   it("addTimer は最小間隔 250ms にクランプされる", async () => {
-    const out = await collectTriggers(mkScript("Nicel.addTimer(10, () => {});"));
+    const clamped = mkScript("Nicel.addTimer(10, () => {});");
+    const out = await collectTriggers(clamped, { grant: grantFor(clamped.source) });
     expect(out.triggers[0].intervalMs).toBe(250);
   });
 
@@ -236,7 +250,7 @@ describe("#189 — トリガー収集 (collectTriggers)", () => {
     const entry = mkScript(
       "Coco.onOpen(() => {});\n" + "Coco.addMenuItem('旧名', () => {});\n",
     );
-    const out = await collectTriggers(entry);
+    const out = await collectTriggers(entry, { grant: grantFor(entry.source) });
     const kinds = out.triggers.map((t) => t.kind).sort();
     expect(kinds).toEqual(["menu", "onOpen"]);
     expect(out.triggers.find((t) => t.kind === "menu")?.label).toBe("旧名");
@@ -246,7 +260,7 @@ describe("#189 — トリガー収集 (collectTriggers)", () => {
 describe("#189 — トリガー発火 (fireTrigger)", () => {
   it("onOpen ハンドラを発火し log が記録される", async () => {
     const entry = mkScript("Nicel.onOpen(() => api.log('opened!'));");
-    const result = await fireTrigger(entry, "onOpen");
+    const result = await fireTrigger(entry, "onOpen", { grant: grantFor(entry.source) });
     expect(result.ok).toBe(true);
     expect(result.logs).toContain("opened!");
   });
@@ -256,6 +270,7 @@ describe("#189 — トリガー発火 (fireTrigger)", () => {
       "Nicel.onEdit((e) => api.log('edited', e.a1, e.value));",
     );
     const result = await fireTrigger(entry, "onEdit", {
+      grant: grantFor(entry.source),
       editEvent: { sheetName: "Sheet1", a1: "B2", row: 1, col: 1, value: 99 },
     });
     expect(result.ok).toBe(true);
@@ -267,7 +282,7 @@ describe("#189 — トリガー発火 (fireTrigger)", () => {
       "Nicel.addMenuItem('A', () => api.log('ran-A'));\n" +
         "Nicel.addMenuItem('B', () => api.log('ran-B'));\n",
     );
-    const result = await fireTrigger(entry, "menu", { label: "B" });
+    const result = await fireTrigger(entry, "menu", { grant: grantFor(entry.source), label: "B" });
     expect(result.ok).toBe(true);
     expect(result.logs).toContain("ran-B");
     expect(result.logs).not.toContain("ran-A");
@@ -275,7 +290,7 @@ describe("#189 — トリガー発火 (fireTrigger)", () => {
 
   it("timer トリガーを発火できる", async () => {
     const entry = mkScript("Nicel.addTimer(500, () => api.log('tick'));");
-    const result = await fireTrigger(entry, "timer");
+    const result = await fireTrigger(entry, "timer", { grant: grantFor(entry.source) });
     expect(result.ok).toBe(true);
     expect(result.logs).toContain("tick");
   });
@@ -285,7 +300,7 @@ describe("#189 — トリガー発火 (fireTrigger)", () => {
       "Coco.addMenuItem('M', () => api.log('ran-legacy'));\n" +
         "api.log(Coco === Nicel ? 'same' : 'different');\n",
     );
-    const result = await fireTrigger(entry, "menu", { label: "M" });
+    const result = await fireTrigger(entry, "menu", { grant: grantFor(entry.source), label: "M" });
     expect(result.ok).toBe(true);
     expect(result.logs).toContain("same");
     expect(result.logs).toContain("ran-legacy");
@@ -302,6 +317,7 @@ describe("#189 — 保護シート書き込み禁止", () => {
     // sheetProtection.test.ts 側に委ねる。ここでは API が例外を投げない
     // ことだけ確認する。
     const result = await runScript("", {
+      grant: grantFor(""),
       snapshotJson: JSON.stringify({ sheets: { s1: { _protected: { protected: true } } } }),
       factory: () => (api: ScriptApi) => {
         api.setSheetValue("Sheet1", "A1", 1);
@@ -320,6 +336,7 @@ describe("#189 — 保護シート書き込み禁止", () => {
 describe("#189 — Facade 拡張 API", () => {
   it("getSheetNames / insertSheet / setCellFormat が呼べる (FUniver なし)", async () => {
     const result = await runScript("", {
+      grant: grantFor(""),
       factory: () => (api: ScriptApi) => {
         api.log("names:", api.getSheetNames());
         api.log("inserted:", api.insertSheet("New"));
@@ -379,7 +396,10 @@ describe("#189 — 実行ログ永続化", () => {
   });
 
   it("recordRun は ScriptRunResult を記録に変換する", async () => {
-    const result = await runScript("api.log('x');", { executor: inlineExecutor });
+    const result = await runScript("api.log('x');", {
+      grant: grantFor("api.log('x');"),
+      executor: inlineExecutor,
+    });
     recordRun(mkScript("api.log('x');"), "manual", result);
     const log = readExecutionLog();
     expect(log[0].ok).toBe(true);
@@ -431,6 +451,7 @@ describe("#189 C2 — inline executor に実 Facade を渡さない", () => {
   it("runScript(executor: inlineExecutor) では fUniver が無効化され Facade に触れない", async () => {
     const probe = makeFacadeProbe();
     const result = await runScript("api.getActiveSheet(); api.log('done');", {
+      grant: grantFor("api.getActiveSheet(); api.log('done');"),
       executor: inlineExecutor,
       // 実 Facade を渡しても inline 経路では null に落とされなければならない。
       fUniver: probe.fUniver as never,
@@ -443,6 +464,7 @@ describe("#189 C2 — inline executor に実 Facade を渡さない", () => {
   it("factory 注入 (テスト経路) でも実 Facade に到達しない", async () => {
     const probe = makeFacadeProbe();
     const result = await runScript("", {
+      grant: grantFor(""),
       fUniver: probe.fUniver as never,
       factory: () => (api: ScriptApi) => {
         api.getActiveSheet();
@@ -458,6 +480,7 @@ describe("#189 C2 — inline executor に実 Facade を渡さない", () => {
     const { executor, calls } = makeSpyExecutor();
     // executor を明示注入して経路を観測する (本番は DOM ありで iframe)。
     const out = await runScript("Nicel.onOpen(() => {});", {
+      grant: grantFor("Nicel.onOpen(() => {});"),
       executor,
       mode: "list-triggers",
       collectTriggers: [],
@@ -469,7 +492,9 @@ describe("#189 C2 — inline executor に実 Facade を渡さない", () => {
 
   it("fireTrigger(本番経路) は fire-trigger モードと発火指示を executor に渡す", async () => {
     const { executor, calls } = makeSpyExecutor();
-    await fireTrigger(mkScript("Nicel.onEdit(() => {});"), "onEdit", {
+    const onEditEntry = mkScript("Nicel.onEdit(() => {});");
+    await fireTrigger(onEditEntry, "onEdit", {
+      grant: grantFor(onEditEntry.source),
       executor,
       editEvent: { sheetName: "S", a1: "A1", row: 0, col: 0, value: 7 },
     });
@@ -481,7 +506,9 @@ describe("#189 C2 — inline executor に実 Facade を渡さない", () => {
 
   it("fireTrigger(本番経路) はカスタム executor 利用時 inlineExecutor を使わない", async () => {
     const { executor, calls } = makeSpyExecutor();
-    await fireTrigger(mkScript("Nicel.addMenuItem('M', () => {});"), "menu", {
+    const menuEntry = mkScript("Nicel.addMenuItem('M', () => {});");
+    await fireTrigger(menuEntry, "menu", {
+      grant: grantFor(menuEntry.source),
       executor,
       label: "M",
     });

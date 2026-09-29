@@ -618,7 +618,13 @@ import {
   collectTriggers,
   fireTrigger,
   recordRun,
+  SCRIPT_NOT_TRUSTED,
 } from "../store/scriptRuntime";
+import { useScriptTrustGate } from "../hooks/useScriptTrustGate";
+import {
+  type ConnectionGuard,
+  startDataConnectionSchedule,
+} from "../store/dataConnectionSchedule";
 import "./EditorScreen.css";
 
 // req 5.4.1: "loading" blocks editing (snapshot is being replaced); "saving"
@@ -814,6 +820,16 @@ export default function EditorScreen() {
     importXlsx,
     importCsv,
   } = useWorkbookStore();
+
+  // #355 — trust gate for content that runs by itself (workbook scripts and
+  // auto-refreshing data connections). Nothing runs while `scriptGrant` is
+  // null. `trustGate.state` / `trustGate.content` / `allowOnce` /
+  // `allowAlways` are what the permission banner uses. The ref gives
+  // callbacks and timers the latest gate without re-subscribing.
+  const trustGate = useScriptTrustGate();
+  const scriptGrant = trustGate.grant;
+  const trustGateRef = useRef(trustGate);
+  trustGateRef.current = trustGate;
 
   // #97: wrapper for apply-style snapshot mutations (AutoSum, format painter,
   // hyperlink, CF, DV, chart, image, comment, quick number format). These
@@ -5271,7 +5287,10 @@ export default function EditorScreen() {
       connection.targetSheetId = sheetId;
       connection.lastRefreshedAt = Date.now();
       addConnectionToSnapshot(snapshot, connection);
-      applyMutatedSnapshot(JSON.stringify(snapshot));
+      const nextJson = JSON.stringify(snapshot);
+      // #355: an edit made in the app keeps the document trusted when it was.
+      void trustGateRef.current.adoptLocalEdit(liveSnap, nextJson);
+      applyMutatedSnapshot(nextJson);
     },
     [applyMutatedSnapshot, loadDataConnectionFragment],
   );
@@ -5284,13 +5303,16 @@ export default function EditorScreen() {
   // read→apply→write critical section runs strictly one refresh at a time.
   const refreshQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const handleDataConnectionRefresh = useCallback(
-    (connectionId: string) => {
+    // `guard` is passed by the scheduled refresh (#355) and checked against
+    // the exact connection about to be loaded; the manual refresh omits it.
+    (connectionId: string, guard?: ConnectionGuard) => {
       const doRefresh = async () => {
         const liveBefore = useWorkbookStore.getState().currentSnapshotJson;
         if (!liveBefore) throw new Error("ワークブックがありません");
         const snapBefore = JSON.parse(liveBefore) as Record<string, unknown>;
         const conn = listDataConnections(snapBefore).find((c) => c.id === connectionId);
         if (!conn) throw new Error("接続が見つかりません");
+        if (guard && !guard(conn)) throw new Error("この接続の自動更新は許可されていません");
         const rawFragment = await loadDataConnectionFragment(conn);
         // Re-parse the live snapshot AFTER the async load.
         const liveAfter = useWorkbookStore.getState().currentSnapshotJson;
@@ -5347,7 +5369,10 @@ export default function EditorScreen() {
           intervalMinutes: patch.scheduleIntervalMinutes,
         },
       });
-      applyMutatedSnapshot(JSON.stringify(snap));
+      const nextJson = JSON.stringify(snap);
+      // #355: an edit made in the app keeps the document trusted when it was.
+      void trustGateRef.current.adoptLocalEdit(live, nextJson);
+      applyMutatedSnapshot(nextJson);
     },
     [applyMutatedSnapshot],
   );
@@ -5358,7 +5383,10 @@ export default function EditorScreen() {
       if (!live) throw new Error("ワークブックがありません");
       const snap = JSON.parse(live) as Record<string, unknown>;
       removeConnectionFromSnapshot(snap, connectionId);
-      applyMutatedSnapshot(JSON.stringify(snap));
+      const nextJson = JSON.stringify(snap);
+      // #355: an edit made in the app keeps the document trusted when it was.
+      void trustGateRef.current.adoptLocalEdit(live, nextJson);
+      applyMutatedSnapshot(nextJson);
     },
     [applyMutatedSnapshot],
   );
@@ -5368,10 +5396,21 @@ export default function EditorScreen() {
   // timers for connections with `intervalMinutes > 0`. The timers re-read the
   // live snapshot each tick, so edits to a connection's schedule take effect
   // on the next dialog save (which replaces the handle? no — we re-scan).
+  //
+  // #355: nothing is scheduled without an execution grant, and each refresh
+  // re-checks the latest grant against the connection it is about to load.
+  // The on-open marker is set only when a refresh actually started, so a
+  // workbook allowed after opening still gets its on-open refresh. The effect
+  // re-runs when the approved connection set changes, not on every new grant
+  // (a script edit issues a new grant but must not reset interval timers).
   const dataConnOnOpenFiredRef = useRef<string | null>(null);
+  const connScheduleKey = scriptGrant
+    ? (trustGate.content?.connectionSignatures ?? []).join("\n")
+    : null;
   useEffect(() => {
     const handle = currentHandle;
     if (!handle) return;
+    if (connScheduleKey === null) return;
     const handleKey = JSON.stringify(handle);
     const snapJson = useWorkbookStore.getState().currentSnapshotJson;
     if (!snapJson) return;
@@ -5381,38 +5420,16 @@ export default function EditorScreen() {
     } catch {
       return;
     }
-    // Fire on-open refreshes exactly once per workbook handle.
-    if (dataConnOnOpenFiredRef.current !== handleKey) {
-      dataConnOnOpenFiredRef.current = handleKey;
-      for (const c of conns) {
-        if (c.schedule?.onOpen) {
-          void handleDataConnectionRefresh(c.id).catch(() => {
-            // Background refresh failures are non-fatal — surfaced in the
-            // dialog when the user next opens it.
-          });
-        }
-      }
-    }
-    // Interval timers: one per connection with intervalMinutes > 0.
-    const timers: ReturnType<typeof setInterval>[] = [];
-    for (const c of conns) {
-      const minutes = c.schedule?.intervalMinutes ?? 0;
-      if (minutes > 0) {
-        const id = c.id;
-        timers.push(
-          setInterval(
-            () => {
-              void handleDataConnectionRefresh(id).catch(() => {});
-            },
-            minutes * 60_000,
-          ),
-        );
-      }
-    }
-    return () => {
-      for (const t of timers) clearInterval(t);
-    };
-  }, [currentHandle, handleDataConnectionRefresh]);
+    const schedule = startDataConnectionSchedule({
+      connections: conns,
+      getGrant: () => trustGateRef.current.grant,
+      // Fire on-open refreshes at most once per workbook handle.
+      onOpenPending: dataConnOnOpenFiredRef.current !== handleKey,
+      refresh: handleDataConnectionRefresh,
+    });
+    if (schedule.firedOnOpen) dataConnOnOpenFiredRef.current = handleKey;
+    return () => schedule.stop();
+  }, [currentHandle, handleDataConnectionRefresh, connScheduleKey]);
 
   const addCurrentCellAsBookmark = useCallback(() => {
     const fUniver = fUniverRef.current;
@@ -8934,8 +8951,13 @@ export default function EditorScreen() {
   // through the sandboxed-iframe executor (handlers are kept inside the
   // iframe; the parent only sends fire-trigger messages). Each run is
   // appended to the execution log.
+  // #355: without an execution grant nothing is collected, fired, listened to
+  // or scheduled. With one, the runtime still refuses any script whose source
+  // the grant does not cover (e.g. an edit that has not been evaluated yet).
   useEffect(() => {
     if (!fUniverRef.current) return;
+    const grant = scriptGrant;
+    if (!grant) return;
     const fUniver = fUniverRef.current;
     let disposed = false;
     const timerIds: ReturnType<typeof setInterval>[] = [];
@@ -8987,10 +9009,13 @@ export default function EditorScreen() {
         const entry = scripts.find((s) => s.id === c.scriptId);
         if (!entry) continue;
         const result = await fireTrigger(entry, kind, {
+          grant,
           fUniver: fUniverRef.current,
           snapshotJson: snapshotRef.current,
           editEvent: extra.editEvent,
         });
+        // #355: a refused run did not run; keep it out of the execution log.
+        if (result.error === SCRIPT_NOT_TRUSTED) continue;
         // M1 — after unmount, don't record runs or write logs.
         if (disposed) return;
         recordRun(entry, kind, result);
@@ -9009,6 +9034,7 @@ export default function EditorScreen() {
         try {
           next.push(
             await collectTriggers(s, {
+              grant,
               fUniver: fUniverRef.current,
               snapshotJson: snapshotRef.current,
             }),
@@ -9089,7 +9115,7 @@ export default function EditorScreen() {
       editDisposable.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSnapshotJson]);
+  }, [currentSnapshotJson, scriptGrant]);
 
   // #186 — global-shortcut macro playback. `useGlobalShortcuts` (App level)
   // detects Ctrl/Cmd+Shift+1..9 and emits the bound macro id; we own the
@@ -10260,10 +10286,14 @@ export default function EditorScreen() {
           scripts={readScripts(currentSnapshotJson)}
           fUniver={fUniverRef.current}
           snapshotJson={currentSnapshotJson}
+          grant={scriptGrant}
           onChange={(next: ScriptEntry[]) => {
             // _scripts はワークブックメタ (シートと独立) なので、現在の
             // snapshot に書き戻して updateSnapshot で永続化する。
             const nextJson = writeScripts(currentSnapshotJson, next);
+            // #355: an edit made in the app keeps the document trusted when
+            // it was (registered before the store update that re-evaluates).
+            void trustGateRef.current.adoptLocalEdit(currentSnapshotJson, nextJson);
             updateSnapshot(nextJson);
           }}
           onClose={() => setScriptEditorOpen(false)}

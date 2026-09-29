@@ -20,6 +20,7 @@ import { registerSnapshotFlush } from "./snapshotSync";
 import { friendlyError } from "./errorMessages";
 import type { SaveResult } from "../types/workbook";
 import { setLocale } from "../i18n/locale";
+import { getScriptTrustStore } from "./scriptTrust";
 
 const EMPTY_WORKBOOK_SNAPSHOT =
   "{\"sheetOrder\":[\"sheet-1\"],\"sheets\":{\"sheet-1\":{\"name\":\"Sheet1\",\"cellData\":{}}}}";
@@ -2247,5 +2248,148 @@ describe("settings-persist reject is best-effort", () => {
     invokeMock.mockRejectedValue("DB_LOCKED");
     await useWorkbookStore.getState().setAutoSaveInterval(12_345);
     expect(useWorkbookStore.getState().autoSaveIntervalMs).toBe(12_345);
+  });
+});
+
+// ---------- #355: document session key / trust lookup path ------------------
+
+describe("#355 document session key", () => {
+  const trustStore = getScriptTrustStore();
+  const openResult = (path: string | null, snapshotJson = "{}") => ({
+    handle: { workbookId: "wb-355", path, sourceType: "coco", snapshotJson },
+    warnings: [],
+  });
+
+  beforeEach(() => {
+    useWorkbookStore.setState({
+      docSessionKey: null,
+      trustLookupPath: null,
+      nicelUndoStack: [],
+      nicelRedoStack: [],
+    });
+  });
+
+  it("newWorkbook issues a key with no lookup path", async () => {
+    invokeMock.mockResolvedValue({ ...makeHandle({ path: null }), snapshotJson: "{}" });
+    await useWorkbookStore.getState().newWorkbook();
+    const s = useWorkbookStore.getState();
+    expect(typeof s.docSessionKey).toBe("string");
+    expect(s.docSessionKey!.length).toBeGreaterThan(8);
+    expect(s.trustLookupPath).toBeNull();
+  });
+
+  it("openNicel / importXlsx / importCsv issue a fresh key each time, lookup path null", async () => {
+    const keys: (string | null)[] = [];
+    invokeMock.mockResolvedValue(openResult("/tmp/a.coco"));
+    await useWorkbookStore.getState().openNicel("/tmp/a.coco");
+    keys.push(useWorkbookStore.getState().docSessionKey);
+    expect(useWorkbookStore.getState().trustLookupPath).toBeNull();
+
+    invokeMock.mockResolvedValue(openResult("/tmp/b.xlsx"));
+    await useWorkbookStore.getState().importXlsx("/tmp/b.xlsx");
+    keys.push(useWorkbookStore.getState().docSessionKey);
+    expect(useWorkbookStore.getState().trustLookupPath).toBeNull();
+
+    invokeMock.mockResolvedValue(openResult("/tmp/c.csv"));
+    await useWorkbookStore.getState().importCsv("/tmp/c.csv");
+    keys.push(useWorkbookStore.getState().docSessionKey);
+    expect(useWorkbookStore.getState().trustLookupPath).toBeNull();
+
+    expect(keys.every((k) => typeof k === "string")).toBe(true);
+    expect(new Set(keys).size).toBe(3);
+  });
+
+  it("restoreCandidate uses the candidate's original path for lookup only", async () => {
+    useWorkbookStore.setState({
+      recoveryCandidates: [
+        { candidateId: "cand-1", originalPath: "C:\Books\Report.coco", savedAt: "x", reason: "crash" },
+      ],
+    });
+    invokeMock.mockResolvedValue(openResult("/tmp/recovery.coco"));
+    await useWorkbookStore.getState().restoreCandidate("cand-1");
+    const s = useWorkbookStore.getState();
+    expect(s.currentHandle?.path).toBeNull();
+    expect(s.trustLookupPath).toBe("C:\Books\Report.coco");
+    expect(typeof s.docSessionKey).toBe("string");
+  });
+
+  it("restoreCandidate without a known candidate has no lookup path", async () => {
+    invokeMock.mockResolvedValue(openResult("/tmp/recovery.coco"));
+    await useWorkbookStore.getState().restoreCandidate("unknown");
+    expect(useWorkbookStore.getState().trustLookupPath).toBeNull();
+  });
+
+  it("openSnapshot uses the path it was opened from for lookup, with a new key", async () => {
+    useWorkbookStore.setState({
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+      docSessionKey: "before-snapshot",
+    });
+    invokeMock.mockResolvedValue(openResult("/tmp/data.coco"));
+    await useWorkbookStore.getState().openSnapshot(7);
+    const s = useWorkbookStore.getState();
+    expect(s.currentHandle?.path).toBeNull();
+    expect(s.trustLookupPath).toBe("/tmp/data.coco");
+    expect(s.docSessionKey).not.toBe("before-snapshot");
+  });
+
+  it("replacing the document ends the previous trust session", async () => {
+    const end = vi.spyOn(trustStore, "endSession");
+    useWorkbookStore.setState({ docSessionKey: "old-key" });
+    invokeMock.mockResolvedValue(openResult("/tmp/a.coco"));
+    await useWorkbookStore.getState().openNicel("/tmp/a.coco");
+    expect(end).toHaveBeenCalledWith("old-key");
+    end.mockRestore();
+  });
+
+  it("goHome ends the session and clears key and lookup path", () => {
+    const end = vi.spyOn(trustStore, "endSession");
+    useWorkbookStore.setState({ docSessionKey: "home-key", trustLookupPath: "/x.coco" });
+    useWorkbookStore.getState().goHome();
+    const s = useWorkbookStore.getState();
+    expect(end).toHaveBeenCalledWith("home-key");
+    expect(s.docSessionKey).toBeNull();
+    expect(s.trustLookupPath).toBeNull();
+    end.mockRestore();
+  });
+
+  it("failed, blocked or superseded opens keep the current key", async () => {
+    useWorkbookStore.setState({ docSessionKey: "keep-me" });
+    invokeMock.mockRejectedValue("File not found: /missing.coco");
+    await useWorkbookStore.getState().openNicel("/missing.coco");
+    expect(useWorkbookStore.getState().docSessionKey).toBe("keep-me");
+
+    invokeMock.mockResolvedValue({
+      handle: { workbookId: "b", path: "/tmp/b.xlsx", sourceType: "xlsx", snapshotJson: "{}" },
+      warnings: [{ severity: "blocking", code: "XLSX_SECURITY_BLOCKED", message: "no" }],
+    });
+    await useWorkbookStore.getState().importXlsx("/tmp/b.xlsx");
+    expect(useWorkbookStore.getState().docSessionKey).toBe("keep-me");
+
+    const first = deferred<unknown>();
+    invokeMock.mockReturnValueOnce(first.promise);
+    const stale = useWorkbookStore.getState().openNicel("/tmp/first.coco");
+    invokeMock.mockResolvedValueOnce(openResult("/tmp/second.coco"));
+    await useWorkbookStore.getState().openNicel("/tmp/second.coco");
+    const winner = useWorkbookStore.getState().docSessionKey;
+    first.resolve(openResult("/tmp/first.coco"));
+    await stale;
+    expect(useWorkbookStore.getState().docSessionKey).toBe(winner);
+  });
+
+  it("undo / redo, snapshot updates and save keep the key", async () => {
+    useWorkbookStore.setState({
+      docSessionKey: "stable",
+      trustLookupPath: null,
+      currentHandle: makeHandle({ path: "/tmp/data.coco" }),
+      currentSnapshotJson: "{\"v\":1}",
+    });
+    useWorkbookStore.getState().pushNicelCheckpoint("{\"v\":0}");
+    useWorkbookStore.getState().updateSnapshot("{\"v\":2}");
+    useWorkbookStore.getState().nicelUndo();
+    useWorkbookStore.getState().nicelRedo();
+    useWorkbookStore.getState().markDirty();
+    invokeMock.mockResolvedValue({ success: true, path: "/tmp/data.coco", error: null });
+    await useWorkbookStore.getState().save();
+    expect(useWorkbookStore.getState().docSessionKey).toBe("stable");
   });
 });

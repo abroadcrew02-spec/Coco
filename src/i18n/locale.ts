@@ -455,8 +455,8 @@ const jaJP = {
   "settings.trustedWorkbooks.trustedAt": "信頼した日時: {0}",
   "settings.trustedWorkbooks.revokeButton": "取り消す",
   "settings.trustedWorkbooks.revokeFailed": "取り消せませんでした。もう一度お試しください",
-  "settings.trustedWorkbooks.revokeHint": "取り消しは次にブックを開いた時から有効です",
-  "toast.trustedWorkbooks.revoked": "信頼を取り消しました。次にこのブックを開いた時から有効です",
+  "settings.trustedWorkbooks.revokeHint": "取り消すと、開いているブックでもすぐに止まります",
+  "toast.trustedWorkbooks.revoked": "信頼を取り消しました。開いているブックでもすぐに止まります",
 } as const;
 
 export type StringKey = keyof typeof jaJP;
@@ -881,9 +881,9 @@ const enUS: Record<StringKey, string> = {
   "settings.trustedWorkbooks.revokeButton": "Revoke",
   "settings.trustedWorkbooks.revokeFailed": "Couldn't revoke trust. Try again.",
   "settings.trustedWorkbooks.revokeHint":
-    "Revoking takes effect the next time you open the workbook.",
+    "Revoking takes effect immediately, even in a workbook that is open.",
   "toast.trustedWorkbooks.revoked":
-    "Trust revoked. This takes effect the next time you open this workbook.",
+    "Trust revoked. It stops right away, even in a workbook that is open.",
 };
 
 export const strings: Record<Locale, Record<StringKey, string>> = {

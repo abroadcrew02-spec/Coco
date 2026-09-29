@@ -450,11 +450,11 @@ describe("SettingsDialog", () => {
       expect(screen.getByText("スクリプトや自動更新を常に許可したブックの一覧です")).toBeTruthy();
       expect(await screen.findByText(PATH)).toBeTruthy();
       expect(screen.getByText(/^信頼した日時: /)).toBeTruthy();
-      expect(screen.getByText("取り消しは次にブックを開いた時から有効です")).toBeTruthy();
+      expect(screen.getByText("取り消すと、開いているブックでもすぐに止まります")).toBeTruthy();
 
       await user.click(screen.getByRole("button", { name: "取り消す" }));
       const toast = await screen.findByText(
-        "信頼を取り消しました。次にこのブックを開いた時から有効です",
+        "信頼を取り消しました。開いているブックでもすぐに止まります",
       );
       expect(toast.getAttribute("role")).toBe("status");
       expect(await screen.findByText("信頼したブックはありません")).toBeTruthy();

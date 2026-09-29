@@ -113,7 +113,7 @@ fn collect_settings(
     // machine's trust records), rather than relying solely on a filter that
     // lives two calls away.
     rows.into_iter()
-        .filter(|row| !row.key.starts_with(crate::db::operations::SCRIPT_TRUST_KEY_PREFIX))
+        .filter(|row| !crate::db::operations::has_script_trust_prefix(&row.key))
         .collect()
 }
 
@@ -375,23 +375,28 @@ pub fn import_workspace_bundle_core(
                 // generic `set_setting`, that command already refuses
                 // `script_trust.*` keys outright (see db::operations).
                 //
-                // Parse-failure isn't fatal for the manifest count — the
-                // user can still inspect the raw file by hand — but in that
-                // case the file on disk is left exactly as the bundle
-                // contained it (best-effort rewrite only, same posture as
-                // the rest of this function's soft failures).
-                if let Ok(rows) =
-                    serde_json::from_slice::<Vec<crate::commands::settings::SettingEntry>>(&data)
+                match serde_json::from_slice::<Vec<crate::commands::settings::SettingEntry>>(&data)
                 {
-                    let filtered: Vec<_> = rows
-                        .into_iter()
-                        .filter(|row| {
-                            !row.key.starts_with(crate::db::operations::SCRIPT_TRUST_KEY_PREFIX)
-                        })
-                        .collect();
-                    restored_settings_count = filtered.len() as u32;
-                    if let Ok(rewritten) = serde_json::to_vec_pretty(&filtered) {
-                        let _ = fs::write(&out_path, &rewritten);
+                    Ok(rows) => {
+                        let filtered: Vec<_> = rows
+                            .into_iter()
+                            .filter(|row| !crate::db::operations::has_script_trust_prefix(&row.key))
+                            .collect();
+                        restored_settings_count = filtered.len() as u32;
+                        if let Ok(rewritten) = serde_json::to_vec_pretty(&filtered) {
+                            let _ = fs::write(&out_path, &rewritten);
+                        }
+                    }
+                    Err(_) => {
+                        // AZKi review follow-up: an unparseable settings.json
+                        // used to be left on disk byte-for-byte, unfiltered —
+                        // "we couldn't check it" must not mean "so ship it
+                        // as-is". Fail closed: treat it as an empty settings
+                        // list, both in the returned count and in the file
+                        // that actually lands on disk, rather than trusting
+                        // content this function couldn't itself validate.
+                        restored_settings_count = 0;
+                        let _ = fs::write(&out_path, b"[]");
                     }
                 }
             }

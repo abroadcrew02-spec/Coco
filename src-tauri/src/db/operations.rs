@@ -12,6 +12,21 @@ use rusqlite::Connection;
 /// execution by writing its own trust record).
 pub const SCRIPT_TRUST_KEY_PREFIX: &str = "script_trust.";
 
+/// True when `key` starts with [`SCRIPT_TRUST_KEY_PREFIX`], **case-insensitively**
+/// (AZKi review follow-up: `key.starts_with(SCRIPT_TRUST_KEY_PREFIX)` alone
+/// would let `Script_Trust.v1....` slip through both the `set_setting`/
+/// `delete_setting` guard and the `list_settings` exclusion). Byte-safe: uses
+/// `str::get` rather than direct slicing, so a `key` shorter than the prefix,
+/// or one where the prefix's byte length doesn't land on a UTF-8 char
+/// boundary, is simply `false` rather than a panic — and since the prefix is
+/// pure ASCII, any string that *would* match it case-insensitively always has
+/// a valid boundary there, so this never rejects a real match.
+pub fn has_script_trust_prefix(key: &str) -> bool {
+    key.get(..SCRIPT_TRUST_KEY_PREFIX.len())
+        .map(|head| head.eq_ignore_ascii_case(SCRIPT_TRUST_KEY_PREFIX))
+        .unwrap_or(false)
+}
+
 /// Cap on how many recent entries are persisted in the recent_files table.
 /// With the inline filter on the HomeScreen, a higher cap is now useful:
 /// power users juggle 20–30 working files and benefit from a stable history.
@@ -127,7 +142,7 @@ pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>> {
 }
 
 pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
-    if key.starts_with(SCRIPT_TRUST_KEY_PREFIX) {
+    if has_script_trust_prefix(key) {
         return Err(NicelError::Rejected(format!(
             "'{SCRIPT_TRUST_KEY_PREFIX}*' keys are reserved for the script trust commands and cannot be written through set_setting"
         )));
@@ -143,11 +158,26 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
 
 /// Never returns a `script_trust.*` row (filtered in SQL, not just in Rust,
 /// so there's no path through this function that forgets to exclude them).
+///
+/// AZKi review follow-up: this used to be `key NOT LIKE 'script_trust.%'`,
+/// which is wrong two ways — SQL `LIKE` treats a bare `_` as a "match any one
+/// character" wildcard (so it over-matched keys like `scriptXtrust.foo`, not
+/// just the literal prefix), and SQLite's `LIKE` is already ASCII
+/// case-insensitive by default, which is easy to mistake for an intentional
+/// choice rather than an accident. `substr(...) = ?1` does a plain
+/// byte-for-byte comparison — no wildcard semantics — with `LOWER(...)`
+/// added deliberately so the exclusion stays case-insensitive on purpose,
+/// consistent with `has_script_trust_prefix`. The substring length comes
+/// from `SCRIPT_TRUST_KEY_PREFIX.len()`, not a hardcoded number, so the two
+/// can't drift apart.
 pub fn list_settings(conn: &Connection) -> Result<Vec<(String, String)>> {
-    let exclude_pattern = format!("{SCRIPT_TRUST_KEY_PREFIX}%");
-    let mut stmt =
-        conn.prepare("SELECT key, value FROM app_settings WHERE key NOT LIKE ?1 ORDER BY key")?;
-    let rows = stmt.query_map(rusqlite::params![exclude_pattern], |row| {
+    let prefix_len = SCRIPT_TRUST_KEY_PREFIX.len();
+    let sql = format!(
+        "SELECT key, value FROM app_settings \
+         WHERE LOWER(substr(key, 1, {prefix_len})) <> ?1 ORDER BY key"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params![SCRIPT_TRUST_KEY_PREFIX], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
     let mut out = Vec::new();
@@ -158,7 +188,7 @@ pub fn list_settings(conn: &Connection) -> Result<Vec<(String, String)>> {
 }
 
 pub fn delete_setting(conn: &Connection, key: &str) -> Result<()> {
-    if key.starts_with(SCRIPT_TRUST_KEY_PREFIX) {
+    if has_script_trust_prefix(key) {
         return Err(NicelError::Rejected(format!(
             "'{SCRIPT_TRUST_KEY_PREFIX}*' keys are reserved for the script trust commands and cannot be deleted through delete_setting"
         )));

@@ -124,6 +124,7 @@ pub fn run() {
             commands::url_fetch_credentials::url_fetch_set_credential,
             commands::url_fetch_credentials::url_fetch_delete_credential,
             commands::url_fetch_credentials::url_fetch_list_credentials,
+            commands::updater::updater_fetch_manifest,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

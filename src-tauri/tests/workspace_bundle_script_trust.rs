@@ -160,3 +160,108 @@ fn import_ignores_script_trust_settings_even_from_a_hand_built_bundle() {
         "the ordinary setting should still be extracted: {extracted}"
     );
 }
+
+/// Hand-builds a bundle whose `settings.json` entry is not a
+/// `Vec<SettingEntry>` at all (e.g. corrupted in transit, or produced by a
+/// future/older bundle format this build doesn't understand).
+fn build_bundle_with_unparseable_settings(path: &std::path::Path) {
+    let manifest = serde_json::json!({
+        "appVersion": "0.8.5",
+        "exportedAt": "2026-01-01T00:00:00Z",
+        "originalWorkbookPath": null,
+        "sheetCount": 1,
+        "restoredWorkbookPath": "",
+        "restoredSettingsCount": 0,
+    });
+
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let mut writer = zip::ZipWriter::new(Cursor::new(&mut buf));
+        let opts =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        writer.start_file("manifest.json", opts).unwrap();
+        writer
+            .write_all(serde_json::to_vec_pretty(&manifest).unwrap().as_slice())
+            .unwrap();
+        writer.start_file("settings.json", opts).unwrap();
+        // Not JSON at all -- and even if it were, not the expected shape.
+        // Whatever a real script_trust.* row's raw bytes could look like,
+        // this must never survive onto disk unfiltered.
+        writer
+            .write_all(b"{ this is not valid settings.json (or even valid JSON) }")
+            .unwrap();
+        writer.finish().unwrap();
+    }
+    std::fs::write(path, &buf).unwrap();
+}
+
+#[test]
+fn import_fails_closed_when_settings_json_cannot_be_parsed() {
+    // AZKi review follow-up: an unparseable settings.json used to be written
+    // to disk byte-for-byte, unfiltered -- "couldn't check it" must not mean
+    // "ship it as-is". It must fail closed to an empty settings list instead.
+    let bundle_dir = TempDir::new().unwrap();
+    let bundle_path = bundle_dir.path().join("corrupt.zip");
+    build_bundle_with_unparseable_settings(&bundle_path);
+
+    let target_dir = TempDir::new().unwrap();
+    let manifest = import_workspace_bundle_core(
+        &bundle_path.to_string_lossy(),
+        &target_dir.path().to_string_lossy(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        manifest.restored_settings_count, 0,
+        "an unparseable settings.json must count as zero restored settings"
+    );
+    let extracted = std::fs::read_to_string(target_dir.path().join("settings.json")).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&extracted)
+        .expect("the file on disk must be rewritten as valid JSON, not left as the raw garbage");
+    assert_eq!(
+        parsed,
+        serde_json::json!([]),
+        "an unparseable settings.json must be replaced with an empty list on disk, not left as-is"
+    );
+}
+
+#[test]
+fn export_excludes_a_mixed_case_script_trust_key() {
+    // AZKi review follow-up: the exclusion must be case-insensitive, matching
+    // the case-insensitive guard on set_setting/delete_setting.
+    let data_dir = TempDir::new().unwrap();
+    {
+        let conn = Connection::open(data_dir.path().join("app_state.db")).unwrap();
+        nicel_lib::db::schema::initialize(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["autosave.interval_ms", "30000", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params![
+                format!("Script_Trust.v1.{}", "a".repeat(64)),
+                "{}",
+                "2026-01-01T00:00:00Z"
+            ],
+        )
+        .unwrap();
+    }
+    let out_dir = TempDir::new().unwrap();
+    let bundle_path = out_dir.path().join("bundle.zip");
+    let result = export_workspace_bundle_core(
+        data_dir.path(),
+        None,
+        minimal_snapshot(),
+        bundle_path.to_string_lossy().into_owned(),
+    )
+    .unwrap();
+    assert!(result.success, "export failed: {:?}", result.error);
+
+    let settings_json = read_zip_entry(&bundle_path, "settings.json").unwrap();
+    assert!(
+        !settings_json.to_ascii_lowercase().contains("script_trust."),
+        "exported settings.json must exclude a mixed-case script_trust key too: {settings_json}"
+    );
+}

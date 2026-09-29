@@ -13,6 +13,7 @@ pub mod security;
 pub mod settings;
 pub mod sheet_import;
 pub mod shell;
+pub mod updater;
 pub mod workbook;
 pub mod workspace_bundle;
 pub mod ws_fetch;

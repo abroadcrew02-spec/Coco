@@ -123,6 +123,72 @@ fn list_settings_never_returns_script_trust_prefixed_keys() {
     assert_eq!(entries[0].key, "ordinary.setting");
 }
 
+// ── AZKi review follow-up: the guard/exclusion must be case-insensitive, and
+// the exclusion must not use SQL LIKE's wildcard semantics (a bare `_` in
+// "script_trust." would otherwise match any single character there, e.g.
+// "scriptXtrust.foo") ─────────────────────────────────────────────────────
+
+#[test]
+fn set_setting_rejects_script_trust_prefix_regardless_of_case() {
+    let tmp = TempDir::new().unwrap();
+    for key in [
+        "Script_Trust.v1.deadbeef",
+        "SCRIPT_TRUST.v1.deadbeef",
+        "ScRiPt_TrUsT.v1.deadbeef",
+    ] {
+        assert!(
+            set_setting_core(tmp.path(), key, "{}").is_err(),
+            "expected {key} to be rejected"
+        );
+    }
+}
+
+#[test]
+fn delete_setting_rejects_script_trust_prefix_regardless_of_case() {
+    let tmp = TempDir::new().unwrap();
+    assert!(delete_setting_core(tmp.path(), "Script_Trust.v1.deadbeef").is_err());
+}
+
+#[test]
+fn list_settings_excludes_script_trust_prefix_regardless_of_case() {
+    let tmp = TempDir::new().unwrap();
+    set_setting_core(tmp.path(), "ordinary.setting", "1").unwrap();
+    {
+        use rusqlite::Connection;
+        let conn = Connection::open(tmp.path().join("app_state.db")).unwrap();
+        nicel_lib::db::schema::initialize(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["Script_Trust.v1.deadbeef", "{}", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+    }
+    let entries = list_settings_core(tmp.path()).unwrap();
+    assert_eq!(
+        entries.len(),
+        1,
+        "the mixed-case script_trust row must still be excluded"
+    );
+    assert_eq!(entries[0].key, "ordinary.setting");
+}
+
+#[test]
+fn list_settings_does_not_over_match_a_key_containing_an_underscore_at_that_position() {
+    // Regression: SQL `LIKE 'script_trust.%'` treats the `_` as "any one
+    // character", so a key like "scriptXtrust.foo" used to be silently
+    // excluded from list_settings even though it isn't a script_trust key at
+    // all. The exact-substring comparison must not repeat that mistake.
+    let tmp = TempDir::new().unwrap();
+    set_setting_core(tmp.path(), "scriptXtrust.foo", "1").unwrap();
+    let entries = list_settings_core(tmp.path()).unwrap();
+    assert_eq!(
+        entries.len(),
+        1,
+        "a key that only LIKE's wildcard would match must still be listed"
+    );
+    assert_eq!(entries[0].key, "scriptXtrust.foo");
+}
+
 #[test]
 fn settings_are_isolated_between_data_dirs() {
     let tmp_a = TempDir::new().unwrap();

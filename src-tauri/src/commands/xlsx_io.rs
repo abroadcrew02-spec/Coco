@@ -349,20 +349,32 @@ impl CellStyle {
 /// A style can appear in two places in a workbook snapshot, and both are
 /// walked here:
 /// - the top-level `styles` map (`{ [id]: IStyleData }`), referenced by cells
-///   through a string `s` id. This is the only shape actually produced by any
-///   writer in this codebase — confirmed by reading `import_xlsx_core`'s
-///   `styles_map` dedup below, and by `ICellData.s: IStyleData | string` in
-///   `@univerjs/core`'s own typedef (Univer's own facade/grid editing path
-///   also writes through this styles-map + string-id pattern).
+///   through a string `s` id. This is what `import_xlsx_core`'s `styles_map`
+///   dedup below writes, matching `ICellData.s: IStyleData | string` in
+///   `@univerjs/core`'s own typedef.
 /// - inline on the cell itself (`cellData[r][c].s` as an object rather than a
-///   string id). Nothing in this codebase writes that shape today, but
-///   Univer's own type allows it, so it is normalized defensively rather than
-///   silently skipped.
+///   string id). This is not a defensive corner case — it's one of the two
+///   main write paths in the frontend: `src/store/cellStyles.ts` (the Cell
+///   Styles gallery) and `src/components/hyperlinkRender.ts` (hyperlink
+///   formatting) both write directly into `cell.s` as an object, spreading
+///   whatever style object was already there and adding their own keys on
+///   top. That's exactly how a legacy-shaped style ends up carrying Univer
+///   keys too: open a v0.8.1 `.coco`, add a hyperlink to an already-styled
+///   cell, save — the cell's `s` is now `{font, fill, ul, cl, ...}`.
 ///
-/// A style object is only rewritten when it carries at least one legacy-only
+/// A style object is only touched when it carries at least one legacy-only
 /// key (`font` / `fill` / `alignment` / `borders`); an already-Univer object
-/// (which may legitimately have `n` or `bd`) is left untouched. When nothing
-/// in the whole snapshot needed rewriting, the original string is returned
+/// (which may legitimately have `n` or `bd`) is left untouched. When touched,
+/// this is a merge, not a wholesale replacement (reviewer finding B2): the
+/// legacy keys are removed and replaced by whatever `CellStyle` can derive
+/// from them (`from_json(...).to_json()`), but any key already on the object
+/// — legacy-adjacent Univer keys `CellStyle` doesn't model, such as `ul`
+/// (hyperlink), `tr` (text rotation), `pd` (padding), `va`, `ol`, `bbl`,
+/// `td`, diagonal borders, or `th` inside `cl`/`bg` — is left exactly as-is
+/// and never overwritten by the derived value. A wholesale
+/// `*v = style.to_json()` replace would silently drop all of those the
+/// moment a legacy key was present anywhere on the object. When nothing in
+/// the whole snapshot needed rewriting, the original string is returned
 /// unchanged (no reserialization) so an already-migrated `.coco` round-trips
 /// byte-for-byte.
 pub(crate) fn normalize_legacy_style_snapshot(snapshot_json: &str) -> Result<String, String> {
@@ -370,7 +382,10 @@ pub(crate) fn normalize_legacy_style_snapshot(snapshot_json: &str) -> Result<Str
         Ok(v) => v,
         // Not parseable JSON — nothing for this function to rewrite; let the
         // caller's own handling of the snapshot surface whatever is wrong.
-        Err(_) => return Ok(snapshot_json.to_string()),
+        Err(_) => {
+            log::warn!("legacy style normalization skipped: snapshot is not valid JSON");
+            return Ok(snapshot_json.to_string());
+        }
     };
 
     let mut changed = false;
@@ -417,6 +432,12 @@ pub(crate) fn normalize_legacy_style_snapshot(snapshot_json: &str) -> Result<Str
 
 /// Rewrites `v` in place if it is a legacy-shaped style object (detected by
 /// the presence of a legacy-only key). Returns whether anything changed.
+///
+/// This merges rather than replaces (reviewer finding B2): every key already
+/// present on `v` — including a co-located Univer-only key like `ul`/`tr`
+/// that `CellStyle` doesn't model — wins over the value `CellStyle::to_json`
+/// would derive and is never overwritten. Only the four legacy-only keys are
+/// ever removed; everything else on the object survives untouched.
 fn normalize_style_value_in_place(v: &mut Value) -> bool {
     let is_legacy = v
         .as_object()
@@ -430,13 +451,28 @@ fn normalize_style_value_in_place(v: &mut Value) -> bool {
     if !is_legacy {
         return false;
     }
-    match CellStyle::from_json(v) {
-        Some(style) => {
-            *v = style.to_json();
-            true
-        }
-        None => false,
+    let Some(style) = CellStyle::from_json(v) else {
+        return false;
+    };
+    // `CellStyle::to_json` always returns `Value::Object(..)`; the `let else`
+    // is defensive rather than reachable.
+    let Value::Object(derived) = style.to_json() else {
+        return false;
+    };
+    let Some(obj) = v.as_object_mut() else {
+        return false;
+    };
+    for key in ["font", "fill", "alignment", "borders"] {
+        obj.remove(key);
     }
+    for (key, value) in derived {
+        // `or_insert`, not overwrite: a key the object already carries — be it
+        // a co-located Univer key (`ul`, `tr`, ...) or, in principle, an
+        // already-set Univer key sharing a name with a derived one — takes
+        // precedence over what `CellStyle` would derive from the legacy keys.
+        obj.entry(key).or_insert(value);
+    }
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -11706,6 +11742,116 @@ mod external_ref_tests {
             cached_formula_result(&json!({ "f": "=[1]S!A1", "v": null })),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod normalize_legacy_style_snapshot_tests {
+    //! Direct unit coverage for `normalize_legacy_style_snapshot`, targeting
+    //! defensive/malformed inputs that the higher-level integration suite
+    //! (`tests/coco_style_migration.rs`) doesn't exercise because it only
+    //! ever feeds well-formed snapshots through `open_nicel_core` etc.
+
+    use super::normalize_legacy_style_snapshot;
+    use serde_json::json;
+
+    #[test]
+    fn malformed_json_is_returned_unchanged() {
+        let input = "not json at all";
+        assert_eq!(normalize_legacy_style_snapshot(input).unwrap(), input);
+    }
+
+    #[test]
+    fn non_object_styles_value_is_skipped_without_panicking() {
+        // A `styles` entry that isn't an object at all (e.g. corrupted file)
+        // must not be treated as legacy and must not crash the normalizer.
+        let input = json!({
+            "id": "wb",
+            "sheets": {},
+            "styles": { "s1": "not-an-object", "s2": 42, "s3": null }
+        })
+        .to_string();
+        let out = normalize_legacy_style_snapshot(&input).unwrap();
+        // Nothing looked legacy, so the original string comes back untouched.
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn null_row_in_cell_data_is_skipped_without_panicking() {
+        let input = json!({
+            "id": "wb",
+            "sheets": {
+                "sheet-1": {
+                    "id": "sheet-1",
+                    "cellData": {
+                        "0": null,
+                        "1": { "0": { "v": "x" } }
+                    }
+                }
+            },
+            "styles": {}
+        })
+        .to_string();
+        let out = normalize_legacy_style_snapshot(&input).unwrap();
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn non_object_inline_cell_style_is_left_alone() {
+        // `s` as a bare number/bool would be invalid Univer data, but the
+        // normalizer must not panic on it — only object-shaped `s` is
+        // eligible for legacy rewriting.
+        let input = json!({
+            "id": "wb",
+            "sheets": {
+                "sheet-1": {
+                    "id": "sheet-1",
+                    "cellData": { "0": { "0": { "v": "x", "s": 123 } } }
+                }
+            },
+            "styles": {}
+        })
+        .to_string();
+        let out = normalize_legacy_style_snapshot(&input).unwrap();
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn univer_style_with_no_legacy_keys_is_untouched_and_string_returned_unmutated() {
+        // Already-Univer shape (has "n"/"bd" but none of font/fill/alignment/
+        // borders) must not be rewritten, and since nothing changed anywhere
+        // in the snapshot the exact original string must come back — this is
+        // the byte-identical round-trip guarantee acceptance criterion 2
+        // relies on, pinned here at the function level rather than only via
+        // the full open_nicel_core path.
+        let input = json!({
+            "id": "wb",
+            "sheets": {},
+            "styles": { "s1": { "bl": 1, "n": { "pattern": "0.00%" } } }
+        })
+        .to_string();
+        let out = normalize_legacy_style_snapshot(&input).unwrap();
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn mixed_legacy_and_malformed_entries_still_migrates_the_legacy_one() {
+        // One legit legacy entry alongside a corrupted sibling — the
+        // corrupted one must not abort the whole pass.
+        let input = json!({
+            "id": "wb",
+            "sheets": {},
+            "styles": {
+                "s-legacy": { "font": { "bold": true } },
+                "s-bad": "not-an-object"
+            }
+        })
+        .to_string();
+        let out = normalize_legacy_style_snapshot(&input).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["styles"]["s-legacy"]["bl"], 1);
+        assert!(parsed["styles"]["s-legacy"].get("font").is_none());
+        assert_eq!(parsed["styles"]["s-bad"], "not-an-object");
     }
 }
 

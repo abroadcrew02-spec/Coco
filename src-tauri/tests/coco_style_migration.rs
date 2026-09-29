@@ -157,13 +157,166 @@ fn open_nicel_handles_mixed_legacy_and_univer_styles() {
     );
 }
 
+/// A legacy-shaped style entry that already carries co-located Univer-only
+/// keys (`ul` for a hyperlink, `tr` for text rotation) — the shape Univer's
+/// own `mergeStyle` produces when the frontend deep-clones an existing style
+/// object and layers its own keys on top (see `src/components/
+/// hyperlinkRender.ts` and `src/store/cellStyles.ts`, which both write
+/// through exactly this pattern). `CellStyle` doesn't model `ul` or `tr`.
+fn legacy_with_colocated_univer_keys_snapshot() -> String {
+    json!({
+        "id": "wb-colocated",
+        "sheets": {},
+        "styles": {
+            "s1": {
+                "font": { "bold": true, "color": "#00FF00" },
+                "fill": { "color": "#123456" },
+                "ul": { "s": 1 },
+                "tr": { "a": 45, "v": 0 }
+            }
+        }
+    })
+    .to_string()
+}
+
+#[test]
+fn open_nicel_preserves_co_located_univer_only_keys_when_migrating_legacy() {
+    // Regression for reviewer finding B2: migration used to reserialize the
+    // whole object via `CellStyle::to_json()`, which silently dropped any key
+    // `CellStyle` doesn't model — including a hyperlink's `ul` or a rotated
+    // cell's `tr` sitting right next to the legacy keys.
+    let app_dir = TempDir::new().unwrap();
+    let wb_dir = TempDir::new().unwrap();
+    let path = wb_dir.path().join("colocated.coco");
+    save_core(
+        "wb-colocated".into(),
+        Some(path_str(&path)),
+        legacy_with_colocated_univer_keys_snapshot(),
+    )
+    .unwrap();
+
+    let result = open_nicel_core(app_dir.path(), &path_str(&path)).unwrap();
+    let snap: Value =
+        serde_json::from_str(result.handle.snapshot_json.as_deref().unwrap()).unwrap();
+    let style = &snap["styles"]["s1"];
+
+    // Legacy keys converted to the Univer shape as usual...
+    assert_eq!(style["bl"], 1);
+    assert_eq!(style["bg"]["rgb"], "#123456");
+    assert!(style.get("font").is_none());
+    assert!(style.get("fill").is_none());
+    // ...and the co-located keys `CellStyle` doesn't model survive untouched.
+    assert_eq!(style["ul"], json!({ "s": 1 }));
+    assert_eq!(style["tr"], json!({ "a": 45, "v": 0 }));
+}
+
+#[test]
+fn open_nicel_leaves_malformed_snapshot_untouched() {
+    // Not valid JSON at all (e.g. a corrupted file). The normalizer must hand
+    // the string back byte-for-byte rather than erroring the whole open, so
+    // the caller's own handling of a broken snapshot can surface whatever is
+    // actually wrong instead of the normalizer masking it.
+    let app_dir = TempDir::new().unwrap();
+    let wb_dir = TempDir::new().unwrap();
+    let path = wb_dir.path().join("malformed.coco");
+    let malformed = "not json at all";
+    save_core(
+        "wb-malformed".into(),
+        Some(path_str(&path)),
+        malformed.to_string(),
+    )
+    .unwrap();
+
+    let result = open_nicel_core(app_dir.path(), &path_str(&path)).unwrap();
+    assert_eq!(result.handle.snapshot_json.as_deref(), Some(malformed));
+}
+
+#[test]
+fn open_nicel_skips_null_rows_and_non_object_styles_without_panicking() {
+    // A null `cellData` row and non-object `styles` entries (string/number/
+    // null) are the kind of corruption a partially-written or hand-edited
+    // snapshot could carry. The normalizer must not panic on them, and must
+    // still migrate the one legitimate legacy entry alongside them.
+    let app_dir = TempDir::new().unwrap();
+    let wb_dir = TempDir::new().unwrap();
+    let path = wb_dir.path().join("corrupt-entries.coco");
+    let snapshot = json!({
+        "id": "wb-corrupt",
+        "sheets": {
+            "sheet-1": {
+                "id": "sheet-1",
+                "cellData": {
+                    "0": null,
+                    "1": {
+                        "0": { "v": "ok", "s": "s-legacy" }
+                    }
+                }
+            }
+        },
+        "styles": {
+            "s-legacy": {
+                "font": { "bold": true, "color": "#00FF00" },
+                "fill": { "color": "#123456" }
+            },
+            "s-string": "not-an-object",
+            "s-number": 42,
+            "s-null": null
+        }
+    })
+    .to_string();
+    save_core("wb-corrupt".into(), Some(path_str(&path)), snapshot).unwrap();
+
+    let result = open_nicel_core(app_dir.path(), &path_str(&path)).unwrap();
+    let snap: Value =
+        serde_json::from_str(result.handle.snapshot_json.as_deref().unwrap()).unwrap();
+
+    let legacy_style = &snap["styles"]["s-legacy"];
+    assert_eq!(legacy_style["bl"], 1);
+    assert!(legacy_style.get("font").is_none());
+
+    assert_eq!(snap["styles"]["s-string"], json!("not-an-object"));
+    assert_eq!(snap["styles"]["s-number"], json!(42));
+    assert_eq!(snap["styles"]["s-null"], json!(null));
+    assert_eq!(snap["sheets"]["sheet-1"]["cellData"]["0"], json!(null));
+}
+
+#[test]
+fn normalizing_an_already_migrated_snapshot_is_idempotent() {
+    // Run the migration, persist the result, then run it again — the second
+    // pass must be a no-op (no legacy keys left to find), so the two outputs
+    // must match exactly.
+    let app_dir = TempDir::new().unwrap();
+    let wb_dir = TempDir::new().unwrap();
+    let path = wb_dir.path().join("idempotent.coco");
+    save_core(
+        "wb-idempotent".into(),
+        Some(path_str(&path)),
+        legacy_with_colocated_univer_keys_snapshot(),
+    )
+    .unwrap();
+
+    let first = open_nicel_core(app_dir.path(), &path_str(&path)).unwrap();
+    let migrated = first.handle.snapshot_json.unwrap();
+
+    save_core(
+        "wb-idempotent".into(),
+        Some(path_str(&path)),
+        migrated.clone(),
+    )
+    .unwrap();
+    let second = open_nicel_core(app_dir.path(), &path_str(&path)).unwrap();
+    let migrated_again = second.handle.snapshot_json.unwrap();
+
+    assert_eq!(migrated, migrated_again);
+}
+
 #[test]
 fn open_nicel_migrates_inline_legacy_style_on_cell() {
     // Univer's own `ICellData.s` type is `IStyleData | string`, so a style can
-    // in principle sit inline on the cell rather than in the top-level
-    // `styles` map. No writer in this codebase produces that shape today
-    // (confirmed by reading xlsx_io's importer and Univer's own snapshot
-    // typedef), but the normalizer handles it defensively.
+    // sit inline on the cell rather than in the top-level `styles` map — and
+    // inline `s` is one of the main write paths in this codebase, not an
+    // edge case: `src/store/cellStyles.ts` and `src/components/
+    // hyperlinkRender.ts` both write an object directly into `cell.s`.
     let app_dir = TempDir::new().unwrap();
     let wb_dir = TempDir::new().unwrap();
     let path = wb_dir.path().join("inline.coco");

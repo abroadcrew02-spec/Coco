@@ -24,11 +24,17 @@ export const flushPendingSnapshot = async () => {
  * snapshot by Nicel (camera links, scenarios) and round-tripped through xlsx
  * by `xlsx_io.rs` (`NICEL_EXTENSION_ROOT_FIELDS`).
  *
- * Because `FWorkbook.save()` reconstructs the snapshot purely from Univer's
- * internal models, it DROPS every key in this list. Any path that overwrites
- * the store with `workbook.save()` output (the MUTATION-driven `syncSnapshot`)
- * must re-graft these keys from the prior snapshot or the user's camera links
- * / scenarios silently vanish on the next cell edit (#184 C-1).
+ * Univer never edits these keys, and the store is their only owner. What
+ * `FWorkbook.save()` returns for them is whatever the workbook was created
+ * with (`Workbook` keeps the createUnit-time root keys and deep-clones them on
+ * every save), so after an in-app change that copy is STALE, not missing
+ * (#356, found on device: a script edit rolled back by the next cell edit).
+ * Two measures keep the store's values authoritative:
+ *   - `carryForwardRootExtensions`: the store's value always wins over the
+ *     save() output in `syncSnapshot` (#184 C-1, #356).
+ *   - `mirrorRootExtensionsInto`: every store change is copied into Univer's
+ *     own snapshot, so any other code that builds a snapshot from save() sees
+ *     current values, and keys the store removed are removed there too.
  */
 export const NICEL_ROOT_EXTENSION_KEYS = [
   "_cameraLinks",
@@ -59,14 +65,17 @@ export const NICEL_ROOT_EXTENSION_KEYS = [
 ] as const;
 
 /**
- * Carry Nicel's workbook-root extension keys forward from `prevJson` into
- * `nextJson`. `nextJson` is fresh `FWorkbook.save()` output that has lost
- * those keys; `prevJson` is the last store snapshot that still holds them.
+ * Carry Nicel's workbook-root extension keys from `prevJson` (the store
+ * snapshot, their owner) into `nextJson` (fresh `FWorkbook.save()` output).
  *
- * Returns a JSON string. When nothing needs grafting (no prior snapshot, no
- * extension keys present, or `nextJson` already carries the same values) the
- * original `nextJson` is returned unchanged so referential checks stay cheap.
- * Malformed input is passed through untouched — never throws.
+ * For every key the store has, the store's value wins, whether save() left
+ * the key out or returned an older copy of it. A key the store does not have
+ * is left as save() returned it (with `mirrorRootExtensionsInto` in place,
+ * save() no longer carries keys the store removed).
+ *
+ * Returns a JSON string. When nothing differs the original `nextJson` is
+ * returned unchanged so referential checks stay cheap. Malformed input is
+ * passed through untouched — never throws.
  */
 export const carryForwardRootExtensions = (
   nextJson: string,
@@ -87,12 +96,54 @@ export const carryForwardRootExtensions = (
   let changed = false;
   for (const key of NICEL_ROOT_EXTENSION_KEYS) {
     const prevVal = prev[key];
-    // Only graft when the prior snapshot actually had the key and Univer's
-    // save() output doesn't (it never does — but stay defensive).
-    if (prevVal !== undefined && !(key in next)) {
+    if (prevVal === undefined) continue;
+    if (!(key in next) || JSON.stringify(next[key]) !== JSON.stringify(prevVal)) {
       next[key] = prevVal;
       changed = true;
     }
   }
   return changed ? JSON.stringify(next) : nextJson;
+};
+
+/** True when `json` may hold any extension key (a \u escape could spell one). */
+function mayContainRootExtension(json: string): boolean {
+  if (json.includes("\\u")) return true;
+  return NICEL_ROOT_EXTENSION_KEYS.some((key) => json.includes(`"${key}"`));
+}
+
+/**
+ * Copy the store's extension keys into Univer's own workbook snapshot object
+ * (`FWorkbook.getWorkbook().getSnapshot()`, the object `save()` deep-clones),
+ * and delete the ones the store no longer has. Other keys are not touched.
+ *
+ * Returns true when `target` was changed. Does nothing (false) when either
+ * side is missing, the store JSON cannot be parsed, or neither side has any
+ * extension key. Never throws.
+ */
+export const mirrorRootExtensionsInto = (
+  target: Record<string, unknown> | null | undefined,
+  storeJson: string | null,
+): boolean => {
+  if (!target || typeof target !== "object" || !storeJson) return false;
+  const targetHasAny = NICEL_ROOT_EXTENSION_KEYS.some((key) => key in target);
+  if (!targetHasAny && !mayContainRootExtension(storeJson)) return false;
+  let store: Record<string, unknown>;
+  try {
+    store = JSON.parse(storeJson) as Record<string, unknown>;
+  } catch {
+    return false;
+  }
+  if (!store || typeof store !== "object" || Array.isArray(store)) return false;
+  let changed = false;
+  for (const key of NICEL_ROOT_EXTENSION_KEYS) {
+    const value = store[key];
+    if (value !== undefined) {
+      target[key] = value;
+      changed = true;
+    } else if (key in target) {
+      delete target[key];
+      changed = true;
+    }
+  }
+  return changed;
 };

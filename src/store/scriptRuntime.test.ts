@@ -13,6 +13,7 @@ import {
   recordRun,
   inlineExecutor,
   buildIframeHtml,
+  IFRAME_CSP,
   type ScriptApi,
   type ScriptEntry,
   type ScriptExecutor,
@@ -607,6 +608,99 @@ describe("buildIframeHtml — CSP による外部送信遮断", () => {
   it("script-src はインラインブートストラップと new Function 評価のため unsafe-inline / unsafe-eval を許可する", () => {
     const html = buildIframeHtml();
     expect(html).toContain("script-src 'unsafe-inline' 'unsafe-eval'");
+  });
+
+  it("#355 A9: CSP refuses nested frames explicitly (child-src / frame-src 'none')", () => {
+    const html = buildIframeHtml();
+    expect(IFRAME_CSP).toContain("child-src 'none'");
+    expect(IFRAME_CSP).toContain("frame-src 'none'");
+    expect(IFRAME_CSP).toContain("default-src 'none'");
+    expect(html).toContain(`content="${IFRAME_CSP}"`);
+  });
+
+  it("#355 A9: the bootstrap removes host bridges before any workbook code runs", () => {
+    const html = buildIframeHtml();
+    for (const name of [
+      '"ipc"',
+      '"chrome"',
+      '"__TAURI_INTERNALS__"',
+      '"__TAURI__"',
+      '"__TAURI_METADATA__"',
+      '"__TAURI_EVENT_PLUGIN_INTERNALS__"',
+      '"__TAURI_INVOKE__"',
+    ]) {
+      expect(html).toContain(name);
+    }
+    expect(html).toContain("Object.getOwnPropertyNames(window)");
+    expect(html).toContain("/^__TAURI/.test(");
+    const bridges = html.indexOf("(function disableHostBridges()");
+    const stubs = html.indexOf("(function blockOutboundGlobals()");
+    const userCode = html.indexOf('new Function("api", "log", "Nicel", "Coco"');
+    expect(bridges).toBeGreaterThan(0);
+    expect(bridges).toBeLessThan(stubs);
+    expect(stubs).toBeLessThan(userCode);
+    // The parent channel stays untouched.
+    expect(html).not.toMatch(/"parent"/);
+    expect(html).toMatch(/"Worker", "SharedWorker"/);
+  });
+
+  it("#355 A9: host bridge globals become read-only undefined (fake window)", () => {
+    const html = buildIframeHtml();
+    const start = html.indexOf("(function disableHostBridges()");
+    const end = html.indexOf("})();", start) + "})();".length;
+    const code = '"use strict";\n' + html.slice(start, end);
+    const run = new Function("window", code) as (w: Record<string, unknown>) => void;
+
+    const parentPost = () => {};
+    const win: Record<string, unknown> = {
+      ipc: { postMessage() {} },
+      chrome: { webview: { postMessage() {} } },
+      __TAURI__: {},
+      __TAURI_PLUGIN_SOMETHING__: {},
+      parent: { postMessage: parentPost },
+      unrelated: 1,
+    };
+    Object.defineProperty(win, "__TAURI_INTERNALS__", {
+      value: { invoke() {} },
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    });
+    expect(() => run(win)).not.toThrow();
+    for (const name of [
+      "ipc",
+      "chrome",
+      "__TAURI__",
+      "__TAURI_INTERNALS__",
+      "__TAURI_PLUGIN_SOMETHING__",
+      "__TAURI_METADATA__",
+      "__TAURI_INVOKE__",
+    ]) {
+      expect([name, win[name]]).toEqual([name, undefined]);
+      const d = Object.getOwnPropertyDescriptor(win, name)!;
+      expect([name, d.writable, d.configurable]).toEqual([name, false, false]);
+    }
+    expect((win.parent as { postMessage: unknown }).postMessage).toBe(parentPost);
+    expect(win.unrelated).toBe(1);
+  });
+
+  it("#355 A9: a bridge that cannot be redefined does not stop the rest", () => {
+    const html = buildIframeHtml();
+    const start = html.indexOf("(function disableHostBridges()");
+    const end = html.indexOf("})();", start) + "})();".length;
+    const run = new Function("window", '"use strict";\n' + html.slice(start, end)) as (
+      w: Record<string, unknown>,
+    ) => void;
+    const webview = { postMessage() {} };
+    const chrome = { webview } as Record<string, unknown>;
+    const win: Record<string, unknown> = { __TAURI__: {} };
+    // Locked the way a host might define them: not configurable, not writable.
+    Object.defineProperty(win, "ipc", { value: Object.freeze({ postMessage() {} }) });
+    Object.defineProperty(win, "chrome", { value: chrome });
+    expect(() => run(win)).not.toThrow();
+    expect(win.__TAURI__).toBeUndefined();
+    // chrome itself stays, but its webview bridge is removed.
+    expect(chrome.webview).toBeUndefined();
   });
 
   it("CSP meta は http-equiv 属性で meta タグとして埋め込まれている", () => {

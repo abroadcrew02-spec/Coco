@@ -164,7 +164,11 @@ describe("EditorScreen Univer plugin wiring", () => {
     // #184 C-1: syncSnapshot re-grafts Nicel's workbook-root extension keys
     // (`_cameraLinks`, `_scenarios`) that `workbook.save()` drops, so a cell
     // edit can't silently wipe the user's camera links / scenarios.
-    expect(mutationSnapshotSyncSource).toMatch(/updateSnapshot\(carryForwardRootExtensions\(fresh, prev\)\)/);
+    // #356 D3: the store's value always wins (save() returns a stale copy).
+    expect(mutationSnapshotSyncSource).toMatch(
+      /const fresh = JSON\.stringify\(workbook\.save\(\)\);\s*const prev = useWorkbookStore\.getState\(\)\.currentSnapshotJson;\s*const merged = carryForwardRootExtensions\(fresh, prev\);\s*syncedSnapshotJsonRef\.current = merged;\s*updateSnapshot\(merged\);/,
+    );
+    expect(mutationSnapshotSyncSource.match(/updateSnapshot\(/g)?.length).toBe(1);
     // #87: when the workbook is too large for the fast path, we still
     // schedule a longer-leash sync (instead of returning indefinitely) so
     // protection / data-validation guards eventually see fresh state.
@@ -172,8 +176,22 @@ describe("EditorScreen Univer plugin wiring", () => {
     expect(mutationSnapshotSyncSource).toMatch(/LARGE_WORKBOOK_SYNC_LEASH_MS/);
   });
 
+  it("mirrors the store's root extension keys into Univer's snapshot (#356 D3)", () => {
+    const mirrorSource =
+      editorSource.match(/\/\/ #356 — keep Univer's copy of Nicel's workbook-root keys[\s\S]*?\n  \}, \[\]\);/)?.[0] ?? "";
+    expect(mirrorSource).not.toBe("");
+    expect(mirrorSource).toMatch(/fUniver\.getActiveWorkbook\(\)\?\.getWorkbook\(\)/);
+    expect(mirrorSource).toMatch(/mirrorRootExtensionsInto\(\s*model\?\.getSnapshot\(\)/);
+    expect(mirrorSource).toMatch(/useWorkbookStore\.subscribe\(\(state, prevState\) => \{/);
+    // Not while another document is mounting; not for syncSnapshot's own output.
+    expect(mirrorSource).toMatch(/if \(state\.editorRevision !== prevState\.editorRevision\) return;/);
+    expect(mirrorSource).toMatch(/if \(state\.currentSnapshotJson === syncedSnapshotJsonRef\.current\) return;/);
+  });
+
   it("registers a synchronous snapshot flush for immediate save/close flows", () => {
-    expect(editorSource).toMatch(/import \{ registerSnapshotFlush, carryForwardRootExtensions \} from "\.\.\/store\/snapshotSync"/);
+    expect(editorSource).toMatch(
+      /import \{\s*registerSnapshotFlush,\s*carryForwardRootExtensions,\s*mirrorRootExtensionsInto,\s*\} from "\.\.\/store\/snapshotSync"/,
+    );
     expect(mutationSnapshotSyncSource).toMatch(/const unregisterSnapshotFlush = registerSnapshotFlush\(\(\) => \{/);
     expect(mutationSnapshotSyncSource).toMatch(
       /registerSnapshotFlush\(\(\) => \{\s*cancelPendingSnapshotSync\(\);\s*syncSnapshot\(\);\s*\}\)/,

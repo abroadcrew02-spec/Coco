@@ -447,6 +447,11 @@ export interface IframeDataBundle {
   sheets: Record<string, Record<string, unknown[][]>>;
 }
 
+/** Content-Security-Policy of the sandbox iframe document. */
+export const IFRAME_CSP =
+  "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; " +
+  "form-action 'none'; child-src 'none'; frame-src 'none'";
+
 /**
  * iframe 内で動くブートストラップ HTML。親へ Facade 呼び出しを postMessage
  * し、読み取りは実行開始時に渡されるデータバンドルから引く。
@@ -469,16 +474,64 @@ export interface IframeDataBundle {
  * 'unsafe-eval'` で許可したまま。多層防御として、ブートストラップ内でも
  * 主要な通信系グローバルを評価前に無効化する。
  *
+ * #355 (A9): WebView2 injects the host bridge into every frame, so the
+ * bootstrap first replaces the bridge globals with a read-only undefined, and
+ * the CSP states `child-src 'none'; frame-src 'none'` explicitly (not only via
+ * the `default-src` fallback) so no nested frame can be created inside the
+ * sandbox. A future Worker-based runtime must add `worker-src` explicitly.
+ *
  * export: テストから直接構造を検証するため (Blob 経由の間接検査ではなく)。
  */
 export function buildIframeHtml(): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; form-action 'none'"></head><body>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${IFRAME_CSP}"></head><body>
 <script>
 (function () {
   "use strict";
+  (function disableHostBridges() {
+    // WebView2 injects the host bridge into every frame, this sandboxed one
+    // included. Workbook code must not reach it, so these globals (and every
+    // global whose name starts with __TAURI) are replaced with a read-only
+    // undefined before any workbook code runs. window.parent.postMessage is
+    // left alone. A property that cannot be redefined is cleared as far as
+    // possible instead; nested frames, which would get a fresh bridge, are
+    // refused by the CSP (child-src / frame-src 'none').
+    var names = [
+      "ipc", "chrome", "__TAURI_INTERNALS__", "__TAURI__", "__TAURI_METADATA__",
+      "__TAURI_EVENT_PLUGIN_INTERNALS__", "__TAURI_INVOKE__"
+    ];
+    try {
+      var own = Object.getOwnPropertyNames(window);
+      for (var j = 0; j < own.length; j++) {
+        if (/^__TAURI/.test(own[j]) && names.indexOf(own[j]) < 0) names.push(own[j]);
+      }
+    } catch (e) { /* best-effort */ }
+    for (var k = 0; k < names.length; k++) {
+      var bridge = names[k];
+      try {
+        Object.defineProperty(window, bridge, {
+          value: undefined,
+          writable: false,
+          configurable: false
+        });
+      } catch (e) {
+        try { window[bridge] = undefined; } catch (e2) { /* best-effort */ }
+        if (bridge === "chrome") {
+          try {
+            Object.defineProperty(window.chrome, "webview", {
+              value: undefined,
+              writable: false,
+              configurable: false
+            });
+          } catch (e3) { /* best-effort */ }
+        }
+      }
+    }
+  })();
   (function blockOutboundGlobals() {
     // CSP が主対策。ここは多層防御 — ユーザーコード評価前に主要な通信系
     // グローバルを書き換え不能な例外送出関数へ置き換える。
+    // Containment does not depend on these stubs (or on how they fail): the
+    // host bridges are removed above and nested frames are refused by the CSP.
     function throwBlocked(name) {
       return function () {
         throw new Error("サンドボックス内からの外部通信は許可されていません: " + name);
@@ -486,7 +539,7 @@ export function buildIframeHtml(): string {
     }
     var globalNames = [
       "fetch", "XMLHttpRequest", "WebSocket", "EventSource",
-      "RTCPeerConnection", "webkitRTCPeerConnection"
+      "RTCPeerConnection", "webkitRTCPeerConnection", "Worker", "SharedWorker"
     ];
     for (var i = 0; i < globalNames.length; i++) {
       var name = globalNames[i];

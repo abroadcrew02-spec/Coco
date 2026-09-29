@@ -27,7 +27,7 @@
 // Cold start (app launch p50 3s / p95 5s) is *not* covered here — it requires
 // the Tauri shell to be running, which can't be done from a unit-test binary.
 
-use nicel_lib::commands::workbook::save_core;
+use nicel_lib::commands::workbook::{open_nicel_core, save_core};
 use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
 use rust_xlsxwriter::{Formula, Workbook};
 use serde_json::{json, Map, Value};
@@ -39,6 +39,7 @@ use tempfile::TempDir;
 const XLSX_IMPORT_CEILING: Duration = Duration::from_secs(15);
 const XLSX_EXPORT_CEILING: Duration = Duration::from_secs(15);
 const SQLITE_SAVE_CEILING: Duration = Duration::from_secs(10);
+const COCO_OPEN_CEILING: Duration = Duration::from_secs(10);
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -276,5 +277,57 @@ fn smoke_sqlite_save_50k_cells() {
         "sqlite save smoke regressed: {} >= ceiling {} (§5.1 p95 target = 3s for 50k cells)",
         fmt_ms(elapsed),
         fmt_ms(SQLITE_SAVE_CEILING)
+    );
+}
+
+// ── Test 4: .coco open, 50k cells ───────────────────────────────────────────
+//
+// #354: `open_nicel_core` runs `normalize_legacy_style_snapshot` on every
+// open, which used to parse the whole snapshot into serde_json::Value before
+// checking whether anything needed migrating. This is not yet wired into the
+// §5.1 budget table / COCO_PERF_GATE (tracked separately) — it's a smoke
+// check that opening a plain, already-Univer-shaped .coco (no legacy style
+// keys, so the fast substring-scan path applies) doesn't regress.
+
+#[test]
+#[ignore = "run via `cargo test -- --include-ignored` for performance smoke"]
+fn smoke_coco_open_50k_cells() {
+    let app_dir = TempDir::new().expect("tempdir for app data");
+    let wb_dir = TempDir::new().expect("tempdir for workbook");
+    let target = wb_dir.path().join("smoke_open.coco");
+    let snapshot_json = build_save_snapshot_50k();
+
+    let save_result = save_core(
+        "perf-smoke-open-wb".into(),
+        Some(target.to_string_lossy().into_owned()),
+        snapshot_json,
+    )
+    .expect("save_core ok");
+    assert!(
+        save_result.success,
+        ".coco save must succeed before the open smoke: error = {:?}",
+        save_result.error
+    );
+
+    let start = Instant::now();
+    let result = open_nicel_core(app_dir.path(), &target.to_string_lossy())
+        .expect("open_nicel_core ok");
+    let elapsed = start.elapsed();
+
+    assert!(
+        result.handle.snapshot_json.is_some(),
+        "open must produce a snapshot"
+    );
+
+    println!(
+        "[perf_smoke] .coco open: 50k cells, elapsed = {} (ceiling = {})",
+        fmt_ms(elapsed),
+        fmt_ms(COCO_OPEN_CEILING),
+    );
+    assert!(
+        elapsed < COCO_OPEN_CEILING,
+        "coco open smoke regressed: {} >= ceiling {}",
+        fmt_ms(elapsed),
+        fmt_ms(COCO_OPEN_CEILING)
     );
 }

@@ -1,5 +1,5 @@
 use nicel_lib::commands::xlsx_io::{export_xlsx_core, import_xlsx_core};
-use rust_xlsxwriter::{Color, Format, FormatAlign, FormatPattern, Workbook};
+use rust_xlsxwriter::{Color, Format, FormatAlign, FormatPattern, FormatUnderline, Workbook};
 use serde_json::Value;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -312,5 +312,65 @@ fn styleless_cells_have_no_s_field_and_styles_map_stays_small() {
         1,
         "styles map should have exactly 1 entry (one bold style); got {:?}",
         styles_map
+    );
+}
+
+/// #350: underline must round-trip as Univer's `ul` key, not the private `un`
+/// this project wrote through v0.8.4 (which the grid never rendered as
+/// underlined). Mirrors `bold_roundtrip` above.
+#[test]
+fn underline_roundtrip() {
+    let tmp = TempDir::new().expect("tempdir");
+    let fixture = tmp.path().join("underline.xlsx");
+    let exported = tmp.path().join("underline_exported.xlsx");
+
+    let fmt = Format::new().set_underline(FormatUnderline::Single);
+    build_fixture(&fixture, &fmt);
+
+    // Import
+    let imported = import_xlsx_core(path_str(&fixture)).expect("import");
+    let snapshot_json = imported.handle.snapshot_json.clone().expect("snapshot");
+    let snapshot: Value = serde_json::from_str(&snapshot_json).expect("parse");
+
+    // X at (0,0) should reference a style; Y at (0,1) should not.
+    let a1 = &snapshot["sheets"]["sheet-1"]["cellData"]["0"]["0"];
+    let b1 = &snapshot["sheets"]["sheet-1"]["cellData"]["0"]["1"];
+    let s_id = a1
+        .get("s")
+        .and_then(|v| v.as_str())
+        .expect("A1 should have a style id");
+    assert!(b1.get("s").is_none(), "B1 should not have a style id");
+
+    // Styles map should mark this id as underlined via Univer's `ul`, and
+    // must NOT carry the old private `un` key.
+    let style_obj = &snapshot["styles"][s_id];
+    assert_eq!(
+        style_obj["ul"]["s"], 1,
+        "style {} should be underlined via `ul`, got {}",
+        s_id, style_obj
+    );
+    assert!(
+        style_obj.get("un").is_none(),
+        "style {} must not carry the legacy `un` key, got {}",
+        s_id, style_obj
+    );
+
+    // Export and verify the resulting xlsx has an underline font entry.
+    let export_res = export_xlsx_core(path_str(&exported), snapshot_json).expect("export");
+    assert!(
+        export_res.success,
+        "export should succeed: {:?}",
+        export_res.error
+    );
+
+    let (styles_xml, xfs) = read_styles_artifacts(&exported);
+    assert!(
+        styles_xml.contains("<u/>") || styles_xml.contains("<u "),
+        "styles.xml should contain an underline font entry. got: {}",
+        styles_xml
+    );
+    assert!(
+        xfs.iter().any(|(font_id, _, _)| *font_id > 0),
+        "expected at least one cellXfs entry with non-default fontId"
     );
 }

@@ -161,7 +161,17 @@ impl CellStyle {
             obj.insert("it".into(), json!(1));
         }
         if self.underline {
-            obj.insert("un".into(), json!({ "s": 1 }));
+            // #350: Univer's own `IStyleData` (@univerjs/core
+            // i-style-data.d.ts) uses `ul` (an `ITextDecoration = { s, cl?,
+            // t? }`, the same shape `st` below uses for strikethrough) for
+            // underline. `un` was never a Univer key; nothing on the grid
+            // read it, so xlsx imports with underlined cells rendered
+            // without the underline. The frontend already treats `ul` as
+            // underline both when writing it (`src/components/
+            // hyperlinkRender.ts`'s `HYPERLINK_STYLE.ul`) and when reading
+            // it back (`EditorScreen.tsx`'s underline-toggle state check,
+            // `cur.ul?.s === 1`).
+            obj.insert("ul".into(), json!({ "s": 1 }));
         }
         if self.strike {
             obj.insert("st".into(), json!({ "s": 1 }));
@@ -231,7 +241,17 @@ impl CellStyle {
         };
         s.bold = flag("bl");
         s.italic = flag("it");
-        s.underline = obj.get("un").and_then(|u| u.get("s")).and_then(Value::as_i64) == Some(1);
+        // #350: `ul` is Univer's real underline key; `un` is a private key
+        // this project wrote through v0.8.4 that the grid never rendered.
+        // Prefer `ul`, but keep reading `un` for backward compatibility with
+        // `.coco` files saved by v0.8.2-0.8.4 so their underline formatting
+        // isn't silently dropped on open.
+        s.underline = obj
+            .get("ul")
+            .or_else(|| obj.get("un"))
+            .and_then(|u| u.get("s"))
+            .and_then(Value::as_i64)
+            == Some(1);
         s.strike = obj.get("st").and_then(|u| u.get("s")).and_then(Value::as_i64) == Some(1);
         s.font_color = obj.get("cl").and_then(color_style_rgb);
         s.fill_color = obj.get("bg").and_then(color_style_rgb);
@@ -368,9 +388,9 @@ impl CellStyle {
 /// this is a merge, not a wholesale replacement (reviewer finding B2): the
 /// legacy keys are removed and replaced by whatever `CellStyle` can derive
 /// from them (`from_json(...).to_json()`), but any key already on the object
-/// — legacy-adjacent Univer keys `CellStyle` doesn't model, such as `ul`
-/// (hyperlink), `tr` (text rotation), `pd` (padding), `va`, `ol`, `bbl`,
-/// `td`, diagonal borders, or `th` inside `cl`/`bg` — is left exactly as-is
+/// — legacy-adjacent Univer keys `CellStyle` doesn't model, such as `tr`
+/// (text rotation), `pd` (padding), `va`, `ol`, `bbl`, `td`, diagonal
+/// borders, or `th` inside `cl`/`bg` — is left exactly as-is
 /// and never overwritten by the derived value. A wholesale
 /// `*v = style.to_json()` replace would silently drop all of those the
 /// moment a legacy key was present anywhere on the object. When nothing in
@@ -378,6 +398,34 @@ impl CellStyle {
 /// unchanged (no reserialization) so an already-migrated `.coco` round-trips
 /// byte-for-byte.
 pub(crate) fn normalize_legacy_style_snapshot(snapshot_json: &str) -> Result<String, String> {
+    // #354: parsing the entire snapshot into serde_json::Value just to find
+    // out nothing needs rewriting is the expensive part — on Windows, JSON
+    // parse throughput of ~5-15 MB/s means a multi-MB snapshot (perf's
+    // measurement: 100k+ cells) can pause this synchronous command's calling
+    // thread for 3-6s. A legacy style object is only ever detected below by
+    // one of these four keys (see `normalize_style_value_in_place`), and they
+    // always appear as a *quoted* JSON object key (`"font":...`) in a
+    // legacy-shaped `.coco`. An already-migrated or Univer-native snapshot
+    // never contains any of them, so a plain substring scan of the raw string
+    // — no parsing — is enough to rule that out and skip straight to
+    // returning the input unchanged.
+    //
+    // A false positive is possible (e.g. a cell's text value happens to be
+    // exactly "font") but harmless: it only falls through to the full parse
+    // below, which finds nothing to migrate and returns the original string
+    // anyway. A false negative is not possible: if none of the four substrings
+    // occur anywhere in the raw text, they cannot occur as an object key
+    // either. Note the trailing quote in each needle — `"fontFamily"` does not
+    // contain the substring `"font"` because the closing quote lands after
+    // `Family`, not right after `font`.
+    const LEGACY_KEY_NEEDLES: [&str; 4] = ["\"font\"", "\"fill\"", "\"alignment\"", "\"borders\""];
+    if !LEGACY_KEY_NEEDLES
+        .iter()
+        .any(|needle| snapshot_json.contains(needle))
+    {
+        return Ok(snapshot_json.to_string());
+    }
+
     let mut root: Value = match serde_json::from_str(snapshot_json) {
         Ok(v) => v,
         // Not parseable JSON — nothing for this function to rewrite; let the
@@ -434,10 +482,12 @@ pub(crate) fn normalize_legacy_style_snapshot(snapshot_json: &str) -> Result<Str
 /// the presence of a legacy-only key). Returns whether anything changed.
 ///
 /// This merges rather than replaces (reviewer finding B2): every key already
-/// present on `v` — including a co-located Univer-only key like `ul`/`tr`
-/// that `CellStyle` doesn't model — wins over the value `CellStyle::to_json`
-/// would derive and is never overwritten. Only the four legacy-only keys are
-/// ever removed; everything else on the object survives untouched.
+/// present on `v` — including a co-located Univer-only key like `tr` that
+/// `CellStyle` doesn't model, or a Univer key `CellStyle` does model (e.g.
+/// `ul`) that the object already set directly — wins over the value
+/// `CellStyle::to_json` would derive and is never overwritten. Only the four
+/// legacy-only keys are ever removed; everything else on the object survives
+/// untouched.
 fn normalize_style_value_in_place(v: &mut Value) -> bool {
     let is_legacy = v
         .as_object()
@@ -11853,6 +11903,66 @@ mod normalize_legacy_style_snapshot_tests {
         assert!(parsed["styles"]["s-legacy"].get("font").is_none());
         assert_eq!(parsed["styles"]["s-bad"], "not-an-object");
     }
+
+    #[test]
+    fn large_univer_snapshot_without_legacy_keys_returns_input_fast() {
+        // #354: a large already-migrated / Univer-native snapshot must take
+        // the substring-scan fast path and skip the serde_json::Value parse
+        // entirely. 100k cells (1000 rows x 100 cols) is large enough that a
+        // full parse + walk + reserialize would not plausibly finish in
+        // under 2s on any CI runner this project targets, so the timing
+        // assertion below is a loose but meaningful guard against
+        // accidentally falling back to the slow path.
+        use serde_json::{Map, Value};
+        let mut cell_data: Map<String, Value> = Map::new();
+        for r in 0..1000u32 {
+            let mut row: Map<String, Value> = Map::new();
+            for c in 0..100u32 {
+                row.insert(c.to_string(), json!({ "v": format!("item_{r}_{c}") }));
+            }
+            cell_data.insert(r.to_string(), Value::Object(row));
+        }
+        let input = json!({
+            "id": "wb-large",
+            "sheets": { "sheet-1": { "id": "sheet-1", "cellData": cell_data } },
+            "styles": { "s1": { "bl": 1, "n": { "pattern": "0.00%" } } }
+        })
+        .to_string();
+
+        let start = std::time::Instant::now();
+        let out = normalize_legacy_style_snapshot(&input).unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(out, input, "unchanged snapshot must round-trip byte-identical");
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "expected the substring-scan fast path, took {:?} instead",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn cell_value_equal_to_a_legacy_key_word_is_not_mistaken_for_legacy_style() {
+        // A cell whose text is literally "font" makes the substring scan find
+        // `"font"` and fall through to the full parse — that's the accepted
+        // false-positive cost documented on `normalize_legacy_style_snapshot`.
+        // What must not happen is treating this as a legacy style: only `s`
+        // objects on a cell or entries in `styles` are ever candidates, never
+        // a cell's `v`. The snapshot must come back byte-identical.
+        let input = json!({
+            "id": "wb",
+            "sheets": {
+                "sheet-1": {
+                    "id": "sheet-1",
+                    "cellData": { "0": { "0": { "v": "font" } } }
+                }
+            },
+            "styles": { "s1": { "bl": 1 } }
+        })
+        .to_string();
+        let out = normalize_legacy_style_snapshot(&input).unwrap();
+        assert_eq!(out, input);
+    }
 }
 
 #[cfg(test)]
@@ -11926,7 +12036,7 @@ mod style_shape_tests {
         assert_eq!(style.font_size_x100, Some(1400));
         let j = style.to_json();
         assert_eq!(j["bl"], 1);
-        assert_eq!(j["un"]["s"], 1);
+        assert_eq!(j["ul"]["s"], 1); // #350: underline is Univer's `ul`, not `un`
         assert_eq!(j["st"]["s"], 1);
         assert_eq!(j["fs"], 14.0);
         assert_eq!(j["ff"], "Meiryo UI");
@@ -11949,12 +12059,17 @@ mod style_shape_tests {
     fn from_json_reads_univer_and_legacy_shapes() {
         // What the grid writes when the user formats a cell.
         let univer = json!({
-            "bl": 1, "it": 0, "cl": { "rgb": "rgb(255, 0, 0)" }, "bg": { "rgb": "#ffff00" },
+            "bl": 1, "it": 0, "ul": { "s": 1 }, "cl": { "rgb": "rgb(255, 0, 0)" }, "bg": { "rgb": "#ffff00" },
             "ht": 3, "vt": 1, "tb": 3, "ff": "Arial", "fs": 10.5,
             "bd": { "b": { "s": 13, "cl": { "rgb": "#000000" } } }, "n": { "pattern": "0.0%" }
         });
         let s = CellStyle::from_json(&univer).unwrap();
         assert!(s.bold && !s.italic && s.wrap_text);
+        // #350: `ul: { s: 1 }` is Univer's own underline shape
+        // (@univerjs/core `ITextDecoration`, the same shape `st` uses for
+        // strikethrough) -- not the private `un` this project wrote through
+        // v0.8.4, which the grid never rendered as underlined.
+        assert!(s.underline);
         assert_eq!(s.font_color.as_deref(), Some("#FF0000"));
         assert_eq!(s.fill_color.as_deref(), Some("#FFFF00"));
         assert_eq!(s.h_align.as_deref(), Some("right"));
@@ -11963,6 +12078,16 @@ mod style_shape_tests {
         assert_eq!(s.font_size_x100, Some(1050));
         assert_eq!(s.borders.as_ref().unwrap().bottom.as_ref().unwrap().style, "thick");
         assert_eq!(s.num_format.as_deref(), Some("0.0%"));
+        // Round-trip: to_json must emit `ul`, not `un`, so the grid actually
+        // renders the underline back.
+        assert_eq!(s.to_json()["ul"]["s"], 1);
+        assert!(s.to_json().get("un").is_none());
+
+        // v0.8.2-0.8.4 `.coco` files were saved with the private `un` key.
+        // from_json keeps reading it so those files don't silently lose their
+        // underline formatting on open.
+        let legacy_underline_only = json!({ "un": { "s": 1 } });
+        assert!(CellStyle::from_json(&legacy_underline_only).unwrap().underline);
 
         // What v0.8.1 and earlier wrote into .coco files.
         let legacy = json!({

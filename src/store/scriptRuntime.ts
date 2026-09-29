@@ -443,12 +443,54 @@ export interface IframeDataBundle {
  *   - "fire-trigger" : 特定種別/ラベルのハンドラをイベント引数付きで発火
  * を postMessage で指示する。これにより untrusted code は常に sandboxed
  * iframe 内 (null origin) でのみ評価され、メインスレッドには到達しない。
+ *
+ * CSP `default-src 'none'` により、この文書自身からの外部通信 (fetch / XHR /
+ * WebSocket / img / form submit 等) を遮断する。スクリプト評価 (インライン
+ * ブートストラップ + `new Function`) は `script-src 'unsafe-inline'
+ * 'unsafe-eval'` で許可したまま。多層防御として、ブートストラップ内でも
+ * 主要な通信系グローバルを評価前に無効化する。
+ *
+ * export: テストから直接構造を検証するため (Blob 経由の間接検査ではなく)。
  */
-function buildIframeHtml(): string {
-  return `<!doctype html><html><head><meta charset="utf-8"></head><body>
+export function buildIframeHtml(): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; form-action 'none'"></head><body>
 <script>
 (function () {
   "use strict";
+  (function blockOutboundGlobals() {
+    // CSP が主対策。ここは多層防御 — ユーザーコード評価前に主要な通信系
+    // グローバルを書き換え不能な例外送出関数へ置き換える。
+    function throwBlocked(name) {
+      return function () {
+        throw new Error("サンドボックス内からの外部通信は許可されていません: " + name);
+      };
+    }
+    var globalNames = [
+      "fetch", "XMLHttpRequest", "WebSocket", "EventSource",
+      "RTCPeerConnection", "webkitRTCPeerConnection"
+    ];
+    for (var i = 0; i < globalNames.length; i++) {
+      var name = globalNames[i];
+      if (name in window) {
+        try {
+          Object.defineProperty(window, name, {
+            value: throwBlocked(name),
+            writable: false,
+            configurable: false
+          });
+        } catch (e) { /* best-effort: 環境によっては再定義不可 */ }
+      }
+    }
+    if (typeof navigator !== "undefined" && "sendBeacon" in navigator) {
+      try {
+        Object.defineProperty(navigator, "sendBeacon", {
+          value: throwBlocked("sendBeacon"),
+          writable: false,
+          configurable: false
+        });
+      } catch (e) { /* best-effort */ }
+    }
+  })();
   var parentPort = null;
   function send(type, payload) {
     if (parentPort) parentPort.postMessage({ __nicel: true, type: type, payload: payload });

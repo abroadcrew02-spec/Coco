@@ -32,6 +32,9 @@ Patch release. Workbook scripts and scheduled data connections now wait for an e
 - The Script Editor evaluates the script on every keystroke (#358).
 - A `.coco` whose scripts or scheduled connections you edited and saved in Nicel asks for confirmation again the next time it is opened. This is by design: the saved file's content no longer matches the trusted content.
 - Moving the script runtime to a Worker is planned for the next release.
+- Scripts you have chosen to trust run with the same access as before this release; the sandbox restricts network requests but is not a complete isolation boundary, so enable scripts only in workbooks whose author you trust.
+- Presets from the Cell Styles gallery (borders, fill, bold, headings and so on) are written to the workbook store only, so they do not render during the session and appear after the workbook is saved and reopened (#360). This is the same pattern as #343; the next release moves them to the facade.
+- Holding the automatic update when the manifest cannot be read (#359) applies to clients on 0.8.5 or later. Clients on 0.8.4 or earlier still receive the automatic update at startup regardless of the rollout. See `docs/AUTO_UPDATE.md` section 11.
 
 ## [0.8.4] - 2026-09-29
 

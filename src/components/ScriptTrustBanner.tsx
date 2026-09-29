@@ -65,6 +65,10 @@ export default function ScriptTrustBanner({ gate, onNotice }: ScriptTrustBannerP
   const sessionDescId = `${baseId}-session-desc`;
   const alwaysDescId = `${baseId}-always-desc`;
   const alwaysHintId = `${baseId}-always-hint`;
+  const noticeId = `${baseId}-notice`;
+  const sourceHintId = `${baseId}-source-hint`;
+  // The cautions below the choices apply to both of them.
+  const cautionIds = `${noticeId} ${sourceHintId}`;
 
   // Screen readers learn about the banner without it taking focus.
   const announcedRef = useRef<string | null>(null);
@@ -166,7 +170,7 @@ export default function ScriptTrustBanner({ gate, onNotice }: ScriptTrustBannerP
             <button
               type="button"
               className="script-trust-banner__btn script-trust-banner__btn--primary"
-              aria-describedby={sessionDescId}
+              aria-describedby={`${sessionDescId} ${cautionIds}`}
               aria-disabled={busy || undefined}
               onClick={() => void enable("session")}
             >
@@ -182,7 +186,11 @@ export default function ScriptTrustBanner({ gate, onNotice }: ScriptTrustBannerP
             <button
               type="button"
               className="script-trust-banner__btn"
-              aria-describedby={canAlways ? alwaysDescId : `${alwaysDescId} ${alwaysHintId}`}
+              aria-describedby={
+                canAlways
+                  ? `${alwaysDescId} ${cautionIds}`
+                  : `${alwaysDescId} ${alwaysHintId} ${cautionIds}`
+              }
               aria-disabled={alwaysBlocked || undefined}
               title={canAlways ? undefined : t("scriptTrust.choice.alwaysTrust.disabledTooltip")}
               onClick={() => void enable("always")}
@@ -198,8 +206,11 @@ export default function ScriptTrustBanner({ gate, onNotice }: ScriptTrustBannerP
               </p>
             )}
           </div>
-          <p className="script-trust-banner__caution">
+          <p id={noticeId} className="script-trust-banner__caution">
             {t("scriptTrust.choice.alwaysTrust.noticeA")}
+          </p>
+          <p id={sourceHintId} className="script-trust-banner__caution">
+            {t("scriptTrust.choice.trustSourceHint")}
           </p>
         </div>
       )}

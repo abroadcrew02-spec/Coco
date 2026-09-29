@@ -103,6 +103,23 @@ describe("ScriptTrustBanner", () => {
     expect(gate.allowAlways).not.toHaveBeenCalled();
   });
 
+  it("shows the trust-the-author hint right after the caution, described by both choices", async () => {
+    const user = userEvent.setup();
+    render(<ScriptTrustBanner gate={makeGate({ state: { kind: "untrusted", reason: "new", canAlways: false } })} />);
+    expect(screen.queryByText("作成元を信頼できるブックだけ有効にしてください")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "有効にする" }));
+
+    const hint = screen.getByText("作成元を信頼できるブックだけ有効にしてください");
+    const caution = screen.getByText(/外部との通信や、保存済みの資格情報/);
+    expect(hint.className).toBe(caution.className);
+    expect(caution.nextElementSibling).toBe(hint);
+    for (const name of ["今回だけ有効にする", "このブックを常に信頼する"]) {
+      const ids = screen.getByRole("button", { name }).getAttribute("aria-describedby")!.split(" ");
+      expect(ids).toContain(caution.id);
+      expect(ids).toContain(hint.id);
+    }
+  });
+
   it("always trust calls allowAlways when the workbook has a path", async () => {
     const user = userEvent.setup();
     const gate = makeGate();

@@ -440,6 +440,7 @@ const jaJP = {
     "このファイルのこの内容に限り、次からもスクリプトと自動更新を自動で実行します",
   "scriptTrust.choice.alwaysTrust.noticeA":
     "信頼したスクリプトや自動更新は、外部との通信や、保存済みの資格情報を使った読み込みを行うことがあります",
+  "scriptTrust.choice.trustSourceHint": "作成元を信頼できるブックだけ有効にしてください",
   "scriptTrust.choice.alwaysTrust.disabledTooltip":
     "保存前のブックはファイルを特定できないため、常に信頼できません",
   "scriptTrust.error.enableFailed":
@@ -865,6 +866,7 @@ const enUS: Record<StringKey, string> = {
     "Runs scripts and auto-refresh connections automatically next time, for this exact file and content only.",
   "scriptTrust.choice.alwaysTrust.noticeA":
     "A trusted script or connection may communicate externally, including with saved credentials.",
+  "scriptTrust.choice.trustSourceHint": "Enable scripts only in workbooks whose author you trust.",
   "scriptTrust.choice.alwaysTrust.disabledTooltip":
     "This workbook can't always be trusted yet because it hasn't been saved to a file.",
   "scriptTrust.error.enableFailed": "Couldn't enable it. Reopen the workbook and try again.",

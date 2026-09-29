@@ -27,9 +27,10 @@ export const flushPendingSnapshot = async () => {
  *
  * Univer never edits these keys, and the store is their only owner. What
  * `FWorkbook.save()` returns for them is whatever the workbook was created
- * with (`Workbook` keeps the createUnit-time root keys and deep-clones them on
- * every save), so after an in-app change that copy is STALE, not missing
- * (#356, found on device: a script edit rolled back by the next cell edit).
+ * with (the unit keeps the createUnit-time root keys in its snapshot object,
+ * and `IResourceLoaderService.saveUnit` returns a deep copy of that object),
+ * so after an in-app change that copy is STALE, not missing (#356, found on
+ * device: a script edit rolled back by the next cell edit).
  * Two measures keep the store's values authoritative:
  *   - `carryForwardRootExtensions`: the store's value always wins over the
  *     save() output in `syncSnapshot`, and a key the store does not have is
@@ -46,23 +47,26 @@ export const flushPendingSnapshot = async () => {
  * resources, custom). This list names the keys known today, for readers and
  * tests. Sheet-level keys (`sheets[id]._checkboxes`, ...) are not covered.
  *
- * Invariant: the store is the only owner of Nicel's root extension keys. The
+ * Invariant: the store is the only owner of Nicel's root extension keys.
+ * After createUnit (which receives them as part of the initial data), the
  * only place allowed to write them into Univer's workbook snapshot is
  * `mirrorRootExtensionsInto`, and it writes nothing but those keys. Its
- * premise (`getSnapshot()` returns the live object, `save()` a deep copy of
- * it) is pinned by the "mirror / Univer contract" test.
+ * premise (`getSnapshot()` returns the live object, `saveUnit` /
+ * `FWorkbook.save()` a deep copy of it) is pinned by
+ * `snapshotSync.univerContract.test.ts`, which runs the real Univer path.
  */
 export const NICEL_ROOT_EXTENSION_KEYS = [
   "_cameraLinks",
   "_scenarios",
   // #233/Phase 4d: image/textbox inserts mutate `_preservedParts` directly
-  // via `applyMutatedSnapshot`. Without this entry the next `syncSnapshot`
-  // would replace them with Univer's copy and the inserted drawing parts
-  // vanish on the next cell edit, breaking xlsx export round-trip.
+  // via `applyMutatedSnapshot`. If the store did not own this key, the next
+  // `syncSnapshot` would replace it with Univer's copy and the inserted
+  // drawing parts would vanish on the next cell edit, breaking xlsx export.
   "_preservedParts",
   // #146 / #188 — shapes (text box / rect / ellipse / line). The shape
-  // handlers build on `workbook.save()`, so without this entry a second shape
-  // in the same session replaced the first. The xlsx flush
+  // handlers build on `workbook.save()`, so if the store did not own (and
+  // mirror) this key, a second shape in the same session would replace the
+  // first. The xlsx flush
   // (`flushTextBoxesToPreservedParts`) only feeds the export call and is not
   // written back to the store, so the store's list stays authoritative.
   "_textBoxes",
@@ -80,10 +84,11 @@ export const NICEL_ROOT_EXTENSION_KEYS = [
   // queries are a separate JSON-typed layer.
   "_cocoQueries",
   // #356 — workbook scripts (#136/#189) and data connections (#140/#190) are
-  // written into the store snapshot by Nicel. Without the graft a script or
-  // connection added during the session is dropped (or rolled back to the
-  // opened state) by the next cell edit, which also changes the #355 trust
-  // fingerprint unexpectedly. Grafting here does not make xlsx carry them.
+  // written into the store snapshot by Nicel. If the store did not own these
+  // keys, a script or connection added during the session would be dropped
+  // (or rolled back to the opened state) by the next cell edit, which also
+  // changes the #355 trust fingerprint unexpectedly. Owning them here does
+  // not make xlsx carry them.
   "_scripts",
   "_connections",
 ] as const;
@@ -162,7 +167,12 @@ export const carryForwardRootExtensions = (
   return changed ? JSON.stringify(next) : nextJson;
 };
 
-/** True when `json` may hold an owned root key (a \u escape could spell one). */
+/**
+ * True when `json` may hold an owned root key (a \u escape could spell one).
+ * The test is loose: `"_` also matches cell- and sheet-level keys such as
+ * `_fmt` or `_comments`, so for a real workbook it is almost always true and
+ * the parse runs. It only saves the parse for empty or plain workbooks.
+ */
 function mayContainRootExtension(json: string): boolean {
   return json.includes('"_') || json.includes("\\u");
 }

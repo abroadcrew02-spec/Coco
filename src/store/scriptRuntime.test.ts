@@ -610,7 +610,7 @@ describe("buildIframeHtml — CSP による外部送信遮断", () => {
     expect(html).toContain("script-src 'unsafe-inline' 'unsafe-eval'");
   });
 
-  it("#355 A9: CSP refuses nested frames explicitly (child-src / frame-src 'none')", () => {
+  it("#355: CSP refuses nested frames explicitly (child-src / frame-src 'none')", () => {
     const html = buildIframeHtml();
     expect(IFRAME_CSP).toContain("child-src 'none'");
     expect(IFRAME_CSP).toContain("frame-src 'none'");
@@ -618,7 +618,7 @@ describe("buildIframeHtml — CSP による外部送信遮断", () => {
     expect(html).toContain(`content="${IFRAME_CSP}"`);
   });
 
-  it("#355 A9: the bootstrap removes host bridges before any workbook code runs", () => {
+  it("#355: the bootstrap removes host bridges before any workbook code runs", () => {
     const html = buildIframeHtml();
     for (const name of [
       '"ipc"',
@@ -658,7 +658,7 @@ describe("buildIframeHtml — CSP による外部送信遮断", () => {
     return new Function("window", code) as (w: Record<string, unknown>) => void;
   }
 
-  it("#355 A9: host bridge globals become read-only undefined (fake window)", () => {
+  it("#355: host bridge globals become read-only undefined (fake window)", () => {
     const run = hostBridgeStep();
 
     const parentPost = () => {};
@@ -694,7 +694,7 @@ describe("buildIframeHtml — CSP による外部送信遮断", () => {
     expect(win.unrelated).toBe(1);
   });
 
-  it("#355 A9: a bridge that cannot be redefined does not stop the rest", () => {
+  it("#355: a bridge that cannot be redefined does not stop the rest", () => {
     const run = hostBridgeStep();
     const webview = { postMessage() {} };
     const chrome = { webview } as Record<string, unknown>;

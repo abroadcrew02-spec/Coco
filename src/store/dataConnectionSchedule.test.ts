@@ -67,7 +67,7 @@ describe("auto-refresh predicates", () => {
     expect(isAutoRefreshConnection(conn())).toBe(false);
   });
 
-  it("rejects non-number intervals of every shape (M1)", () => {
+  it("rejects non-number intervals of every shape (#355)", () => {
     for (const bad of ["5", true, [5], { m: 5 }, null] as unknown[]) {
       const c = conn({ schedule: { onOpen: false, intervalMinutes: bad as number } });
       expect(autoIntervalMinutes(c)).toBe(0);
@@ -75,7 +75,7 @@ describe("auto-refresh predicates", () => {
     }
   });
 
-  it("accepts only intervals the timer can represent (L4)", () => {
+  it("accepts only intervals the timer can represent (#355)", () => {
     const at = (m: number) =>
       autoIntervalMinutes(conn({ schedule: { onOpen: false, intervalMinutes: m } }));
     expect(MAX_INTERVAL_MINUTES).toBe(35791);

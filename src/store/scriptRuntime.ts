@@ -474,7 +474,7 @@ export const IFRAME_CSP =
  * 'unsafe-eval'` で許可したまま。多層防御として、ブートストラップ内でも
  * 主要な通信系グローバルを評価前に無効化する。
  *
- * #355 (A9): WebView2 injects the host bridge into every frame, so the
+ * #355: WebView2 injects the host bridge into every frame, so the
  * bootstrap first replaces the bridge globals with a read-only undefined, and
  * the CSP states `child-src 'none'; frame-src 'none'` explicitly (not only via
  * the `default-src` fallback) so no nested frame can be created inside the

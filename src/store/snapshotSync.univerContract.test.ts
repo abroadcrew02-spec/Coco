@@ -1,78 +1,98 @@
 // @vitest-environment node
 //
-// #356 — the snapshot mirror relies on how Univer's Workbook model stores
-// and returns its snapshot. These tests pin that contract against the real
-// @univerjs/core Workbook, so a Univer upgrade that changes it fails here
+// #356 — the snapshot mirror relies on how Univer stores a workbook's
+// snapshot and what `FWorkbook.save()` returns. `FWorkbook.save()` is
+// `IResourceLoaderService.saveUnit(unitId)`, so these tests create a real
+// unit through `Univer.createUnit` and call the real `saveUnit`. A Univer
+// upgrade that changes the contract (for example rebuilding the output from
+// the model, or returning the live object instead of a copy) fails here
 // instead of silently bringing stale workbook-root keys back.
-import { describe, it, expect } from "vitest";
-import { Tools, Workbook } from "@univerjs/core";
+import { afterEach, describe, it, expect } from "vitest";
+import {
+  IResourceLoaderService,
+  Univer,
+  UniverInstanceType,
+  type IWorkbookData,
+  type Workbook,
+} from "@univerjs/core";
 import { carryForwardRootExtensions, isNicelRootKey, mirrorRootExtensionsInto } from "./snapshotSync";
 
-type LogService = ConstructorParameters<typeof Workbook>[1];
-const silentLog = {
-  debug() {},
-  log() {},
-  warn() {},
-  error() {},
-  deprecate() {},
-} as unknown as LogService;
+const UNIT_ID = "wb-contract";
+const opened: Univer[] = [];
 
-function workbookData(extra: Record<string, unknown> = {}) {
-  return {
-    id: "wb-contract",
+afterEach(() => {
+  for (const univer of opened.splice(0)) univer.dispose();
+});
+
+/** A real sheet unit plus the real saveUnit behind FWorkbook.save(). */
+function openWorkbook(extra: Record<string, unknown> = {}) {
+  const univer = new Univer();
+  opened.push(univer);
+  const data = {
+    id: UNIT_ID,
     name: "contract",
     sheetOrder: ["s1"],
     sheets: { s1: { id: "s1", name: "Sheet1", cellData: { 0: { 0: { v: 1 } } } } },
     ...extra,
-  } as unknown as ConstructorParameters<typeof Workbook>[0];
+  } as unknown as Partial<IWorkbookData>;
+  const workbook = univer.createUnit<IWorkbookData, Workbook>(UniverInstanceType.UNIVER_SHEET, data);
+  const loader = univer.__getInjector().get(IResourceLoaderService);
+  /** The live snapshot object the mirror writes into. */
+  const live = () => workbook.getSnapshot() as unknown as Record<string, unknown>;
+  /** What FWorkbook.save() returns. */
+  const saveUnit = () => {
+    const out = loader.saveUnit(UNIT_ID) as unknown as Record<string, unknown> | null;
+    if (!out) throw new Error("saveUnit returned null");
+    return out;
+  };
+  return { workbook, live, saveUnit };
 }
 
-const rootOf = (wb: Workbook) => wb.getSnapshot() as unknown as Record<string, unknown>;
-const saved = (wb: Workbook) => wb.save() as unknown as Record<string, unknown>;
-/** What ResourceLoaderService.saveUnit does (FWorkbook.save()): deep-clone getSnapshot(). */
-const savedUnit = (wb: Workbook) =>
-  Tools.deepClone(wb.getSnapshot()) as unknown as Record<string, unknown>;
-
-describe("snapshot mirror — Univer contract (@univerjs/core Workbook)", () => {
-  it("keeps the createUnit-time root keys and returns them from save() (the #356 premise)", () => {
-    const wb = new Workbook(workbookData({ _scripts: [{ id: "opened" }] }), silentLog);
-    expect(saved(wb)._scripts).toEqual([{ id: "opened" }]);
+describe("snapshot mirror — Univer contract (Univer.createUnit + IResourceLoaderService.saveUnit)", () => {
+  it("returns the createUnit-time root keys from saveUnit (the #356 premise)", () => {
+    const { saveUnit } = openWorkbook({ _scripts: [{ id: "opened" }] });
+    expect(saveUnit()._scripts).toEqual([{ id: "opened" }]);
   });
 
-  it("getSnapshot() returns the live object; save() returns a copy", () => {
-    const wb = new Workbook(workbookData(), silentLog);
-    expect(wb.getSnapshot()).toBe(wb.getSnapshot());
-    const copy = saved(wb);
-    expect(copy).not.toBe(wb.getSnapshot());
+  it("getSnapshot() is the live object; saveUnit returns a copy of it", () => {
+    const { live, saveUnit } = openWorkbook();
+    expect(live()).toBe(live());
+    const copy = saveUnit();
+    expect(copy).not.toBe(live());
     copy._scripts = ["changed only in the copy"];
-    expect("_scripts" in rootOf(wb)).toBe(false);
+    expect("_scripts" in live()).toBe(false);
+    expect("_scripts" in saveUnit()).toBe(false);
   });
 
-  it("mirror writes into getSnapshot() show up in save() and in the saveUnit clone", () => {
-    const wb = new Workbook(workbookData({ _scripts: [{ id: "opened" }], _cocoQueries: [{ id: "q" }] }), silentLog);
-    mirrorRootExtensionsInto(rootOf(wb), JSON.stringify({ _scripts: [{ id: "edited" }] }));
-    expect(saved(wb)._scripts).toEqual([{ id: "edited" }]);
-    expect(savedUnit(wb)._scripts).toEqual([{ id: "edited" }]);
-    // A key the store removed is gone from both as well.
-    expect("_cocoQueries" in saved(wb)).toBe(false);
-    expect("_cocoQueries" in savedUnit(wb)).toBe(false);
+  it("mirror writes into getSnapshot() show up in saveUnit, and removed keys disappear", () => {
+    const { live, saveUnit } = openWorkbook({
+      _scripts: [{ id: "opened" }],
+      _cocoQueries: [{ id: "q" }],
+    });
+    mirrorRootExtensionsInto(live(), JSON.stringify({ _scripts: [{ id: "edited" }] }));
+    const out = saveUnit();
+    expect(out._scripts).toEqual([{ id: "edited" }]);
+    expect("_cocoQueries" in out).toBe(false);
     // Univer's own data is untouched.
-    expect(saved(wb).sheetOrder).toEqual(["s1"]);
-    expect(saved(wb).id).toBe("wb-contract");
+    expect(out.id).toBe(UNIT_ID);
+    expect(out.sheetOrder).toEqual(["s1"]);
   });
 
   it("Univer adds no root key of its own that Nicel would treat as owned", () => {
-    const wb = new Workbook(workbookData(), silentLog);
-    const owned = Object.keys(rootOf(wb)).filter(isNicelRootKey);
-    expect(owned).toEqual([]);
-    expect(Object.keys(savedUnit(wb)).filter(isNicelRootKey)).toEqual([]);
+    const { live, saveUnit } = openWorkbook();
+    expect(Object.keys(live()).filter(isNicelRootKey)).toEqual([]);
+    const out = saveUnit();
+    // saveUnit puts `resources` at the root; it is Univer's, not an owned key.
+    expect("resources" in out).toBe(true);
+    expect(isNicelRootKey("resources")).toBe(false);
+    expect(Object.keys(out).filter(isNicelRootKey)).toEqual([]);
   });
 
   it("with the mirror, a cell-edit sync keeps the store's root keys end to end", () => {
-    const wb = new Workbook(workbookData({ _scripts: [{ id: "opened" }] }), silentLog);
-    const store = JSON.stringify({ ...saved(wb), _scripts: [{ id: "edited" }] });
-    mirrorRootExtensionsInto(rootOf(wb), store);
-    const merged = JSON.parse(carryForwardRootExtensions(JSON.stringify(savedUnit(wb)), store));
+    const { live, saveUnit } = openWorkbook({ _scripts: [{ id: "opened" }] });
+    const store = JSON.stringify({ ...saveUnit(), _scripts: [{ id: "edited" }] });
+    mirrorRootExtensionsInto(live(), store);
+    const merged = JSON.parse(carryForwardRootExtensions(JSON.stringify(saveUnit()), store));
     expect(merged._scripts).toEqual([{ id: "edited" }]);
   });
 });

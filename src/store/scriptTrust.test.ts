@@ -383,7 +383,7 @@ describe("createScriptTrustStore — revoke / endSession / list", () => {
     expect((await store.evaluate(sub, json)).state.kind).toBe("untrusted");
   });
 
-  it("revoke drops self decisions made by in-app edits (M2)", async () => {
+  it("revoke drops self decisions made by in-app edits (#355)", async () => {
     const { store } = newStore();
     const sub = subject();
     const prev = snap([A]);
@@ -597,7 +597,7 @@ describe("createScriptTrustStore — fail closed", () => {
     expect(r.grant).toBeNull();
   });
 
-  it("only trusts content this store evaluated for the same session (L5)", async () => {
+  it("only trusts content this store evaluated for the same session (#355)", async () => {
     const { store } = newStore();
     const json = snap([A]);
     const s1 = subject();

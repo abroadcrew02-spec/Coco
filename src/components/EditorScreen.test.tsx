@@ -164,8 +164,9 @@ describe("EditorScreen Univer plugin wiring", () => {
     // #184 C-1: syncSnapshot re-grafts Nicel's workbook-root extension keys
     // (`_cameraLinks`, `_scenarios`) that `workbook.save()` drops, so a cell
     // edit can't silently wipe the user's camera links / scenarios.
-    // #356 D3: the store's value always wins (save() returns a stale copy),
-    // and the write goes through the mirror's one-shot skip (HIGH-1).
+    // #356: the store's value always wins (save() returns a stale copy),
+    // and the write goes through the mirror's one-shot skip (skipped for
+    // that single update, never compared with later ones).
     expect(mutationSnapshotSyncSource).toMatch(
       /const fresh = JSON\.stringify\(workbook\.save\(\)\);\s*const prev = useWorkbookStore\.getState\(\)\.currentSnapshotJson;\s*const merged = carryForwardRootExtensions\(fresh, prev\);[\s\S]*?rootMirror\.writeOwn\(merged, updateSnapshot\);/,
     );
@@ -180,7 +181,7 @@ describe("EditorScreen Univer plugin wiring", () => {
     expect(mutationSnapshotSyncSource).toMatch(/LARGE_WORKBOOK_SYNC_LEASH_MS/);
   });
 
-  it("mirrors the store's root extension keys into Univer's snapshot (#356 D3)", () => {
+  it("mirrors the store's root extension keys into Univer's snapshot (#356)", () => {
     // One mirror per editor, targeting Univer's live workbook snapshot.
     expect(editorSource).toMatch(
       /rootMirrorRef\.current = createRootExtensionMirror\(\s*\(\) =>\s*fUniverRef\.current\?\.getActiveWorkbook\(\)\?\.getWorkbook\(\)\?\.getSnapshot\(\)/,
@@ -294,7 +295,7 @@ describe("#355 script trust gate wiring", () => {
     expect(users).toEqual([]);
   });
 
-  it("never passes the test-only factory / executor options from production code (L2)", () => {
+  it("never passes the test-only factory / executor options from production code (#355)", () => {
     // `factory` and `executor` evaluate outside the sandbox iframe. Only the
     // runtime and tests may set them.
     const runtimeUsers = sources.filter(
@@ -327,7 +328,7 @@ describe("#355 script trust gate wiring", () => {
     expect(triggerEffectSource.match(/collectTriggers\(/g)?.length).toBe(1);
     expect(triggerEffectSource.match(/fireTrigger\(/g)?.length).toBe(1);
     // A refused run is not written to the execution log. The runtime-set flag
-    // decides, not the error text a script could imitate (L3).
+    // decides, not the error text a script could imitate.
     expect(triggerEffectSource).toMatch(/if \(result\.blockedByGate === true\) continue;/);
     expect(triggerEffectSource).not.toMatch(/SCRIPT_NOT_TRUSTED/);
   });
@@ -354,7 +355,7 @@ describe("#355 script trust gate wiring", () => {
     );
   });
 
-  it("stores only scheduler-accepted schedule values when a connection is edited (M1)", () => {
+  it("stores only scheduler-accepted schedule values when a connection is edited (#355)", () => {
     expect(editorSource).toMatch(
       /schedule: \{\s*onOpen: patch\.scheduleOnOpen === true,\s*intervalMinutes: normalizeIntervalMinutesInput\(patch\.scheduleIntervalMinutes\),\s*\}/,
     );

@@ -237,7 +237,7 @@ describe("gate details", () => {
     expect((globalThis as Record<string, unknown>)[EVAL_FLAG]).toBeUndefined();
   });
 
-  it("marks refusals with blockedByGate; a script throwing the same text is not marked (L3)", async () => {
+  it("marks refusals with blockedByGate; a script throwing the same text is not marked", async () => {
     const refused = await runScript(SOURCE, { grant: null });
     expect(refused.blockedByGate).toBe(true);
 

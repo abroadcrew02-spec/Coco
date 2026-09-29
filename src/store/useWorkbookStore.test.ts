@@ -2376,7 +2376,7 @@ describe("#355 document session key", () => {
     expect(useWorkbookStore.getState().docSessionKey).toBe(winner);
   });
 
-  it("every open path clears the previous document's undo / redo history (L1)", async () => {
+  it("every open path clears the previous document's undo / redo history (#355)", async () => {
     const opens: [string, () => Promise<void>][] = [
       ["newWorkbook", () => useWorkbookStore.getState().newWorkbook()],
       ["openNicel", () => useWorkbookStore.getState().openNicel("/tmp/a.coco")],

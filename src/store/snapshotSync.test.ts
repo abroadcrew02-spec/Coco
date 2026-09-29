@@ -9,11 +9,14 @@ import {
   type RootMirrorStoreState,
 } from "./snapshotSync";
 
-// #184 C-1 regression: `FWorkbook.save()` reconstructs the snapshot from
-// Univer's internal models and drops Nicel's workbook-root extension keys
-// (`_cameraLinks`, `_scenarios`). The MUTATION-driven `syncSnapshot` overwrites
-// the store with that output on every cell edit — without carry-forward the
-// user's camera links / scenarios vanish on the next keystroke.
+// #184 C-1 / #356: `FWorkbook.save()` returns a deep copy of the snapshot the
+// unit was created with, so for Nicel's workbook-root extension keys
+// (`_cameraLinks`, `_scenarios`, `_scripts`, ...) it returns the createUnit-time
+// copy (or nothing, if the key was added later), never the store's current
+// value. The MUTATION-driven `syncSnapshot` overwrites the store with that
+// output on every cell edit, so without carry-forward and the mirror an
+// in-app change to those keys is lost or rolled back on the next keystroke.
+// (The real Univer behaviour is pinned in snapshotSync.univerContract.test.ts.)
 
 const link = {
   id: "camera-1",
@@ -49,13 +52,13 @@ describe("carryForwardRootExtensions", () => {
     expect(merged._scenarios).toEqual([scenario]);
   });
 
-  it("the store's value wins over the copy save() returns (#356 D3)", () => {
+  it("the store's value wins over the copy save() returns (#356)", () => {
     const prev = JSON.stringify({ _cameraLinks: [link] });
     const fresh = JSON.stringify({ _cameraLinks: [] });
     expect(JSON.parse(carryForwardRootExtensions(fresh, prev))._cameraLinks).toEqual([link]);
   });
 
-  it("a newer _scripts in the store beats the older one save() still carries (#356 D3)", () => {
+  it("a newer _scripts in the store beats the older one save() still carries (#356)", () => {
     const opened = [{ id: "s1", name: "n", source: "api.log('old')", lastModified: 1 }];
     const edited = [{ id: "s1", name: "n", source: "api.log('new')", lastModified: 2 }];
     const prev = JSON.stringify({ sheets: { s1: {} }, _scripts: edited });
@@ -77,7 +80,7 @@ describe("carryForwardRootExtensions", () => {
     expect(merged._connections).toEqual([]);
   });
 
-  it("drops save()'s value when the store has no such key (M-1: the store owns it)", () => {
+  it("drops save()'s value when the store has no such key (#356: the store owns the key)", () => {
     const prev = JSON.stringify({ sheets: {} });
     const fresh = JSON.stringify({ sheets: {}, _scenarios: [{ name: "x" }] });
     expect("_scenarios" in JSON.parse(carryForwardRootExtensions(fresh, prev))).toBe(false);
@@ -117,7 +120,7 @@ describe("carryForwardRootExtensions", () => {
     expect(JSON.parse(store)._cameraLinks).toEqual([link]);
   });
 
-  it("exports the extension key list for the xlsx round-trip to mirror", () => {
+  it("lists the known root extension keys (for readers and tests; ownership is by the _ prefix)", () => {
     expect(NICEL_ROOT_EXTENSION_KEYS).toContain("_cameraLinks");
     expect(NICEL_ROOT_EXTENSION_KEYS).toContain("_scenarios");
     // Phase 4d: image/textbox inserts write into _preservedParts and must
@@ -239,7 +242,7 @@ describe("mirrorRootExtensionsInto (#356)", () => {
   });
 });
 
-// ---------- ownership rule and symmetric carry-forward (M-1 / M-2) --------
+// ---------- ownership rule and symmetric carry-forward (#356) -------------
 
 describe("root key ownership", () => {
   it("treats every root key starting with _ as Nicel's, except __proto__", () => {
@@ -251,7 +254,7 @@ describe("root key ownership", () => {
     for (const key of NICEL_ROOT_EXTENSION_KEYS) expect(isNicelRootKey(key)).toBe(true);
   });
 
-  it("removes an owned key from save()'s output when the store does not have it (M-1)", () => {
+  it("removes an owned key from save()'s output when the store does not have it (#356)", () => {
     const prev = JSON.stringify({ sheets: {} });
     const fresh = JSON.stringify({ sheets: {}, _scenarios: [{ name: "x" }], _cocoQueries: [] });
     const merged = JSON.parse(carryForwardRootExtensions(fresh, prev));
@@ -259,7 +262,7 @@ describe("root key ownership", () => {
     expect("_cocoQueries" in merged).toBe(false);
   });
 
-  it("passes save()'s output through when the store snapshot is unusable (M-1 guard)", () => {
+  it("passes save()'s output through when the store snapshot is unusable (no owner value to apply)", () => {
     const fresh = JSON.stringify({ sheets: {}, _scripts: [{ id: "keep" }] });
     expect(carryForwardRootExtensions(fresh, null)).toBe(fresh);
     expect(carryForwardRootExtensions(fresh, "")).toBe(fresh);
@@ -298,7 +301,7 @@ describe("root key ownership", () => {
   });
 });
 
-// ---------- createRootExtensionMirror (#356, HIGH-1 / M-2) ------------------
+// ---------- createRootExtensionMirror (#356) --------------------------------
 
 /** A workbook store and a stand-in for Univer's Workbook model. */
 function setup(opened: Record<string, unknown>) {
@@ -328,7 +331,7 @@ function setup(opened: Record<string, unknown>) {
 }
 
 describe("createRootExtensionMirror", () => {
-  it("a store update back to the last sync output is still mirrored (HIGH-1)", () => {
+  it("a store update back to the last sync output is still mirrored (#356: a removed measure stays removed)", () => {
     const t = setup({ sheets: { s1: {} } });
     t.syncCellEdit(1); // store = M1 (no _cocoDataModel)
     const m1 = t.store.getState().currentSnapshotJson!;
@@ -397,7 +400,7 @@ describe("createRootExtensionMirror", () => {
     unsubscribe();
   });
 
-  it("keeps the first shape when a second one is added from save() (M-2 _textBoxes)", () => {
+  it("keeps the first shape when a second one is added from save() (#356 _textBoxes)", () => {
     expect(NICEL_ROOT_EXTENSION_KEYS).toContain("_textBoxes");
     const t = setup({ sheets: { s1: {} } });
     // applyShape: builds on save(), appends, writes to the store.
@@ -414,7 +417,7 @@ describe("createRootExtensionMirror", () => {
     t.unsubscribe();
   });
 
-  it("keeps linked data types across a cell edit and does not revive removed ones (M-2)", () => {
+  it("keeps linked data types across a cell edit and does not revive removed ones (#356 _cocoDataTypes)", () => {
     expect(NICEL_ROOT_EXTENSION_KEYS).toContain("_cocoDataTypes");
     const t = setup({ sheets: { s1: {} } });
     const added = t.current();

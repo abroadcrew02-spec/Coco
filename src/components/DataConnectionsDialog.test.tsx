@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// #355 M1 — the connections dialog must show and save the schedule exactly as
+// #355 — the connections dialog must show and save the schedule exactly as
 // the scheduler and the trust fingerprint read it. A stored schedule value the
 // scheduler ignores (e.g. the string "5") must not be shown as active and must
 // not become active when the user only edits other fields and saves.

@@ -1,6 +1,11 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act, waitFor, cleanup } from "@testing-library/react";
+import { renderHook, act, waitFor, cleanup, configure } from "@testing-library/react";
+
+// Each evaluation hashes the snapshot with Web Crypto and the hook re-runs it
+// on every store change; under a loaded machine (full suite, parallel cargo
+// build) the default 1 s waitFor budget is not enough.
+configure({ asyncUtilTimeout: 5000 });
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));

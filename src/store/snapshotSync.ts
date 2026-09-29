@@ -20,9 +20,10 @@ export const flushPendingSnapshot = async () => {
 
 /**
  * Workbook-root keys that Nicel layers on top of Univer's `IWorkbookData`.
- * Univer 0.5.x doesn't know about these — they're written into the store
- * snapshot by Nicel (camera links, scenarios) and round-tripped through xlsx
- * by `xlsx_io.rs` (`NICEL_EXTENSION_ROOT_FIELDS`).
+ * Univer doesn't know about these — they're written into the store snapshot
+ * by Nicel (camera links, scenarios, scripts, ...). Some of them are also
+ * round-tripped through xlsx by `xlsx_io.rs` (`NICEL_EXTENSION_ROOT_FIELDS`);
+ * being listed here does not make xlsx carry a key.
  *
  * Univer never edits these keys, and the store is their only owner. What
  * `FWorkbook.save()` returns for them is whatever the workbook was created
@@ -31,20 +32,43 @@ export const flushPendingSnapshot = async () => {
  * (#356, found on device: a script edit rolled back by the next cell edit).
  * Two measures keep the store's values authoritative:
  *   - `carryForwardRootExtensions`: the store's value always wins over the
- *     save() output in `syncSnapshot` (#184 C-1, #356).
- *   - `mirrorRootExtensionsInto`: every store change is copied into Univer's
- *     own snapshot, so any other code that builds a snapshot from save() sees
- *     current values, and keys the store removed are removed there too.
+ *     save() output in `syncSnapshot`, and a key the store does not have is
+ *     removed from it (#184 C-1, #356).
+ *   - `mirrorRootExtensionsInto` / `createRootExtensionMirror`: every store
+ *     change is copied into Univer's own snapshot, so any other code that
+ *     builds a snapshot from save() sees current values, and keys the store
+ *     removed are removed there too.
+ *
+ * Ownership is decided by `isNicelRootKey` (every root key starting with
+ * "_"), not by this list, so a new key cannot be forgotten. Univer's
+ * `IWorkbookData` has no such key (checked for @univerjs/core 0.24.0: id,
+ * rev, name, appVersion, locale, styles, sheetOrder, sheets, defaultStyle,
+ * resources, custom). This list names the keys known today, for readers and
+ * tests. Sheet-level keys (`sheets[id]._checkboxes`, ...) are not covered.
+ *
+ * Invariant: the store is the only owner of Nicel's root extension keys. The
+ * only place allowed to write them into Univer's workbook snapshot is
+ * `mirrorRootExtensionsInto`, and it writes nothing but those keys. Its
+ * premise (`getSnapshot()` returns the live object, `save()` a deep copy of
+ * it) is pinned by the "mirror / Univer contract" test.
  */
 export const NICEL_ROOT_EXTENSION_KEYS = [
   "_cameraLinks",
   "_scenarios",
   // #233/Phase 4d: image/textbox inserts mutate `_preservedParts` directly
-  // via `applyMutatedSnapshot`. The next Univer mutation triggers a
-  // `syncSnapshot` whose `FWorkbook.save()` drops every non-IWorkbookData key
-  // — without this graft the inserted drawing parts vanish on the next cell
-  // edit, breaking xlsx export round-trip.
+  // via `applyMutatedSnapshot`. Without this entry the next `syncSnapshot`
+  // would replace them with Univer's copy and the inserted drawing parts
+  // vanish on the next cell edit, breaking xlsx export round-trip.
   "_preservedParts",
+  // #146 / #188 — shapes (text box / rect / ellipse / line). The shape
+  // handlers build on `workbook.save()`, so without this entry a second shape
+  // in the same session replaced the first. The xlsx flush
+  // (`flushTextBoxesToPreservedParts`) only feeds the export call and is not
+  // written back to the store, so the store's list stays authoritative.
+  "_textBoxes",
+  // Linked data types (LinkedDataTypesPanel). Written on the store snapshot;
+  // removed (key deleted) when the last source goes.
+  "_cocoDataTypes",
   // #239 Step 5 — Nicel-native Data Model (tables + relationships + measures).
   // Distinct from `xl/model/item.data` (Excel's binary Vertipaq store, which
   // we byte-preserve via _preservedParts). The Nicel model is JSON and can be
@@ -65,85 +89,179 @@ export const NICEL_ROOT_EXTENSION_KEYS = [
 ] as const;
 
 /**
+ * True for a workbook-root key owned by Nicel: any key starting with "_"
+ * (Univer's IWorkbookData has none). "__proto__" is excluded so a hostile
+ * JSON key cannot touch an object's prototype.
+ */
+export function isNicelRootKey(key: string): boolean {
+  return key.length > 1 && key.startsWith("_") && key !== "__proto__";
+}
+
+const hasOwn = (o: object, key: string): boolean => Object.prototype.hasOwnProperty.call(o, key);
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+/** Nicel-owned root keys present in any of `objs`. */
+function ownedRootKeys(...objs: Record<string, unknown>[]): string[] {
+  const out = new Set<string>();
+  for (const o of objs) {
+    for (const key of Object.keys(o)) {
+      if (isNicelRootKey(key)) out.add(key);
+    }
+  }
+  return [...out];
+}
+
+/**
  * Carry Nicel's workbook-root extension keys from `prevJson` (the store
- * snapshot, their owner) into `nextJson` (fresh `FWorkbook.save()` output).
+ * snapshot, their only owner) into `nextJson` (fresh `FWorkbook.save()`
+ * output): for every owned key, the store's value wins, whether save() left
+ * the key out or returned an older copy, and a key the store does not have is
+ * removed from the output.
  *
- * For every key the store has, the store's value wins, whether save() left
- * the key out or returned an older copy of it. A key the store does not have
- * is left as save() returned it (with `mirrorRootExtensionsInto` in place,
- * save() no longer carries keys the store removed).
- *
- * Returns a JSON string. When nothing differs the original `nextJson` is
- * returned unchanged so referential checks stay cheap. Malformed input is
- * passed through untouched — never throws.
+ * When the store snapshot is null, cannot be parsed or is not an object,
+ * `nextJson` is passed through as is (there is no owner value to apply). The
+ * same happens when `nextJson` cannot be parsed. Returns the original
+ * `nextJson` string when nothing differs, so referential checks stay cheap.
+ * Never throws.
  */
 export const carryForwardRootExtensions = (
   nextJson: string,
   prevJson: string | null,
 ): string => {
   if (!prevJson) return nextJson;
-  let prev: Record<string, unknown>;
-  let next: Record<string, unknown>;
+  let prev: unknown;
+  let next: unknown;
   try {
-    prev = JSON.parse(prevJson) as Record<string, unknown>;
-    next = JSON.parse(nextJson) as Record<string, unknown>;
+    prev = JSON.parse(prevJson);
   } catch {
     return nextJson;
   }
-  if (!prev || typeof prev !== "object" || !next || typeof next !== "object") {
+  if (!isPlainObject(prev)) return nextJson;
+  try {
+    next = JSON.parse(nextJson);
+  } catch {
     return nextJson;
   }
+  if (!isPlainObject(next)) return nextJson;
   let changed = false;
-  for (const key of NICEL_ROOT_EXTENSION_KEYS) {
-    const prevVal = prev[key];
-    if (prevVal === undefined) continue;
-    if (!(key in next) || JSON.stringify(next[key]) !== JSON.stringify(prevVal)) {
-      next[key] = prevVal;
+  for (const key of ownedRootKeys(prev, next)) {
+    if (hasOwn(prev, key)) {
+      const prevVal = prev[key];
+      if (!hasOwn(next, key) || JSON.stringify(next[key]) !== JSON.stringify(prevVal)) {
+        next[key] = prevVal;
+        changed = true;
+      }
+    } else if (hasOwn(next, key)) {
+      delete next[key];
       changed = true;
     }
   }
   return changed ? JSON.stringify(next) : nextJson;
 };
 
-/** True when `json` may hold any extension key (a \u escape could spell one). */
+/** True when `json` may hold an owned root key (a \u escape could spell one). */
 function mayContainRootExtension(json: string): boolean {
-  if (json.includes("\\u")) return true;
-  return NICEL_ROOT_EXTENSION_KEYS.some((key) => json.includes(`"${key}"`));
+  return json.includes('"_') || json.includes("\\u");
 }
 
 /**
- * Copy the store's extension keys into Univer's own workbook snapshot object
- * (`FWorkbook.getWorkbook().getSnapshot()`, the object `save()` deep-clones),
- * and delete the ones the store no longer has. Other keys are not touched.
+ * Copy the store's owned root keys into Univer's own workbook snapshot
+ * object (`FWorkbook.getWorkbook().getSnapshot()`, the object `save()`
+ * deep-clones), and delete the owned keys the store no longer has. Keys not
+ * owned by Nicel are never touched. This is the only function that writes
+ * into Univer's snapshot (see the invariant above).
  *
- * Returns true when `target` was changed. Does nothing (false) when either
- * side is missing, the store JSON cannot be parsed, or neither side has any
- * extension key. Never throws.
+ * Returns true when at least one owned key of `target` was written or
+ * removed (a key is rewritten whenever the store has it, even with an equal
+ * value). Returns false, touching nothing, when either side is missing, the
+ * store JSON cannot be parsed or is not an object, or neither side has any
+ * owned key.
  */
 export const mirrorRootExtensionsInto = (
   target: Record<string, unknown> | null | undefined,
   storeJson: string | null,
 ): boolean => {
-  if (!target || typeof target !== "object" || !storeJson) return false;
-  const targetHasAny = NICEL_ROOT_EXTENSION_KEYS.some((key) => key in target);
-  if (!targetHasAny && !mayContainRootExtension(storeJson)) return false;
-  let store: Record<string, unknown>;
+  if (!isPlainObject(target) || !storeJson) return false;
+  if (ownedRootKeys(target).length === 0 && !mayContainRootExtension(storeJson)) return false;
+  let store: unknown;
   try {
-    store = JSON.parse(storeJson) as Record<string, unknown>;
+    store = JSON.parse(storeJson);
   } catch {
     return false;
   }
-  if (!store || typeof store !== "object" || Array.isArray(store)) return false;
+  if (!isPlainObject(store)) return false;
   let changed = false;
-  for (const key of NICEL_ROOT_EXTENSION_KEYS) {
-    const value = store[key];
-    if (value !== undefined) {
-      target[key] = value;
+  for (const key of ownedRootKeys(store, target)) {
+    if (hasOwn(store, key)) {
+      target[key] = store[key];
       changed = true;
-    } else if (key in target) {
+    } else if (hasOwn(target, key)) {
       delete target[key];
       changed = true;
     }
   }
   return changed;
 };
+
+/** The part of the workbook store the mirror listens to. */
+export interface RootMirrorStoreState {
+  currentSnapshotJson: string | null;
+  editorRevision: number;
+}
+
+export interface RootExtensionMirror {
+  /** Mirror `json` into the target now (e.g. when the editor mounts). */
+  mirror: (json: string | null) => void;
+  /**
+   * Store listener. Mirrors every snapshot change of the mounted document,
+   * except the one update currently being written through `writeOwn`, and
+   * nothing while another document is mounting (editor revision changed).
+   */
+  onStoreChange: (state: RootMirrorStoreState, prevState: RootMirrorStoreState) => void;
+  /**
+   * Run `write(json)` for a snapshot whose extension keys already are the
+   * store's (syncSnapshot's own output). The store notifies listeners
+   * synchronously, so exactly that update is skipped; the marker is cleared
+   * in `finally`, so a later update with the same string is mirrored again.
+   */
+  writeOwn: (json: string, write: (json: string) => void) => void;
+}
+
+/**
+ * Keeps Univer's snapshot object (from `getTarget`) in step with the store's
+ * extension keys. `onError` receives failures of `getTarget` or of writing
+ * into the target; they never propagate to the store.
+ */
+export function createRootExtensionMirror(
+  getTarget: () => Record<string, unknown> | null | undefined,
+  onError: (e: unknown) => void = () => {},
+): RootExtensionMirror {
+  let ownWrite: string | null = null;
+  const mirror = (json: string | null) => {
+    try {
+      mirrorRootExtensionsInto(getTarget(), json);
+    } catch (e) {
+      onError(e);
+    }
+  };
+  return {
+    mirror,
+    onStoreChange: (state, prevState) => {
+      if (state.currentSnapshotJson === prevState.currentSnapshotJson) return;
+      if (state.editorRevision !== prevState.editorRevision) return;
+      if (ownWrite !== null && state.currentSnapshotJson === ownWrite) return;
+      mirror(state.currentSnapshotJson);
+    },
+    writeOwn: (json, write) => {
+      ownWrite = json;
+      try {
+        write(json);
+      } finally {
+        ownWrite = null;
+      }
+    },
+  };
+}

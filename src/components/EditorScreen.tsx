@@ -551,7 +551,8 @@ import { routeOpenPath } from "../store/pathRouter";
 import {
   registerSnapshotFlush,
   carryForwardRootExtensions,
-  mirrorRootExtensionsInto,
+  createRootExtensionMirror,
+  type RootExtensionMirror,
 } from "../store/snapshotSync";
 import { timeAgoJa } from "./timeAgo";
 import {
@@ -8810,9 +8811,25 @@ export default function EditorScreen() {
   // normalising the loaded sheet, live-render patches) and must not mark the
   // workbook dirty; there is nothing to save yet.
   const userInteractedRef = useRef(false);
-  // #356: the last snapshot `syncSnapshot` wrote. Its root extension keys are
-  // the store's own values, so the mirror below can skip it.
-  const syncedSnapshotJsonRef = useRef<string | null>(null);
+  // #356: keeps Univer's copy of Nicel's workbook-root keys equal to the store
+  // (see the mirror effect below and createRootExtensionMirror). One instance
+  // per editor, shared by the snapshot sync and the store subscription.
+  const rootMirrorRef = useRef<RootExtensionMirror | null>(null);
+  if (rootMirrorRef.current === null) {
+    rootMirrorRef.current = createRootExtensionMirror(
+      () =>
+        fUniverRef.current?.getActiveWorkbook()?.getWorkbook()?.getSnapshot() as unknown as
+          | Record<string, unknown>
+          | undefined,
+      (e) => {
+        // A failure here means save()-based handlers may write stale root
+        // keys again; carryForwardRootExtensions still protects syncSnapshot.
+        // eslint-disable-next-line no-console
+        console.warn("[snapshot] could not mirror workbook root keys into the editor:", e);
+      },
+    );
+  }
+  const rootMirror = rootMirrorRef.current;
 
   // Sync snapshot to store on data mutations (skip selection/scroll operations).
   // Debounce by 300ms so rapid typing doesn't thrash the store on every keystroke.
@@ -8834,20 +8851,17 @@ export default function EditorScreen() {
     const syncSnapshot = () => {
       const workbook = fUniver.getActiveWorkbook();
       if (!workbook) return;
-      // #184 C-1: `FWorkbook.save()` reconstructs the snapshot from Univer's
-      // internal models, so it drops Nicel's workbook-root extension keys
-      // (`_cameraLinks`, `_scenarios`) that were written straight into the
-      // store via `applyMutatedSnapshot` without a Univer re-mount. Re-graft
-      // them from the prior store snapshot so a cell edit doesn't silently
-      // wipe the user's camera links / scenarios.
-      // #356: save() returns the createUnit-time copy of those keys, so the
-      // store's value must win even when save() has the key (see
-      // carryForwardRootExtensions).
+      // #184 C-1 / #356: Nicel's workbook-root extension keys (`_scripts`,
+      // `_cameraLinks`, `_scenarios`, ...) are owned by the store. save()
+      // returns the copy Univer holds (the createUnit-time value unless the
+      // mirror below updated it), so the store's value is grafted over it and
+      // a cell edit cannot roll back or wipe those keys.
       const fresh = JSON.stringify(workbook.save());
       const prev = useWorkbookStore.getState().currentSnapshotJson;
       const merged = carryForwardRootExtensions(fresh, prev);
-      syncedSnapshotJsonRef.current = merged;
-      updateSnapshot(merged);
+      // Its root keys already are the store's, so the mirror skips exactly
+      // this update (and no later one with the same string).
+      rootMirror.writeOwn(merged, updateSnapshot);
     };
 
     const cancelPendingSnapshotSync = () => {
@@ -8935,27 +8949,10 @@ export default function EditorScreen() {
   // to those keys or bring back ones the store removed. Runs synchronously on
   // every store change of this document (not when another one is mounting).
   useEffect(() => {
-    const fUniver = fUniverRef.current;
-    if (!fUniver) return;
-    const mirror = (json: string | null) => {
-      try {
-        const model = fUniver.getActiveWorkbook()?.getWorkbook();
-        mirrorRootExtensionsInto(
-          model?.getSnapshot() as unknown as Record<string, unknown> | undefined,
-          json,
-        );
-      } catch {
-        // Best effort: carryForwardRootExtensions still protects syncSnapshot.
-      }
-    };
-    mirror(useWorkbookStore.getState().currentSnapshotJson);
-    return useWorkbookStore.subscribe((state, prevState) => {
-      if (state.currentSnapshotJson === prevState.currentSnapshotJson) return;
-      if (state.editorRevision !== prevState.editorRevision) return;
-      if (state.currentSnapshotJson === syncedSnapshotJsonRef.current) return;
-      mirror(state.currentSnapshotJson);
-    });
-  }, []);
+    if (!fUniverRef.current) return;
+    rootMirror.mirror(useWorkbookStore.getState().currentSnapshotJson);
+    return useWorkbookStore.subscribe(rootMirror.onStoreChange);
+  }, [rootMirror]);
 
   // #131 — macro recorder hook. Subscribes to Univer's high-level COMMAND
   // stream (not MUTATION; replaying a COMMAND re-generates the right MUTATIONs

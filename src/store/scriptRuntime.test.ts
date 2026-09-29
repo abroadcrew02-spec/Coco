@@ -644,12 +644,22 @@ describe("buildIframeHtml — CSP による外部送信遮断", () => {
     expect(html).toMatch(/"Worker", "SharedWorker"/);
   });
 
-  it("#355 A9: host bridge globals become read-only undefined (fake window)", () => {
+  /**
+   * The bootstrap's disableHostBridges step as a callable taking `window`.
+   * Cut from its own start to the start of the next step, whose order is
+   * asserted above, so an inner "})();" cannot end the slice early.
+   */
+  function hostBridgeStep(): (w: Record<string, unknown>) => void {
     const html = buildIframeHtml();
     const start = html.indexOf("(function disableHostBridges()");
-    const end = html.indexOf("})();", start) + "})();".length;
+    const end = html.indexOf("(function blockOutboundGlobals()", start);
+    if (start < 0 || end < 0) throw new Error("bootstrap step markers not found");
     const code = '"use strict";\n' + html.slice(start, end);
-    const run = new Function("window", code) as (w: Record<string, unknown>) => void;
+    return new Function("window", code) as (w: Record<string, unknown>) => void;
+  }
+
+  it("#355 A9: host bridge globals become read-only undefined (fake window)", () => {
+    const run = hostBridgeStep();
 
     const parentPost = () => {};
     const win: Record<string, unknown> = {
@@ -685,12 +695,7 @@ describe("buildIframeHtml — CSP による外部送信遮断", () => {
   });
 
   it("#355 A9: a bridge that cannot be redefined does not stop the rest", () => {
-    const html = buildIframeHtml();
-    const start = html.indexOf("(function disableHostBridges()");
-    const end = html.indexOf("})();", start) + "})();".length;
-    const run = new Function("window", '"use strict";\n' + html.slice(start, end)) as (
-      w: Record<string, unknown>,
-    ) => void;
+    const run = hostBridgeStep();
     const webview = { postMessage() {} };
     const chrome = { webview } as Record<string, unknown>;
     const win: Record<string, unknown> = { __TAURI__: {} };

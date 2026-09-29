@@ -1,8 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
+import { create } from "zustand";
 import {
   carryForwardRootExtensions,
+  createRootExtensionMirror,
+  isNicelRootKey,
   mirrorRootExtensionsInto,
   NICEL_ROOT_EXTENSION_KEYS,
+  type RootMirrorStoreState,
 } from "./snapshotSync";
 
 // #184 C-1 regression: `FWorkbook.save()` reconstructs the snapshot from
@@ -73,10 +77,10 @@ describe("carryForwardRootExtensions", () => {
     expect(merged._connections).toEqual([]);
   });
 
-  it("keeps save()'s value when the store has no such key", () => {
+  it("drops save()'s value when the store has no such key (M-1: the store owns it)", () => {
     const prev = JSON.stringify({ sheets: {} });
     const fresh = JSON.stringify({ sheets: {}, _scenarios: [{ name: "x" }] });
-    expect(carryForwardRootExtensions(fresh, prev)).toBe(fresh);
+    expect("_scenarios" in JSON.parse(carryForwardRootExtensions(fresh, prev))).toBe(false);
   });
 
   it("returns the fresh json unchanged when the values already match", () => {
@@ -192,11 +196,15 @@ describe("mirrorRootExtensionsInto (#356)", () => {
   });
 
   it("skips the parse when neither side has any extension key", () => {
+    const json = JSON.stringify({ sheets: { s1: {} } });
     const parse = vi.spyOn(JSON, "parse");
-    const target: Record<string, unknown> = { sheets: {} };
-    expect(mirrorRootExtensionsInto(target, JSON.stringify({ sheets: { s1: {} } }))).toBe(false);
-    expect(parse).not.toHaveBeenCalled();
-    parse.mockRestore();
+    try {
+      const target: Record<string, unknown> = { sheets: {} };
+      expect(mirrorRootExtensionsInto(target, json)).toBe(false);
+      expect(parse).not.toHaveBeenCalled();
+    } finally {
+      parse.mockRestore();
+    }
   });
 
   it("keeps save()-based writers from rolling back or reviving store changes", () => {
@@ -228,5 +236,198 @@ describe("mirrorRootExtensionsInto (#356)", () => {
     setStore(carryForwardRootExtensions(JSON.stringify(save()), store));
     expect(JSON.parse(store)._scripts).toEqual([{ id: "s1", source: "new" }]);
     expect("_cocoQueries" in JSON.parse(store)).toBe(false);
+  });
+});
+
+// ---------- ownership rule and symmetric carry-forward (M-1 / M-2) --------
+
+describe("root key ownership", () => {
+  it("treats every root key starting with _ as Nicel's, except __proto__", () => {
+    expect(isNicelRootKey("_scripts")).toBe(true);
+    expect(isNicelRootKey("_anythingNew")).toBe(true);
+    expect(isNicelRootKey("sheets")).toBe(false);
+    expect(isNicelRootKey("_")).toBe(false);
+    expect(isNicelRootKey("__proto__")).toBe(false);
+    for (const key of NICEL_ROOT_EXTENSION_KEYS) expect(isNicelRootKey(key)).toBe(true);
+  });
+
+  it("removes an owned key from save()'s output when the store does not have it (M-1)", () => {
+    const prev = JSON.stringify({ sheets: {} });
+    const fresh = JSON.stringify({ sheets: {}, _scenarios: [{ name: "x" }], _cocoQueries: [] });
+    const merged = JSON.parse(carryForwardRootExtensions(fresh, prev));
+    expect("_scenarios" in merged).toBe(false);
+    expect("_cocoQueries" in merged).toBe(false);
+  });
+
+  it("passes save()'s output through when the store snapshot is unusable (M-1 guard)", () => {
+    const fresh = JSON.stringify({ sheets: {}, _scripts: [{ id: "keep" }] });
+    expect(carryForwardRootExtensions(fresh, null)).toBe(fresh);
+    expect(carryForwardRootExtensions(fresh, "")).toBe(fresh);
+    expect(carryForwardRootExtensions(fresh, "{broken")).toBe(fresh);
+    expect(carryForwardRootExtensions(fresh, "[1,2]")).toBe(fresh);
+    expect(carryForwardRootExtensions(fresh, "null")).toBe(fresh);
+    expect(carryForwardRootExtensions(fresh, '"text"')).toBe(fresh);
+  });
+
+  it("covers keys that are not in the known list", () => {
+    const prev = JSON.stringify({ _futureKey: { v: 2 } });
+    const fresh = JSON.stringify({ sheets: {}, _futureKey: { v: 1 }, _staleKey: true, name: "wb" });
+    const merged = JSON.parse(carryForwardRootExtensions(fresh, prev));
+    expect(merged._futureKey).toEqual({ v: 2 });
+    expect("_staleKey" in merged).toBe(false);
+    expect(merged.name).toBe("wb");
+    expect(merged.sheets).toEqual({});
+  });
+
+  it("ignores a __proto__ key in either snapshot", () => {
+    const prev = '{"__proto__":{"polluted":true},"_scripts":[]}';
+    const fresh = '{"sheets":{},"__proto__":{"x":1}}';
+    const merged = JSON.parse(carryForwardRootExtensions(fresh, prev));
+    expect(merged._scripts).toEqual([]);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    const target: Record<string, unknown> = {};
+    mirrorRootExtensionsInto(target, prev);
+    expect(Object.getPrototypeOf(target)).toBe(Object.prototype);
+    expect(target._scripts).toEqual([]);
+  });
+
+  it("mirrors keys that are not in the known list, and only owned keys", () => {
+    const target: Record<string, unknown> = { id: "wb", sheets: { s1: {} }, _old: 1 };
+    mirrorRootExtensionsInto(target, JSON.stringify({ id: "other", sheets: {}, _futureKey: [1] }));
+    expect(target).toEqual({ id: "wb", sheets: { s1: {} }, _futureKey: [1] });
+  });
+});
+
+// ---------- createRootExtensionMirror (#356, HIGH-1 / M-2) ------------------
+
+/** A workbook store and a stand-in for Univer's Workbook model. */
+function setup(opened: Record<string, unknown>) {
+  const store = create<RootMirrorStoreState>(() => ({
+    currentSnapshotJson: JSON.stringify(opened),
+    editorRevision: 1,
+  }));
+  const model = { snapshot: JSON.parse(JSON.stringify(opened)) as Record<string, unknown> };
+  const save = () => JSON.parse(JSON.stringify(model.snapshot)) as Record<string, unknown>;
+  const errors: unknown[] = [];
+  const mirror = createRootExtensionMirror(() => model.snapshot, (e) => errors.push(e));
+  mirror.mirror(store.getState().currentSnapshotJson);
+  const unsubscribe = store.subscribe(mirror.onStoreChange);
+  const setJson = (json: string) => store.setState({ currentSnapshotJson: json });
+  /** What EditorScreen.syncSnapshot does after a cell edit. */
+  const syncCellEdit = (cell: number) => {
+    const fresh = save();
+    (fresh.sheets as Record<string, unknown>).s1 = { cellData: { [cell]: {} } };
+    const merged = carryForwardRootExtensions(
+      JSON.stringify(fresh),
+      store.getState().currentSnapshotJson,
+    );
+    mirror.writeOwn(merged, setJson);
+  };
+  const current = () => JSON.parse(store.getState().currentSnapshotJson!) as Record<string, unknown>;
+  return { store, model, save, mirror, setJson, syncCellEdit, current, errors, unsubscribe };
+}
+
+describe("createRootExtensionMirror", () => {
+  it("a store update back to the last sync output is still mirrored (HIGH-1)", () => {
+    const t = setup({ sheets: { s1: {} } });
+    t.syncCellEdit(1); // store = M1 (no _cocoDataModel)
+    const m1 = t.store.getState().currentSnapshotJson!;
+
+    // Add a measure: the data model is written on the store snapshot.
+    const withModel = JSON.parse(m1);
+    withModel._cocoDataModel = { measures: [{ name: "Total" }] };
+    t.setJson(JSON.stringify(withModel));
+    expect(t.model.snapshot._cocoDataModel).toEqual({ measures: [{ name: "Total" }] });
+
+    // Remove it again: the key is deleted and the string is byte-identical to M1.
+    const without = JSON.parse(JSON.stringify(withModel));
+    delete without._cocoDataModel;
+    expect(JSON.stringify(without)).toBe(m1);
+    t.setJson(JSON.stringify(without));
+    expect("_cocoDataModel" in t.model.snapshot).toBe(false);
+
+    // Next cell edit / save / autosave: the measure must not come back.
+    t.syncCellEdit(2);
+    expect("_cocoDataModel" in t.current()).toBe(false);
+    t.unsubscribe();
+  });
+
+  it("skips exactly its own write, and clears the marker even when the write throws", () => {
+    const t = setup({ sheets: { s1: {} }, _scripts: [{ id: "a" }] });
+    const own = JSON.stringify({ sheets: { s1: {} }, _scripts: [{ id: "own" }] });
+    t.mirror.writeOwn(own, t.setJson);
+    // Not mirrored: its keys are taken to be the store's already.
+    expect(t.model.snapshot._scripts).toEqual([{ id: "a" }]);
+
+    expect(() =>
+      t.mirror.writeOwn("{}", () => {
+        throw new Error("write failed");
+      }),
+    ).toThrow("write failed");
+    // A later ordinary update with the same string as the own write is mirrored.
+    t.setJson(JSON.stringify({ sheets: {} }));
+    t.setJson(own);
+    expect(t.model.snapshot._scripts).toEqual([{ id: "own" }]);
+    t.unsubscribe();
+  });
+
+  it("does not mirror while another document is mounting", () => {
+    const t = setup({ sheets: {}, _scripts: [{ id: "a" }] });
+    t.store.setState({
+      currentSnapshotJson: JSON.stringify({ sheets: {}, _scripts: [{ id: "other-doc" }] }),
+      editorRevision: 2,
+    });
+    expect(t.model.snapshot._scripts).toEqual([{ id: "a" }]);
+    t.unsubscribe();
+  });
+
+  it("reports target failures without breaking the store update", () => {
+    const store = create<RootMirrorStoreState>(() => ({ currentSnapshotJson: "{}", editorRevision: 1 }));
+    const errors: unknown[] = [];
+    const mirror = createRootExtensionMirror(
+      () => {
+        throw new Error("no workbook");
+      },
+      (e) => errors.push(e),
+    );
+    const unsubscribe = store.subscribe(mirror.onStoreChange);
+    store.setState({ currentSnapshotJson: JSON.stringify({ _scripts: [] }) });
+    expect(errors).toHaveLength(1);
+    expect(store.getState().currentSnapshotJson).toBe(JSON.stringify({ _scripts: [] }));
+    unsubscribe();
+  });
+
+  it("keeps the first shape when a second one is added from save() (M-2 _textBoxes)", () => {
+    expect(NICEL_ROOT_EXTENSION_KEYS).toContain("_textBoxes");
+    const t = setup({ sheets: { s1: {} } });
+    // applyShape: builds on save(), appends, writes to the store.
+    const addShape = (id: string) => {
+      const snap = t.save();
+      const list = Array.isArray(snap._textBoxes) ? (snap._textBoxes as unknown[]) : [];
+      t.setJson(JSON.stringify({ ...snap, _textBoxes: [...list, { id }] }));
+    };
+    addShape("tb-1");
+    addShape("tb-2");
+    expect(t.current()._textBoxes).toEqual([{ id: "tb-1" }, { id: "tb-2" }]);
+    t.syncCellEdit(3);
+    expect(t.current()._textBoxes).toEqual([{ id: "tb-1" }, { id: "tb-2" }]);
+    t.unsubscribe();
+  });
+
+  it("keeps linked data types across a cell edit and does not revive removed ones (M-2)", () => {
+    expect(NICEL_ROOT_EXTENSION_KEYS).toContain("_cocoDataTypes");
+    const t = setup({ sheets: { s1: {} } });
+    const added = t.current();
+    added._cocoDataTypes = { sources: [{ id: "src" }] };
+    t.setJson(JSON.stringify(added));
+    t.syncCellEdit(4);
+    expect(t.current()._cocoDataTypes).toEqual({ sources: [{ id: "src" }] });
+
+    const removed = t.current();
+    delete removed._cocoDataTypes; // writeLinkedDataTypes deletes the key
+    t.setJson(JSON.stringify(removed));
+    t.syncCellEdit(5);
+    expect("_cocoDataTypes" in t.current()).toBe(false);
+    t.unsubscribe();
   });
 });

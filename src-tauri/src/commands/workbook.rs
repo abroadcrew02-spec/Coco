@@ -455,6 +455,12 @@ pub fn open_nicel_core(
 
     let (workbook_id, snapshot_json) = result.map_err(|e| e.to_string())?;
 
+    // B2: .coco files saved by v0.8.1 or earlier stored cell styles in a
+    // private `{font, fill, alignment, borders}` shape the grid can't render.
+    // Normalize in memory only — this never touches the file on disk, so a
+    // plain open still leaves the frontend's saveStatus at "saved".
+    let snapshot_json = crate::commands::xlsx_io::normalize_legacy_style_snapshot(&snapshot_json)?;
+
     let file_name = std::path::Path::new(path)
         .file_name()
         .and_then(|n| n.to_str())
@@ -667,6 +673,9 @@ pub fn restore_backup_core(
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
     );
     let (workbook_id, snapshot_json) = result.map_err(|e| e.to_string())?;
+    // B2: same in-memory style normalization as workbook_open_nicel — a
+    // recovered .coco can be just as old as one opened directly.
+    let snapshot_json = crate::commands::xlsx_io::normalize_legacy_style_snapshot(&snapshot_json)?;
 
     // #67: detach the recovery temp path. Returning `Some(temp_path)` plus
     // `requires_save_as_on_first_save: false` would silently overwrite the
@@ -765,6 +774,9 @@ pub fn open_snapshot_core(path: &str, snapshot_id: i64) -> Result<OpenWorkbookRe
     );
     let (workbook_id, snapshot_json) =
         row.map_err(|_| format!("Snapshot not found: {snapshot_id}"))?;
+    // B2: same in-memory style normalization as workbook_open_nicel — an
+    // older snapshot in the history can predate the v0.8.2 style-shape fix.
+    let snapshot_json = crate::commands::xlsx_io::normalize_legacy_style_snapshot(&snapshot_json)?;
 
     Ok(OpenWorkbookResult {
         handle: WorkbookHandle {

@@ -338,6 +338,107 @@ impl CellStyle {
     }
 }
 
+/// Rewrites any legacy `{font, fill, alignment, borders}` style objects found
+/// inside a `.coco` workbook snapshot into the Univer `IStyleData` shape,
+/// reusing the exact `CellStyle::from_json` → `to_json` round-trip the xlsx
+/// importer already relies on (see the doc comment on `CellStyle::to_json`
+/// for the shape). `.coco` files saved by v0.8.1 or earlier wrote the legacy
+/// shape directly into the snapshot; the grid only understands the Univer
+/// shape, so those files render with no formatting until this runs.
+///
+/// A style can appear in two places in a workbook snapshot, and both are
+/// walked here:
+/// - the top-level `styles` map (`{ [id]: IStyleData }`), referenced by cells
+///   through a string `s` id. This is the only shape actually produced by any
+///   writer in this codebase — confirmed by reading `import_xlsx_core`'s
+///   `styles_map` dedup below, and by `ICellData.s: IStyleData | string` in
+///   `@univerjs/core`'s own typedef (Univer's own facade/grid editing path
+///   also writes through this styles-map + string-id pattern).
+/// - inline on the cell itself (`cellData[r][c].s` as an object rather than a
+///   string id). Nothing in this codebase writes that shape today, but
+///   Univer's own type allows it, so it is normalized defensively rather than
+///   silently skipped.
+///
+/// A style object is only rewritten when it carries at least one legacy-only
+/// key (`font` / `fill` / `alignment` / `borders`); an already-Univer object
+/// (which may legitimately have `n` or `bd`) is left untouched. When nothing
+/// in the whole snapshot needed rewriting, the original string is returned
+/// unchanged (no reserialization) so an already-migrated `.coco` round-trips
+/// byte-for-byte.
+pub(crate) fn normalize_legacy_style_snapshot(snapshot_json: &str) -> Result<String, String> {
+    let mut root: Value = match serde_json::from_str(snapshot_json) {
+        Ok(v) => v,
+        // Not parseable JSON — nothing for this function to rewrite; let the
+        // caller's own handling of the snapshot surface whatever is wrong.
+        Err(_) => return Ok(snapshot_json.to_string()),
+    };
+
+    let mut changed = false;
+    if let Some(obj) = root.as_object_mut() {
+        if let Some(styles) = obj.get_mut("styles").and_then(Value::as_object_mut) {
+            for style_val in styles.values_mut() {
+                changed |= normalize_style_value_in_place(style_val);
+            }
+        }
+        if let Some(sheets) = obj.get_mut("sheets").and_then(Value::as_object_mut) {
+            for sheet in sheets.values_mut() {
+                let Some(cell_data) = sheet
+                    .as_object_mut()
+                    .and_then(|s| s.get_mut("cellData"))
+                    .and_then(Value::as_object_mut)
+                else {
+                    continue;
+                };
+                for row in cell_data.values_mut() {
+                    let Some(row_obj) = row.as_object_mut() else {
+                        continue;
+                    };
+                    for cell in row_obj.values_mut() {
+                        let Some(s_val) = cell.as_object_mut().and_then(|c| c.get_mut("s")) else {
+                            continue;
+                        };
+                        // A string `s` is a reference into the top-level
+                        // `styles` map already handled above; only inline
+                        // objects need rewriting here.
+                        if s_val.is_object() {
+                            changed |= normalize_style_value_in_place(s_val);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !changed {
+        return Ok(snapshot_json.to_string());
+    }
+    serde_json::to_string(&root).map_err(|e| e.to_string())
+}
+
+/// Rewrites `v` in place if it is a legacy-shaped style object (detected by
+/// the presence of a legacy-only key). Returns whether anything changed.
+fn normalize_style_value_in_place(v: &mut Value) -> bool {
+    let is_legacy = v
+        .as_object()
+        .map(|o| {
+            o.contains_key("font")
+                || o.contains_key("fill")
+                || o.contains_key("alignment")
+                || o.contains_key("borders")
+        })
+        .unwrap_or(false);
+    if !is_legacy {
+        return false;
+    }
+    match CellStyle::from_json(v) {
+        Some(style) => {
+            *v = style.to_json();
+            true
+        }
+        None => false,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Univer IStyleData enum values (@univerjs/core `HorizontalAlign`,
 // `VerticalAlign`, `BorderStyleTypes`, `WrapStrategy`).

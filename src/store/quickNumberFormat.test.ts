@@ -1,89 +1,80 @@
 import { describe, it, expect } from "vitest";
+import { QUICK_FMT_CURRENCY, QUICK_FMT_PERCENT } from "./quickNumberFormat";
 import {
-  applyQuickNumberFormat,
-  QUICK_FMT_CURRENCY,
-  QUICK_FMT_PERCENT,
-} from "./quickNumberFormat";
+  NUMBER_FORMAT_MAX_CELLS,
+  planUniformNumberFormat,
+  runNumberFormatJob,
+  type NumberFormatDeps,
+} from "./numberFormat";
 
-describe("applyQuickNumberFormat", () => {
-  it("writes the currency format code to every cell in the range", () => {
-    const snap = JSON.stringify({
-      sheets: { s1: { cellData: { "0": { "0": { v: 100 } } } } },
-    });
-    const next = applyQuickNumberFormat(
-      snap,
+// The quick-format buttons (通貨 / %) plan with planUniformNumberFormat and run
+// the job through the numfmt facade; these tests pin that path with the two
+// button codes. The planner / runner themselves are covered in
+// numberFormat.test.ts.
+
+function recordingDeps() {
+  const calls: Array<{ at: number[]; pattern: string }> = [];
+  const deps: NumberFormatDeps = {
+    getSheet: () => ({
+      getRange: (row, col, numRows, numCols) => ({
+        setNumberFormat: (pattern: string) => {
+          calls.push({ at: [row, col, numRows, numCols], pattern });
+        },
+        setNumberFormats: () => undefined,
+      }),
+    }),
+    setCells: () => true,
+  };
+  return { calls, deps };
+}
+
+describe("quick number format codes", () => {
+  it("match Excel's defaults", () => {
+    expect(QUICK_FMT_CURRENCY).toBe("$#,##0.00");
+    expect(QUICK_FMT_PERCENT).toBe("0%");
+  });
+});
+
+describe("quick number format apply", () => {
+  it("applies the currency code to the whole selection with one facade call", () => {
+    const { calls, deps } = recordingDeps();
+    const job = planUniformNumberFormat(
       "s1",
       { startRow: 0, endRow: 1, startCol: 0, endCol: 1 },
       QUICK_FMT_CURRENCY,
+      { "0": { "0": { v: 100 } } },
     );
-    const parsed = JSON.parse(next) as {
-      sheets: {
-        s1: {
-          cellData: Record<string, Record<string, { _fmt?: string; v?: unknown }>>;
-        };
-      };
-    };
-    expect(parsed.sheets.s1.cellData["0"]["0"]._fmt).toBe("$#,##0.00");
-    expect(parsed.sheets.s1.cellData["0"]["0"].v).toBe(100); // preserves existing
-    expect(parsed.sheets.s1.cellData["0"]["1"]._fmt).toBe("$#,##0.00");
-    expect(parsed.sheets.s1.cellData["1"]["0"]._fmt).toBe("$#,##0.00");
-    expect(parsed.sheets.s1.cellData["1"]["1"]._fmt).toBe("$#,##0.00");
+    expect(job).not.toBeNull();
+    runNumberFormatJob(job!, deps);
+    expect(calls).toEqual([{ at: [0, 0, 2, 2], pattern: "$#,##0.00" }]);
   });
 
-  it("writes the percent format code (0%)", () => {
-    const snap = JSON.stringify({ sheets: { s1: { cellData: {} } } });
-    const next = applyQuickNumberFormat(
-      snap,
+  it("applies the percent code to a single blank cell", () => {
+    const { calls, deps } = recordingDeps();
+    runNumberFormatJob(
+      planUniformNumberFormat("s1", { startRow: 2, endRow: 2, startCol: 3, endCol: 3 }, QUICK_FMT_PERCENT, {})!,
+      deps,
+    );
+    expect(calls).toEqual([{ at: [2, 3, 1, 1], pattern: "0%" }]);
+  });
+
+  it("no-ops on a range with a negative corner", () => {
+    expect(
+      planUniformNumberFormat("s1", { startRow: -1, endRow: 0, startCol: 0, endCol: 0 }, QUICK_FMT_PERCENT),
+    ).toBeNull();
+  });
+
+  it("#98: a whole-column selection only formats cells that already exist", () => {
+    const job = planUniformNumberFormat(
       "s1",
-      { startRow: 2, endRow: 2, startCol: 3, endCol: 3 },
-      QUICK_FMT_PERCENT,
+      { startRow: 0, endRow: NUMBER_FORMAT_MAX_CELLS * 10, startCol: 0, endCol: 0 },
+      QUICK_FMT_CURRENCY,
+      { "4": { "0": { v: 1 } }, "8": { "1": { v: 2 } } },
     );
-    const parsed = JSON.parse(next) as {
-      sheets: { s1: { cellData: Record<string, Record<string, { _fmt?: string }>> } };
-    };
-    expect(parsed.sheets.s1.cellData["2"]["3"]._fmt).toBe("0%");
-  });
-
-  it("no-ops on degenerate range or missing sheet", () => {
-    const snap = JSON.stringify({ sheets: { s1: { cellData: {} } } });
-    expect(
-      applyQuickNumberFormat(
-        snap,
-        "s1",
-        { startRow: 5, endRow: 0, startCol: 0, endCol: 0 },
-        "0%",
-      ),
-    ).toBe(snap);
-    expect(
-      applyQuickNumberFormat(
-        snap,
-        "missing",
-        { startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
-        "0%",
-      ),
-    ).toBe(snap);
-  });
-
-  it("empty fmt code removes _fmt without dropping the cell", () => {
-    const snap = JSON.stringify({
-      sheets: {
-        s1: { cellData: { "0": { "0": { v: 1, _fmt: "$#,##0.00" } } } },
-      },
+    expect(job).toEqual({
+      kind: "cells",
+      sheetId: "s1",
+      writes: [{ row: 4, col: 0, pattern: "$#,##0.00" }],
     });
-    const next = applyQuickNumberFormat(
-      snap,
-      "s1",
-      { startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
-      "",
-    );
-    const parsed = JSON.parse(next) as {
-      sheets: {
-        s1: {
-          cellData: Record<string, Record<string, { _fmt?: string; v?: unknown }>>;
-        };
-      };
-    };
-    expect(parsed.sheets.s1.cellData["0"]["0"]._fmt).toBeUndefined();
-    expect(parsed.sheets.s1.cellData["0"]["0"].v).toBe(1);
   });
 });

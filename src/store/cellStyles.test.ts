@@ -119,22 +119,80 @@ describe("applyPresetToRange", () => {
     expect(obj.sheets.s1.cellData["1"]["0"]).toBeDefined();
   });
 
-  it("writes _fmt when the preset declares a numFmt code", () => {
+  it("ships Comma / Currency / Percent as number-only presets with Excel codes", () => {
+    const numPresets = CELL_STYLE_PRESETS.filter((p) => p.numFmt !== undefined);
+    expect(numPresets.map((p) => [p.id, p.numFmt])).toEqual([
+      ["comma", "#,##0"],
+      ["currency", "¥#,##0"],
+      ["percent", "0%"],
+    ]);
+    for (const p of numPresets) expect(Object.keys(p.style)).toEqual([]);
+  });
+
+  // Number formats are applied through the numfmt facade (numberFormat.ts),
+  // not written into the snapshot: a store-only write is never painted and is
+  // overwritten by the next Univer -> store sync.
+  it("leaves the snapshot unchanged for a number-only preset (no _fmt, no inline s.n)", () => {
     const numPreset = CELL_STYLE_PRESETS.find((p) => p.numFmt !== undefined);
-    if (!numPreset) return; // catalog has no number preset — skip
-    const next = applyPresetToRange(
-      emptySnapshot(),
-      "s1",
-      { r1: 0, c1: 0, r2: 0, c2: 0 },
-      numPreset.id,
-    );
-    const obj = JSON.parse(next) as { sheets: { s1: { cellData: Record<string, Record<string, Record<string, unknown>>> } } };
-    const cell = obj.sheets.s1.cellData["0"]["0"];
-    expect(cell._fmt).toBe(numPreset.numFmt);
+    expect(numPreset).toBeDefined();
+    const snap = JSON.stringify({
+      sheets: {
+        s1: { cellData: { "0": { "0": { v: 1234.5, s: { bl: 1 } } } } },
+      },
+    });
+    expect(applyPresetToRange(snap, "s1", { r1: 0, c1: 0, r2: 0, c2: 0 }, numPreset!.id)).toBe(snap);
+  });
+
+  it("does not create empty cells for a number-only preset on a blank range", () => {
+    const numPreset = CELL_STYLE_PRESETS.find((p) => p.numFmt !== undefined);
+    expect(numPreset).toBeDefined();
+    const snap = emptySnapshot();
+    expect(applyPresetToRange(snap, "s1", { r1: 0, c1: 0, r2: 4, c2: 4 }, numPreset!.id)).toBe(snap);
+  });
+
+  it("a style preset never touches a sibling cell that shares the same style id", () => {
+    const snap = JSON.stringify({
+      styles: { st1: { bl: 1 } },
+      sheets: {
+        s1: {
+          cellData: {
+            "0": { "0": { v: 1, s: "st1" }, "1": { v: 2, s: "st1" } },
+          },
+        },
+      },
+    });
+    const next = applyPresetToRange(snap, "s1", { r1: 0, c1: 0, r2: 0, c2: 0 }, "good");
+    const obj = JSON.parse(next) as {
+      styles: Record<string, unknown>;
+      sheets: { s1: { cellData: Record<string, Record<string, { s?: unknown }>> } };
+    };
+    expect(obj.sheets.s1.cellData["0"]["1"].s).toBe("st1");
+    expect(obj.styles.st1).toEqual({ bl: 1 });
   });
 
   it("returns input unchanged for negative range corners", () => {
     const snap = emptySnapshot();
     expect(applyPresetToRange(snap, "s1", { r1: -1, c1: 0, r2: 0, c2: 0 }, "good")).toBe(snap);
+  });
+
+  // Cap boundary for CELL_STYLE_MAX_NEW_CELLS (100_000, not exported — mirrors
+  // NUMBER_FORMAT_MAX_CELLS in numberFormat.ts). A single row of exactly
+  // 100_000 columns must still create every blank cell; one column past that
+  // must fall back to painting only cells that already exist.
+  it("cap boundary: exactly 100_000 cells still creates every blank cell", () => {
+    const next = applyPresetToRange(emptySnapshot(), "s1", { r1: 0, c1: 0, r2: 0, c2: 99_999 }, "good");
+    const obj = JSON.parse(next) as { sheets: { s1: { cellData: Record<string, Record<string, unknown>> } } };
+    expect(Object.keys(obj.sheets.s1.cellData["0"])).toHaveLength(100_000);
+  });
+
+  it("cap boundary: one cell past 100_000 only paints cells that already exist", () => {
+    const snap = JSON.stringify({
+      sheets: { s1: { cellData: { "0": { "5": { v: 1 } } } } },
+    });
+    const next = applyPresetToRange(snap, "s1", { r1: 0, c1: 0, r2: 0, c2: 100_000 }, "good");
+    const obj = JSON.parse(next) as { sheets: { s1: { cellData: Record<string, Record<string, { s?: unknown }>> } } };
+    const row = obj.sheets.s1.cellData["0"];
+    expect(Object.keys(row)).toEqual(["5"]);
+    expect(row["5"].s).toMatchObject({ bg: { rgb: "#C6EFCE" } });
   });
 });

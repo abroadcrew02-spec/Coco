@@ -4,6 +4,18 @@ All notable changes to Nicel (formerly Coco) are documented in this file. The fo
 
 ## [Unreleased]
 
+## [0.8.6] - YYYY-MM-DD
+
+Patch release. Dependency update only: the Tauri runtime and the TLS library move to their current patch releases to pick up upstream fixes. No feature or behaviour changes. Delivered to v0.8.5 users through the auto-updater.
+
+### Changed
+
+- **Runtime dependencies updated** (#369). `tauri` 2.11.1 → 2.11.6 (with `tauri-runtime` 2.11.3, `tauri-runtime-wry` 2.11.4, `tauri-utils` 2.9.3 and `tauri-build` / `tauri-codegen` / `tauri-macros` 2.6.3), `rustls` 0.23.40 → 0.23.45, `rustls-webpki` 0.103.13 → 0.103.15, `tray-icon` 0.23.1 → 0.24.2. The WebView layer (`wry` 0.55.1, `tao` 0.35.2, `windows` 0.61.3) is unchanged. Rust sources, `Cargo.toml` and the npm dependencies are unchanged.
+
+### Known issues
+
+- The 0.8.5 known issues remain: #346, #347, #357, #358, #360, #361, #362, #363, #365, #367, #368, and the mixed-version export difference between 0.8.4 and 0.8.5 or later.
+
 ## [0.8.5] - 2026-09-30
 
 Patch release. Workbook scripts and scheduled data connections now wait for an explicit trust grant, number formats set in Nicel render immediately, and xlsx / CSV export follows the same number-format rule as the grid. Delivered to v0.8.4 users through the auto-updater.

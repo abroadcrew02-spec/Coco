@@ -134,6 +134,18 @@ gh release delete v0.1.1-rc1 --cleanup-tag --yes
 6. Release workflow が自動実行される
 7. (オプション) 旧バージョンで稼働中の社内ユーザーに「アプリを再起動して更新を受け取って下さい」と連絡
 
+### 配信を止める (Latest を前の版に戻す)
+
+新しい版に問題が見つかり、まだ更新していない端末への配信を止めたいときは、Release の Latest を前の版に戻す。
+
+```bash
+gh release edit v0.8.5 --prerelease
+gh release edit v0.8.4 --latest
+```
+
+- 効くのは「これから起動する端末」だけ。既に更新した端末は updater がダウングレードしないので、復旧は次の版の前進修正になる。
+- 戻している間は旧版と新版の混在期間が延びる。v0.8.4 と v0.8.5 の混在では、v0.8.5 で表示形式や下線を変えて保存した `.coco` を v0.8.4 で xlsx / CSV に書き出すと、変える前の状態で出る (CHANGELOG 0.8.5 の既知の問題)。
+
 ## 7. 秘密鍵漏洩時の対応
 
 秘密鍵 (`coco_updater.key` または `TAURI_UPDATER_PRIVATE_KEY` Secret) が漏洩した疑いがある場合、即座に以下を実行する。

@@ -27,7 +27,7 @@ Patch release. Workbook scripts and scheduled data connections now wait for an e
 
 - Two paths write number formats to `_fmt` only: `smartDate.ts` and `templates.ts` (#347).
 - The rust_xlsxwriter limits on the sheet default column width and default row height listed under 0.8.1 remain (#346).
-- Clearing formatting (Univer's "clear format") removes the cell style but not the per-cell `_fmt` key, so a number format cleared that way can still come back in the exported xlsx (#343).
+- Clearing formatting (Univer's "clear format") removes the cell style but not the per-cell `_fmt` key, so a number format cleared that way can still come back in the exported xlsx (#368).
 - Setting a number format back to "General" in the Format Cells dialog may not be undone by Ctrl+Z; apply the previous format again. Cell values are not affected (#361).
 - The `onOpen` trigger fires again on every snapshot sync (#357).
 - The Script Editor evaluates the script on every keystroke (#358).
@@ -36,6 +36,8 @@ Patch release. Workbook scripts and scheduled data connections now wait for an e
 - Scripts you have chosen to trust run with the same access as before this release; the sandbox restricts network requests but is not a complete isolation boundary, so enable scripts only in workbooks whose author you trust.
 - Presets from the Cell Styles gallery (borders, fill, bold, headings and so on) are written to the workbook store only, so they do not render during the session and appear after the workbook is saved and reopened (#360). This is the same pattern as #343; the next release moves them to the facade.
 - Holding the automatic update when the manifest cannot be read (#359) applies to clients on 0.8.5 or later. Clients on 0.8.4 or earlier still receive the automatic update at startup regardless of the rollout. See `docs/AUTO_UPDATE.md` section 11.
+- In large workbooks that carry scripts or data connections, the trust check re-reads the whole snapshot after each sync, which adds about 0.1–0.2 s per 100,000 cells. Workbooks without scripts or connections are not affected (#365).
+- A `.coco` saved by v0.8.5 with changed number formats or underline, opened in v0.8.4 or earlier and exported to xlsx or CSV, can come out with the formats and underline as they were before the v0.8.5 change. Cell values are not affected; updating to v0.8.5 fixes it.
 
 ## [0.8.4] - 2026-09-29
 

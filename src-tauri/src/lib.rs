@@ -103,6 +103,10 @@ pub fn run() {
             commands::settings::set_setting,
             commands::settings::list_settings,
             commands::settings::delete_setting,
+            commands::script_trust::script_trust_check,
+            commands::script_trust::script_trust_grant,
+            commands::script_trust::script_trust_list,
+            commands::script_trust::script_trust_revoke,
             commands::shell::reveal_in_file_manager,
             commands::shell::open_url,
             commands::file_io::read_file_bytes_base64,
@@ -120,6 +124,7 @@ pub fn run() {
             commands::url_fetch_credentials::url_fetch_set_credential,
             commands::url_fetch_credentials::url_fetch_delete_credential,
             commands::url_fetch_credentials::url_fetch_list_credentials,
+            commands::updater::updater_fetch_manifest,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

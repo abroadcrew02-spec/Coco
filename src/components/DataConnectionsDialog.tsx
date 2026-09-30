@@ -13,6 +13,12 @@ import {
   sheetHasExtraRows,
   validateSqliteQuery,
 } from "../store/dataConnections";
+import {
+  MAX_INTERVAL_MINUTES,
+  autoIntervalMinutes,
+  isAutoOnOpen,
+  normalizeIntervalMinutesInput,
+} from "../store/dataConnectionSchedule";
 import "./DataConnectionsDialog.css";
 
 /** Input shape for adding a connection. The discriminated `type` decides
@@ -315,8 +321,8 @@ export default function DataConnectionsDialog({
         name: editing.name.trim(),
         targetSheetName: editing.targetSheetName.trim(),
         steps: editing.steps,
-        scheduleOnOpen: editing.scheduleOnOpen,
-        scheduleIntervalMinutes: Math.max(0, Math.floor(editing.scheduleIntervalMinutes)),
+        scheduleOnOpen: editing.scheduleOnOpen === true,
+        scheduleIntervalMinutes: normalizeIntervalMinutesInput(editing.scheduleIntervalMinutes),
       });
       setEditing(null);
     } catch (e) {
@@ -428,6 +434,10 @@ export default function DataConnectionsDialog({
                     ? state.message
                     : null;
                 const stepCount = c.steps?.length ?? 0;
+                // #355: show the schedule the scheduler would actually run
+                // (same predicates as the scheduler and the trust fingerprint).
+                const schedOnOpen = isAutoOnOpen(c);
+                const schedMinutes = autoIntervalMinutes(c);
                 const sourceLabel =
                   c.type === "web"
                     ? c.web?.url ?? ""
@@ -443,11 +453,11 @@ export default function DataConnectionsDialog({
                         {stepCount > 0 && (
                           <span className="dcd-badge dcd-badge--steps">{stepCount} ステップ</span>
                         )}
-                        {c.schedule && (c.schedule.onOpen || c.schedule.intervalMinutes > 0) && (
+                        {(schedOnOpen || schedMinutes > 0) && (
                           <span className="dcd-badge dcd-badge--sched">
-                            {c.schedule.onOpen ? "起動時" : ""}
-                            {c.schedule.intervalMinutes > 0
-                              ? `${c.schedule.onOpen ? " / " : ""}${c.schedule.intervalMinutes}分毎`
+                            {schedOnOpen ? "起動時" : ""}
+                            {schedMinutes > 0
+                              ? `${schedOnOpen ? " / " : ""}${schedMinutes}分毎`
                               : ""}
                           </span>
                         )}
@@ -488,8 +498,11 @@ export default function DataConnectionsDialog({
                             name: c.name,
                             targetSheetName: c.targetSheetName,
                             steps: c.steps ? c.steps.map((s) => ({ ...s })) : [],
-                            scheduleOnOpen: c.schedule?.onOpen ?? false,
-                            scheduleIntervalMinutes: c.schedule?.intervalMinutes ?? 0,
+                            // #355: start from the effective schedule, not the
+                            // raw stored values, so saving other fields cannot
+                            // turn an ignored value into an active schedule.
+                            scheduleOnOpen: schedOnOpen,
+                            scheduleIntervalMinutes: schedMinutes,
                           })
                         }
                         data-testid={`dcd-edit-${c.id}`}
@@ -956,6 +969,7 @@ export default function DataConnectionsDialog({
                   <input
                     type="number"
                     min={0}
+                    max={MAX_INTERVAL_MINUTES}
                     className="dcd-input dcd-input--inline"
                     value={editing.scheduleIntervalMinutes}
                     onChange={(e) =>

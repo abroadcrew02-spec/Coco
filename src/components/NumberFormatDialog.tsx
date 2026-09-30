@@ -4,7 +4,9 @@ import { useFocusTrap } from "../hooks/useFocusTrap";
 import "./NumberFormatDialog.css";
 
 export interface NumberFormatValue {
-  /** Format code to apply. Empty string means "General" (clear _fmt). */
+  /** Format code to apply. Empty string means "General": the format is
+   *  removed. An imported `_fmt` is kept on the cell; cells that carry one get
+   *  GENERAL_PATTERN so it stays hidden (see clearPatternFor in numberFormat.ts). */
   code: string;
 }
 

@@ -1,0 +1,135 @@
+/* #355 — trust banner above the grid. Same placement and palette family as
+   .warning-banner (EditorScreen.css); body text uses --nicel-text because
+   the muted and warning colors fall below 4.5:1 on --nicel-warning-bg. */
+.script-trust-banner {
+  position: relative;
+  flex-shrink: 0;
+  z-index: 10;
+  padding: 8px 44px 8px 16px;
+  background-color: var(--nicel-warning-bg);
+  border-bottom: 1px solid var(--nicel-warning);
+  color: var(--nicel-text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.script-trust-banner__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+}
+
+.script-trust-banner__text {
+  flex: 1 1 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.script-trust-banner__message {
+  margin: 0;
+  font-weight: 600;
+}
+
+.script-trust-banner__detail {
+  margin: 0;
+}
+
+.script-trust-banner__first-run {
+  margin: 0;
+  color: var(--nicel-info);
+  font-weight: 500;
+}
+
+.script-trust-banner__btn {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--nicel-text);
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border-strong);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.script-trust-banner__btn:hover:not([aria-disabled="true"]) {
+  background-color: var(--nicel-surface-hover);
+  border-color: var(--nicel-text-faint);
+}
+
+.script-trust-banner__btn--primary {
+  background-color: var(--nicel-accent);
+  color: var(--nicel-accent-text);
+  border-color: var(--nicel-accent);
+}
+
+.script-trust-banner__btn--primary:hover:not([aria-disabled="true"]) {
+  background-color: var(--nicel-accent-hover);
+  border-color: var(--nicel-accent-hover);
+}
+
+.script-trust-banner__btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.script-trust-banner__choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+
+.script-trust-banner__choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px 10px;
+  background-color: var(--nicel-bg-elevated);
+  border: 1px solid var(--nicel-border);
+  border-radius: 4px;
+}
+
+.script-trust-banner__choice-desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--nicel-text-muted);
+}
+
+.script-trust-banner__caution {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-left: 8px;
+  border-left: 3px solid var(--nicel-warning);
+  font-size: 12px;
+}
+
+.script-trust-banner__error {
+  margin: 6px 0 0;
+  color: var(--nicel-danger);
+  font-weight: 500;
+}
+
+.script-trust-banner__dismiss {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--nicel-text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: color 0.1s ease;
+}
+
+.script-trust-banner__dismiss:hover {
+  color: var(--nicel-text);
+}

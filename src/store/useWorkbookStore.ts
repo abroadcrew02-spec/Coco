@@ -5,6 +5,7 @@ import { friendlyError } from "./errorMessages";
 import { t } from "../i18n/locale";
 import { flushPendingSnapshot } from "./snapshotSync";
 import { flushTextBoxesToPreservedParts } from "./textBoxes";
+import { getScriptTrustStore } from "./scriptTrust";
 import type {
   AppScreen,
   SaveStatus,
@@ -50,6 +51,14 @@ interface WorkbookState {
    *  predated the next mutation. Bounded to keep memory in check. */
   nicelUndoStack: string[];
   nicelRedoStack: string[];
+  /** #355: random key issued every time a document is opened or created.
+   *  "Allow once" decisions and execution grants are scoped to it. Kept
+   *  across undo/redo and save; null on the home screen. */
+  docSessionKey: string | null;
+  /** #355: path used only to look up an existing "always trust" record when
+   *  the open document has no path of its own (restored copy: the original
+   *  path; history snapshot: the path it was opened from). */
+  trustLookupPath: string | null;
 
   // Actions
   newWorkbook: () => Promise<void>;
@@ -198,6 +207,36 @@ const clearRecoveryBestEffort = (workbookId: string) => {
   void invoke("workbook_clear_recovery", { candidateId: workbookId }).catch(() => undefined);
 };
 
+/** #355: new document session key. Uniqueness matters, not secrecy. */
+const newDocSessionKey = (): string => {
+  const c = (globalThis as { crypto?: Crypto }).crypto;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  if (c && typeof c.getRandomValues === "function") {
+    const bytes = c.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  return `doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+};
+
+/** #355: end the trust session of the document being closed or replaced so
+ *  its "allow once" decisions and grants stop working. */
+const endTrustSession = (sessionKey: string | null) => {
+  if (!sessionKey) return;
+  try {
+    getScriptTrustStore().endSession(sessionKey);
+  } catch {
+    // Ending a session only revokes; a failure here leaves nothing enabled
+    // that the new session could use, because the new key is unrelated.
+  }
+};
+
+/** #355: end the current trust session and return a fresh key for the next
+ *  document. Call only when the open document is actually being replaced. */
+const rotateDocSession = (current: string | null): string => {
+  endTrustSession(current);
+  return newDocSessionKey();
+};
+
 export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   screen: "home",
   currentHandle: null,
@@ -222,6 +261,8 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
   suppressCsvPocWarning: false,
   nicelUndoStack: [],
   nicelRedoStack: [],
+  docSessionKey: null,
+  trustLookupPath: null,
 
   // A freshly created / opened workbook starts clean ("saved"): the dirty
   // marker, the close guard and the updater guard only engage after a
@@ -234,6 +275,12 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       set({
         screen: "editor",
         currentHandle: handle,
+        docSessionKey: rotateDocSession(get().docSessionKey),
+        trustLookupPath: null,
+        // #355: history belongs to the previous document; undoing into it would
+        // show that content under this document session.
+        nicelUndoStack: [],
+        nicelRedoStack: [],
         editorRevision: get().editorRevision + 1,
         saveStatus: "saved",
         wasDirtyBeforeExport: false,
@@ -262,6 +309,12 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       set({
         screen: "editor",
         currentHandle: result.handle,
+        docSessionKey: rotateDocSession(get().docSessionKey),
+        trustLookupPath: null,
+        // #355: history belongs to the previous document; undoing into it would
+        // show that content under this document session.
+        nicelUndoStack: [],
+        nicelRedoStack: [],
         editorRevision: get().editorRevision + 1,
         saveStatus: "saved",
         wasDirtyBeforeExport: false,
@@ -310,6 +363,12 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       set({
         screen: "editor",
         currentHandle: result.handle,
+        docSessionKey: rotateDocSession(get().docSessionKey),
+        trustLookupPath: null,
+        // #355: history belongs to the previous document; undoing into it would
+        // show that content under this document session.
+        nicelUndoStack: [],
+        nicelRedoStack: [],
         editorRevision: get().editorRevision + 1,
         saveStatus: "saved",
         wasDirtyBeforeExport: false,
@@ -349,6 +408,12 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       set({
         screen: "editor",
         currentHandle: result.handle,
+        docSessionKey: rotateDocSession(get().docSessionKey),
+        trustLookupPath: null,
+        // #355: history belongs to the previous document; undoing into it would
+        // show that content under this document session.
+        nicelUndoStack: [],
+        nicelRedoStack: [],
         editorRevision: get().editorRevision + 1,
         saveStatus: "saved",
         wasDirtyBeforeExport: false,
@@ -1016,6 +1081,10 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     const mySeq = ++openSeq;
     const priorStatus = get().saveStatus;
     const priorDirty = get().wasDirtyBeforeExport;
+    // #355: the restored copy has no path of its own; its original path is
+    // used only to look up an existing trust record.
+    const originalPath =
+      get().recoveryCandidates.find((c) => c.candidateId === candidateId)?.originalPath ?? null;
     try {
       set({ saveStatus: "loading" });
       const result = await invoke<OpenWorkbookResult>("workbook_restore_backup", { candidateId });
@@ -1024,6 +1093,12 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       set({
         screen: "editor",
         currentHandle: { ...result.handle, path: null },
+        docSessionKey: rotateDocSession(get().docSessionKey),
+        trustLookupPath: originalPath,
+        // #355: history belongs to the previous document; undoing into it would
+        // show that content under this document session.
+        nicelUndoStack: [],
+        nicelRedoStack: [],
         editorRevision: get().editorRevision + 1,
         saveStatus: "unsaved",
         wasDirtyBeforeExport: false,
@@ -1058,10 +1133,14 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
 
   clearError: () => set({ lastError: null }),
 
-  goHome: () =>
+  goHome: () => {
+    // #355: closing the document ends its trust session.
+    endTrustSession(get().docSessionKey);
     set({
       screen: "home",
       currentHandle: null,
+      docSessionKey: null,
+      trustLookupPath: null,
       currentSnapshotJson: null,
       saveStatus: "saved",
       wasDirtyBeforeExport: false,
@@ -1073,7 +1152,8 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       // #97: drop undo history when leaving the workbook.
       nicelUndoStack: [],
       nicelRedoStack: [],
-    }),
+    });
+  },
 
   setSaveStatus: (status) => set({ saveStatus: status }),
 
@@ -1305,6 +1385,14 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       set({
         screen: "editor",
         currentHandle: { ...result.handle, path: null },
+        // #355: a new document session; the path the snapshot came from is
+        // used only to look up an existing trust record.
+        docSessionKey: rotateDocSession(get().docSessionKey),
+        trustLookupPath: currentHandle.path,
+        // #355: history belongs to the previous document; undoing into it would
+        // show that content under this document session.
+        nicelUndoStack: [],
+        nicelRedoStack: [],
         editorRevision: get().editorRevision + 1,
         saveStatus: "unsaved",
         wasDirtyBeforeExport: false,

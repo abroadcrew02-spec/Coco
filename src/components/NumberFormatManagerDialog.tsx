@@ -7,7 +7,7 @@ interface Props {
   entries: FormatCodeEntry[];
   /** A1 reference for the active selection (passed to `onApplyToRange`). */
   activeSelectionRange: string;
-  /** Rewrites every cell whose `_fmt` matches `oldCode` to `newCode`. */
+  /** Changes every cell whose current format code is `oldCode` to `newCode`. */
   onRename: (oldCode: string, newCode: string) => void;
   /** Apply `code` to the user's current selection — same path as the toolbar. */
   onApplyToRange: (code: string, range: string) => void;

@@ -94,7 +94,7 @@ fn collect_settings(
     data_dir: &Path,
     warnings: &mut Vec<CompatibilityWarning>,
 ) -> Vec<crate::commands::settings::SettingEntry> {
-    match crate::commands::settings::list_settings_core(data_dir) {
+    let rows = match crate::commands::settings::list_settings_core(data_dir) {
         Ok(rows) => rows,
         Err(e) => {
             warnings.push(CompatibilityWarning {
@@ -105,7 +105,16 @@ fn collect_settings(
             });
             Vec::new()
         }
-    }
+    };
+    // #355: `list_settings_core` (db::operations::list_settings) already
+    // excludes `script_trust.*` rows at the SQL level, so this is redundant
+    // in practice today — kept anyway as an explicit, local guarantee for
+    // this specific boundary (a distributed bundle must never carry another
+    // machine's trust records), rather than relying solely on a filter that
+    // lives two calls away.
+    rows.into_iter()
+        .filter(|row| !crate::db::operations::has_script_trust_prefix(&row.key))
+        .collect()
 }
 
 // ── Export ───────────────────────────────────────────────────────────────────
@@ -356,10 +365,39 @@ pub fn import_workspace_bundle_core(
                 restored_workbook_path = Some(out_path.to_string_lossy().into_owned());
             }
             "settings.json" => {
-                // Count entries for the returned manifest. Parse-failure isn't
-                // fatal — the user can still inspect the file by hand.
-                if let Ok(rows) = serde_json::from_slice::<Vec<serde_json::Value>>(&data) {
-                    restored_settings_count = rows.len() as u32;
+                // #355: strip any `script_trust.*` row before it stays on
+                // disk in the new install — a shared/distributed bundle must
+                // not be able to plant a trust record on the machine that
+                // imports it (design-355.md Q3: no exceptions, not even for
+                // an internally-distributed template). This is defense in
+                // depth on top of the write-time guard: even if some future
+                // code path read this file back and looped calls into the
+                // generic `set_setting`, that command already refuses
+                // `script_trust.*` keys outright (see db::operations).
+                //
+                match serde_json::from_slice::<Vec<crate::commands::settings::SettingEntry>>(&data)
+                {
+                    Ok(rows) => {
+                        let filtered: Vec<_> = rows
+                            .into_iter()
+                            .filter(|row| !crate::db::operations::has_script_trust_prefix(&row.key))
+                            .collect();
+                        restored_settings_count = filtered.len() as u32;
+                        if let Ok(rewritten) = serde_json::to_vec_pretty(&filtered) {
+                            let _ = fs::write(&out_path, &rewritten);
+                        }
+                    }
+                    Err(_) => {
+                        // AZKi review follow-up: an unparseable settings.json
+                        // used to be left on disk byte-for-byte, unfiltered —
+                        // "we couldn't check it" must not mean "so ship it
+                        // as-is". Fail closed: treat it as an empty settings
+                        // list, both in the returned count and in the file
+                        // that actually lands on disk, rather than trusting
+                        // content this function couldn't itself validate.
+                        restored_settings_count = 0;
+                        let _ = fs::write(&out_path, b"[]");
+                    }
                 }
             }
             _ => {}

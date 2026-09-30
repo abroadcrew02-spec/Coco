@@ -15,9 +15,22 @@
 //
 // スクリプトは untrusted code として扱う。iframe 実行下では window /
 // document / fetch / localStorage / Tauri invoke は到達不能。
+//
+// #355 trust gate: nothing in this module evaluates a script unless the caller
+// passes an execution grant (see scriptGrant.ts / scriptTrust.ts) that covers
+// the exact source text. The check is the first statement of `runScript`,
+// before any logging, watchdog, executor selection or await. `collectTriggers`
+// and `fireTrigger` only reach an executor through `runScript`, and the iframe
+// executor factory is module-private, so there is no other entry point. An
+// unapproved call returns `{ ok: false, error: SCRIPT_NOT_TRUSTED }` and has no
+// side effects.
 
 import type { FUniver } from "@univerjs/core/facade";
 import { isSheetProtectedInSnapshot } from "./sheetProtection";
+import { checkGrant, type ScriptExecutionGrant } from "./scriptGrant";
+
+/** Error string returned when a run is refused by the trust gate (#355). */
+export const SCRIPT_NOT_TRUSTED = "SCRIPT_NOT_TRUSTED";
 
 /** スクリプトのデフォルト最大実行時間 (ms)。watchdog がこれを超えたら
  *  `aborted` フラグを立て、次のループチェックで throw する。 */
@@ -51,6 +64,12 @@ export interface ScriptRunResult {
   elapsedMs: number;
   /** タイムアウトで打ち切られたか。 */
   timedOut: boolean;
+  /**
+   * #355: true only when the trust gate refused the run (nothing was
+   * evaluated). Set by the runtime itself, never derived from script output,
+   * so a script cannot produce it by throwing a matching error message.
+   */
+  blockedByGate?: boolean;
 }
 
 // ---------- トリガー (#189) --------------------------------------------------
@@ -428,6 +447,11 @@ export interface IframeDataBundle {
   sheets: Record<string, Record<string, unknown[][]>>;
 }
 
+/** Content-Security-Policy of the sandbox iframe document. */
+export const IFRAME_CSP =
+  "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; " +
+  "form-action 'none'; child-src 'none'; frame-src 'none'";
+
 /**
  * iframe 内で動くブートストラップ HTML。親へ Facade 呼び出しを postMessage
  * し、読み取りは実行開始時に渡されるデータバンドルから引く。
@@ -450,16 +474,63 @@ export interface IframeDataBundle {
  * 'unsafe-eval'` で許可したまま。多層防御として、ブートストラップ内でも
  * 主要な通信系グローバルを評価前に無効化する。
  *
+ * #355: WebView2 injects the host bridge into every frame; the bootstrap removes it from
+ * this frame only. child-src/frame-src 'none' do not stop about:blank or srcdoc frames:
+ * they inherit this CSP (their fetch IPC is blocked) but get a fresh bridge. A command
+ * invoked from one did not run in a host-side check on 2026-09-29. Keep remote IPC
+ * capabilities off; full isolation is the Worker runtime planned for 0.8.6 (add `worker-src`).
+ *
  * export: テストから直接構造を検証するため (Blob 経由の間接検査ではなく)。
  */
 export function buildIframeHtml(): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; form-action 'none'"></head><body>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${IFRAME_CSP}"></head><body>
 <script>
 (function () {
   "use strict";
+  (function disableHostBridges() {
+    // WebView2 injects the host bridge into every frame, this one included, so these
+    // globals (and every __TAURI* global) become a read-only undefined before workbook
+    // code runs; any that cannot be redefined are cleared as far as possible.
+    // window.parent.postMessage is left alone. Frames nested inside this one are not
+    // covered; see the #355 note above buildIframeHtml().
+    var names = [
+      "ipc", "chrome", "__TAURI_INTERNALS__", "__TAURI__", "__TAURI_METADATA__",
+      "__TAURI_EVENT_PLUGIN_INTERNALS__", "__TAURI_INVOKE__"
+    ];
+    try {
+      var own = Object.getOwnPropertyNames(window);
+      for (var j = 0; j < own.length; j++) {
+        if (/^__TAURI/.test(own[j]) && names.indexOf(own[j]) < 0) names.push(own[j]);
+      }
+    } catch (e) { /* best-effort */ }
+    for (var k = 0; k < names.length; k++) {
+      var bridge = names[k];
+      try {
+        Object.defineProperty(window, bridge, {
+          value: undefined,
+          writable: false,
+          configurable: false
+        });
+      } catch (e) {
+        try { window[bridge] = undefined; } catch (e2) { /* best-effort */ }
+        if (bridge === "chrome") {
+          try {
+            Object.defineProperty(window.chrome, "webview", {
+              value: undefined,
+              writable: false,
+              configurable: false
+            });
+          } catch (e3) { /* best-effort */ }
+        }
+      }
+    }
+  })();
   (function blockOutboundGlobals() {
     // CSP が主対策。ここは多層防御 — ユーザーコード評価前に主要な通信系
     // グローバルを書き換え不能な例外送出関数へ置き換える。
+    // Containment does not depend on these stubs (or on how they fail): the CSP
+    // blocks network access and the bridge is removed above. Nested frames are not
+    // refused by the CSP; see the #355 note above buildIframeHtml().
     function throwBlocked(name) {
       return function () {
         throw new Error("サンドボックス内からの外部通信は許可されていません: " + name);
@@ -467,7 +538,7 @@ export function buildIframeHtml(): string {
     }
     var globalNames = [
       "fetch", "XMLHttpRequest", "WebSocket", "EventSource",
-      "RTCPeerConnection", "webkitRTCPeerConnection"
+      "RTCPeerConnection", "webkitRTCPeerConnection", "Worker", "SharedWorker"
     ];
     for (var i = 0; i < globalNames.length; i++) {
       var name = globalNames[i];
@@ -604,8 +675,11 @@ export function buildIframeHtml(): string {
 /**
  * iframe executor を生成する。`getBundle` は実行直前に getSheetValues 用の
  * 読み取りデータを集めるコールバック。
+ *
+ * Not exported (#355): the only way to create a sandbox iframe is through
+ * `runScript`, which checks the execution grant first.
  */
-export function createIframeExecutor(getBundle: () => IframeDataBundle): ScriptExecutor {
+function createIframeExecutor(getBundle: () => IframeDataBundle): ScriptExecutor {
   return {
     execute(source, api, options) {
       return new Promise((resolve, reject) => {
@@ -716,20 +790,27 @@ export function createIframeExecutor(getBundle: () => IframeDataBundle): ScriptE
 // ---------- runScript --------------------------------------------------------
 
 export interface RunScriptOptions {
+  /**
+   * Execution grant (#355). Required: the run is refused unless this is a
+   * live grant whose approved sources contain `source` exactly.
+   */
+  grant: ScriptExecutionGrant | null;
   /** タイムアウト (ms)。デフォルト 5000。 */
   timeoutMs?: number;
   /** Facade。null の場合は no-op api。 */
   fUniver?: FUniver | null;
   /** 既に開いた logs バッファ (テスト用; 通常は undefined)。 */
   initialLogs?: string[];
-  /** Function コンストラクタの代わりに任意の評価関数を注入 (テスト用)。 */
+  /** Function コンストラクタの代わりに任意の評価関数を注入 (テスト用)。
+   *  Test only (#355): it evaluates in the main frame, outside the sandbox.
+   *  Production code must not pass it; EditorScreen.test.tsx checks that no
+   *  file other than this one sets `factory:` or `executor:` for the runtime. */
   factory?: (source: string) => (api: ScriptApi, log: ScriptApi["log"]) => unknown;
-  /** 評価方式。未指定なら DOM があれば iframe、無ければ inline。 */
+  /** 評価方式。未指定なら DOM があれば iframe、無ければ inline。
+   *  Test only (#355), same rule as `factory`. */
   executor?: ScriptExecutor;
   /** 保護判定用の最新 snapshot JSON。 */
   snapshotJson?: string | null;
-  /** トリガー発火時の追加呼び出しコード (内部用; inline executor 専用)。 */
-  triggerCall?: string;
   /** 収集済みトリガーの参照を返してほしい場合に渡す配列
    *  (iframe executor 経由でも `mode: "list-triggers"` の結果がここに入る)。 */
   collectTriggers?: RegisteredTrigger[];
@@ -750,10 +831,52 @@ function inferErrorLine(stack: string | null): number | null {
   return Number.isFinite(raw) ? Math.max(1, raw - 1) : null;
 }
 
-export async function runScript(
+/**
+ * Options only this module may set. They add code around the approved source
+ * (inline trigger dispatch), so they are kept off the public options: a caller
+ * holding a grant for a source cannot use them to run other code.
+ */
+interface InternalRunOptions {
+  /** Prepended to the source before evaluation (inline executor only). */
+  inlinePrelude?: string;
+  /** Appended after the source (inline executor only). */
+  triggerCall?: string;
+}
+
+function notTrustedResult(): ScriptRunResult {
+  return {
+    ok: false,
+    logs: [],
+    error: SCRIPT_NOT_TRUSTED,
+    stack: null,
+    errorLine: null,
+    elapsedMs: 0,
+    timedOut: false,
+    blockedByGate: true,
+  };
+}
+
+/**
+ * Run a workbook script. Refused (no executor, no iframe, no log, no timer)
+ * unless `options.grant` covers `source`.
+ */
+export function runScript(
   source: string,
-  options: RunScriptOptions = {},
+  options: RunScriptOptions,
 ): Promise<ScriptRunResult> {
+  return runScriptInternal(source, options, {});
+}
+
+async function runScriptInternal(
+  source: string,
+  options: RunScriptOptions,
+  internal: InternalRunOptions,
+): Promise<ScriptRunResult> {
+  // #355: trust gate. Synchronous and first; nothing below runs on refusal.
+  if (!checkGrant(options?.grant, source).ok) {
+    return notTrustedResult();
+  }
+
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const logs: string[] = options.initialLogs ?? [];
   const triggers: RegisteredTrigger[] = options.collectTriggers ?? [];
@@ -830,15 +953,20 @@ export async function runScript(
     addTimer: rawApi.addTimer.bind(rawApi),
   };
 
+  // The prelude is internal-only and is joined after the gate has checked the
+  // original source.
+  const executedSource =
+    internal.inlinePrelude !== undefined ? internal.inlinePrelude + "\n" + source : source;
+
   try {
     const { returnValue, triggers: iframeTriggers } = await executor.execute(
-      source,
+      executedSource,
       api,
       {
         timeoutMs,
         aborted,
         factory: options.factory,
-        triggerCall: options.triggerCall,
+        triggerCall: internal.triggerCall,
         mode: options.mode,
         fire: options.fire,
       },
@@ -942,14 +1070,22 @@ export interface CollectedTriggers {
  *
  * DOM の無いテスト環境では inline executor へフォールバックする (実 Facade
  * は `runScript` 側で null に落とされる)。
+ *
+ * #355: `grant` is passed through to `runScript`; without a covering grant the
+ * result is an empty trigger list and the script is not evaluated.
  */
 export async function collectTriggers(
   entry: ScriptEntry,
-  options: { fUniver?: FUniver | null; snapshotJson?: string | null } = {},
+  options: {
+    grant: ScriptExecutionGrant | null;
+    fUniver?: FUniver | null;
+    snapshotJson?: string | null;
+  },
 ): Promise<CollectedTriggers> {
   const collected: RegisteredTrigger[] = [];
   const hasDom = typeof document !== "undefined";
   await runScript(entry.source, {
+    grant: options?.grant ?? null,
     fUniver: options.fUniver ?? null,
     snapshotJson: options.snapshotJson ?? null,
     // DOM があれば iframe (mode 指定)、無ければ inline フォールバック。
@@ -1002,11 +1138,15 @@ var __cocoQueue = [];
  *
  * DOM の無いテスト環境では inline executor へフォールバックし、登録 API を
  * 差し替えるプレリュード方式で発火する (実 Facade は渡らない)。
+ *
+ * #355: `grant` is passed through to `runScript`, which checks it against
+ * `entry.source` (not the prelude-joined text).
  */
 export async function fireTrigger(
   entry: ScriptEntry,
   kind: TriggerKind,
   options: {
+    grant: ScriptExecutionGrant | null;
     fUniver?: FUniver | null;
     snapshotJson?: string | null;
     /** menu のとき発火対象を絞るラベル。 */
@@ -1015,8 +1155,9 @@ export async function fireTrigger(
     editEvent?: EditEvent;
     executor?: ScriptExecutor;
     timeoutMs?: number;
-  } = {},
+  },
 ): Promise<ScriptRunResult> {
+  const grant = options?.grant ?? null;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const label = options.label ?? "";
   const editEvent = options.editEvent ?? null;
@@ -1028,17 +1169,22 @@ export async function fireTrigger(
 
   if (useInline) {
     const { prelude, triggerCall } = buildInlineFirePrelude(kind, label, editEvent);
-    return runScript(prelude + "\n" + entry.source, {
-      fUniver: options.fUniver ?? null,
-      snapshotJson: options.snapshotJson ?? null,
-      executor: inlineExecutor,
-      triggerCall,
-      timeoutMs,
-    });
+    return runScriptInternal(
+      entry.source,
+      {
+        grant,
+        fUniver: options.fUniver ?? null,
+        snapshotJson: options.snapshotJson ?? null,
+        executor: inlineExecutor,
+        timeoutMs,
+      },
+      { inlinePrelude: prelude, triggerCall },
+    );
   }
 
   // 本番経路: iframe executor の fire-trigger モード。
   return runScript(entry.source, {
+    grant,
     fUniver: options.fUniver ?? null,
     snapshotJson: options.snapshotJson ?? null,
     executor: options.executor,
@@ -1129,20 +1275,29 @@ export function recordRun(
 export function readScripts(snapshotJson: string | null): ScriptEntry[] {
   if (!snapshotJson) return [];
   try {
-    const obj = JSON.parse(snapshotJson) as ScriptsSnapshot;
-    const arr = obj._scripts;
-    if (!Array.isArray(arr)) return [];
-    return arr.filter(
-      (e): e is ScriptEntry =>
-        !!e &&
-        typeof e.id === "string" &&
-        typeof e.name === "string" &&
-        typeof e.source === "string" &&
-        typeof e.lastModified === "number",
-    );
+    return scriptsFromSnapshotObject(JSON.parse(snapshotJson));
   } catch {
     return [];
   }
+}
+
+/**
+ * Same filtering as `readScripts`, for callers that already parsed the
+ * snapshot. The trust fingerprint (#355) uses this so it sees exactly the
+ * scripts the runtime would run.
+ */
+export function scriptsFromSnapshotObject(obj: unknown): ScriptEntry[] {
+  if (!obj || typeof obj !== "object") return [];
+  const arr = (obj as ScriptsSnapshot)._scripts;
+  if (!Array.isArray(arr)) return [];
+  return arr.filter(
+    (e): e is ScriptEntry =>
+      !!e &&
+      typeof e.id === "string" &&
+      typeof e.name === "string" &&
+      typeof e.source === "string" &&
+      typeof e.lastModified === "number",
+  );
 }
 
 /** snapshot ルートに `_scripts` を書き戻す。元の JSON を壊さない。 */

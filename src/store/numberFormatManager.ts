@@ -4,21 +4,23 @@
 // inherited xlsx files quickly accumulate dozens of near-duplicate codes
 // ("#,##0", "#,##0_)", "#,##0_-") with no easy way to consolidate.
 //
-// This module walks the Nicel snapshot, dedupes by code, and exposes mutation
-// helpers that rewrite every matching `_fmt` field in one pass. Kept entirely
-// framework-free so unit tests don't need Univer in scope.
+// This module walks the Nicel snapshot and dedupes by code. Rename / delete
+// don't mutate the snapshot: they return numfmt jobs (numberFormat.ts) that
+// EditorScreen runs through Univer, so the grid repaints and Univer keeps the
+// undo entry. Kept entirely framework-free so unit tests don't need Univer.
 //
-// Snapshot shape (Univer 0.5.x + Nicel extension) — only the fields we touch:
+// Snapshot shape (Univer 0.24 + Nicel extension) — only the fields we read:
 //   {
 //     sheetOrder?: string[],
+//     styles?: { <styleId>: { n?: { pattern?: string }, ... } },
 //     sheets: {
 //       <sheetId>: {
 //         name?: string,
 //         cellData?: {
 //           <row>: {
 //             <col>: {
-//               _fmt?: string,          // Nicel-managed per-cell format code
-//               s?: { n?: { pattern?: string } },  // Univer's style-table form
+//               s?: string | object,    // style id (or inline style object)
+//               _fmt?: string,          // Nicel per-cell sidecar (xlsx import)
 //               ...
 //             } | undefined
 //           } | undefined
@@ -27,10 +29,21 @@
 //     }
 //   }
 //
-// Both `_fmt` and `s.n.pattern` are checked so codes that round-tripped via
-// the Univer style table are surfaced too. Mutations only ever write `_fmt`
-// (matching applyNumberFormat / quickNumberFormat) — `s.n.pattern` is
-// cleared on rename/delete to avoid leaving the old code behind.
+// A cell's code is resolved by resolveCellNumberFormat: a non-empty
+// `n.pattern` on the cell's style decides ("General" there means no format);
+// `_fmt` only counts when the style has no non-empty `n.pattern`. Removing a
+// code (delete, or rename to blank / General) writes clearPatternFor(cell):
+// "General" on cells that carry a non-empty `_fmt`, "" everywhere else.
+
+import {
+  clearPatternFor,
+  resolveCellNumberFormat,
+  styleLookupFromTable,
+  normalizeNumberFormatCode,
+  type NumberFormatJob,
+  type NumberFormatWrite,
+  type StyleLookup,
+} from "./numberFormat";
 
 export interface FormatCodeEntry {
   /** The unique format code (e.g. "#,##0", "yyyy/m/d"). Empty codes are skipped. */
@@ -51,6 +64,7 @@ interface FmtCell {
 
 interface FmtSnapshot {
   sheetOrder?: string[];
+  styles?: Record<string, Record<string, unknown> | undefined>;
   sheets?: Record<
     string,
     | {
@@ -61,24 +75,9 @@ interface FmtSnapshot {
   >;
 }
 
-function deepClone<T>(value: T): T {
-  try {
-    return JSON.parse(JSON.stringify(value)) as T;
-  } catch {
-    return value;
-  }
-}
-
-function readCellCode(cell: FmtCell | undefined): string | null {
-  if (!cell || typeof cell !== "object") return null;
-  if (typeof cell._fmt === "string" && cell._fmt.trim() !== "") return cell._fmt;
-  // s may be either the style-table id (string) or the inline style object;
-  // only the object form carries a pattern we can read directly.
-  if (cell.s && typeof cell.s === "object") {
-    const pattern = (cell.s as { n?: { pattern?: string } }).n?.pattern;
-    if (typeof pattern === "string" && pattern.trim() !== "") return pattern;
-  }
-  return null;
+function readCellCode(cell: FmtCell | undefined, lookup: StyleLookup): string | null {
+  const code = resolveCellNumberFormat(cell, lookup);
+  return code === "" ? null : code;
 }
 
 /** Walk every cell across every sheet, dedupe by format code, and return one
@@ -106,6 +105,7 @@ export function listAllFormatCodes(
       ? parsed.sheetOrder.filter((s): s is string => typeof s === "string")
       : Object.keys(sheets);
 
+  const lookup = styleLookupFromTable(parsed.styles);
   // Map by code so we can accumulate counts + sheet ids before constructing
   // the final array. Using a Map preserves insertion order for stable output.
   const byCode = new Map<string, { count: number; sheets: Set<string> }>();
@@ -117,7 +117,7 @@ export function listAllFormatCodes(
       const row = rows[rowKey];
       if (!row) continue;
       for (const colKey of Object.keys(row)) {
-        const code = readCellCode(row[colKey]);
+        const code = readCellCode(row[colKey], lookup);
         if (!code) continue;
         let entry = byCode.get(code);
         if (!entry) {
@@ -143,63 +143,65 @@ export function listAllFormatCodes(
   return result;
 }
 
-/** Replace every `_fmt` (and inline `s.n.pattern`) matching `oldCode` with
- *  `newCode`. Returns the mutated snapshot + count of cells updated. Empty
- *  `newCode` is treated as "delete" — equivalent to deleteFormatCode. */
-export function renameFormatCode(
+/** Plan replacing `oldCode` with `newCode` on every cell whose current code
+ *  is `oldCode`. Returns one sparse job per affected sheet plus the number of
+ *  cells targeted. A blank / "General" `newCode` is a delete — same as
+ *  planFormatCodeDelete (clearPatternFor per cell). The snapshot itself is
+ *  not modified. */
+export function planFormatCodeRename(
   snapshot: FmtSnapshot | string | null | undefined,
   oldCode: string,
   newCode: string,
-): { snapshotMutated: FmtSnapshot; changedCount: number } {
-  const base: FmtSnapshot = parseSnapshot(snapshot);
-  if (!oldCode || newCode === oldCode) {
-    return { snapshotMutated: base, changedCount: 0 };
-  }
-  if (!newCode || !newCode.trim()) {
-    const deleted = deleteFormatCode(base, oldCode);
-    return { snapshotMutated: deleted.snapshotMutated, changedCount: deleted.clearedCount };
-  }
-  const next = deepClone(base);
-  let changed = 0;
-  forEachCell(next, (cell) => {
-    const current = readCellCode(cell);
-    if (current !== oldCode) return;
-    cell._fmt = newCode;
-    // Clear any inline-style pattern so the rename is canonical.
-    if (cell.s && typeof cell.s === "object") {
-      const styleObj = cell.s as { n?: { pattern?: string } };
-      if (styleObj.n && typeof styleObj.n === "object") {
-        delete styleObj.n.pattern;
-      }
-    }
-    changed += 1;
-  });
-  return { snapshotMutated: next, changedCount: changed };
+): { jobs: NumberFormatJob[]; changedCount: number } {
+  if (!oldCode || newCode === oldCode) return { jobs: [], changedCount: 0 };
+  return planReplace(parseSnapshot(snapshot), oldCode, normalizeNumberFormatCode(newCode));
 }
 
-/** Strip every `_fmt` (and inline `s.n.pattern`) matching `code`. Returns the
- *  mutated snapshot + count of cells cleared. */
-export function deleteFormatCode(
+/** Plan removing the format from every cell whose current code is `code`:
+ *  "General" for cells that carry a non-empty `_fmt`, "" for the rest (see
+ *  clearPatternFor). Returns one sparse job per affected sheet plus the
+ *  number of cells. */
+export function planFormatCodeDelete(
   snapshot: FmtSnapshot | string | null | undefined,
   code: string,
-): { snapshotMutated: FmtSnapshot; clearedCount: number } {
-  const base: FmtSnapshot = parseSnapshot(snapshot);
-  if (!code) return { snapshotMutated: base, clearedCount: 0 };
-  const next = deepClone(base);
-  let cleared = 0;
-  forEachCell(next, (cell) => {
-    const current = readCellCode(cell);
-    if (current !== code) return;
-    delete cell._fmt;
-    if (cell.s && typeof cell.s === "object") {
-      const styleObj = cell.s as { n?: { pattern?: string } };
-      if (styleObj.n && typeof styleObj.n === "object") {
-        delete styleObj.n.pattern;
+): { jobs: NumberFormatJob[]; changedCount: number } {
+  if (!code) return { jobs: [], changedCount: 0 };
+  return planReplace(parseSnapshot(snapshot), code, "");
+}
+
+/** `pattern` is the normalised replacement; "" means "remove the format",
+ *  which is resolved per cell through clearPatternFor. */
+function planReplace(
+  snapshot: FmtSnapshot,
+  match: string,
+  pattern: string,
+): { jobs: NumberFormatJob[]; changedCount: number } {
+  const sheets = snapshot.sheets;
+  if (!sheets || typeof sheets !== "object") return { jobs: [], changedCount: 0 };
+  const lookup = styleLookupFromTable(snapshot.styles);
+  const jobs: NumberFormatJob[] = [];
+  let changedCount = 0;
+  for (const sheetId of Object.keys(sheets)) {
+    const rows = sheets[sheetId]?.cellData;
+    if (!rows || typeof rows !== "object") continue;
+    const writes: NumberFormatWrite[] = [];
+    for (const rowKey of Object.keys(rows)) {
+      const row = rows[rowKey];
+      if (!row) continue;
+      for (const colKey of Object.keys(row)) {
+        const cell = row[colKey];
+        if (readCellCode(cell, lookup) !== match) continue;
+        const r = Number(rowKey);
+        const c = Number(colKey);
+        if (!Number.isInteger(r) || !Number.isInteger(c)) continue;
+        writes.push({ row: r, col: c, pattern: pattern !== "" ? pattern : clearPatternFor(cell) });
       }
     }
-    cleared += 1;
-  });
-  return { snapshotMutated: next, clearedCount: cleared };
+    if (writes.length === 0) continue;
+    jobs.push({ kind: "cells", sheetId, writes });
+    changedCount += writes.length;
+  }
+  return { jobs, changedCount };
 }
 
 function parseSnapshot(input: FmtSnapshot | string | null | undefined): FmtSnapshot {
@@ -212,24 +214,6 @@ function parseSnapshot(input: FmtSnapshot | string | null | undefined): FmtSnaps
     }
   }
   return input && typeof input === "object" ? input : {};
-}
-
-function forEachCell(snapshot: FmtSnapshot, fn: (cell: FmtCell) => void): void {
-  const sheets = snapshot.sheets;
-  if (!sheets || typeof sheets !== "object") return;
-  for (const sheetId of Object.keys(sheets)) {
-    const sheet = sheets[sheetId];
-    if (!sheet || !sheet.cellData) continue;
-    const rows = sheet.cellData;
-    for (const rowKey of Object.keys(rows)) {
-      const row = rows[rowKey];
-      if (!row) continue;
-      for (const colKey of Object.keys(row)) {
-        const cell = row[colKey];
-        if (cell && typeof cell === "object") fn(cell);
-      }
-    }
-  }
 }
 
 // --- Sample rendering -------------------------------------------------------

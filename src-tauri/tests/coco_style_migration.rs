@@ -158,11 +158,14 @@ fn open_nicel_handles_mixed_legacy_and_univer_styles() {
 }
 
 /// A legacy-shaped style entry that already carries co-located Univer-only
-/// keys (`ul` for a hyperlink, `tr` for text rotation) — the shape Univer's
-/// own `mergeStyle` produces when the frontend deep-clones an existing style
-/// object and layers its own keys on top (see `src/components/
-/// hyperlinkRender.ts` and `src/store/cellStyles.ts`, which both write
-/// through exactly this pattern). `CellStyle` doesn't model `ul` or `tr`.
+/// keys (`ul` — underline, the same key `src/components/hyperlinkRender.ts`
+/// sets for a hyperlink's blue+underline styling — and `tr` for text
+/// rotation) — the shape Univer's own `mergeStyle` produces when the
+/// frontend deep-clones an existing style object and layers its own keys on
+/// top (see `hyperlinkRender.ts` and `src/store/cellStyles.ts`, which both
+/// write through exactly this pattern). `CellStyle` models `ul` (#350) but
+/// not `tr`; this test's point is that an already-set key on the object —
+/// modeled or not — always wins over whatever `CellStyle` would derive.
 fn legacy_with_colocated_univer_keys_snapshot() -> String {
     json!({
         "id": "wb-colocated",
@@ -183,8 +186,8 @@ fn legacy_with_colocated_univer_keys_snapshot() -> String {
 fn open_nicel_preserves_co_located_univer_only_keys_when_migrating_legacy() {
     // Regression for reviewer finding B2: migration used to reserialize the
     // whole object via `CellStyle::to_json()`, which silently dropped any key
-    // `CellStyle` doesn't model — including a hyperlink's `ul` or a rotated
-    // cell's `tr` sitting right next to the legacy keys.
+    // not present on the freshly-derived style — including an underline's
+    // `ul` or a rotated cell's `tr` sitting right next to the legacy keys.
     let app_dir = TempDir::new().unwrap();
     let wb_dir = TempDir::new().unwrap();
     let path = wb_dir.path().join("colocated.coco");
@@ -205,7 +208,10 @@ fn open_nicel_preserves_co_located_univer_only_keys_when_migrating_legacy() {
     assert_eq!(style["bg"]["rgb"], "#123456");
     assert!(style.get("font").is_none());
     assert!(style.get("fill").is_none());
-    // ...and the co-located keys `CellStyle` doesn't model survive untouched.
+    // ...and the co-located keys survive untouched: `tr` because `CellStyle`
+    // doesn't model it at all, `ul` because it's already set and the merge
+    // never overwrites an existing key — even one `CellStyle` does model,
+    // since #350 made `ul` mean underline.
     assert_eq!(style["ul"], json!({ "s": 1 }));
     assert_eq!(style["tr"], json!({ "a": 45, "v": 0 }));
 }

@@ -1,5 +1,31 @@
-use crate::error::Result;
+use crate::error::{NicelError, Result};
 use rusqlite::Connection;
+
+/// #355: prefix of every persisted script-trust record key
+/// (`script_trust.v1.<sha256hex(pathNorm)>`, see `commands::script_trust`).
+/// `set_setting` / `delete_setting` refuse any key under this prefix, and
+/// `list_settings` never returns one — so the generic settings surface can't
+/// write, erase, or leak a trust record. Writing/deleting these keys is only
+/// possible through the dedicated `script_trust_*` commands, which talk to
+/// `app_settings` directly rather than through this module (PM/Coco's call:
+/// if the generic path could touch these rows, a script could grant itself
+/// execution by writing its own trust record).
+pub const SCRIPT_TRUST_KEY_PREFIX: &str = "script_trust.";
+
+/// True when `key` starts with [`SCRIPT_TRUST_KEY_PREFIX`], **case-insensitively**
+/// (AZKi review follow-up: `key.starts_with(SCRIPT_TRUST_KEY_PREFIX)` alone
+/// would let `Script_Trust.v1....` slip through both the `set_setting`/
+/// `delete_setting` guard and the `list_settings` exclusion). Byte-safe: uses
+/// `str::get` rather than direct slicing, so a `key` shorter than the prefix,
+/// or one where the prefix's byte length doesn't land on a UTF-8 char
+/// boundary, is simply `false` rather than a panic — and since the prefix is
+/// pure ASCII, any string that *would* match it case-insensitively always has
+/// a valid boundary there, so this never rejects a real match.
+pub fn has_script_trust_prefix(key: &str) -> bool {
+    key.get(..SCRIPT_TRUST_KEY_PREFIX.len())
+        .map(|head| head.eq_ignore_ascii_case(SCRIPT_TRUST_KEY_PREFIX))
+        .unwrap_or(false)
+}
 
 /// Cap on how many recent entries are persisted in the recent_files table.
 /// With the inline filter on the HomeScreen, a higher cap is now useful:
@@ -97,6 +123,11 @@ pub fn delete_recovery_candidate(conn: &Connection, candidate_id: &str) -> Resul
     Ok(())
 }
 
+/// Deliberately NOT guarded against `script_trust.*` (unlike `set_setting` /
+/// `delete_setting` / `list_settings`): a read-only lookup of a trust
+/// record's raw JSON can't grant a script anything by itself — the actual
+/// trust decision only ever comes from `script_trust_check`, which compares
+/// path *and* hash. Only the write/erase/enumerate surface needed closing.
 pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>> {
     let row: std::result::Result<String, rusqlite::Error> = conn.query_row(
         "SELECT value FROM app_settings WHERE key = ?1",
@@ -111,6 +142,11 @@ pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>> {
 }
 
 pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
+    if has_script_trust_prefix(key) {
+        return Err(NicelError::Rejected(format!(
+            "'{SCRIPT_TRUST_KEY_PREFIX}*' keys are reserved for the script trust commands and cannot be written through set_setting"
+        )));
+    }
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)
@@ -120,9 +156,28 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+/// Never returns a `script_trust.*` row (filtered in SQL, not just in Rust,
+/// so there's no path through this function that forgets to exclude them).
+///
+/// AZKi review follow-up: this used to be `key NOT LIKE 'script_trust.%'`,
+/// which is wrong two ways — SQL `LIKE` treats a bare `_` as a "match any one
+/// character" wildcard (so it over-matched keys like `scriptXtrust.foo`, not
+/// just the literal prefix), and SQLite's `LIKE` is already ASCII
+/// case-insensitive by default, which is easy to mistake for an intentional
+/// choice rather than an accident. `substr(...) = ?1` does a plain
+/// byte-for-byte comparison — no wildcard semantics — with `LOWER(...)`
+/// added deliberately so the exclusion stays case-insensitive on purpose,
+/// consistent with `has_script_trust_prefix`. The substring length comes
+/// from `SCRIPT_TRUST_KEY_PREFIX.len()`, not a hardcoded number, so the two
+/// can't drift apart.
 pub fn list_settings(conn: &Connection) -> Result<Vec<(String, String)>> {
-    let mut stmt = conn.prepare("SELECT key, value FROM app_settings ORDER BY key")?;
-    let rows = stmt.query_map([], |row| {
+    let prefix_len = SCRIPT_TRUST_KEY_PREFIX.len();
+    let sql = format!(
+        "SELECT key, value FROM app_settings \
+         WHERE LOWER(substr(key, 1, {prefix_len})) <> ?1 ORDER BY key"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params![SCRIPT_TRUST_KEY_PREFIX], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
     let mut out = Vec::new();
@@ -133,6 +188,11 @@ pub fn list_settings(conn: &Connection) -> Result<Vec<(String, String)>> {
 }
 
 pub fn delete_setting(conn: &Connection, key: &str) -> Result<()> {
+    if has_script_trust_prefix(key) {
+        return Err(NicelError::Rejected(format!(
+            "'{SCRIPT_TRUST_KEY_PREFIX}*' keys are reserved for the script trust commands and cannot be deleted through delete_setting"
+        )));
+    }
     conn.execute(
         "DELETE FROM app_settings WHERE key = ?1",
         rusqlite::params![key],

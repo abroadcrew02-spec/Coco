@@ -5,9 +5,9 @@
 // the source by reading the file directly. The check is mechanical but
 // guards against silent regressions (e.g. someone removes the import).
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, relative, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const editorSource = readFileSync(resolve(here, "EditorScreen.tsx"), "utf8");
@@ -22,7 +22,32 @@ const toolbarSource =
   editorSource.match(/<Ribbon[\s\S]*?\n      \{sheetPicker && \(/)?.[0] ?? "";
 // #189 — the script-trigger useEffect (onOpen / onEdit / timer wiring).
 const triggerEffectSource =
-  editorSource.match(/\/\/ #189 — script triggers\.[\s\S]*?\n  \}, \[currentSnapshotJson\]\);/)?.[0] ?? "";
+  editorSource.match(/\/\/ #189 — script triggers\.[\s\S]*?\n  \}, \[currentSnapshotJson, scriptGrant\]\);/)?.[0] ?? "";
+// #190 Phase 5 / #355 — the scheduled data-connection refresh effect.
+const dataConnScheduleSource =
+  editorSource.match(/const dataConnOnOpenFiredRef = [\s\S]*?\n  \}, \[currentHandle, handleDataConnectionRefresh, connScheduleKey\]\);/)?.[0] ?? "";
+const dataConnRefreshSource =
+  editorSource.match(/const handleDataConnectionRefresh = useCallback\([\s\S]*?\n  \);/)?.[0] ?? "";
+const scriptEditorDialogSource =
+  editorSource.match(/<ScriptEditorDialog[\s\S]*?\n        \/>/)?.[0] ?? "";
+
+// Production sources under src/ (tests excluded), for #355 invariants.
+const srcRoot = resolve(here, "..");
+function productionSources(): { file: string; text: string }[] {
+  const out: { file: string; text: string }[] = [];
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) {
+        walk(full);
+      } else if (/\.(ts|tsx)$/.test(name) && !/\.test\.(ts|tsx)$/.test(name)) {
+        out.push({ file: relative(srcRoot, full).replace(/\\/g, "/"), text: readFileSync(full, "utf8") });
+      }
+    }
+  };
+  walk(srcRoot);
+  return out;
+}
 
 describe("EditorScreen Univer plugin wiring", () => {
   it("imports and registers the Find/Replace plugins (Ctrl+F / Ctrl+H)", () => {
@@ -139,7 +164,16 @@ describe("EditorScreen Univer plugin wiring", () => {
     // #184 C-1: syncSnapshot re-grafts Nicel's workbook-root extension keys
     // (`_cameraLinks`, `_scenarios`) that `workbook.save()` drops, so a cell
     // edit can't silently wipe the user's camera links / scenarios.
-    expect(mutationSnapshotSyncSource).toMatch(/updateSnapshot\(carryForwardRootExtensions\(fresh, prev\)\)/);
+    // #356: the store's value always wins (save() returns a stale copy),
+    // and the write goes through the mirror's one-shot skip (skipped for
+    // that single update, never compared with later ones).
+    expect(mutationSnapshotSyncSource).toMatch(
+      /const fresh = JSON\.stringify\(workbook\.save\(\)\);\s*const prev = useWorkbookStore\.getState\(\)\.currentSnapshotJson;\s*const merged = carryForwardRootExtensions\(fresh, prev\);[\s\S]*?rootMirror\.writeOwn\(merged, updateSnapshot\);/,
+    );
+    expect(mutationSnapshotSyncSource.match(/rootMirror\.writeOwn\(/g)?.length).toBe(1);
+    expect(mutationSnapshotSyncSource).not.toMatch(/updateSnapshot\(/);
+    // No long-lived "last synced" marker that later updates are compared to.
+    expect(editorSource).not.toMatch(/syncedSnapshotJsonRef/);
     // #87: when the workbook is too large for the fast path, we still
     // schedule a longer-leash sync (instead of returning indefinitely) so
     // protection / data-validation guards eventually see fresh state.
@@ -147,8 +181,26 @@ describe("EditorScreen Univer plugin wiring", () => {
     expect(mutationSnapshotSyncSource).toMatch(/LARGE_WORKBOOK_SYNC_LEASH_MS/);
   });
 
+  it("mirrors the store's root extension keys into Univer's snapshot (#356)", () => {
+    // One mirror per editor, targeting Univer's live workbook snapshot.
+    expect(editorSource).toMatch(
+      /rootMirrorRef\.current = createRootExtensionMirror\(\s*\(\) =>\s*fUniverRef\.current\?\.getActiveWorkbook\(\)\?\.getWorkbook\(\)\?\.getSnapshot\(\)/,
+    );
+    const mirrorSource =
+      editorSource.match(/\/\/ #356 — keep Univer's copy of Nicel's workbook-root keys[\s\S]*?\n  \}, \[rootMirror\]\);/)?.[0] ?? "";
+    expect(mirrorSource).not.toBe("");
+    expect(mirrorSource).toMatch(/rootMirror\.mirror\(useWorkbookStore\.getState\(\)\.currentSnapshotJson\);/);
+    // Skip rules (revision change, own write) live in createRootExtensionMirror
+    // and are tested behaviourally in snapshotSync.test.ts.
+    expect(mirrorSource).toMatch(/return useWorkbookStore\.subscribe\(rootMirror\.onStoreChange\);/);
+    // The mirror helper is the only writer into Univer's snapshot.
+    expect(editorSource.match(/\.getSnapshot\(\)/g)?.length).toBe(1);
+  });
+
   it("registers a synchronous snapshot flush for immediate save/close flows", () => {
-    expect(editorSource).toMatch(/import \{ registerSnapshotFlush, carryForwardRootExtensions \} from "\.\.\/store\/snapshotSync"/);
+    expect(editorSource).toMatch(
+      /import \{\s*registerSnapshotFlush,\s*carryForwardRootExtensions,\s*createRootExtensionMirror,\s*type RootExtensionMirror,\s*\} from "\.\.\/store\/snapshotSync"/,
+    );
     expect(mutationSnapshotSyncSource).toMatch(/const unregisterSnapshotFlush = registerSnapshotFlush\(\(\) => \{/);
     expect(mutationSnapshotSyncSource).toMatch(
       /registerSnapshotFlush\(\(\) => \{\s*cancelPendingSnapshotSync\(\);\s*syncSnapshot\(\);\s*\}\)/,
@@ -196,5 +248,147 @@ describe("EditorScreen Univer plugin wiring", () => {
     // pre-mutation state is checkpointed for Nicel undo (Ctrl+Alt+Z).
     expect(editorSource).toMatch(/applyMutatedSnapshot\(JSON\.stringify\(fresh\)\)/);
     expect(editorSource).toMatch(/_protected/);
+  });
+});
+
+describe("Number Format Manager selection (0.8.5 follow-ups)", () => {
+  const applyToRangeSource =
+    editorSource.match(/const applyFormatCodeToRange = useCallback\([\s\S]*?\n  \);/)?.[0] ?? "";
+  const trackSelectionSource =
+    editorSource.match(/const trackActiveSelection = [\s\S]*?\n  \}, \[trackActiveSelection\]\);/)?.[0] ?? "";
+
+  it("passes the sheet size so whole-column / whole-row selections parse", () => {
+    expect(applyToRangeSource).toMatch(/rowCount: sheet\.getMaxRows\(\), colCount: sheet\.getMaxColumns\(\)/);
+    expect(applyToRangeSource).toMatch(/parseA1Rect\(range, bounds\)/);
+    // The parser lives in numberFormat.ts (unit-tested there), not in the editor.
+    expect(editorSource).not.toMatch(/^function parseA1Rect\(/m);
+  });
+
+  it("forgets the tracked selection when the dialogs close", () => {
+    expect(trackSelectionSource).toMatch(/disposable\.dispose\(\);\s*[\s\S]*?setActiveSelectionA1\(""\);\s*\};/);
+  });
+});
+
+describe("#355 script trust gate wiring", () => {
+  const sources = productionSources();
+
+  it("finds the source slices it inspects", () => {
+    expect(triggerEffectSource).not.toBe("");
+    expect(dataConnScheduleSource).not.toBe("");
+    expect(dataConnRefreshSource).not.toBe("");
+    expect(scriptEditorDialogSource).not.toBe("");
+    expect(sources.length).toBeGreaterThan(50);
+  });
+
+  it("issues grants only from store/scriptTrust.ts", () => {
+    const users = sources
+      .filter((s) => s.file !== "store/scriptGrant.ts" && /\bissueGrant\b/.test(s.text))
+      .map((s) => s.file);
+    expect(users).toEqual(["store/scriptTrust.ts"]);
+  });
+
+  it("never uses the inline executor or the iframe factory outside the runtime", () => {
+    const users = sources
+      .filter((s) => s.file !== "store/scriptRuntime.ts")
+      .filter((s) => /\binlineExecutor\b|\bcreateIframeExecutor\b/.test(s.text))
+      .map((s) => s.file);
+    expect(users).toEqual([]);
+  });
+
+  it("never passes the test-only factory / executor options from production code (#355)", () => {
+    // `factory` and `executor` evaluate outside the sandbox iframe. Only the
+    // runtime and tests may set them.
+    const runtimeUsers = sources.filter(
+      (s) => s.file !== "store/scriptRuntime.ts" && /from "[./]*(store\/)?scriptRuntime"/.test(s.text),
+    );
+    expect(runtimeUsers.map((s) => s.file)).toContain("components/EditorScreen.tsx");
+    const offenders = runtimeUsers
+      .filter((s) => /\b(factory|executor)\s*:/.test(s.text))
+      .map((s) => s.file);
+    expect(offenders).toEqual([]);
+  });
+
+  it("keeps sandbox iframe creation inside the runtime", () => {
+    const users = sources
+      .filter((s) => /createElement\(\s*["']iframe["']/.test(s.text))
+      .map((s) => s.file);
+    expect(users).toEqual(["store/scriptRuntime.ts"]);
+  });
+
+  it("gets the grant from the trust gate hook", () => {
+    expect(editorSource).toMatch(/import \{ useScriptTrustGate \} from "\.\.\/hooks\/useScriptTrustGate"/);
+    expect(editorSource).toMatch(/const trustGate = useScriptTrustGate\(\);/);
+    expect(editorSource).toMatch(/const scriptGrant = trustGate\.grant;/);
+  });
+
+  it("trigger effect: no grant → nothing armed; grant passed to collect and fire", () => {
+    expect(triggerEffectSource).toMatch(/const grant = scriptGrant;\s*if \(!grant\) return;/);
+    expect(triggerEffectSource).toMatch(/collectTriggers\(s, \{\s*grant,/);
+    expect(triggerEffectSource).toMatch(/fireTrigger\(entry, kind, \{\s*grant,/);
+    expect(triggerEffectSource.match(/collectTriggers\(/g)?.length).toBe(1);
+    expect(triggerEffectSource.match(/fireTrigger\(/g)?.length).toBe(1);
+    // A refused run is not written to the execution log. The runtime-set flag
+    // decides, not the error text a script could imitate.
+    expect(triggerEffectSource).toMatch(/if \(result\.blockedByGate === true\) continue;/);
+    expect(triggerEffectSource).not.toMatch(/SCRIPT_NOT_TRUSTED/);
+  });
+
+  it("data-connection schedule: gated, re-checked per refresh, on-open marker set only when fired", () => {
+    expect(dataConnScheduleSource).toMatch(/if \(connScheduleKey === null\) return;/);
+    expect(dataConnScheduleSource).toMatch(/startDataConnectionSchedule\(\{/);
+    expect(dataConnScheduleSource).toMatch(/getGrant: \(\) => trustGateRef\.current\.grant/);
+    expect(dataConnScheduleSource).toMatch(
+      /if \(schedule\.firedOnOpen\) dataConnOnOpenFiredRef\.current = handleKey;/,
+    );
+    expect(dataConnScheduleSource).not.toMatch(/setInterval\(/);
+    expect(dataConnScheduleSource).not.toMatch(/dataConnOnOpenFiredRef\.current = handleKey;\s*\n\s*for/);
+    // The scheduled refresh checks the guard on the connection before loading it.
+    expect(dataConnRefreshSource).toMatch(
+      /if \(guard && !guard\(conn\)\) throw new Error\([^)]*\);\s*const rawFragment = await loadDataConnectionFragment\(conn\);/,
+    );
+  });
+
+  it("script editor gets the grant and reports in-app edits before the store update", () => {
+    expect(scriptEditorDialogSource).toMatch(/grant=\{scriptGrant\}/);
+    expect(scriptEditorDialogSource).toMatch(
+      /adoptLocalEdit\(currentSnapshotJson, nextJson\);\s*updateSnapshot\(nextJson\);/,
+    );
+  });
+
+  it("stores only scheduler-accepted schedule values when a connection is edited (#355)", () => {
+    expect(editorSource).toMatch(
+      /schedule: \{\s*onOpen: patch\.scheduleOnOpen === true,\s*intervalMinutes: normalizeIntervalMinutesInput\(patch\.scheduleIntervalMinutes\),\s*\}/,
+    );
+  });
+
+  it("connection add / edit / remove report in-app edits before applying", () => {
+    const adoptThenApply =
+      /void trustGateRef\.current\.adoptLocalEdit\((liveSnap|live), nextJson\);\s*applyMutatedSnapshot\(nextJson\);/g;
+    expect(editorSource.match(adoptThenApply)?.length).toBe(3);
+  });
+
+  it("renders the permission banner from the gate; its notices go to the status bar", () => {
+    expect(editorSource).toMatch(/import ScriptTrustBanner from "\.\/ScriptTrustBanner";/);
+    expect(editorSource).toMatch(
+      /<ScriptTrustBanner gate=\{trustGate\} onNotice=\{setEditorOperationError\} \/>/,
+    );
+  });
+
+  it("installs the Tauri trust persistence at startup only", () => {
+    const installers = sources
+      .filter((s) => s.file !== "store/scriptTrust.ts" && /\bsetScriptTrustPersistence\(/.test(s.text))
+      .map((s) => s.file);
+    expect(installers).toEqual(["main.tsx"]);
+    const main = sources.find((s) => s.file === "main.tsx")?.text ?? "";
+    expect(main).toMatch(/setScriptTrustPersistence\(createTauriTrustPersistence\(\)\);/);
+  });
+
+  it("stores trust records only through the dedicated script_trust_* commands", () => {
+    const persistence = sources.find((s) => s.file === "store/scriptTrustPersistence.ts")?.text ?? "";
+    expect(persistence).toMatch(/"script_trust_check"/);
+    expect(persistence).toMatch(/"script_trust_grant"/);
+    expect(persistence).toMatch(/"script_trust_list"/);
+    expect(persistence).toMatch(/"script_trust_revoke"/);
+    expect(persistence).not.toMatch(/"(get|set|delete|list)_setting"/);
   });
 });

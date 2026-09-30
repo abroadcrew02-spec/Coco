@@ -40,6 +40,8 @@
 // All counters tolerate malformed input by treating the missing/invalid
 // branch as zero — the dialog should never throw on a partial workbook.
 
+import { resolveCellNumberFormat, styleLookupFromTable, type StyleLookup } from "./numberFormat";
+
 export interface OverviewStats {
   sheetCount: number;
   hiddenSheetCount: number;
@@ -230,6 +232,7 @@ function walkSheetCells(
   dataTypes: DataTypeStats,
   styleIds: Set<string>,
   numberFormats: Set<string>,
+  lookupStyle: StyleLookup,
 ): { cellCount: number; formulaCount: number } {
   let cellCount = 0;
   let formulaCount = 0;
@@ -256,12 +259,12 @@ function walkSheetCells(
         }
       }
 
-      // Number format — both Nicel-managed `_fmt` and inline `s.n.pattern` are
-      // recognised by numberFormatManager; we only need the unique-set count
-      // here so `_fmt` is sufficient (inline patterns serialise via styleIds).
-      if (typeof cell._fmt === "string" && cell._fmt.trim().length > 0) {
-        numberFormats.add(cell._fmt);
-      }
+      // Number format as the grid shows it (numberFormat.ts
+      // resolveCellNumberFormat): the style's `n.pattern` first, the imported
+      // `_fmt` only when the style has none, and "General" as no format — so
+      // a `_fmt` hidden by 標準 is not counted.
+      const format = resolveCellNumberFormat(cell, lookupStyle);
+      if (format !== "") numberFormats.add(format);
 
       const hasFormula =
         cell.f !== undefined && cell.f !== null && cell.f !== "";
@@ -309,6 +312,9 @@ export function collectWorkbookStats(
 
   const ids = sheetIdsOrdered(parsed);
   const perSheet: PerSheetStats[] = [];
+  const lookupStyle = styleLookupFromTable(
+    parsed.styles && typeof parsed.styles === "object" ? parsed.styles : null,
+  );
 
   let hiddenSheetCount = 0;
   let totalCells = 0;
@@ -331,7 +337,7 @@ export function collectWorkbookStats(
     const hidden = isHiddenSheet(sheet);
     if (hidden) hiddenSheetCount += 1;
 
-    const walked = walkSheetCells(sheet, dataTypes, styleIds, numberFormats);
+    const walked = walkSheetCells(sheet, dataTypes, styleIds, numberFormats, lookupStyle);
     const commentCount = arrayLen(sheet?._comments);
     const cfRules = arrayLen(sheet?._conditionalFormatting);
     const dvRules = arrayLen(sheet?._dataValidations);

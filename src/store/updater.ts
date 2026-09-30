@@ -30,6 +30,15 @@
 //
 // Tauri-plugin imports are deferred to call-time so that unit tests and
 // type-checking can import this module without the Tauri runtime shim.
+//
+// The custom manifest fields (rollout, min_required_version, channel) are
+// read through the Rust command `updater_fetch_manifest`, which fetches the
+// fixed endpoint URL and returns the body text (#359). When that fails, the
+// body is not JSON, or its version differs from what the updater plugin
+// found, the staged rollout is held (ROLLOUT_HELD): the automatic startup
+// flow offers nothing, while a manual "Check for Updates" still works.
+
+import { invoke } from "@tauri-apps/api/core";
 
 export type UpdateChannel = "stable" | "beta";
 
@@ -84,10 +93,11 @@ export const INSTALLATION_ID_KEY = "coco.updater.installationId";
 // Legacy key — migrated to INSTALLATION_ID_KEY once at module load below.
 const LEGACY_INSTALLATION_ID_KEY = "coco.installationId";
 
-// Manifest URL. Kept exported so test code can mock it via module-level
-// replacement. Must mirror the `endpoints[0]` value in
-// `src-tauri/tauri.conf.json` — runtime JS cannot read that file so we
-// hard-code a duplicate here.
+// Manifest URL. Must mirror the `endpoints[0]` value in
+// `src-tauri/tauri.conf.json` and the URL `updater_fetch_manifest` fetches on
+// the Rust side. The renderer no longer requests it itself (#359); the
+// constant stays as the documented value that persistedIdentifiers.test.ts
+// pins.
 export const UPDATE_MANIFEST_URL =
   "https://github.com/abroadcrew02-spec/Coco/releases/latest/download/latest.json";
 
@@ -252,7 +262,7 @@ function fnv1a32(s: string): number {
  *   ship an update than silently block every device on a malformed
  *   manifest field)
  * - `percent >= 100` → always true (fully rolled out)
- * - `percent <= 0`  → always false (paused / nobody)
+ * - `percent <= 0`  → always false (paused / nobody; also ROLLOUT_HELD)
  */
 export function isInRolloutBucket(rollout: RolloutBucket | null): boolean {
   if (rollout == null) return true;
@@ -474,19 +484,51 @@ interface RawManifest {
 }
 
 /**
- * Fetch the raw latest.json from the configured endpoint. Used purely to
- * pick up custom fields the plugin's `Update` object does not expose
- * (`min_required_version`, `rollout`, `channel`). Failures are tolerated
- * — callers get nulls.
+ * Rollout reported when the manifest's custom fields cannot be trusted
+ * (not fetched, not JSON, or for another version than the plugin found).
+ * `percent: 0` makes isInRolloutBucket() false, so the automatic flow holds
+ * the update. Manual checks pass `gateOverride` to downloadAndInstall and
+ * are unaffected. `isInRolloutBucket(null) === true` keeps meaning "the
+ * manifest has no rollout field".
  */
-async function fetchRawManifest(): Promise<RawManifest | null> {
+export const ROLLOUT_HELD: RolloutBucket = Object.freeze({
+  percent: 0,
+  seed: "manifest-unavailable",
+});
+
+type ManifestFetch = { ok: true; manifest: RawManifest } | { ok: false; reason: string };
+
+/**
+ * Read latest.json through the Rust command `updater_fetch_manifest` (it
+ * fetches the fixed endpoint URL and returns the body text). Used purely to
+ * pick up custom fields the plugin's `Update` object does not expose
+ * (`min_required_version`, `rollout`, `channel`).
+ */
+async function fetchRawManifest(): Promise<ManifestFetch> {
+  let body: unknown;
   try {
-    const res = await fetch(UPDATE_MANIFEST_URL, { cache: "no-store" });
-    if (!res.ok) return null;
-    return (await res.json()) as RawManifest;
-  } catch {
-    return null;
+    body = await invoke<string>("updater_fetch_manifest");
+  } catch (e) {
+    return { ok: false, reason: `manifest fetch failed: ${e instanceof Error ? e.message : String(e)}` };
   }
+  if (typeof body !== "string") return { ok: false, reason: "manifest fetch returned no text" };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { ok: false, reason: "manifest is not valid JSON" };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, reason: "manifest is not a JSON object" };
+  }
+  return { ok: true, manifest: parsed as RawManifest };
+}
+
+/** Compare manifest and plugin versions, ignoring surrounding whitespace and a leading "v". */
+function sameVersion(manifestVersion: unknown, pluginVersion: string): boolean {
+  if (typeof manifestVersion !== "string") return false;
+  const norm = (v: string) => v.trim().replace(/^v/i, "");
+  return norm(manifestVersion) !== "" && norm(manifestVersion) === norm(pluginVersion);
 }
 
 function parseRollout(raw: unknown): RolloutBucket | null {
@@ -525,15 +567,30 @@ export async function checkForUpdate(): Promise<UpdaterCheckResult> {
   }
   cachedUpdate = update;
 
-  // Plugin doesn't expose our custom fields — re-fetch the manifest for
-  // them. CDN is hot from the call the plugin just made, response is
-  // ~ 1 KB; tolerant of failure (nulls fall through).
-  const raw = await fetchRawManifest();
+  // Plugin doesn't expose our custom fields — re-read the manifest for
+  // them. Fail closed: when it cannot be read, or describes another version
+  // than the one the plugin found, the rollout is held and no custom field
+  // (forced upgrade included) is taken from it.
+  const fetched = await fetchRawManifest();
+  let raw: RawManifest | null = null;
+  let heldReason: string | null = null;
+  if (!fetched.ok) {
+    heldReason = fetched.reason;
+  } else if (!sameVersion(fetched.manifest.version, update.version)) {
+    heldReason =
+      `manifest version ${JSON.stringify(fetched.manifest.version)} ` +
+      `does not match the update ${JSON.stringify(update.version)}`;
+  } else {
+    raw = fetched.manifest;
+  }
+  if (heldReason !== null) {
+    console.warn(`[updater] staged rollout held: ${heldReason}`);
+  }
   const minRequiredVersion =
     raw && typeof raw.min_required_version === "string" && raw.min_required_version.length > 0
       ? raw.min_required_version
       : null;
-  const rollout = raw ? parseRollout(raw.rollout) : null;
+  const rollout = heldReason !== null ? ROLLOUT_HELD : raw ? parseRollout(raw.rollout) : null;
   const channel = raw ? parseChannel(raw.channel) : "stable";
   const isForced = isForcedUpgrade(update.currentVersion, minRequiredVersion);
 

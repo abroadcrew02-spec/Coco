@@ -2,15 +2,11 @@
 // Headings, Title, Total, Calculation, Accents, Comma / Currency / Percent,
 // ...). Kept side-effect free + framework-free so tests don't need Univer.
 //
-// Approach mirrors formatPainter.ts and quickNumberFormat.ts: we operate on
-// the Univer 0.5.x workbook snapshot directly because FRange has no public
-// `setStyle(IStyleData)` in this build. The preset's resolved style is
-// merged into each cell's inline `s` field, and number-format presets
-// (Comma / Currency / Percent) additionally write to the per-cell `_fmt`
-// key — same path applyNumberFormat / applyQuickNumberFormat use, so the
-// round-trip through xlsx_io.rs stays clean.
+// Approach mirrors formatPainter.ts: we operate on the workbook snapshot
+// directly. The preset's resolved style is merged into each cell's inline
+// `s` field.
 //
-// Snapshot shape (Univer 0.5.x):
+// Snapshot shape (Univer 0.24):
 //   {
 //     sheets: {
 //       [sheetId]: {
@@ -28,6 +24,11 @@
 //
 // We don't intern style payloads into workbook.styles — inline `s` round-trips
 // fine through Univer, and dedup is the xlsx export's responsibility.
+//
+// Number-format presets (Comma / Currency / Percent) are not applied here.
+// Their `numFmt` code goes through the numfmt facade (see numberFormat.ts)
+// so the grid repaints immediately and Univer owns the style id and the undo
+// entry; applyPresetToRange ignores `numFmt`.
 
 /** A partial Univer IStyleData. We avoid coupling to Univer's type at the
  *  helper boundary so the file stays framework-free. Keys mirror the shape
@@ -36,7 +37,7 @@
  *    cl: { rgb }            -- font color
  *    bl: 0|1                -- bold
  *    it: 0|1                -- italic
- *    un: { s }              -- underline
+ *    ul: { s }              -- underline
  *    ff: string             -- font family
  *    fs: number             -- font size (pt)
  *    bd: { t/b/l/r: { s, cl: { rgb } } }  -- borders
@@ -222,8 +223,8 @@ export const CELL_STYLE_PRESETS: ReadonlyArray<CellStylePreset> = [
   ...ACCENTS.map((a) => accentTint(a, 40)),
   ...ACCENTS.map((a) => accentTint(a, 20)),
 
-  // Number formats — these tweak `_fmt` only; `style` left empty so the
-  // cell's existing fill/font is preserved.
+  // Number formats — applied through the numfmt facade (numberFormat.ts);
+  // `style` left empty so the cell's existing fill/font is preserved.
   { id: "comma", label: "Comma", category: "number", style: {}, numFmt: "#,##0" },
   { id: "currency", label: "Currency", category: "number", style: {}, numFmt: "¥#,##0" },
   { id: "percent", label: "Percent", category: "number", style: {}, numFmt: "0%" },
@@ -249,19 +250,20 @@ interface CellStylesSnapshot {
 /** #98-style cap: refuse to materialise more than 100k empty cells for whole-
  *  column / whole-row selections. Past the cap we restrict writes to cells
  *  that already exist in cellData — same "format only used cells" behaviour
- *  applyQuickNumberFormat uses. */
+ *  as the number-format planner (NUMBER_FORMAT_MAX_CELLS in numberFormat.ts). */
 const CELL_STYLE_MAX_NEW_CELLS = 100_000;
 
 /**
- * Apply a preset to every cell in the inclusive rectangle. Returns a new
- * snapshot JSON string. No-ops (returns input) when the snapshot is malformed,
- * the sheet is missing, the preset is unknown, or the range is degenerate.
+ * Apply a preset's style to every cell in the inclusive rectangle. Returns a
+ * new snapshot JSON string. No-ops (returns input) when the snapshot is
+ * malformed, the sheet is missing, the preset is unknown, the range is
+ * degenerate, or the preset has no style to apply (a number-format-only
+ * preset — its `numFmt` is applied through the numfmt facade instead).
  *
  * Behaviour per cell:
  *   - When the preset is `resetAll`, drop the cell's `s` and `_fmt` keys.
  *   - Otherwise, shallow-merge the preset's `style` onto the cell's existing
  *     `s` (preserves whatever the cell already had — partial override).
- *   - When the preset has a `numFmt`, write it to `_fmt`.
  *
  * Cells outside cellData are created so formatting sticks to blank cells too
  * (Excel does the same). Past the cell cap we only paint existing cells.
@@ -274,6 +276,11 @@ export function applyPresetToRange(
 ): string {
   const preset = getPreset(presetId);
   if (!preset) return snapshotJson;
+  const styleHasKeys =
+    !preset.resetAll && Object.keys(preset.style).length > 0;
+  // Nothing for the snapshot path to do; creating empty cells here would only
+  // bloat cellData.
+  if (!preset.resetAll && !styleHasKeys) return snapshotJson;
   const r1 = Math.min(range.r1, range.r2);
   const r2 = Math.max(range.r1, range.r2);
   const c1 = Math.min(range.c1, range.c2);
@@ -293,10 +300,6 @@ export function applyPresetToRange(
 
   const rangeCellCount = (r2 - r1 + 1) * (c2 - c1 + 1);
   const usedRangeOnly = rangeCellCount > CELL_STYLE_MAX_NEW_CELLS;
-
-  const styleHasKeys =
-    !preset.resetAll && Object.keys(preset.style).length > 0;
-  const code = preset.numFmt;
 
   for (let r = r1; r <= r2; r++) {
     const rowKey = String(r);
@@ -319,25 +322,15 @@ export function applyPresetToRange(
 
       const cell = (existing ?? {}) as Record<string, unknown>;
 
-      if (styleHasKeys) {
-        // Merge: pull the cell's current inline style (if any) and overlay
-        // the preset's keys on top. String-id `s` is replaced wholesale —
-        // we can't safely mutate the interned styles table.
-        let base: Record<string, unknown> = {};
-        const curS = cell.s;
-        if (curS && typeof curS === "object") {
-          base = { ...(curS as Record<string, unknown>) };
-        }
-        cell.s = { ...base, ...preset.style };
+      // Merge: pull the cell's current inline style (if any) and overlay the
+      // preset's keys on top. String-id `s` is replaced wholesale — we can't
+      // safely mutate the interned styles table.
+      let base: Record<string, unknown> = {};
+      const curS = cell.s;
+      if (curS && typeof curS === "object") {
+        base = { ...(curS as Record<string, unknown>) };
       }
-
-      if (code !== undefined) {
-        if (code === "") {
-          delete cell._fmt;
-        } else {
-          cell._fmt = code;
-        }
-      }
+      cell.s = { ...base, ...preset.style };
 
       row[colKey] = cell;
     }

@@ -209,9 +209,8 @@ export function applyConvertToDate(
   ) {
     return { snapshotMutated: (snapshot as object) ?? {}, convertedCount: 0 };
   }
-  // Deep-clone via JSON so the caller's input stays untouched — same pattern
-  // applyQuickNumberFormat uses. Safe here because Univer cell payloads are
-  // JSON-clean (no Dates, Maps, functions).
+  // Deep-clone via JSON so the caller's input stays untouched. Safe here
+  // because Univer cell payloads are JSON-clean (no Dates, Maps, functions).
   const cloned = JSON.parse(JSON.stringify(snapshot)) as SmartDateSnapshot;
   const sheet = cloned.sheets?.[sheetId];
   if (!sheet) return { snapshotMutated: cloned, convertedCount: 0 };

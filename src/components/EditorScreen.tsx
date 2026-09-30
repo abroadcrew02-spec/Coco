@@ -18,7 +18,11 @@ import { UniverUIPlugin } from "@univerjs/ui";
 import { UniverDocsPlugin } from "@univerjs/docs";
 import { UniverDocsUIPlugin } from "@univerjs/docs-ui";
 import { UniverSheetsPlugin } from "@univerjs/sheets";
-import { UniverSheetsNumfmtPlugin } from "@univerjs/sheets-numfmt";
+import {
+  UniverSheetsNumfmtPlugin,
+  SetNumfmtCommand,
+  type ISetNumfmtCommandParams,
+} from "@univerjs/sheets-numfmt";
 import { UniverSheetsUIPlugin } from "@univerjs/sheets-ui";
 import { UniverSheetsFormulaPlugin } from "@univerjs/sheets-formula";
 import { UniverSheetsFormulaUIPlugin } from "@univerjs/sheets-formula-ui";
@@ -38,6 +42,9 @@ import { UniverSheetsDrawingPlugin } from "@univerjs/sheets-drawing";
 import { UniverSheetsDrawingUIPlugin } from "@univerjs/sheets-drawing-ui";
 import { FUniver } from "@univerjs/core/facade";
 import "@univerjs/sheets/facade";
+// FRange.setNumberFormat / setNumberFormats / getNumberFormat (numfmt mixin).
+// Every "apply number format" entry point goes through it (numberFormat.ts).
+import "@univerjs/sheets-numfmt/facade";
 import "@univerjs/sheets-ui/facade";
 import "@univerjs/sheets-formula/facade";
 import "@univerjs/engine-formula/facade";
@@ -423,8 +430,8 @@ import NumberFormatManagerDialog from "./NumberFormatManagerDialog";
 import {
   type FormatCodeEntry,
   listAllFormatCodes,
-  renameFormatCode,
-  deleteFormatCode,
+  planFormatCodeRename,
+  planFormatCodeDelete,
 } from "../store/numberFormatManager";
 import RangeCompareDialog from "./RangeCompareDialog";
 import InsertSymbolDialog from "./InsertSymbolDialog";
@@ -541,7 +548,12 @@ import {
 } from "../hooks/useGlobalShortcuts";
 import { confirmDiscardIfUnsaved, isDirtySaveStatus, isWorkbookDirty } from "../store/dirtyGuard";
 import { routeOpenPath } from "../store/pathRouter";
-import { registerSnapshotFlush, carryForwardRootExtensions } from "../store/snapshotSync";
+import {
+  registerSnapshotFlush,
+  carryForwardRootExtensions,
+  createRootExtensionMirror,
+  type RootExtensionMirror,
+} from "../store/snapshotSync";
 import { timeAgoJa } from "./timeAgo";
 import {
   computeSnapshotStats,
@@ -558,11 +570,20 @@ import {
   type SplitSnapshotShape,
 } from "../store/splitPane";
 import { inferAutoSumRange, buildSumFormula } from "../store/autoSum";
+import { QUICK_FMT_CURRENCY, QUICK_FMT_PERCENT } from "../store/quickNumberFormat";
 import {
-  applyQuickNumberFormat,
-  QUICK_FMT_CURRENCY,
-  QUICK_FMT_PERCENT,
-} from "../store/quickNumberFormat";
+  parseA1Rect,
+  planUniformNumberFormat,
+  planSteppedNumberFormat,
+  resolveCellNumberFormat,
+  runNumberFormatJob,
+  type CellRect,
+  type LiveCellAccess,
+  type NumberFormatDeps,
+  type NumberFormatJob,
+  type SheetBounds,
+  type SheetCellData,
+} from "../store/numberFormat";
 import {
   computeCommentIndicators,
   type CommentIndicator,
@@ -605,6 +626,13 @@ import {
   fireTrigger,
   recordRun,
 } from "../store/scriptRuntime";
+import { useScriptTrustGate } from "../hooks/useScriptTrustGate";
+import ScriptTrustBanner from "./ScriptTrustBanner";
+import {
+  type ConnectionGuard,
+  normalizeIntervalMinutesInput,
+  startDataConnectionSchedule,
+} from "../store/dataConnectionSchedule";
 import "./EditorScreen.css";
 
 // req 5.4.1: "loading" blocks editing (snapshot is being replaced); "saving"
@@ -653,9 +681,42 @@ const EDITOR_NOT_READY_MESSAGE =
 const SNAPSHOT_UNAVAILABLE_MESSAGE =
   "ワークブックの内容を取得できませんでした。ホームへ戻って、もう一度開き直してください。";
 
+type LiveWorkbook = NonNullable<ReturnType<FUniver["getActiveWorkbook"]>>;
+
+/** Live (uncloned) cells of one sheet in Univer's model, read-only. Feeds the
+ *  number-format planners in numberFormat.ts (which cells exist, what format
+ *  they currently have). */
+function liveSheetCells(
+  workbook: LiveWorkbook,
+  sheetId: string,
+): (LiveCellAccess & { cellData: SheetCellData }) | null {
+  try {
+    const core = workbook.getWorkbook();
+    const ws = core.getSheetBySheetId(sheetId);
+    if (!ws) return null;
+    const styles = core.getStyles();
+    return {
+      cellData: ws.getCellMatrix().getMatrix() as unknown as SheetCellData,
+      getCellRaw: (row, col) => ws.getCellRaw(row, col),
+      lookupStyle: (id) => styles.get(id),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Inclusive rectangle covered by a facade range. */
+function facadeRangeRect(range: {
+  getRange(): { startRow: number; endRow: number; startColumn: number; endColumn: number };
+}): CellRect {
+  const r = range.getRange();
+  return { startRow: r.startRow, endRow: r.endRow, startCol: r.startColumn, endCol: r.endColumn };
+}
+
 // #198: derive the next number-format code for the ribbon's comma / decimal
-// buttons. `prev` is the cell's current `_fmt`; the result is written back to
-// `_fmt`. Kept module-level + pure so it's trivially unit-testable.
+// buttons from a cell's current code (resolveCellNumberFormat). The
+// result is applied through the numfmt facade. Kept module-level + pure so
+// it's trivially unit-testable.
 //   commaStyle      — toggle a thousands-separator integer format.
 //   increaseDecimal — append one fractional digit.
 //   decreaseDecimal — remove one fractional digit (floors at zero).
@@ -744,6 +805,16 @@ export default function EditorScreen() {
     importXlsx,
     importCsv,
   } = useWorkbookStore();
+
+  // #355 — trust gate for content that runs by itself (workbook scripts and
+  // auto-refreshing data connections). Nothing runs while `scriptGrant` is
+  // null. `trustGate.state` / `trustGate.content` / `allowOnce` /
+  // `allowAlways` are what the permission banner uses. The ref gives
+  // callbacks and timers the latest gate without re-subscribing.
+  const trustGate = useScriptTrustGate();
+  const scriptGrant = trustGate.grant;
+  const trustGateRef = useRef(trustGate);
+  trustGateRef.current = trustGate;
 
   // #97: wrapper for apply-style snapshot mutations (AutoSum, format painter,
   // hyperlink, CF, DV, chart, image, comment, quick number format). These
@@ -1150,6 +1221,63 @@ export default function EditorScreen() {
     setEditorOperationError(null);
     return { fUniver, workbook };
   }, []);
+
+  // Runs number-format jobs (numberFormat.ts) against the live workbook:
+  // dense rectangles through FRange.setNumberFormat / setNumberFormats, sparse
+  // cell lists through SetNumfmtCommand (the command the facade wraps). Both
+  // go through Univer's command service, so the grid repaints immediately,
+  // Univer's Ctrl+Z covers the change and the Univer -> store sync picks it
+  // up. No applyMutatedSnapshot / Nicel checkpoint here on purpose.
+  //
+  // A protected sheet is rejected up front with a message: the protection
+  // guard would cancel the mutation anyway, but the facade doesn't report the
+  // cancellation, so without this check the click would fail silently.
+  const runNumberFormatJobs = useCallback(
+    (
+      label: string,
+      ready: { fUniver: FUniver; workbook: LiveWorkbook },
+      jobs: ReadonlyArray<NumberFormatJob | null>,
+    ): boolean => {
+      const todo = jobs.filter((j): j is NumberFormatJob => j !== null);
+      if (todo.length === 0) return false;
+      const { fUniver, workbook } = ready;
+      const liveSnapshot = useWorkbookStore.getState().currentSnapshotJson;
+      if (todo.some((j) => isSheetProtectedInSnapshot(liveSnapshot, j.sheetId))) {
+        setEditorOperationError(
+          `${label}: このシートは保護されているため表示形式を変更できません。シートの保護を解除してから、もう一度実行してください。`,
+        );
+        return false;
+      }
+      const unitId = workbook.getId();
+      const deps: NumberFormatDeps = {
+        getSheet: (sheetId) => workbook.getSheetBySheetId(sheetId),
+        setCells: (sheetId, writes) =>
+          fUniver.syncExecuteCommand<ISetNumfmtCommandParams, boolean>(SetNumfmtCommand.id, {
+            unitId,
+            subUnitId: sheetId,
+            values: writes,
+          }),
+      };
+      try {
+        let allApplied = true;
+        for (const job of todo) {
+          if (!runNumberFormatJob(job, deps)) allApplied = false;
+        }
+        if (!allApplied) {
+          setEditorOperationError(
+            `${label}: 一部のセルに表示形式を適用できませんでした。対象シートが削除されていないか、シートの保護が掛かっていないかを確認して、もう一度実行してください。`,
+          );
+        }
+        return allApplied;
+      } catch (e) {
+        setEditorOperationError(
+          `${label}: 表示形式を適用できませんでした（${(e as Error).message}）。選択範囲と書式コードを確認して、もう一度実行してください。`,
+        );
+        return false;
+      }
+    },
+    [],
+  );
 
   const getSnapshotForTool = useCallback(
     (label: string): Record<string, unknown> | null => {
@@ -2303,42 +2431,45 @@ export default function EditorScreen() {
   const applyCellStylePreset = useCallback(
     (preset: CellStylePreset, range: string) => {
       if (!cellStylesDialog) return;
-      const fUniver = fUniverRef.current;
-      if (!fUniver) return;
-      const workbook = fUniver.getActiveWorkbook();
-      if (!workbook) return;
-      const fresh = workbook.save();
-      const json = JSON.stringify(fresh);
-      // Parse range to rect; the dialog supplies an A1 like "A1:C10" with or
-      // without a sheet qualifier. Strip the sheet prefix if present.
-      const cleaned = range.includes("!") ? range.split("!").slice(1).join("!") : range;
-      const m = /^\$?([A-Za-z]+)\$?(\d+)(?::\$?([A-Za-z]+)\$?(\d+))?$/.exec(cleaned.trim());
-      if (!m) return;
-      const colLetterToIndex = (s: string) => {
-        let n = 0;
-        for (const ch of s.toUpperCase()) {
-          n = n * 26 + (ch.charCodeAt(0) - 64);
-        }
-        return n - 1;
-      };
-      const c1 = colLetterToIndex(m[1]);
-      const r1 = parseInt(m[2], 10) - 1;
-      const c2 = m[3] ? colLetterToIndex(m[3]) : c1;
-      const r2 = m[4] ? parseInt(m[4], 10) - 1 : r1;
-      const rect = {
-        r1: Math.min(r1, r2),
-        c1: Math.min(c1, c2),
-        r2: Math.max(r1, r2),
-        c2: Math.max(c1, c2),
-      };
+      const ready = getReadyWorkbook("セルスタイル");
+      if (!ready) return;
+      const { workbook } = ready;
+      // The dialog supplies an A1 like "A1:C10" with or without a sheet
+      // qualifier.
+      const rect = parseA1Rect(range);
+      if (!rect) {
+        setEditorOperationError(
+          `セルスタイル: 範囲「${range}」を読み取れませんでした。A1 や A1:C10 の形式で指定してください。`,
+        );
+        return;
+      }
+      const sheetId = cellStylesDialog.sheetId;
+
+      // Comma / Currency / Percent: the number format goes through the numfmt
+      // facade (numberFormat.ts) so the grid repaints and Univer owns the undo.
+      if (preset.numFmt !== undefined) {
+        const live = liveSheetCells(workbook, sheetId);
+        runNumberFormatJobs("セルスタイル", ready, [
+          planUniformNumberFormat(sheetId, rect, preset.numFmt, live?.cellData),
+        ]);
+      }
+
+      const hasStyle = preset.resetAll === true || Object.keys(preset.style).length > 0;
+      if (!hasStyle) return;
       try {
-        const next = applyPresetToRange(json, cellStylesDialog.sheetId, rect, preset.id);
+        const json = JSON.stringify(workbook.save());
+        const next = applyPresetToRange(
+          json,
+          sheetId,
+          { r1: rect.startRow, c1: rect.startCol, r2: rect.endRow, c2: rect.endCol },
+          preset.id,
+        );
         applyMutatedSnapshot(next);
       } catch (e) {
         setEditorOperationError(`セルスタイル: ${(e as Error).message}`);
       }
     },
-    [cellStylesDialog, applyMutatedSnapshot],
+    [cellStylesDialog, getReadyWorkbook, runNumberFormatJobs, applyMutatedSnapshot],
   );
 
   // --- Goal Seek -------------------------------------------------------------
@@ -5141,7 +5272,10 @@ export default function EditorScreen() {
       connection.targetSheetId = sheetId;
       connection.lastRefreshedAt = Date.now();
       addConnectionToSnapshot(snapshot, connection);
-      applyMutatedSnapshot(JSON.stringify(snapshot));
+      const nextJson = JSON.stringify(snapshot);
+      // #355: an edit made in the app keeps the document trusted when it was.
+      void trustGateRef.current.adoptLocalEdit(liveSnap, nextJson);
+      applyMutatedSnapshot(nextJson);
     },
     [applyMutatedSnapshot, loadDataConnectionFragment],
   );
@@ -5154,13 +5288,16 @@ export default function EditorScreen() {
   // read→apply→write critical section runs strictly one refresh at a time.
   const refreshQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const handleDataConnectionRefresh = useCallback(
-    (connectionId: string) => {
+    // `guard` is passed by the scheduled refresh (#355) and checked against
+    // the exact connection about to be loaded; the manual refresh omits it.
+    (connectionId: string, guard?: ConnectionGuard) => {
       const doRefresh = async () => {
         const liveBefore = useWorkbookStore.getState().currentSnapshotJson;
         if (!liveBefore) throw new Error("ワークブックがありません");
         const snapBefore = JSON.parse(liveBefore) as Record<string, unknown>;
         const conn = listDataConnections(snapBefore).find((c) => c.id === connectionId);
         if (!conn) throw new Error("接続が見つかりません");
+        if (guard && !guard(conn)) throw new Error("この接続の自動更新は許可されていません");
         const rawFragment = await loadDataConnectionFragment(conn);
         // Re-parse the live snapshot AFTER the async load.
         const liveAfter = useWorkbookStore.getState().currentSnapshotJson;
@@ -5212,12 +5349,17 @@ export default function EditorScreen() {
         name: patch.name,
         targetSheetName: patch.targetSheetName,
         steps: patch.steps,
+        // #355: store only values the scheduler accepts, so the saved
+        // schedule is exactly what the trust fingerprint and the badge show.
         schedule: {
-          onOpen: patch.scheduleOnOpen,
-          intervalMinutes: patch.scheduleIntervalMinutes,
+          onOpen: patch.scheduleOnOpen === true,
+          intervalMinutes: normalizeIntervalMinutesInput(patch.scheduleIntervalMinutes),
         },
       });
-      applyMutatedSnapshot(JSON.stringify(snap));
+      const nextJson = JSON.stringify(snap);
+      // #355: an edit made in the app keeps the document trusted when it was.
+      void trustGateRef.current.adoptLocalEdit(live, nextJson);
+      applyMutatedSnapshot(nextJson);
     },
     [applyMutatedSnapshot],
   );
@@ -5228,7 +5370,10 @@ export default function EditorScreen() {
       if (!live) throw new Error("ワークブックがありません");
       const snap = JSON.parse(live) as Record<string, unknown>;
       removeConnectionFromSnapshot(snap, connectionId);
-      applyMutatedSnapshot(JSON.stringify(snap));
+      const nextJson = JSON.stringify(snap);
+      // #355: an edit made in the app keeps the document trusted when it was.
+      void trustGateRef.current.adoptLocalEdit(live, nextJson);
+      applyMutatedSnapshot(nextJson);
     },
     [applyMutatedSnapshot],
   );
@@ -5238,10 +5383,21 @@ export default function EditorScreen() {
   // timers for connections with `intervalMinutes > 0`. The timers re-read the
   // live snapshot each tick, so edits to a connection's schedule take effect
   // on the next dialog save (which replaces the handle? no — we re-scan).
+  //
+  // #355: nothing is scheduled without an execution grant, and each refresh
+  // re-checks the latest grant against the connection it is about to load.
+  // The on-open marker is set only when a refresh actually started, so a
+  // workbook allowed after opening still gets its on-open refresh. The effect
+  // re-runs when the approved connection set changes, not on every new grant
+  // (a script edit issues a new grant but must not reset interval timers).
   const dataConnOnOpenFiredRef = useRef<string | null>(null);
+  const connScheduleKey = scriptGrant
+    ? (trustGate.content?.connectionSignatures ?? []).join("\n")
+    : null;
   useEffect(() => {
     const handle = currentHandle;
     if (!handle) return;
+    if (connScheduleKey === null) return;
     const handleKey = JSON.stringify(handle);
     const snapJson = useWorkbookStore.getState().currentSnapshotJson;
     if (!snapJson) return;
@@ -5251,38 +5407,16 @@ export default function EditorScreen() {
     } catch {
       return;
     }
-    // Fire on-open refreshes exactly once per workbook handle.
-    if (dataConnOnOpenFiredRef.current !== handleKey) {
-      dataConnOnOpenFiredRef.current = handleKey;
-      for (const c of conns) {
-        if (c.schedule?.onOpen) {
-          void handleDataConnectionRefresh(c.id).catch(() => {
-            // Background refresh failures are non-fatal — surfaced in the
-            // dialog when the user next opens it.
-          });
-        }
-      }
-    }
-    // Interval timers: one per connection with intervalMinutes > 0.
-    const timers: ReturnType<typeof setInterval>[] = [];
-    for (const c of conns) {
-      const minutes = c.schedule?.intervalMinutes ?? 0;
-      if (minutes > 0) {
-        const id = c.id;
-        timers.push(
-          setInterval(
-            () => {
-              void handleDataConnectionRefresh(id).catch(() => {});
-            },
-            minutes * 60_000,
-          ),
-        );
-      }
-    }
-    return () => {
-      for (const t of timers) clearInterval(t);
-    };
-  }, [currentHandle, handleDataConnectionRefresh]);
+    const schedule = startDataConnectionSchedule({
+      connections: conns,
+      getGrant: () => trustGateRef.current.grant,
+      // Fire on-open refreshes at most once per workbook handle.
+      onOpenPending: dataConnOnOpenFiredRef.current !== handleKey,
+      refresh: handleDataConnectionRefresh,
+    });
+    if (schedule.firedOnOpen) dataConnOnOpenFiredRef.current = handleKey;
+    return () => schedule.stop();
+  }, [currentHandle, handleDataConnectionRefresh, connScheduleKey]);
 
   const addCurrentCellAsBookmark = useCallback(() => {
     const fUniver = fUniverRef.current;
@@ -5323,23 +5457,102 @@ export default function EditorScreen() {
     [currentSnapshotJson],
   );
 
-  const activeSelectionA1 = useMemo(() => {
-    try {
-      const fUniver = fUniverRef.current;
-      const wb = fUniver?.getActiveWorkbook();
-      const sheet = wb?.getActiveSheet();
-      const r = sheet?.getSelection()?.getActiveRange();
-      return r ? r.getA1Notation() : "";
-    } catch {
-      return "";
+  // A1 of the active selection, for the Number Format Manager's "選択範囲へ"
+  // and the Go To dialog. Tracked only while one of them is open (so a
+  // selection change does not re-render the editor otherwise): read once when
+  // it opens, then on every Univer SelectionChanged — pointer, keyboard and
+  // Name Box moves all emit it (selectionMoveEnd$ merged with selectionSet$,
+  // fired after the selection model is updated).
+  const [activeSelectionA1, setActiveSelectionA1] = useState("");
+  const trackActiveSelection = numberFormatManagerOpen || goToOpen;
+  useEffect(() => {
+    if (!trackActiveSelection) return;
+    const fUniver = fUniverRef.current;
+    if (!fUniver) {
+      setActiveSelectionA1("");
+      return;
     }
-  }, []);
+    const readSelection = () => {
+      try {
+        const r = fUniver.getActiveWorkbook()?.getActiveSheet()?.getSelection()?.getActiveRange();
+        setActiveSelectionA1(r ? r.getA1Notation() : "");
+      } catch {
+        // Univer's selection API can throw mid-teardown; treat as no selection.
+        setActiveSelectionA1("");
+      }
+    };
+    readSelection();
+    const disposable = fUniver.addEvent(fUniver.Event.SelectionChanged, readSelection);
+    return () => {
+      disposable.dispose();
+      // Forget the range on close so the next open does not show the
+      // previous selection for its first frame.
+      setActiveSelectionA1("");
+    };
+  }, [trackActiveSelection]);
 
-  const replaceWorkbookSnapshot = useCallback(
-    (json: string) => {
-      applyMutatedSnapshot(json);
+  // Number Format Manager actions. Rename / delete scan a fresh `save()` of
+  // the workbook (the store can lag by the sync debounce) for cells whose
+  // current code matches, then apply through the numfmt command like every
+  // other number-format entry point.
+  const renameFormatCodeInWorkbook = useCallback(
+    (oldCode: string, newCode: string) => {
+      const ready = getReadyWorkbook("表示形式の管理");
+      if (!ready) return;
+      const { jobs } = planFormatCodeRename(
+        ready.workbook.save() as unknown as Parameters<typeof planFormatCodeRename>[0],
+        oldCode,
+        newCode,
+      );
+      runNumberFormatJobs("表示形式の管理", ready, jobs);
     },
-    [applyMutatedSnapshot],
+    [getReadyWorkbook, runNumberFormatJobs],
+  );
+
+  const deleteFormatCodeInWorkbook = useCallback(
+    (code: string) => {
+      const ready = getReadyWorkbook("表示形式の管理");
+      if (!ready) return;
+      const { jobs } = planFormatCodeDelete(
+        ready.workbook.save() as unknown as Parameters<typeof planFormatCodeDelete>[0],
+        code,
+      );
+      runNumberFormatJobs("表示形式の管理", ready, jobs);
+    },
+    [getReadyWorkbook, runNumberFormatJobs],
+  );
+
+  // "Apply to range" targets the active sheet (a sheet prefix in the typed
+  // range is ignored, as before). Same cell cap as the other entry points.
+  const applyFormatCodeToRange = useCallback(
+    (code: string, range: string) => {
+      const ready = getReadyWorkbook("表示形式の管理");
+      if (!ready) return;
+      const sheet = ready.workbook.getActiveSheet();
+      if (!sheet) return;
+      // Whole-column / whole-row selections arrive as "A:A" / "1:1"; the
+      // sheet size turns them into a rectangle (the planner limits the dense
+      // write to NUMBER_FORMAT_MAX_CELLS and formats existing cells past it).
+      let bounds: SheetBounds | undefined;
+      try {
+        bounds = { rowCount: sheet.getMaxRows(), colCount: sheet.getMaxColumns() };
+      } catch {
+        bounds = undefined;
+      }
+      const rect = parseA1Rect(range, bounds);
+      if (!rect) {
+        setEditorOperationError(
+          `表示形式の管理: 範囲「${range}」を読み取れませんでした。A1、A1:C10、A:A、1:1 の形式で指定してください。`,
+        );
+        return;
+      }
+      const sheetId = sheet.getSheetId();
+      const live = liveSheetCells(ready.workbook, sheetId);
+      runNumberFormatJobs("表示形式の管理", ready, [
+        planUniformNumberFormat(sheetId, rect, code, live?.cellData),
+      ]);
+    },
+    [getReadyWorkbook, runNumberFormatJobs],
   );
 
   // RangeCompare opener
@@ -5455,8 +5668,8 @@ export default function EditorScreen() {
   // ops call the FRange facade directly on the live workbook (Univer routes
   // these through its command stack, so undo/redo and re-render Just Work).
   // Toggle buttons read the current cell style first so a second click clears.
-  // Number-format ops (comma / decimal) take the snapshot `_fmt` path because
-  // Nicel doesn't register the optional @univerjs/sheets-numfmt facade.
+  // Number-format ops (comma / decimal) derive each cell's next code from its
+  // current one and apply it through the numfmt facade (numberFormat.ts).
   const handleUniverAction = useCallback(
     (
       op: import("./ribbon/ribbonDefs").UniverActionId,
@@ -5585,44 +5798,21 @@ export default function EditorScreen() {
           case "commaStyle":
           case "increaseDecimal":
           case "decreaseDecimal": {
-            // Number-format ops walk the snapshot `_fmt` field directly —
-            // Nicel doesn't register @univerjs/sheets-numfmt, and xlsx_io.rs
-            // keys the round-trip off per-cell `_fmt` (see applyNumberFormat).
+            // Each cell's next code depends on its current one, so this is a
+            // per-cell grid (FRange.setNumberFormats). The planner caps
+            // whole-column / whole-row selections to existing cells.
             const sheetId = sheet.getSheetId();
-            const sr = range.getRow();
-            const sc = range.getColumn();
-            const h =
-              (range as unknown as { getHeight?: () => number }).getHeight?.() ?? 1;
-            const w =
-              (range as unknown as { getWidth?: () => number }).getWidth?.() ?? 1;
-            const snapshot = workbook.save() as unknown as {
-              sheets?: Record<
-                string,
-                {
-                  cellData?: Record<
-                    string,
-                    Record<string, Record<string, unknown> | undefined>
-                  >;
-                }
-              >;
-            };
-            const sheetObj = snapshot.sheets?.[sheetId];
-            if (!sheetObj) break;
-            if (!sheetObj.cellData) sheetObj.cellData = {};
-            const cellData = sheetObj.cellData;
-            for (let r = sr; r < sr + h; r++) {
-              const rowKey = String(r);
-              if (!cellData[rowKey]) cellData[rowKey] = {};
-              const row = cellData[rowKey];
-              for (let c = sc; c < sc + w; c++) {
-                const colKey = String(c);
-                const cell = row[colKey] ?? {};
-                const prev = typeof cell._fmt === "string" ? cell._fmt : "";
-                cell._fmt = nextNumberFormatCode(op, prev);
-                row[colKey] = cell;
-              }
-            }
-            applyMutatedSnapshot(JSON.stringify(snapshot));
+            const live = liveSheetCells(workbook, sheetId);
+            if (!live) break;
+            runNumberFormatJobs("表示形式", { fUniver, workbook }, [
+              planSteppedNumberFormat(
+                sheetId,
+                facadeRangeRect(range),
+                (prev) => nextNumberFormatCode(op, prev),
+                live.cellData,
+                live.lookupStyle,
+              ),
+            ]);
             break;
           }
         }
@@ -5631,7 +5821,7 @@ export default function EditorScreen() {
         // overlap); swallow so a bad click never crashes the editor.
       }
     },
-    [applyMutatedSnapshot],
+    [runNumberFormatJobs],
   );
 
   // --- Wave 10: Insert Symbol / Sheet Notes / Image Manager / Templates / Snapshot Controls ---
@@ -6451,7 +6641,7 @@ export default function EditorScreen() {
   );
 
   // Number-format dialog plumbing. Captures the active selection's bounding
-  // rows/cols + the anchor cell's existing `_fmt` (so the dialog can pre-select
+  // rows/cols + the anchor cell's current format (so the dialog can pre-select
   // a preset) and stashes them in state. We pin coords at open time so the
   // user can confirm later even if focus moves.
   const openNumberFormatDialog = useCallback(() => {
@@ -6485,22 +6675,12 @@ export default function EditorScreen() {
       // Best-effort: fall back to A1 single cell.
     }
 
-    // Read existing _fmt on the anchor cell, if any, from the live snapshot.
-    let initialCode = "";
-    if (currentSnapshotJson) {
-      try {
-        const snap = JSON.parse(currentSnapshotJson) as {
-          sheets?: Record<
-            string,
-            { cellData?: Record<string, Record<string, { _fmt?: string }>> }
-          >;
-        };
-        const cell = snap.sheets?.[sheetId]?.cellData?.[String(startRow)]?.[String(startCol)];
-        if (cell && typeof cell._fmt === "string") initialCode = cell._fmt;
-      } catch {
-        // Malformed snapshot — leave initialCode empty so "General" is picked.
-      }
-    }
+    // Read the anchor cell's current format from Univer's live model (the
+    // store snapshot can lag behind by the sync debounce).
+    const live = liveSheetCells(workbook, sheetId);
+    const initialCode = live
+      ? resolveCellNumberFormat(live.getCellRaw(startRow, startCol), live.lookupStyle)
+      : "";
     setNumFmtDialog({
       sheetId,
       startRow,
@@ -6510,63 +6690,29 @@ export default function EditorScreen() {
       rangeLabel,
       initialCode,
     });
-  }, [currentSnapshotJson, getReadyWorkbook]);
+  }, [getReadyWorkbook]);
 
-  // Apply a format code to every cell in the captured selection by walking
-  // the snapshot directly: read → mutate cellData[r][c]._fmt → write back via
-  // updateSnapshot. We use the snapshot path because Univer 0.5.x's facade
-  // exposes setNumberFormat only via the optional @univerjs/sheets-numfmt
-  // plugin, which Nicel doesn't register; the round-trip in xlsx_io.rs is
-  // already keyed off the per-cell `_fmt` field, so this is the simplest
-  // path that preserves the format through save/load.
+  // Apply a format code to every cell in the captured selection through the
+  // numfmt facade (FRange.setNumberFormat — see numberFormat.ts for why the
+  // store snapshot path doesn't work). An empty code ("標準") removes the
+  // format. Selections past NUMBER_FORMAT_MAX_CELLS only touch existing cells.
   const applyNumberFormat = useCallback(
     (value: NumberFormatValue) => {
       if (!numFmtDialog) return;
-      const fUniver = fUniverRef.current;
-      if (!fUniver) return;
-      const workbook = fUniver.getActiveWorkbook();
-      if (!workbook) return;
-      // Re-derive the snapshot from Univer (not the cached JSON) so we don't
-      // clobber edits the user made while the dialog was open.
-      const snapshot = workbook.save() as unknown as {
-        sheets?: Record<
-          string,
-          {
-            cellData?: Record<
-              string,
-              Record<string, Record<string, unknown> | undefined>
-            >;
-          }
-        >;
-      };
-      const sheetObj = snapshot.sheets?.[numFmtDialog.sheetId];
-      if (!sheetObj) return;
-      if (!sheetObj.cellData) sheetObj.cellData = {};
-      const cellData = sheetObj.cellData;
-      const code = value.code.trim();
-      for (let r = numFmtDialog.startRow; r <= numFmtDialog.endRow; r++) {
-        const rowKey = String(r);
-        if (!cellData[rowKey]) cellData[rowKey] = {};
-        const row = cellData[rowKey];
-        for (let c = numFmtDialog.startCol; c <= numFmtDialog.endCol; c++) {
-          const colKey = String(c);
-          const existing = row[colKey];
-          if (code) {
-            // Create the cell if it didn't exist (formatting a blank cell is
-            // legitimate — Excel keeps the style on empty cells too).
-            const cell = existing ?? {};
-            cell._fmt = code;
-            row[colKey] = cell;
-          } else if (existing) {
-            // Empty code means "General" → drop the _fmt key entirely so the
-            // round-trip stays clean (Rust side omits unset formats).
-            delete existing._fmt;
-          }
-        }
-      }
-      applyMutatedSnapshot(JSON.stringify(snapshot));
+      const ready = getReadyWorkbook("表示形式");
+      if (!ready) return;
+      const { sheetId, startRow, endRow, startCol, endCol } = numFmtDialog;
+      const live = liveSheetCells(ready.workbook, sheetId);
+      runNumberFormatJobs("表示形式", ready, [
+        planUniformNumberFormat(
+          sheetId,
+          { startRow, endRow, startCol, endCol },
+          value.code,
+          live?.cellData,
+        ),
+      ]);
     },
-    [numFmtDialog, applyMutatedSnapshot],
+    [numFmtDialog, getReadyWorkbook, runNumberFormatJobs],
   );
 
   // AutoSum (Σ / Alt+=). Excel's heuristic: look for a contiguous run of
@@ -6640,9 +6786,9 @@ export default function EditorScreen() {
     applyMutatedSnapshot(JSON.stringify(snapshot));
   }, [getReadyWorkbook, applyMutatedSnapshot]);
 
-  // Quick-format buttons (通貨 / %). Reuses the same snapshot-level _fmt path
-  // as the Number Format dialog but skips the dialog — one click applies a
-  // preset. Range = current selection (multi-cell ok).
+  // Quick-format buttons (通貨 / %). Same numfmt facade path as the Number
+  // Format dialog but skips the dialog — one click applies a preset.
+  // Range = current selection (multi-cell ok).
   const applyQuickFormat = useCallback(
     (code: string) => {
       const ready = getReadyWorkbook("表示形式");
@@ -6651,37 +6797,19 @@ export default function EditorScreen() {
       const sheet = workbook.getActiveSheet();
       if (!sheet) return;
       const sheetId = sheet.getSheetId();
-      let startRow = 0;
-      let endRow = 0;
-      let startCol = 0;
-      let endCol = 0;
+      let rect: CellRect = { startRow: 0, endRow: 0, startCol: 0, endCol: 0 };
       try {
-        const sel = sheet.getSelection();
-        const range = sel?.getActiveRange();
-        if (range) {
-          startRow = range.getRow();
-          startCol = range.getColumn();
-          const height =
-            (range as unknown as { getHeight?: () => number }).getHeight?.() ?? 1;
-          const width =
-            (range as unknown as { getWidth?: () => number }).getWidth?.() ?? 1;
-          endRow = startRow + Math.max(0, height - 1);
-          endCol = startCol + Math.max(0, width - 1);
-        }
+        const range = sheet.getSelection()?.getActiveRange();
+        if (range) rect = facadeRangeRect(range);
       } catch {
         // Fall back to single A1 cell.
       }
-      // Re-derive the snapshot so we don't clobber concurrent edits.
-      const snapshot = workbook.save() as unknown as Record<string, unknown>;
-      const nextJson = applyQuickNumberFormat(
-        JSON.stringify(snapshot),
-        sheetId,
-        { startRow, endRow, startCol, endCol },
-        code,
-      );
-      applyMutatedSnapshot(nextJson);
+      const live = liveSheetCells(workbook, sheetId);
+      runNumberFormatJobs("表示形式", ready, [
+        planUniformNumberFormat(sheetId, rect, code, live?.cellData),
+      ]);
     },
-    [getReadyWorkbook, applyMutatedSnapshot],
+    [getReadyWorkbook, runNumberFormatJobs],
   );
 
   // Insert-image dialog plumbing. Snapshots the active sheet + the top-left of
@@ -8357,6 +8485,8 @@ export default function EditorScreen() {
           if (!isInRolloutBucket(r.rollout)) {
             // User isn't in this rollout bucket yet — silently skip and wait
             // for either a higher percent or a manual check from Settings.
+            // Also the path when the manifest could not be read or did not
+            // match the update (ROLLOUT_HELD, #359).
             setUpdaterState({ kind: "idle" });
             return;
           }
@@ -8681,6 +8811,25 @@ export default function EditorScreen() {
   // normalising the loaded sheet, live-render patches) and must not mark the
   // workbook dirty; there is nothing to save yet.
   const userInteractedRef = useRef(false);
+  // #356: keeps Univer's copy of Nicel's workbook-root keys equal to the store
+  // (see the mirror effect below and createRootExtensionMirror). One instance
+  // per editor, shared by the snapshot sync and the store subscription.
+  const rootMirrorRef = useRef<RootExtensionMirror | null>(null);
+  if (rootMirrorRef.current === null) {
+    rootMirrorRef.current = createRootExtensionMirror(
+      () =>
+        fUniverRef.current?.getActiveWorkbook()?.getWorkbook()?.getSnapshot() as unknown as
+          | Record<string, unknown>
+          | undefined,
+      (e) => {
+        // A failure here means save()-based handlers may write stale root
+        // keys again; carryForwardRootExtensions still protects syncSnapshot.
+        // eslint-disable-next-line no-console
+        console.warn("[snapshot] could not mirror workbook root keys into the editor:", e);
+      },
+    );
+  }
+  const rootMirror = rootMirrorRef.current;
 
   // Sync snapshot to store on data mutations (skip selection/scroll operations).
   // Debounce by 300ms so rapid typing doesn't thrash the store on every keystroke.
@@ -8702,15 +8851,17 @@ export default function EditorScreen() {
     const syncSnapshot = () => {
       const workbook = fUniver.getActiveWorkbook();
       if (!workbook) return;
-      // #184 C-1: `FWorkbook.save()` reconstructs the snapshot from Univer's
-      // internal models, so it drops Nicel's workbook-root extension keys
-      // (`_cameraLinks`, `_scenarios`) that were written straight into the
-      // store via `applyMutatedSnapshot` without a Univer re-mount. Re-graft
-      // them from the prior store snapshot so a cell edit doesn't silently
-      // wipe the user's camera links / scenarios.
+      // #184 C-1 / #356: Nicel's workbook-root extension keys (`_scripts`,
+      // `_cameraLinks`, `_scenarios`, ...) are owned by the store. save()
+      // returns the copy Univer holds (the createUnit-time value unless the
+      // mirror below updated it), so the store's value is grafted over it and
+      // a cell edit cannot roll back or wipe those keys.
       const fresh = JSON.stringify(workbook.save());
       const prev = useWorkbookStore.getState().currentSnapshotJson;
-      updateSnapshot(carryForwardRootExtensions(fresh, prev));
+      const merged = carryForwardRootExtensions(fresh, prev);
+      // Its root keys already are the store's, so the mirror skips exactly
+      // this update (and no later one with the same string).
+      rootMirror.writeOwn(merged, updateSnapshot);
     };
 
     const cancelPendingSnapshotSync = () => {
@@ -8791,6 +8942,18 @@ export default function EditorScreen() {
     };
   }, [markDirty, updateSnapshot]);
 
+  // #356 — keep Univer's copy of Nicel's workbook-root keys (_scripts,
+  // _connections, _cameraLinks, ...) equal to the store. Univer returns the
+  // createUnit-time copy from every save(), and many handlers build a store
+  // snapshot from save(); without this they would roll back in-app changes
+  // to those keys or bring back ones the store removed. Runs synchronously on
+  // every store change of this document (not when another one is mounting).
+  useEffect(() => {
+    if (!fUniverRef.current) return;
+    rootMirror.mirror(useWorkbookStore.getState().currentSnapshotJson);
+    return useWorkbookStore.subscribe(rootMirror.onStoreChange);
+  }, [rootMirror]);
+
   // #131 — macro recorder hook. Subscribes to Univer's high-level COMMAND
   // stream (not MUTATION; replaying a COMMAND re-generates the right MUTATIONs
   // so undo + snapshot sync keep working). The observer is a no-op when the
@@ -8824,8 +8987,13 @@ export default function EditorScreen() {
   // through the sandboxed-iframe executor (handlers are kept inside the
   // iframe; the parent only sends fire-trigger messages). Each run is
   // appended to the execution log.
+  // #355: without an execution grant nothing is collected, fired, listened to
+  // or scheduled. With one, the runtime still refuses any script whose source
+  // the grant does not cover (e.g. an edit that has not been evaluated yet).
   useEffect(() => {
     if (!fUniverRef.current) return;
+    const grant = scriptGrant;
+    if (!grant) return;
     const fUniver = fUniverRef.current;
     let disposed = false;
     const timerIds: ReturnType<typeof setInterval>[] = [];
@@ -8877,10 +9045,15 @@ export default function EditorScreen() {
         const entry = scripts.find((s) => s.id === c.scriptId);
         if (!entry) continue;
         const result = await fireTrigger(entry, kind, {
+          grant,
           fUniver: fUniverRef.current,
           snapshotJson: snapshotRef.current,
           editEvent: extra.editEvent,
         });
+        // #355: a refused run did not run; keep it out of the execution log.
+        // The runtime-set flag is used, not the error text, so a script cannot
+        // hide its own failures by throwing a matching message.
+        if (result.blockedByGate === true) continue;
         // M1 — after unmount, don't record runs or write logs.
         if (disposed) return;
         recordRun(entry, kind, result);
@@ -8899,6 +9072,7 @@ export default function EditorScreen() {
         try {
           next.push(
             await collectTriggers(s, {
+              grant,
               fUniver: fUniverRef.current,
               snapshotJson: snapshotRef.current,
             }),
@@ -8979,7 +9153,7 @@ export default function EditorScreen() {
       editDisposable.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSnapshotJson]);
+  }, [currentSnapshotJson, scriptGrant]);
 
   // #186 — global-shortcut macro playback. `useGlobalShortcuts` (App level)
   // detects Ctrl/Cmd+Shift+1..9 and emits the bound macro id; we own the
@@ -9434,6 +9608,9 @@ export default function EditorScreen() {
           }}
         />
       )}
+      {/* #355: non-modal permission banner for content that runs by itself.
+          Renders nothing unless the gate reports "untrusted". */}
+      <ScriptTrustBanner gate={trustGate} onNotice={setEditorOperationError} />
       {importWarnings.length > 0 && (
         <div className="warning-banner">
           <div className="warning-banner__content">
@@ -10150,10 +10327,14 @@ export default function EditorScreen() {
           scripts={readScripts(currentSnapshotJson)}
           fUniver={fUniverRef.current}
           snapshotJson={currentSnapshotJson}
+          grant={scriptGrant}
           onChange={(next: ScriptEntry[]) => {
             // _scripts はワークブックメタ (シートと独立) なので、現在の
             // snapshot に書き戻して updateSnapshot で永続化する。
             const nextJson = writeScripts(currentSnapshotJson, next);
+            // #355: an edit made in the app keeps the document trusted when
+            // it was (registered before the store update that re-evaluates).
+            void trustGateRef.current.adoptLocalEdit(currentSnapshotJson, nextJson);
             updateSnapshot(nextJson);
           }}
           onClose={() => setScriptEditorOpen(false)}
@@ -10522,52 +10703,9 @@ export default function EditorScreen() {
         <NumberFormatManagerDialog
           entries={numberFormatEntries}
           activeSelectionRange={activeSelectionA1}
-          onRename={(oldCode, newCode) => {
-            const { snapshotMutated, changedCount } = renameFormatCode(currentSnapshotJson ?? "", oldCode, newCode);
-            if (changedCount > 0) replaceWorkbookSnapshot(JSON.stringify(snapshotMutated));
-          }}
-          onApplyToRange={(code, range) => {
-            // Apply via existing applyMutatedSnapshot pattern — set _fmt on each cell in the range.
-            // Simplified: just call applyMutatedSnapshot with a quick range-walk.
-            try {
-              const fUniver = fUniverRef.current;
-              const wb = fUniver?.getActiveWorkbook();
-              const sheet = wb?.getActiveSheet();
-              if (!wb || !sheet) return;
-              const sheetId = sheet.getSheetId();
-              const fresh = wb.save() as unknown as {
-                sheets?: Record<string, { cellData?: Record<string, Record<string, unknown>>; _fmt?: Record<string, Record<string, string>> }>;
-              };
-              const sheetObj = fresh.sheets?.[sheetId];
-              if (!sheetObj) return;
-              if (!sheetObj._fmt) sheetObj._fmt = {};
-              const cleaned = range.includes("!") ? range.split("!").slice(1).join("!") : range;
-              const m = /^\$?([A-Za-z]+)\$?(\d+)(?::\$?([A-Za-z]+)\$?(\d+))?$/.exec(cleaned.trim());
-              if (!m) return;
-              const colToIdx = (s: string) => {
-                let n = 0;
-                for (const c of s.toUpperCase()) n = n * 26 + (c.charCodeAt(0) - 64);
-                return n - 1;
-              };
-              const c1 = colToIdx(m[1]);
-              const r1 = parseInt(m[2], 10) - 1;
-              const c2 = m[3] ? colToIdx(m[3]) : c1;
-              const r2 = m[4] ? parseInt(m[4], 10) - 1 : r1;
-              for (let r = Math.min(r1, r2); r <= Math.max(r1, r2); r++) {
-                if (!sheetObj._fmt[String(r)]) sheetObj._fmt[String(r)] = {};
-                for (let c = Math.min(c1, c2); c <= Math.max(c1, c2); c++) {
-                  sheetObj._fmt[String(r)][String(c)] = code;
-                }
-              }
-              applyMutatedSnapshot(JSON.stringify(fresh));
-            } catch {
-              // best-effort
-            }
-          }}
-          onDelete={(code) => {
-            const { snapshotMutated, clearedCount } = deleteFormatCode(currentSnapshotJson ?? "", code);
-            if (clearedCount > 0) replaceWorkbookSnapshot(JSON.stringify(snapshotMutated));
-          }}
+          onRename={renameFormatCodeInWorkbook}
+          onApplyToRange={applyFormatCodeToRange}
+          onDelete={deleteFormatCodeInWorkbook}
           onClose={() => setNumberFormatManagerOpen(false)}
         />
       )}

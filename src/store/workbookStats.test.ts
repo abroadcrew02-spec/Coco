@@ -132,4 +132,31 @@ describe("collectWorkbookStats", () => {
     expect(b.perSheet).toEqual([]);
     expect(b.topSheets).toEqual([]);
   });
+
+  it("counts number formats as displayed: style first, _fmt hidden by General not counted", () => {
+    const b = collectWorkbookStats(
+      JSON.stringify({
+        sheetOrder: ["s1"],
+        styles: {
+          gen: { n: { pattern: "General" } },
+          pct: { n: { pattern: "0.00%" } },
+          bold: { bl: 1 },
+        },
+        sheets: {
+          s1: {
+            cellData: {
+              "0": {
+                "0": { v: 1, s: "gen", _fmt: "0%" }, // 標準 hides the imported 0%
+                "1": { v: 2, s: "pct", _fmt: "#,##0" }, // style wins → 0.00%
+                "2": { v: 3, s: "bold", _fmt: "yyyy-mm-dd" }, // no style pattern → _fmt
+                "3": { v: 4, s: { n: { pattern: "0.0" } } }, // inline style pattern
+                "4": { v: 5, _fmt: "general" }, // General sidecar → no format
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(b.styles.uniqueNumberFormats).toBe(3); // 0.00% / yyyy-mm-dd / 0.0
+  });
 });

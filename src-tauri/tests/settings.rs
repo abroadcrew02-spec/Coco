@@ -57,6 +57,138 @@ fn delete_setting_on_missing_key_is_noop() {
     delete_setting_core(tmp.path(), "nonexistent").unwrap();
 }
 
+// ── #355: the generic settings surface must not touch `script_trust.*` ─────
+// (that's reserved for the dedicated script_trust_* commands — see
+// db::operations::SCRIPT_TRUST_KEY_PREFIX and commands::script_trust for the
+// full "why": a generic write path here would let a script grant itself
+// execution by writing its own "always trust" record.)
+
+#[test]
+fn set_setting_rejects_script_trust_prefixed_keys() {
+    let tmp = TempDir::new().unwrap();
+    let result = set_setting_core(
+        tmp.path(),
+        "script_trust.v1.deadbeef",
+        r#"{"v":1,"path":"C:\\evil.coco"}"#,
+    );
+    assert!(result.is_err(), "set_setting must reject a script_trust.* key");
+    // And the rejection must not have written anything.
+    assert_eq!(
+        get_setting_core(tmp.path(), "script_trust.v1.deadbeef").unwrap(),
+        None
+    );
+}
+
+#[test]
+fn delete_setting_rejects_script_trust_prefixed_keys() {
+    let tmp = TempDir::new().unwrap();
+    // Seed a row the normal way (bypassing the guard, as script_trust.rs's
+    // own commands do) so there's something a buggy delete_setting could
+    // have removed.
+    {
+        use rusqlite::Connection;
+        let conn = Connection::open(tmp.path().join("app_state.db")).unwrap();
+        nicel_lib::db::schema::initialize(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["script_trust.v1.deadbeef", "{}", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+    }
+    let result = delete_setting_core(tmp.path(), "script_trust.v1.deadbeef");
+    assert!(
+        result.is_err(),
+        "delete_setting must reject a script_trust.* key"
+    );
+}
+
+#[test]
+fn list_settings_never_returns_script_trust_prefixed_keys() {
+    let tmp = TempDir::new().unwrap();
+    set_setting_core(tmp.path(), "ordinary.setting", "1").unwrap();
+    // Seed a script_trust row directly (bypassing the guard) so we can prove
+    // list_settings excludes it even though it exists in the same table.
+    {
+        use rusqlite::Connection;
+        let conn = Connection::open(tmp.path().join("app_state.db")).unwrap();
+        nicel_lib::db::schema::initialize(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["script_trust.v1.deadbeef", "{}", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+    }
+    let entries = list_settings_core(tmp.path()).unwrap();
+    assert_eq!(entries.len(), 1, "only the ordinary setting should be listed");
+    assert_eq!(entries[0].key, "ordinary.setting");
+}
+
+// ── AZKi review follow-up: the guard/exclusion must be case-insensitive, and
+// the exclusion must not use SQL LIKE's wildcard semantics (a bare `_` in
+// "script_trust." would otherwise match any single character there, e.g.
+// "scriptXtrust.foo") ─────────────────────────────────────────────────────
+
+#[test]
+fn set_setting_rejects_script_trust_prefix_regardless_of_case() {
+    let tmp = TempDir::new().unwrap();
+    for key in [
+        "Script_Trust.v1.deadbeef",
+        "SCRIPT_TRUST.v1.deadbeef",
+        "ScRiPt_TrUsT.v1.deadbeef",
+    ] {
+        assert!(
+            set_setting_core(tmp.path(), key, "{}").is_err(),
+            "expected {key} to be rejected"
+        );
+    }
+}
+
+#[test]
+fn delete_setting_rejects_script_trust_prefix_regardless_of_case() {
+    let tmp = TempDir::new().unwrap();
+    assert!(delete_setting_core(tmp.path(), "Script_Trust.v1.deadbeef").is_err());
+}
+
+#[test]
+fn list_settings_excludes_script_trust_prefix_regardless_of_case() {
+    let tmp = TempDir::new().unwrap();
+    set_setting_core(tmp.path(), "ordinary.setting", "1").unwrap();
+    {
+        use rusqlite::Connection;
+        let conn = Connection::open(tmp.path().join("app_state.db")).unwrap();
+        nicel_lib::db::schema::initialize(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["Script_Trust.v1.deadbeef", "{}", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+    }
+    let entries = list_settings_core(tmp.path()).unwrap();
+    assert_eq!(
+        entries.len(),
+        1,
+        "the mixed-case script_trust row must still be excluded"
+    );
+    assert_eq!(entries[0].key, "ordinary.setting");
+}
+
+#[test]
+fn list_settings_does_not_over_match_a_key_containing_an_underscore_at_that_position() {
+    // Regression: SQL `LIKE 'script_trust.%'` treats the `_` as "any one
+    // character", so a key like "scriptXtrust.foo" used to be silently
+    // excluded from list_settings even though it isn't a script_trust key at
+    // all. The exact-substring comparison must not repeat that mistake.
+    let tmp = TempDir::new().unwrap();
+    set_setting_core(tmp.path(), "scriptXtrust.foo", "1").unwrap();
+    let entries = list_settings_core(tmp.path()).unwrap();
+    assert_eq!(
+        entries.len(),
+        1,
+        "a key that only LIKE's wildcard would match must still be listed"
+    );
+    assert_eq!(entries[0].key, "scriptXtrust.foo");
+}
+
 #[test]
 fn settings_are_isolated_between_data_dirs() {
     let tmp_a = TempDir::new().unwrap();

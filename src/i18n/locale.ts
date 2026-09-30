@@ -419,6 +419,45 @@ const jaJP = {
   "ribbon.menu.color.more": "その他の色...",
   "ribbon.formulaBar.label": "数式バー",
   "ribbon.formulaBar.placeholder": "値または数式を入力",
+  // #355 — trust banner for content that runs by itself (scripts and
+  // auto-refreshing data connections)
+  "scriptTrust.banner.regionLabel": "自動で動く内容の確認",
+  "scriptTrust.banner.message": "このブックには自動で動く内容があります",
+  "scriptTrust.banner.summary": "スクリプト {0} 件・自動更新 {1} 件があります",
+  "scriptTrust.banner.changedNotice":
+    "前回信頼した時から内容が変わったため、もう一度確認しています",
+  "scriptTrust.banner.unavailable":
+    "自動で動く内容を確認できなかったため、止めたままにしています。ブックを開き直してください",
+  "scriptTrust.banner.enableButton": "有効にする",
+  "scriptTrust.banner.dismissAriaLabel": "このバナーを閉じる",
+  "scriptTrust.banner.firstRunNotice": "このバージョンから、開いただけではスクリプトは実行されません",
+  "scriptTrust.choice.groupLabel": "有効にする範囲",
+  "scriptTrust.choice.sessionOnly.label": "今回だけ有効にする",
+  "scriptTrust.choice.sessionOnly.description":
+    "このブックを閉じるまでの間だけ、スクリプトと自動更新を実行します",
+  "scriptTrust.choice.alwaysTrust.label": "このブックを常に信頼する",
+  "scriptTrust.choice.alwaysTrust.description":
+    "このファイルのこの内容に限り、次からもスクリプトと自動更新を自動で実行します",
+  "scriptTrust.choice.alwaysTrust.noticeA":
+    "信頼したスクリプトや自動更新は、外部との通信や、保存済みの資格情報を使った読み込みを行うことがあります",
+  "scriptTrust.choice.trustSourceHint": "作成元を信頼できるブックだけ有効にしてください",
+  "scriptTrust.choice.alwaysTrust.disabledTooltip":
+    "保存前のブックはファイルを特定できないため、常に信頼できません",
+  "scriptTrust.error.enableFailed":
+    "有効にできませんでした。ブックを開き直してから、もう一度お試しください",
+  "scriptTrust.notice.alwaysDegraded":
+    "今回だけ有効にしました。設定を保存できなかったため、次に開いた時にもう一度確認します",
+  // #355 — Settings: trusted workbooks
+  "settings.section.trustedWorkbooks": "信頼したブック",
+  "settings.trustedWorkbooks.description": "スクリプトや自動更新を常に許可したブックの一覧です",
+  "settings.trustedWorkbooks.empty": "信頼したブックはありません",
+  "settings.trustedWorkbooks.loading": "読み込み中...",
+  "settings.trustedWorkbooks.loadFailed": "一覧を読み込めませんでした",
+  "settings.trustedWorkbooks.trustedAt": "信頼した日時: {0}",
+  "settings.trustedWorkbooks.revokeButton": "取り消す",
+  "settings.trustedWorkbooks.revokeFailed": "取り消せませんでした。もう一度お試しください",
+  "settings.trustedWorkbooks.revokeHint": "取り消すと、開いているブックでもすぐに止まります",
+  "toast.trustedWorkbooks.revoked": "信頼を取り消しました。開いているブックでもすぐに止まります",
 } as const;
 
 export type StringKey = keyof typeof jaJP;
@@ -806,6 +845,47 @@ const enUS: Record<StringKey, string> = {
   "ribbon.menu.color.more": "More Colors...",
   "ribbon.formulaBar.label": "Formula bar",
   "ribbon.formulaBar.placeholder": "Enter a value or formula",
+  // #355 — trust banner
+  "scriptTrust.banner.regionLabel": "Content that runs automatically",
+  "scriptTrust.banner.message": "This workbook contains content that runs automatically.",
+  "scriptTrust.banner.summary": "{0} script(s), {1} auto-refresh connection(s)",
+  "scriptTrust.banner.changedNotice":
+    "The content has changed since it was trusted, so please confirm again.",
+  "scriptTrust.banner.unavailable":
+    "Couldn't check the content that runs automatically, so it stays off. Reopen the workbook.",
+  "scriptTrust.banner.enableButton": "Enable",
+  "scriptTrust.banner.dismissAriaLabel": "Dismiss this banner",
+  "scriptTrust.banner.firstRunNotice":
+    "Starting with this version, scripts no longer run just by opening a workbook.",
+  "scriptTrust.choice.groupLabel": "How to enable",
+  "scriptTrust.choice.sessionOnly.label": "Enable for this session only",
+  "scriptTrust.choice.sessionOnly.description":
+    "Runs scripts and auto-refresh connections only until you close this workbook.",
+  "scriptTrust.choice.alwaysTrust.label": "Always trust this workbook",
+  "scriptTrust.choice.alwaysTrust.description":
+    "Runs scripts and auto-refresh connections automatically next time, for this exact file and content only.",
+  "scriptTrust.choice.alwaysTrust.noticeA":
+    "A trusted script or connection may communicate externally, including with saved credentials.",
+  "scriptTrust.choice.trustSourceHint": "Enable scripts only in workbooks whose author you trust.",
+  "scriptTrust.choice.alwaysTrust.disabledTooltip":
+    "This workbook can't always be trusted yet because it hasn't been saved to a file.",
+  "scriptTrust.error.enableFailed": "Couldn't enable it. Reopen the workbook and try again.",
+  "scriptTrust.notice.alwaysDegraded":
+    "Enabled for this session only. The setting couldn't be saved, so you'll be asked again next time.",
+  // #355 — Settings: trusted workbooks
+  "settings.section.trustedWorkbooks": "Trusted workbooks",
+  "settings.trustedWorkbooks.description":
+    "Workbooks you've allowed to always run their scripts or auto-refresh connections.",
+  "settings.trustedWorkbooks.empty": "No trusted workbooks yet.",
+  "settings.trustedWorkbooks.loading": "Loading...",
+  "settings.trustedWorkbooks.loadFailed": "Couldn't load the list.",
+  "settings.trustedWorkbooks.trustedAt": "Trusted: {0}",
+  "settings.trustedWorkbooks.revokeButton": "Revoke",
+  "settings.trustedWorkbooks.revokeFailed": "Couldn't revoke trust. Try again.",
+  "settings.trustedWorkbooks.revokeHint":
+    "Revoking takes effect immediately, even in a workbook that is open.",
+  "toast.trustedWorkbooks.revoked":
+    "Trust revoked. It stops right away, even in a workbook that is open.",
 };
 
 export const strings: Record<Locale, Record<StringKey, string>> = {

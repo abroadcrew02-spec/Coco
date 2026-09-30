@@ -4,7 +4,7 @@ All notable changes to Nicel (formerly Coco) are documented in this file. The fo
 
 ## [Unreleased]
 
-## [0.8.5] - YYYY-MM-DD
+## [0.8.5] - 2026-09-30
 
 Patch release. Workbook scripts and scheduled data connections now wait for an explicit trust grant, number formats set in Nicel render immediately, and xlsx / CSV export follows the same number-format rule as the grid. Delivered to v0.8.4 users through the auto-updater.
 

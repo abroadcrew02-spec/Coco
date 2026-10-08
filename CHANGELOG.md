@@ -7,6 +7,16 @@ All notable changes to Nicel (formerly Coco) are documented in this file. The fo
 ### Added
 
 - **Open Excel 97-2003 workbooks (`.xls`)** (#417). Values, formulas, dates, sheet names and workbook-level defined names are read; formatting, merged cells, column widths, comments, images and macros are not. Functions added after Excel 2003 (IFERROR, SUMIFS, COUNTIFS and others Nicel can calculate) stay live formulas; shared formulas, references to a range of sheets (`'Jan:Mar'!B2`) and functions Nicel cannot calculate keep Excel's last result as a value, and the banner counts them. A workbook with more cells than Nicel loads is refused with a "too large to open" message. The file is never modified: Ctrl+S always opens Save As and saves a new `.xlsx`, and a warning banner says so. Home, Ctrl+O, the menu, drag-and-drop and Recent files all accept `.xls`. A file named `.xls` whose content is not a workbook (an HTML export, XML Spreadsheet 2003) or a password-protected file is rejected with a message and the open workbook stays as it was. Save also now overwrites in place only for `.xlsx` and `.coco`; every other extension goes through Save As.
+- **Nicel appears in Windows "Open with" for .xlsx, .xlsm, .xls, .csv and .tsv** (#418). The installer registers Nicel as a candidate without changing the default app, so double-clicking a workbook still opens the app chosen before (for example Excel). Opening a file this way starts a new Nicel window with the file in the editor; windows that are already open are left as they are, as Excel does with a second workbook. Selecting several files opens one window per file. Uninstalling removes the registration and leaves other apps' entries untouched.
+
+### Changed
+
+- **Starting an update always asks first** (#418). The Windows installer closes every open Nicel window while it updates, so the confirmation now says so and asks to save unsaved changes in other windows first. It appears even when the current window has no unsaved changes.
+
+### Known issues
+
+- After an automatic update, Nicel restarts with the command line of the window that started the update. If that window was opened from a file, the file is opened again from disk (nothing is written; a file that no longer exists leaves Nicel on the home screen). Other windows do not come back (#418).
+- The same file can be open in two windows. Saving in both keeps whichever was saved last; there is no "already open" notice yet.
 
 ## [0.8.5] - 2026-09-30
 

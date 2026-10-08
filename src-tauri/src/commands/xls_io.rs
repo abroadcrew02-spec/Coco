@@ -17,6 +17,13 @@
 //!   the original `.xls` path and always requires Save As (the save path then
 //!   writes `.xlsx`, never the original file).
 //! - Parser panics are caught and turned into `XLS_CORRUPT: parser panic`.
+//!   This relies on unwinding: setting `panic = "abort"` in a Cargo profile
+//!   would make every `catch_unwind` here a no-op and let a crafted file
+//!   close the app.
+//! - Allocation is bounded twice: the reader refuses a workbook whose cell
+//!   ranges together exceed `MAX_WORKBOOK_CELLS` (vendor `xls.rs`), and the
+//!   snapshot stops at `XLS_MAX_CELLS` cells. Both return
+//!   `XLS_TOO_MANY_CELLS`.
 
 use std::any::Any;
 use std::collections::{BTreeMap, HashSet};
@@ -43,15 +50,22 @@ const ZIP_MAGIC: [u8; 4] = [0x50, 0x4B, 0x03, 0x04];
 const SNIFF_WINDOW: usize = 4096;
 /// Days between the 1904 and 1900 date systems.
 const DAYS_1904_TO_1900: f64 = 1462.0;
+/// Cells written into the snapshot for the whole workbook. Same value as
+/// `CSV_MAX_CELLS` (csv_io.rs) and `JSON_MAX_CELLS` (data_connection.rs), the
+/// other imports that build a snapshot from a file.
+pub const XLS_MAX_CELLS: usize = 5_000_000;
 
 // Warning and error codes. The frontend (`src/store/errorMessages.ts`)
-// translates errors by these prefixes. `XLS_PASSWORD_PROTECTED` and
-// `XLS_NO_WORKSHEETS` are returned as-is; every other error is
-// `"<CODE>: <detail>"`.
+// translates errors by these prefixes. `XLS_PASSWORD_PROTECTED`,
+// `XLS_NO_WORKSHEETS` and `XLS_TOO_MANY_CELLS` are returned as-is; every
+// other error is `"<CODE>: <detail>"`.
 pub const XLS_LEGACY_FORMAT: &str = "XLS_LEGACY_FORMAT";
 pub const XLS_NOT_EXCEL97: &str = "XLS_NOT_EXCEL97";
 pub const XLS_PASSWORD_PROTECTED: &str = "XLS_PASSWORD_PROTECTED";
 pub const XLS_TOO_LARGE: &str = "XLS_TOO_LARGE";
+/// The file is within the size limit but holds more cells than Nicel loads.
+/// Not a damaged file, so it is kept apart from `XLS_CORRUPT`.
+pub const XLS_TOO_MANY_CELLS: &str = "XLS_TOO_MANY_CELLS";
 pub const XLS_CORRUPT: &str = "XLS_CORRUPT";
 pub const XLS_NO_WORKSHEETS: &str = "XLS_NO_WORKSHEETS";
 pub const XLS_READ_FAILED: &str = "XLS_READ_FAILED";
@@ -182,7 +196,8 @@ fn sniff(bytes: &[u8]) -> Sniffed {
         }
         return Sniffed::NotExcel97("html");
     }
-    if lower.starts_with('<') {
+    // "Single File Web Page" (.mht) saved by Excel starts with MIME headers.
+    if lower.starts_with('<') || lower.starts_with("mime-version:") {
         return Sniffed::NotExcel97("html");
     }
     let is_text = text
@@ -234,7 +249,7 @@ fn import_ole_inner(bytes: Vec<u8>) -> Result<ImportWorkbookResult, String> {
     let workbook_id = uuid::Uuid::new_v4().to_string();
     let mut wb: Xls<_> = Xls::new(Cursor::new(bytes)).map_err(map_xls_error)?;
     let mut counters = OleCounters {
-        has_vba: wb.vba_project().is_some(),
+        has_vba: wb.has_vba_project(),
         ..Default::default()
     };
 
@@ -251,16 +266,22 @@ fn import_ole_inner(bytes: Vec<u8>) -> Result<ImportWorkbookResult, String> {
     let mut sheet_order: Vec<String> = Vec::new();
     let mut sheets_map: Map<String, Value> = Map::new();
     let mut seen_names: HashSet<String> = HashSet::new();
+    // Cells written for earlier sheets, checked against XLS_MAX_CELLS.
+    let mut cells_before: usize = 0;
 
     for (name, typ, visible) in metadata {
         if typ != SheetType::WorkSheet || !seen_names.insert(name.clone()) {
             counters.skipped_sheets += 1;
             continue;
         }
-        let range = wb
-            .worksheet_range(&name)
-            .map_err(|e| format!("{XLS_CORRUPT}: {e}"))?;
-        let formulas = wb.worksheet_formula(&name).ok();
+        // Moved out of the reader rather than cloned: a full-size sheet takes
+        // hundreds of megabytes.
+        let (range, formulas) = wb.take_worksheet(&name).ok_or_else(|| {
+            format!(
+                "{XLS_CORRUPT}: {}",
+                XlsError::WorksheetNotFound(name.clone())
+            )
+        })?;
 
         // Keys are absolute (row, col). Values and formulas each use their own
         // range's start: the two ranges usually begin at different cells.
@@ -269,33 +290,34 @@ fn import_ole_inner(bytes: Vec<u8>) -> Result<ImportWorkbookResult, String> {
             for (r, c, v) in range.used_cells() {
                 if let Some(Value::Object(obj)) = xls_value_to_cell(v) {
                     cells.insert((r0 + r as u32, c0 + c as u32), obj);
+                    check_cell_cap(cells_before + cells.len())?;
                 }
             }
         }
         let mut sheet_affected = false;
-        if let Some(fr) = formulas.as_ref() {
-            if let Some((r0, c0)) = fr.start() {
-                for (r, c, f) in fr.used_cells() {
-                    if f.is_empty() {
-                        continue;
-                    }
-                    let pos = (r0 + r as u32, c0 + c as u32);
-                    if is_unusable_formula(f) {
-                        // Keep Excel's cached value; the formula is lost.
-                        counters.formulas_as_values += 1;
-                        sheet_affected = true;
-                        continue;
-                    }
-                    cells
-                        .entry(pos)
-                        .or_default()
-                        .insert("f".into(), Value::String(format!("={f}")));
+        if let Some((r0, c0)) = formulas.start() {
+            for (r, c, f) in formulas.used_cells() {
+                if f.is_empty() {
+                    continue;
                 }
+                let pos = (r0 + r as u32, c0 + c as u32);
+                if is_unusable_formula(f) {
+                    // Keep Excel's cached value; the formula is lost.
+                    counters.formulas_as_values += 1;
+                    sheet_affected = true;
+                    continue;
+                }
+                cells
+                    .entry(pos)
+                    .or_default()
+                    .insert("f".into(), Value::String(format!("={f}")));
+                check_cell_cap(cells_before + cells.len())?;
             }
         }
         if sheet_affected {
             counters.affected_sheets.push(name.clone());
         }
+        cells_before += cells.len();
 
         let sheet_id = format!("sheet-{}", sheet_order.len() + 1);
         let sheet_obj = build_sheet(&sheet_id, &name, visible, cells);
@@ -329,6 +351,16 @@ fn import_ole_inner(bytes: Vec<u8>) -> Result<ImportWorkbookResult, String> {
         },
         warnings: vec![legacy_warning_ole(&counters)],
     })
+}
+
+/// `XLS_TOO_MANY_CELLS` once the snapshot would hold more than
+/// `XLS_MAX_CELLS` cells.
+fn check_cell_cap(cells: usize) -> Result<(), String> {
+    if cells > XLS_MAX_CELLS {
+        Err(XLS_TOO_MANY_CELLS.to_string())
+    } else {
+        Ok(())
+    }
 }
 
 fn build_sheet(
@@ -371,14 +403,16 @@ fn build_sheet(
 /// Workbook-level defined names in the xlsx import shape
 /// (`{ "name", "formula" }`, no leading `=`). Built-in names (Print_Area,
 /// _FilterDatabase, ...) arrive as a one-character control code and are left
-/// out without counting. Names that cannot be used (unsupported or external
+/// out without counting, as are the hidden `_xlfn.*` names Excel adds for each
+/// function newer than BIFF8 (they only carry the function's name for the
+/// formula decoder). Names that cannot be used (unsupported or external
 /// references) and case-insensitive duplicates (sheet-scoped names flattened
 /// to workbook scope; the first one wins) are counted in `dropped`.
 fn collect_defined_names(names: &[(String, String)], dropped: &mut usize) -> Vec<Value> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut out = Vec::new();
     for (name, formula) in names {
-        if name.trim().is_empty() || name.chars().any(|c| c.is_control()) {
+        if name.trim().is_empty() || name.chars().any(|c| c.is_control()) || is_xlfn_name(name) {
             continue;
         }
         if formula.trim().is_empty() || is_unusable_formula(formula) {
@@ -392,6 +426,11 @@ fn collect_defined_names(names: &[(String, String)], dropped: &mut usize) -> Vec
         out.push(json!({ "name": name, "formula": formula }));
     }
     out
+}
+
+fn is_xlfn_name(name: &str) -> bool {
+    name.get(..6)
+        .map_or(false, |p| p.eq_ignore_ascii_case("_xlfn."))
 }
 
 /// Text calamine produces for formulas it could not decode, or references it
@@ -456,9 +495,11 @@ fn xls_value_to_cell(v: &Data) -> Option<Value> {
             // Nicel works in the 1900 date system; shift 1904-system dates so
             // they show (and save) as the same calendar day. Durations are
             // lengths of time and need no shift.
+            // A serial below 1 is a time of day without a date: it reads the
+            // same in both systems and must not turn into 1904-01-01.
             // Known gap: a formula's cached value never carries a date format
             // in calamine, so a 1904 date produced by a formula is not shifted.
-            if is_1904 && !is_duration {
+            if is_1904 && !is_duration && serial >= 1.0 {
                 serial += DAYS_1904_TO_1900;
             }
             Some(json!({ "v": serial, "_fmt": default_date_format(serial, is_duration) }))
@@ -502,6 +543,10 @@ fn default_date_format(serial: f64, is_duration: bool) -> &'static str {
 fn map_xls_error(e: XlsError) -> String {
     match e {
         XlsError::Password => XLS_PASSWORD_PROTECTED.to_string(),
+        XlsError::TooManyCells { found, limit } => {
+            log::warn!("xls refused: cell ranges need {found} cells (limit {limit})");
+            XLS_TOO_MANY_CELLS.to_string()
+        }
         other => format!("{XLS_CORRUPT}: {other}"),
     }
 }
@@ -699,6 +744,49 @@ mod tests {
     }
 
     #[test]
+    fn time_only_1904_value_is_not_shifted() {
+        use ExcelDateTimeType::DateTime;
+        // 12:30 typed into a 1904-system workbook.
+        let t = xls_value_to_cell(&Data::DateTime(ExcelDateTime::new(
+            0.5208333333333334,
+            DateTime,
+            true,
+        )))
+        .unwrap();
+        assert_eq!(t["v"], json!(0.5208333333333334));
+        assert_eq!(t["_fmt"], json!("h:mm:ss"));
+        // Serial 1 is a date (1904-01-02) and is shifted.
+        let d =
+            xls_value_to_cell(&Data::DateTime(ExcelDateTime::new(1.0, DateTime, true))).unwrap();
+        assert_eq!(d["v"], json!(1463.0));
+    }
+
+    #[test]
+    fn sniff_names_mht_as_html() {
+        let mht = b"MIME-Version: 1.0\r\nX-Document-Type: Workbook\r\nContent-Type: multipart/related; boundary=\"----=_NextPart\"\r\n";
+        assert_eq!(sniff(mht), Sniffed::NotExcel97("html"));
+        assert_eq!(sniff(b"mime-version: 1.0\n"), Sniffed::NotExcel97("html"));
+    }
+
+    #[test]
+    fn snapshot_cell_cap_allows_the_limit_and_refuses_one_more() {
+        assert_eq!(check_cell_cap(XLS_MAX_CELLS), Ok(()));
+        assert_eq!(
+            check_cell_cap(XLS_MAX_CELLS + 1),
+            Err("XLS_TOO_MANY_CELLS".to_string())
+        );
+    }
+
+    #[test]
+    fn too_many_cells_maps_to_its_own_exact_code() {
+        let e = XlsError::TooManyCells {
+            found: (1 << 25) + 1,
+            limit: 1 << 25,
+        };
+        assert_eq!(map_xls_error(e), "XLS_TOO_MANY_CELLS");
+    }
+
+    #[test]
     fn unusable_formulas() {
         assert!(is_unusable_formula(
             "Unrecognised formula for cell (2, 10): Unrecognized { typ: \"ptg\", val: 1 }"
@@ -723,6 +811,15 @@ mod tests {
             ("Total".to_string(), "売上!$B$4".to_string()),
             ("TOTAL".to_string(), "集計!$A$1".to_string()),
             ("空".to_string(), "".to_string()),
+            // Hidden names for post-2003 functions: neither kept nor counted.
+            (
+                "_xlfn.IFERROR".to_string(),
+                "Unsupported ptg: 1c".to_string(),
+            ),
+            (
+                "_XLFN.SUMIFS".to_string(),
+                "Unsupported ptg: 1c".to_string(),
+            ),
         ];
         let mut dropped = 0;
         let out = collect_defined_names(&names, &mut dropped);

@@ -1,7 +1,8 @@
 //! .xls (Excel 97-2003) import.
 //!
 //! Fixtures in tests/fixtures/xls/ are produced by Excel itself through
-//! tests/fixtures/xls/make_fixtures.ps1 (SaveAs FileFormat 56). Corrupted
+//! tests/fixtures/xls/make_fixtures.ps1 and make_more_fixtures.ps1 (SaveAs
+//! FileFormat 56). Corrupted
 //! variants are made inside the tests by patching record bytes of basic.xls;
 //! every patch asserts that it found its target so a test cannot pass by
 //! patching nothing.
@@ -615,6 +616,7 @@ fn huge_shared_string_count_is_corrupt() {
     bytes[off + 8..off + 12].copy_from_slice(&0x7FFF_FFFFu32.to_le_bytes());
     let err = import_bytes("sst.xls", &bytes).unwrap_err();
     assert!(err.starts_with("XLS_CORRUPT:"), "{err}");
+    assert_ne!(err, "XLS_CORRUPT: parser panic", "guard did not fire");
 }
 
 #[test]
@@ -642,7 +644,10 @@ fn huge_stream_length_in_directory_does_not_crash() {
     bytes[entry + 120..entry + 124].copy_from_slice(&u32::MAX.to_le_bytes());
     match import_bytes("dir.xls", &bytes) {
         Ok(r) => assert_eq!(legacy_count(&r), 1),
-        Err(e) => assert!(e.starts_with("XLS_CORRUPT:"), "{e}"),
+        Err(e) => {
+            assert!(e.starts_with("XLS_CORRUPT:"), "{e}");
+            assert_ne!(e, "XLS_CORRUPT: parser panic", "guard did not fire");
+        }
     }
 }
 
@@ -654,4 +659,218 @@ fn sector_id_past_end_of_file_is_corrupt() {
     let err = import_bytes("sector.xls", &bytes).unwrap_err();
     assert!(err.starts_with("XLS_CORRUPT:"), "{err}");
     assert_ne!(err, "XLS_CORRUPT: parser panic");
+}
+
+// ── Formula decoding, second round (columns.xls, span3d.xls, new_functions.xls) ──
+
+#[test]
+fn columns_past_z_keep_both_letters() {
+    let r = import_xls_core(path_str(&fixture("columns.xls"))).unwrap();
+    let snap = snapshot(&r);
+    let s = sheet(&snap, "Data");
+    // (row, col, formula, Excel's cached value)
+    let expect = [
+        (2, 0, "=AA1", 2.0),
+        (3, 0, "=IV1", 5.0),
+        (4, 0, "=$AA$1", 2.0),
+        (5, 0, "=SUM(Z1:AB1)", 6.0),
+        (6, 0, "=Z1", 1.0),
+        (9, 0, "=ABS(-Z1)", 1.0),
+    ];
+    for (row, col, f, v) in expect {
+        assert_eq!(cell(s, row, col)["f"], json!(f), "({row},{col})");
+        assert_eq!(cell(s, row, col)["v"].as_f64(), Some(v), "({row},{col})");
+    }
+    assert_eq!(cell(s, 0, 255)["v"].as_f64(), Some(5.0), "IV1 itself");
+    assert_eq!(r.warnings.len(), 1);
+    assert_eq!(r.warnings[0].message, LEGACY_BASE);
+}
+
+#[test]
+fn quotes_inside_string_literals_are_doubled() {
+    let r = import_xls_core(path_str(&fixture("columns.xls"))).unwrap();
+    let snap = snapshot(&r);
+    let s = sheet(&snap, "Data");
+    assert_eq!(cell(s, 7, 0)["f"], json!("=\"say \"\"hi\"\"\""));
+    assert_eq!(cell(s, 7, 0)["v"], json!("say \"hi\""));
+    assert_eq!(cell(s, 8, 0)["f"], json!("=A8&\"\"\"\""));
+    assert_eq!(cell(s, 8, 0)["v"], json!("say \"hi\"\""));
+}
+
+#[test]
+fn sheet_span_reference_keeps_the_value_and_is_reported() {
+    let r = import_xls_core(path_str(&fixture("span3d.xls"))).unwrap();
+    let snap = snapshot(&r);
+    let t = sheet(&snap, "集計");
+    // =SUM('1月:3月'!B2): Excel's 60 stays, without a formula that would
+    // read only one of the three sheets.
+    assert_eq!(cell(t, 0, 0)["v"].as_f64(), Some(60.0));
+    assert!(cell(t, 0, 0).get("f").is_none(), "{}", cell(t, 0, 0));
+    // A reference to a single sheet still resolves.
+    assert_eq!(cell(t, 1, 0)["f"], json!("='2月'!B2"));
+    assert_eq!(cell(t, 1, 0)["v"].as_f64(), Some(20.0));
+    // The span name is dropped, the single-sheet one kept.
+    assert_eq!(
+        snap["namedRanges"],
+        json!([{ "name": "Feb", "formula": "'2月'!$B$2" }])
+    );
+    let w = &r.warnings[0];
+    assert_eq!(r.warnings.len(), 1);
+    assert!(w.message.contains("読み取れない数式 1 個"), "{}", w.message);
+    assert!(
+        w.message.contains("定義名 1 個は読み込めませんでした"),
+        "{}",
+        w.message
+    );
+    assert_eq!(w.affected_sheets, Some(vec!["集計".to_string()]));
+}
+
+#[test]
+fn post_2003_functions_stay_live_formulas() {
+    let r = import_xls_core(path_str(&fixture("new_functions.xls"))).unwrap();
+    let snap = snapshot(&r);
+    let s = sheet(&snap, "S");
+    // A1=1, A2=2, B1="a", B2="b". Each cached value is what the formula
+    // computes from those inputs.
+    assert_eq!(cell(s, 0, 2)["f"], json!("=IFERROR(1/0,\"x\")"));
+    assert_eq!(cell(s, 0, 2)["v"], json!("x"));
+    assert_eq!(cell(s, 1, 2)["f"], json!("=SUMIFS(A1:A2,B1:B2,\"a\")"));
+    assert_eq!(cell(s, 1, 2)["v"].as_f64(), Some(1.0));
+    assert_eq!(cell(s, 2, 2)["f"], json!("=COUNTIFS(B1:B2,\"b\")"));
+    assert_eq!(cell(s, 2, 2)["v"].as_f64(), Some(1.0));
+    assert_eq!(cell(s, 3, 2)["f"], json!("=IFERROR(A1/A2,0)+1"));
+    assert_eq!(cell(s, 3, 2)["v"].as_f64(), Some(1.5));
+    // FILTERXML is not evaluated by Nicel: value only, and counted.
+    assert!(cell(s, 4, 2).get("f").is_none(), "{}", cell(s, 4, 2));
+    assert!(!cell(s, 4, 2)["v"].is_null(), "cached value kept");
+
+    // The hidden _xlfn.* names are neither imported nor counted as dropped.
+    assert_eq!(snap["namedRanges"], json!([]));
+    let w = &r.warnings[0];
+    assert_eq!(r.warnings.len(), 1);
+    assert_eq!(
+        w.message,
+        format!("{LEGACY_BASE}読み取れない数式 1 個は計算結果の値で読み込みました。これらのセルは、元になるセルを変えても再計算されません。")
+    );
+    assert_eq!(w.affected_sheets, Some(vec!["S".to_string()]));
+}
+
+#[test]
+fn a_user_function_that_is_not_xlfn_keeps_its_value() {
+    // Rename the hidden name behind C5 so the call looks like a VBA or
+    // add-in function (User(MyFunc..., ...)) rather than a post-2003 one.
+    let mut bytes = fixture_bytes("new_functions.xls");
+    let at = find(&bytes, b"_xlfn.FILTERXML").expect("_xlfn.FILTERXML name not found");
+    assert!(
+        find(&bytes[at + 1..], b"_xlfn.FILTERXML").is_none(),
+        "name found twice"
+    );
+    bytes[at..at + 6].copy_from_slice(b"MyFunc");
+    let r = import_bytes("udf.xls", &bytes).unwrap();
+    let snap = snapshot(&r);
+    let s = sheet(&snap, "S");
+    assert!(cell(s, 4, 2).get("f").is_none(), "{}", cell(s, 4, 2));
+    assert!(!cell(s, 4, 2)["v"].is_null());
+    assert_eq!(cell(s, 0, 2)["f"], json!("=IFERROR(1/0,\"x\")"));
+    assert!(r.warnings[0].message.contains("読み取れない数式 1 個"));
+}
+
+#[test]
+fn function_index_at_the_table_end_is_unreadable_not_a_panic() {
+    // =ABS(-Z1) is PtgFuncV (0x41) with iftab 24; 485 is one past FTAB.
+    let mut bytes = fixture_bytes("columns.xls");
+    let at = find(&bytes, &[0x41, 0x18, 0x00]).expect("PtgFuncV ABS not found");
+    bytes[at + 1..at + 3].copy_from_slice(&485u16.to_le_bytes());
+    let r = import_bytes("iftab.xls", &bytes).unwrap();
+    let snap = snapshot(&r);
+    let s = sheet(&snap, "Data");
+    assert!(cell(s, 9, 0).get("f").is_none(), "{}", cell(s, 9, 0));
+    assert_eq!(cell(s, 9, 0)["v"].as_f64(), Some(1.0));
+    assert!(r.warnings[0].message.contains("読み取れない数式 1 個"));
+}
+
+// ── Macros: presence only ────────────────────────────────────────────────────
+
+#[test]
+fn vba_storage_is_detected_without_being_parsed() {
+    // Rename the "\u{5}SummaryInformation" directory entry to _VBA_PROJECT_CUR.
+    // It then holds none of the streams a VBA project needs, so parsing it
+    // would fail; an Ok result shows that it is only detected.
+    let mut bytes = fixture_bytes("basic.xls");
+    let old: Vec<u8> = "\u{5}SummaryInformation"
+        .encode_utf16()
+        .flat_map(|u| u.to_le_bytes())
+        .collect();
+    let entry = (0..bytes.len().saturating_sub(128))
+        .find(|&i| bytes[i..].starts_with(&old) && read_u16(&bytes, i + 64) == 40)
+        .expect("SummaryInformation directory entry not found");
+    let new: Vec<u8> = "_VBA_PROJECT_CUR"
+        .encode_utf16()
+        .flat_map(|u| u.to_le_bytes())
+        .collect();
+    bytes[entry..entry + 64].fill(0);
+    bytes[entry..entry + new.len()].copy_from_slice(&new);
+    bytes[entry + 64..entry + 66].copy_from_slice(&((new.len() + 2) as u16).to_le_bytes());
+    let r = import_bytes("macro.xls", &bytes).unwrap();
+    assert_eq!(r.warnings.len(), 1);
+    assert!(
+        r.warnings[0]
+            .message
+            .ends_with("マクロは読み込まれません。"),
+        "{}",
+        r.warnings[0].message
+    );
+}
+
+// ── Cell budget (XLS_TOO_MANY_CELLS) ─────────────────────────────────────────
+
+/// Offsets of every BOUNDSHEET record in the workbook globals.
+fn boundsheets(bytes: &[u8]) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut off = find(bytes, &BOF_GLOBALS).expect("globals BOF not found");
+    while off + 4 <= bytes.len() {
+        let typ = read_u16(bytes, off);
+        if typ == 0x0085 {
+            out.push(off);
+        }
+        if typ == 0x000A {
+            break;
+        }
+        off += 4 + read_u16(bytes, off + 2) as usize;
+    }
+    out
+}
+
+#[test]
+fn one_full_size_sheet_opens() {
+    // "Big" has values in A1 and IV65536: the largest range BIFF8 allows.
+    let r = import_xls_core(path_str(&fixture("corner.xls"))).unwrap();
+    let snap = snapshot(&r);
+    let b = sheet(&snap, "Big");
+    assert_eq!(cell(b, 0, 0)["v"].as_f64(), Some(1.0));
+    assert_eq!(cell(b, 65535, 255)["v"].as_f64(), Some(2.0));
+    assert_eq!(b["rowCount"], json!(65536));
+    assert_eq!(b["columnCount"], json!(256));
+    assert_eq!(cell(sheet(&snap, "S3"), 0, 0)["v"].as_f64(), Some(4.0));
+}
+
+#[test]
+fn several_full_size_sheets_are_refused_as_too_large() {
+    let err = import_xls_core(path_str(&fixture("corners3.xls"))).unwrap_err();
+    assert_eq!(err, "XLS_TOO_MANY_CELLS");
+}
+
+#[test]
+fn boundsheets_pointing_at_one_large_sheet_are_refused() {
+    let mut bytes = fixture_bytes("corner.xls");
+    let sheets = boundsheets(&bytes);
+    assert_eq!(sheets.len(), 3, "Big, S2, S3");
+    // Without the patch the file opens (one_full_size_sheet_opens). Now the
+    // lbPlyPos of S2 and S3 point at Big's substream.
+    let big_pos = bytes[sheets[0] + 4..sheets[0] + 8].to_vec();
+    for &s in &sheets[1..] {
+        bytes[s + 4..s + 8].copy_from_slice(&big_pos);
+    }
+    let err = import_bytes("dup.xls", &bytes).unwrap_err();
+    assert_eq!(err, "XLS_TOO_MANY_CELLS");
 }

@@ -256,6 +256,12 @@ fn error_strings_match_the_table_the_frontend_translates() {
 
     let missing = import_xls_core(path_str(&dir.path().join("nope.xls"))).unwrap_err();
     assert!(missing.starts_with("XLS_READ_FAILED: "), "{missing}");
+
+    // Exact code, no tail: three sheets each using A1:IV65536.
+    assert_eq!(
+        import_xls_core(path_str(&fixture("corners3.xls"))).unwrap_err(),
+        "XLS_TOO_MANY_CELLS"
+    );
 }
 
 // ── Chart sheets (skipped_sheets / XLS_NO_WORKSHEETS) ───────────────────────

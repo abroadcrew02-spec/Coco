@@ -29,6 +29,7 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 calamine = "0.24"
+calamine_xls = { package = "nicel-calamine-xls", path = "vendor/calamine-xls" }
 rust_xlsxwriter = "0.77"
 csv = "1.3"
 encoding_rs = "0.8"

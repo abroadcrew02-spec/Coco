@@ -1,0 +1,56 @@
+[package]
+edition = "2021"
+name = "nicel-calamine-xls"
+version = "0.24.0"
+authors = ["Johann Tuffe <tafia973@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/tafia/calamine"
+publish = false
+description = "calamine 0.24.0 with BIFF8 formula decoding and allocation-bound fixes, used only for .xls import (see NICEL_PATCH.md)"
+
+[lib]
+name = "calamine_xls"
+path = "src/lib.rs"
+doctest = false
+
+[dependencies.byteorder]
+version = "1.4"
+
+[dependencies.chrono]
+version = "0.4"
+features = ["serde"]
+optional = true
+default-features = false
+
+[dependencies.codepage]
+version = "0.1.1"
+
+[dependencies.encoding_rs]
+version = "0.8"
+
+[dependencies.log]
+version = "0.4"
+
+[dependencies.once_cell]
+version = "1.18"
+optional = true
+
+[dependencies.quick-xml]
+version = "0.31"
+features = ["encoding"]
+
+[dependencies.serde]
+version = "1.0"
+
+[dependencies.zip]
+version = "0.6"
+features = ["deflate"]
+default-features = false
+
+[features]
+dates = [
+    "chrono",
+    "once_cell",
+]
+default = []
+picture = []

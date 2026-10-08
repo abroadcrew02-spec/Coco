@@ -123,6 +123,103 @@ describe("friendlyError", () => {
     });
   });
 
+  // #417: Rust xls_io.rs error strings. Exact codes carry no tail; the rest are
+  // "<CODE>: <detail>". Acceptance 3/4/5 ("Japanese error") are pinned here.
+  describe("xls import errors (xls_io.rs)", () => {
+    const XLS_ERRORS = [
+      "XLS_NOT_EXCEL97: html",
+      "XLS_NOT_EXCEL97: xml",
+      "XLS_NOT_EXCEL97: text",
+      "XLS_NOT_EXCEL97: empty",
+      "XLS_NOT_EXCEL97: unknown",
+      "XLS_PASSWORD_PROTECTED",
+      "XLS_TOO_LARGE: 51.2",
+      "XLS_CORRUPT: parser panic",
+      "XLS_NO_WORKSHEETS",
+      "XLS_READ_FAILED: os error 5",
+    ];
+
+    for (const locale of ["ja-JP", "en-US"] as const) {
+      for (const raw of XLS_ERRORS) {
+        it(`${locale}: ${raw} is translated, not returned raw`, () => {
+          const out = friendlyError(raw, locale);
+          expect(out).not.toBeNull();
+          expect(out).not.toBe(raw);
+          expect(out).not.toMatch(/XLS_[A-Z0-9_]+/);
+        });
+      }
+    }
+
+    it("every XLS_NOT_EXCEL97 hint says the file is not Excel 97-2003 format (ja-JP)", () => {
+      for (const hint of ["html", "xml", "text", "empty", "unknown", "something-new"]) {
+        expect(friendlyError(`XLS_NOT_EXCEL97: ${hint}`, "ja-JP")).toContain(
+          "Excel 97-2003 形式ではありません"
+        );
+      }
+    });
+
+    it("XLS_NOT_EXCEL97 gives a hint-specific next step (ja-JP)", () => {
+      expect(friendlyError("XLS_NOT_EXCEL97: html", "ja-JP")).toBe(
+        "このファイルは Excel 97-2003 形式ではありません。中身は Web ページ（HTML）です。Excel で開いて .xlsx として保存し直してください。"
+      );
+      expect(friendlyError("XLS_NOT_EXCEL97: xml", "ja-JP")).toBe(
+        "このファイルは Excel 97-2003 形式ではありません。中身は XML スプレッドシート 2003 です。Excel で開いて .xlsx として保存し直してください。"
+      );
+      expect(friendlyError("XLS_NOT_EXCEL97: text", "ja-JP")).toBe(
+        "このファイルは Excel 97-2003 形式ではありません。中身はテキスト（CSV / TSV など）のようです。拡張子を .csv か .tsv に変えて開いてください。"
+      );
+      expect(friendlyError("XLS_NOT_EXCEL97: empty", "ja-JP")).toBe(
+        "このファイルは Excel 97-2003 形式ではありません。"
+      );
+      expect(friendlyError("XLS_NOT_EXCEL97: unknown", "ja-JP")).toBe(
+        "このファイルは Excel 97-2003 形式ではありません。"
+      );
+    });
+
+    it("an unrecognized hint falls back to the plain sentence without leaking the hint", () => {
+      const out = friendlyError("XLS_NOT_EXCEL97: brand-new-hint", "ja-JP");
+      expect(out).toBe("このファイルは Excel 97-2003 形式ではありません。");
+    });
+
+    it("XLS_PASSWORD_PROTECTED names the password (ja-JP)", () => {
+      expect(friendlyError("XLS_PASSWORD_PROTECTED", "ja-JP")).toBe(
+        "パスワードで保護された .xls は開けません。Excel でパスワードを解除して保存し直してください。"
+      );
+    });
+
+    it("XLS_CORRUPT keeps the detail and starts with the fixed sentence (ja-JP)", () => {
+      const parserPanic = friendlyError("XLS_CORRUPT: parser panic", "ja-JP");
+      expect(parserPanic?.startsWith(".xls を読み取れませんでした")).toBe(true);
+      expect(parserPanic).toBe(
+        ".xls を読み取れませんでした。ファイルが壊れているか、対応していない形式です（parser panic）。"
+      );
+    });
+
+    it("XLS_NO_WORKSHEETS and XLS_READ_FAILED (ja-JP)", () => {
+      expect(friendlyError("XLS_NO_WORKSHEETS", "ja-JP")).toBe("読み込めるワークシートがありません。");
+      expect(friendlyError("XLS_READ_FAILED: os error 5", "ja-JP")).toBe(
+        "ファイルを読み込めませんでした（os error 5）。"
+      );
+    });
+
+    it("XLS_TOO_LARGE shows the size once, with or without a unit in the detail", () => {
+      const expected = ".xls のファイルサイズが上限（50 MB）を超えています（51.2 MB）。";
+      expect(friendlyError("XLS_TOO_LARGE: 51.2", "ja-JP")).toBe(expected);
+      expect(friendlyError("XLS_TOO_LARGE: 51.2 MB", "ja-JP")).toBe(expected);
+    });
+
+    it("exact codes do not match when a tail is appended (strict shape)", () => {
+      // XLS_PASSWORD_PROTECTED / XLS_NO_WORKSHEETS are exact-match only.
+      expect(friendlyError("XLS_PASSWORD_PROTECTED: extra", "ja-JP")).toBe(
+        "XLS_PASSWORD_PROTECTED: extra"
+      );
+    });
+
+    it("XLS_ prefixes do not collide with the XLSX_ codes", () => {
+      expect(friendlyError("XLSX_BUILD_FAILED", "ja-JP")).toBe("xlsx の構築中にエラーが発生しました。");
+    });
+  });
+
   describe("pass-through", () => {
     it("returns unknown codes unchanged", () => {
       expect(friendlyError("SOMETHING_NEW_2026", "ja-JP")).toBe("SOMETHING_NEW_2026");

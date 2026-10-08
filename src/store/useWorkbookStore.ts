@@ -6,6 +6,7 @@ import { t } from "../i18n/locale";
 import { flushPendingSnapshot } from "./snapshotSync";
 import { flushTextBoxesToPreservedParts } from "./textBoxes";
 import { getScriptTrustStore } from "./scriptTrust";
+import { excelImportCommand } from "./pathRouter";
 import type {
   AppScreen,
   SaveStatus,
@@ -340,7 +341,9 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
     const priorDirty = get().wasDirtyBeforeExport;
     try {
       set({ saveStatus: "loading" });
-      const result = await invoke<ImportWorkbookResult>("workbook_import_xlsx", { path });
+      // .xls (Excel 97-2003) goes to its own reader; the rest of this flow
+      // (newer-wins guard, blocking warnings, state restore on failure) is shared.
+      const result = await invoke<ImportWorkbookResult>(excelImportCommand(path), { path });
       if (mySeq !== openSeq) return; // newer open started — discard stale result
       // If the import was blocked by security_scan (now folded into Rust), the result
       // has an empty snapshot + blocking warnings. Surface them on the home screen
@@ -460,7 +463,12 @@ export const useWorkbookStore = create<WorkbookState>((set, get) => ({
       const currentPath = currentHandle.path;
       const currentLower = currentPath?.toLowerCase() ?? "";
 
-      if (!currentPath || currentHandle.requiresSaveAsOnFirstSave || currentLower.endsWith(".xlsm")) {
+      // Allow-list: only .xlsx (re-export) and .coco (workbook_save) are ever
+      // overwritten in place. Anything else (.xls, .xlsm, .csv, unknown) must go
+      // through Save As, so `workbook_save` can never write a .coco (SQLite) over
+      // a file that is not one - e.g. a legacy .xls opened via import.
+      const savesInPlace = currentLower.endsWith(".xlsx") || currentLower.endsWith(".coco");
+      if (!currentPath || currentHandle.requiresSaveAsOnFirstSave || !savesInPlace) {
         const defaultPath = defaultSaveAsName(currentPath);
         const chosen = await saveDialog({
           title: "名前を付けて保存",

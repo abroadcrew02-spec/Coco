@@ -503,6 +503,132 @@ describe("importXlsx", () => {
     expect(s.saveStatus).toBe("saved");
     expect(s.lastError).toContain("対応していない拡張子");
   });
+
+  // --- #417: .xls (Excel 97-2003) goes through the same importXlsx action ---
+
+  const xlsResult = (overrides: Record<string, unknown> = {}) => ({
+    handle: {
+      workbookId: "wb-xls",
+      path: "/tmp/legacy.xls",
+      sourceType: "xlsx",
+      snapshotJson: "{\"sheetOrder\":[\"sheet-1\"]}",
+      requiresSaveAsOnFirstSave: true,
+    },
+    warnings: [
+      {
+        severity: "warning",
+        code: "XLS_LEGACY_FORMAT",
+        message: "legacy format notice",
+      },
+    ],
+    ...overrides,
+  });
+
+  it("calls workbook_import_xls for a .xls path", async () => {
+    invokeMock.mockResolvedValue(xlsResult());
+    await useWorkbookStore.getState().importXlsx("/tmp/legacy.xls");
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("workbook_import_xls", { path: "/tmp/legacy.xls" });
+  });
+
+  it("picks the .xls reader case-insensitively on Windows paths", async () => {
+    invokeMock.mockResolvedValue(xlsResult());
+    await useWorkbookStore.getState().importXlsx("C:\\data\\LEGACY.XLS");
+    expect(invokeMock).toHaveBeenCalledWith("workbook_import_xls", { path: "C:\\data\\LEGACY.XLS" });
+  });
+
+  it("still calls workbook_import_xlsx for .xlsx and .xlsm", async () => {
+    invokeMock.mockResolvedValue(xlsResult());
+    await useWorkbookStore.getState().importXlsx("/tmp/data.xlsx");
+    await useWorkbookStore.getState().importXlsx("/tmp/macro.xlsm");
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "workbook_import_xlsx", { path: "/tmp/data.xlsx" });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "workbook_import_xlsx", { path: "/tmp/macro.xlsm" });
+  });
+
+  it(".xls import opens the editor and keeps XLS_LEGACY_FORMAT first, unfiltered", async () => {
+    invokeMock.mockResolvedValue(
+      xlsResult({
+        warnings: [
+          { severity: "warning", code: "XLS_LEGACY_FORMAT", message: "legacy" },
+          { severity: "info", code: "OTHER", message: "other" },
+        ],
+      }),
+    );
+    await useWorkbookStore.getState().importXlsx("/tmp/legacy.xls");
+    const s = useWorkbookStore.getState();
+    expect(s.screen).toBe("editor");
+    expect(s.currentHandle?.path).toBe("/tmp/legacy.xls");
+    expect(s.currentHandle?.requiresSaveAsOnFirstSave).toBe(true);
+    expect(s.saveStatus).toBe("saved");
+    expect(s.importWarnings.map((w) => w.code)).toEqual(["XLS_LEGACY_FORMAT", "OTHER"]);
+    expect(s.importWarnings[0].severity).toBe("warning");
+    expect(s.blockingImport).toBeNull();
+  });
+
+  it(".xls import error shows a Japanese message and leaves the open workbook untouched", async () => {
+    const before = makeHandle({ workbookId: "wb-open", path: "/tmp/open.xlsx", sourceType: "xlsx" });
+    useWorkbookStore.setState({
+      screen: "editor",
+      currentHandle: before,
+      currentSnapshotJson: "{\"open\":1}",
+      saveStatus: "unsaved",
+      importWarnings: [],
+    });
+    invokeMock.mockRejectedValue("XLS_NOT_EXCEL97: html");
+    await useWorkbookStore.getState().importXlsx("/tmp/fake.xls");
+    const s = useWorkbookStore.getState();
+    expect(s.lastError).toContain("Excel 97-2003 形式ではありません");
+    expect(s.screen).toBe("editor");
+    expect(s.currentHandle).toBe(before);
+    expect(s.currentSnapshotJson).toBe("{\"open\":1}");
+    expect(s.saveStatus).toBe("unsaved");
+    expect(s.importWarnings).toEqual([]);
+  });
+
+  it(".xls import error from the home screen stays on home with no workbook", async () => {
+    invokeMock.mockRejectedValue("XLS_PASSWORD_PROTECTED");
+    await useWorkbookStore.getState().importXlsx("/tmp/locked.xls");
+    const s = useWorkbookStore.getState();
+    expect(s.screen).toBe("home");
+    expect(s.currentHandle).toBeNull();
+    expect(s.saveStatus).toBe("saved");
+    expect(s.lastError).toContain("パスワード");
+  });
+
+  it(".xls that is really a blocked xlsx surfaces blockingImport and adopts nothing", async () => {
+    invokeMock.mockResolvedValue(
+      xlsResult({
+        warnings: [{ severity: "blocking", code: "XLSX_SECURITY_BLOCKED", message: "too big" }],
+      }),
+    );
+    await useWorkbookStore.getState().importXlsx("/tmp/huge.xls");
+    const s = useWorkbookStore.getState();
+    expect(s.screen).toBe("home");
+    expect(s.currentHandle).toBeNull();
+    expect(s.blockingImport).toHaveLength(1);
+    expect(s.importWarnings).toEqual([]);
+  });
+
+  it("a newer open wins over a slower .xls import", async () => {
+    const slow = deferred<unknown>();
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "workbook_import_xls") return slow.promise;
+      return Promise.resolve({
+        handle: {
+          workbookId: "wb-newer",
+          path: "/tmp/newer.xlsx",
+          sourceType: "xlsx",
+          snapshotJson: "{}",
+        },
+        warnings: [],
+      });
+    });
+    const first = useWorkbookStore.getState().importXlsx("/tmp/slow.xls");
+    await useWorkbookStore.getState().importXlsx("/tmp/newer.xlsx");
+    slow.resolve(xlsResult());
+    await first;
+    expect(useWorkbookStore.getState().currentHandle?.workbookId).toBe("wb-newer");
+  });
 });
 
 describe("dismissBlockingImport", () => {
@@ -663,6 +789,142 @@ describe("save flow", () => {
     expect(saveDialogMock).toHaveBeenCalledWith(
       expect.objectContaining({ defaultPath: "macros.xlsx" })
     );
+  });
+
+  // --- #417: save() allow-list (.xlsx -> export, .coco -> workbook_save, else Save As) ---
+
+  describe(".xls never reaches workbook_save", () => {
+    const saveCalls = () => invokeMock.mock.calls.filter(([cmd]) => cmd === "workbook_save");
+
+    it("opens Save As with <name>.xlsx for an imported .xls (requiresSaveAs true)", async () => {
+      saveDialogMock.mockResolvedValue(null);
+      useWorkbookStore.setState({
+        currentHandle: makeHandle({
+          path: "C:\\tmp\\b.xls",
+          sourceType: "xlsx",
+          requiresSaveAsOnFirstSave: true,
+        }),
+        currentSnapshotJson: "{\"v\":1}",
+      });
+      await useWorkbookStore.getState().save();
+      expect(saveDialogMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          defaultPath: "b.xlsx",
+          filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }],
+        }),
+      );
+      expect(invokeMock).not.toHaveBeenCalled();
+      expect(useWorkbookStore.getState().saveStatus).toBe("unsaved");
+    });
+
+    it("defence: .xls with requiresSaveAsOnFirstSave=false still goes to Save As, not workbook_save", async () => {
+      saveDialogMock.mockResolvedValue(null);
+      useWorkbookStore.setState({
+        currentHandle: makeHandle({
+          path: "C:\\tmp\\b.xls",
+          sourceType: "xlsx",
+          requiresSaveAsOnFirstSave: false,
+        }),
+        currentSnapshotJson: "{\"v\":1}",
+      });
+      await useWorkbookStore.getState().save();
+      expect(saveDialogMock).toHaveBeenCalledWith(expect.objectContaining({ defaultPath: "b.xlsx" }));
+      expect(saveCalls()).toHaveLength(0);
+      expect(invokeMock).not.toHaveBeenCalled();
+    });
+
+    it("defence also holds for .XLS and every non-allow-listed extension", async () => {
+      saveDialogMock.mockResolvedValue(null);
+      for (const path of ["/tmp/UP.XLS", "/tmp/a.csv", "/tmp/a.tsv", "/tmp/a.xlsb", "/tmp/noext"]) {
+        saveDialogMock.mockClear();
+        useWorkbookStore.setState({
+          currentHandle: makeHandle({ path, sourceType: "xlsx", requiresSaveAsOnFirstSave: false }),
+          currentSnapshotJson: "{\"v\":1}",
+          saveStatus: "unsaved",
+        });
+        await useWorkbookStore.getState().save();
+        expect(saveDialogMock).toHaveBeenCalledTimes(1);
+      }
+      expect(saveCalls()).toHaveLength(0);
+      expect(invokeMock).not.toHaveBeenCalled();
+    });
+
+    it("Save As from an imported .xls exports a new .xlsx and the next save overwrites that .xlsx", async () => {
+      saveDialogMock.mockResolvedValue("/tmp/b.xlsx");
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "workbook_export_xlsx") {
+          return Promise.resolve({ success: true, path: "/tmp/b.xlsx", warnings: [] });
+        }
+        return Promise.resolve(undefined);
+      });
+      useWorkbookStore.setState({
+        currentHandle: makeHandle({
+          path: "/tmp/b.xls",
+          sourceType: "xlsx",
+          requiresSaveAsOnFirstSave: true,
+        }),
+        currentSnapshotJson: "{\"v\":1}",
+      });
+      await useWorkbookStore.getState().save();
+      expect(invokeMock).toHaveBeenCalledWith(
+        "workbook_export_xlsx",
+        expect.objectContaining({ path: "/tmp/b.xlsx" }),
+      );
+      expect(useWorkbookStore.getState().currentHandle?.path).toBe("/tmp/b.xlsx");
+      expect(useWorkbookStore.getState().currentHandle?.requiresSaveAsOnFirstSave).toBe(false);
+
+      invokeMock.mockClear();
+      saveDialogMock.mockClear();
+      await useWorkbookStore.getState().save();
+      expect(saveDialogMock).not.toHaveBeenCalled();
+      expect(invokeMock).toHaveBeenCalledWith(
+        "workbook_export_xlsx",
+        expect.objectContaining({ path: "/tmp/b.xlsx" }),
+      );
+      expect(saveCalls()).toHaveLength(0);
+    });
+
+    it("Save As that picks the original .xls name still writes .xlsx (never overwrites the .xls)", async () => {
+      saveDialogMock.mockResolvedValue("/tmp/b.xls");
+      invokeMock.mockImplementation((cmd: string, args: { path: string }) => {
+        if (cmd === "workbook_export_xlsx") {
+          return Promise.resolve({ success: true, path: args.path, warnings: [] });
+        }
+        return Promise.resolve(undefined);
+      });
+      useWorkbookStore.setState({
+        currentHandle: makeHandle({
+          path: "/tmp/b.xls",
+          sourceType: "xlsx",
+          requiresSaveAsOnFirstSave: true,
+        }),
+        currentSnapshotJson: "{\"v\":1}",
+      });
+      await useWorkbookStore.getState().save();
+      const exportCalls = invokeMock.mock.calls.filter(([cmd]) => cmd === "workbook_export_xlsx");
+      expect(exportCalls).toHaveLength(1);
+      expect(exportCalls[0][1]).toMatchObject({ path: "/tmp/b.xlsx" });
+      expect(saveCalls()).toHaveLength(0);
+    });
+  });
+
+  it("allow-list regression: .xlsx and .XLSX -> export, .coco and .COCO -> workbook_save", async () => {
+    invokeMock.mockResolvedValue({ success: true, path: "/tmp/x", warnings: [], error: null });
+    const run = async (path: string) => {
+      invokeMock.mockClear();
+      useWorkbookStore.setState({
+        currentHandle: makeHandle({ path }),
+        currentSnapshotJson: "{\"v\":1}",
+        saveStatus: "unsaved",
+      });
+      await useWorkbookStore.getState().save();
+      return invokeMock.mock.calls[0]?.[0];
+    };
+    expect(await run("/tmp/a.xlsx")).toBe("workbook_export_xlsx");
+    expect(await run("/tmp/A.XLSX")).toBe("workbook_export_xlsx");
+    expect(await run("/tmp/a.coco")).toBe("workbook_save");
+    expect(await run("/tmp/A.COCO")).toBe("workbook_save");
+    expect(saveDialogMock).not.toHaveBeenCalled();
   });
 
   it("fails instead of sending fallback snapshot when save snapshot is missing", async () => {

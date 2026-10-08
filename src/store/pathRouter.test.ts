@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { routeOpenPath } from "./pathRouter";
+import { excelImportCommand, routeOpenPath } from "./pathRouter";
 
 describe("routeOpenPath", () => {
   describe("recognized extensions", () => {
@@ -18,6 +18,11 @@ describe("routeOpenPath", () => {
       expect(r).toEqual({ kind: "xlsx", path: "/tmp/macros.xlsm" });
     });
 
+    it("routes .xls (Excel 97-2003) to xlsx — same kind, importXlsx picks the reader (#417)", () => {
+      const r = routeOpenPath("/tmp/legacy.xls");
+      expect(r).toEqual({ kind: "xlsx", path: "/tmp/legacy.xls" });
+    });
+
     it("routes .csv to csv", () => {
       const r = routeOpenPath("/tmp/data.csv");
       expect(r).toEqual({ kind: "csv", path: "/tmp/data.csv" });
@@ -34,6 +39,14 @@ describe("routeOpenPath", () => {
       expect(routeOpenPath("/tmp/wb.XLSX").kind).toBe("xlsx");
       expect(routeOpenPath("/tmp/data.CSV").kind).toBe("csv");
       expect(routeOpenPath("/tmp/db.COCO").kind).toBe("coco");
+    });
+
+    it("recognizes uppercase .XLS and keeps the path as given", () => {
+      expect(routeOpenPath("C:\\Users\\foo\\OLD.XLS")).toEqual({
+        kind: "xlsx",
+        path: "C:\\Users\\foo\\OLD.XLS",
+      });
+      expect(routeOpenPath("/tmp/Old.XlS").kind).toBe("xlsx");
     });
 
     it("recognizes mixed-case extensions", () => {
@@ -116,6 +129,13 @@ describe("routeOpenPath", () => {
     it("does not match extensions inside a longer suffix", () => {
       // "report.xlsx.bak" ends in .bak, not .xlsx — must be unsupported.
       expect(routeOpenPath("/tmp/report.xlsx.bak").kind).toBe("unsupported");
+    });
+
+    it("does not treat .xls.csv / .xls.bak / .xlsb as .xls", () => {
+      expect(routeOpenPath("/tmp/a.xls.csv").kind).toBe("csv");
+      expect(routeOpenPath("/tmp/a.xls.bak").kind).toBe("unsupported");
+      // .xlsb (binary workbook) is out of scope for #417 and must stay unsupported.
+      expect(routeOpenPath("/tmp/a.xlsb").kind).toBe("unsupported");
     });
 
     it("matches a multi-dot filename by its trailing extension", () => {
@@ -228,5 +248,26 @@ describe("routeOpenPath", () => {
       expect(b.kind).toBe("xlsx");
       expect(a.path).not.toBe(b.path);
     });
+  });
+});
+
+describe("excelImportCommand (#417)", () => {
+  it("selects the legacy reader for .xls", () => {
+    expect(excelImportCommand("/tmp/legacy.xls")).toBe("workbook_import_xls");
+  });
+
+  it("is case-insensitive for .XLS and handles Windows paths", () => {
+    expect(excelImportCommand("C:\\data\\OLD.XLS")).toBe("workbook_import_xls");
+    expect(excelImportCommand("/tmp/Old.XlS")).toBe("workbook_import_xls");
+  });
+
+  it("keeps the xlsx importer for .xlsx and .xlsm", () => {
+    expect(excelImportCommand("/tmp/a.xlsx")).toBe("workbook_import_xlsx");
+    expect(excelImportCommand("/tmp/a.xlsm")).toBe("workbook_import_xlsx");
+  });
+
+  it("does not pick the legacy reader when .xls is only mid-name", () => {
+    expect(excelImportCommand("/tmp/a.xls.xlsx")).toBe("workbook_import_xlsx");
+    expect(excelImportCommand("/tmp/xls")).toBe("workbook_import_xlsx");
   });
 });

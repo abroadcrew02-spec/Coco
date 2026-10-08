@@ -5,6 +5,7 @@ pub mod file_replace;
 pub mod html_export;
 pub mod http_fetch;
 pub mod http_fetch_stream;
+pub mod launch;
 pub mod pdf_export;
 pub mod url_fetch_credentials;
 pub mod recovery;

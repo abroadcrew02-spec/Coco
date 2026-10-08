@@ -5,6 +5,13 @@ mod error;
 use tauri::Manager;
 
 pub fn run() {
+    // Files passed on the command line (Explorer "Open with" runs
+    // `"<exe>" "%1"`). Handed to the frontend once by `take_launch_paths`.
+    let launch_paths = commands::launch::LaunchPaths::from_args(
+        std::env::args_os().skip(1),
+        &std::env::current_dir().unwrap_or_default(),
+    );
+
     tauri::Builder::default()
         .plugin(
             // #46: runtime diagnostic logging to a rotating file under the
@@ -41,6 +48,7 @@ pub fn run() {
         .manage(std::sync::Arc::new(
             commands::ws_fetch::ConnRegistry::default(),
         ))
+        .manage(launch_paths)
         .setup(|app| {
             // #82: best-effort startup sweep of orphan recovery .coco files
             // (file present, no recovery_candidates row). Scoped to the
@@ -126,6 +134,7 @@ pub fn run() {
             commands::url_fetch_credentials::url_fetch_delete_credential,
             commands::url_fetch_credentials::url_fetch_list_credentials,
             commands::updater::updater_fetch_manifest,
+            commands::launch::take_launch_paths,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

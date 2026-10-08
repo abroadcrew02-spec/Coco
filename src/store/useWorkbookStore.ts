@@ -187,6 +187,12 @@ const defaultSaveAsName = (path: string | null): string =>
 // resolves, the result is discarded. Applies to every action that ends in
 // switching `currentHandle` / `currentSnapshotJson` for a new workbook.
 let openSeq = 0;
+// Read-only view of the counter for callers that must not open anything once
+// the user has started another open / new / import (the launch-file opener
+// compares it with the value it saw at startup).
+export function getOpenSeq(): number {
+  return openSeq;
+}
 let autoSaveInFlight: Promise<void> | null = null;
 // #69: manual save/saveAs in-flight guard. Without this, Ctrl+S double-presses
 // (or shortcut + menu race) launch two `workbook_save` / `workbook_export_xlsx`

@@ -81,6 +81,7 @@ pub fn run() {
             commands::recovery::workbook_clear_recovery,
             commands::security::security_scan_xlsx,
             commands::xlsx_io::workbook_import_xlsx,
+            commands::xls_io::workbook_import_xls,
             commands::xlsx_io::workbook_export_xlsx,
             commands::csv_io::workbook_export_csv,
             commands::csv_io::workbook_import_csv,

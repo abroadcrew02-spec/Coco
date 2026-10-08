@@ -18,8 +18,8 @@ use crate::commands::workbook::{
     WorkbookHandle,
 };
 
-const MIN_ROWS: usize = 1000;
-const MIN_COLS: usize = 100;
+pub(crate) const MIN_ROWS: usize = 1000;
+pub(crate) const MIN_COLS: usize = 100;
 const LARGE_SHEET_THRESHOLD: usize = 100_000;
 const MAX_EXPORT_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
 const MAX_EXPORT_CELLS: usize = 500_000;

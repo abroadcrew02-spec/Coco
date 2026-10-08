@@ -23,6 +23,8 @@ const FRIENDLY: Record<Locale, Record<string, string>> = {
     XLS_PASSWORD_PROTECTED:
       "パスワードで保護された .xls は開けません。Excel でパスワードを解除して保存し直してください。",
     XLS_NO_WORKSHEETS: "読み込めるワークシートがありません。",
+    XLS_TOO_MANY_CELLS:
+      "この .xls は大きすぎて開けません。データの入っている範囲が上限を超えています。Excel で不要な行や列を削除してから開いてください。",
 
     // csv import/export
     CSV_INVALID_EXTENSION: "拡張子が .csv / .tsv ではありません。",
@@ -48,6 +50,8 @@ const FRIENDLY: Record<Locale, Record<string, string>> = {
     XLS_PASSWORD_PROTECTED:
       "A password-protected .xls file cannot be opened. Remove the password in Excel and save it again.",
     XLS_NO_WORKSHEETS: "There are no worksheets that can be read.",
+    XLS_TOO_MANY_CELLS:
+      "This .xls file is too large to open. The range that holds data exceeds the limit. Delete unused rows or columns in Excel, then open it again.",
 
     CSV_INVALID_EXTENSION: "The file extension is not .csv / .tsv.",
     CSV_EMPTY_WORKBOOK: "No sheets were found to export.",

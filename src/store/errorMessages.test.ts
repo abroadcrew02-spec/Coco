@@ -136,6 +136,7 @@ describe("friendlyError", () => {
       "XLS_TOO_LARGE: 51.2",
       "XLS_CORRUPT: parser panic",
       "XLS_NO_WORKSHEETS",
+      "XLS_TOO_MANY_CELLS",
       "XLS_READ_FAILED: os error 5",
     ];
 
@@ -208,10 +209,26 @@ describe("friendlyError", () => {
       expect(friendlyError("XLS_TOO_LARGE: 51.2 MB", "ja-JP")).toBe(expected);
     });
 
+    it("XLS_TOO_MANY_CELLS says the file is too large, not damaged", () => {
+      const ja = friendlyError("XLS_TOO_MANY_CELLS", "ja-JP");
+      expect(ja).toBe(
+        "この .xls は大きすぎて開けません。データの入っている範囲が上限を超えています。Excel で不要な行や列を削除してから開いてください。"
+      );
+      expect(ja).not.toMatch(/壊れて/);
+      const en = friendlyError("XLS_TOO_MANY_CELLS", "en-US");
+      expect(en).toBe(
+        "This .xls file is too large to open. The range that holds data exceeds the limit. Delete unused rows or columns in Excel, then open it again."
+      );
+      expect(en).not.toMatch(/corrupt/i);
+    });
+
     it("exact codes do not match when a tail is appended (strict shape)", () => {
-      // XLS_PASSWORD_PROTECTED / XLS_NO_WORKSHEETS are exact-match only.
+      // XLS_PASSWORD_PROTECTED / XLS_NO_WORKSHEETS / XLS_TOO_MANY_CELLS are exact-match only.
       expect(friendlyError("XLS_PASSWORD_PROTECTED: extra", "ja-JP")).toBe(
         "XLS_PASSWORD_PROTECTED: extra"
+      );
+      expect(friendlyError("XLS_TOO_MANY_CELLS: extra", "ja-JP")).toBe(
+        "XLS_TOO_MANY_CELLS: extra"
       );
     });
 

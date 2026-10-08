@@ -36,6 +36,13 @@ describe("xls_io.rs error strings as emitted by Rust", () => {
     expect(friendlyError("XLS_NO_WORKSHEETS", "ja-JP")).toBe("読み込めるワークシートがありません。");
   });
 
+  it("XLS_TOO_MANY_CELLS (corners3.xls, and BoundSheets pointing at one large sheet) reads as too large, not corrupt", () => {
+    const ja = friendlyError("XLS_TOO_MANY_CELLS", "ja-JP");
+    expect(ja).toContain("大きすぎて開けません");
+    expect(ja).not.toContain("壊れて");
+    expect(friendlyError("XLS_TOO_MANY_CELLS", "en-US")).toContain("too large to open");
+  });
+
   it("every sniffed hint Rust can emit is translated and says the file is not Excel 97-2003", () => {
     for (const hint of ["html", "xml", "text", "empty", "unknown"]) {
       const out = friendlyError(`XLS_NOT_EXCEL97: ${hint}`, "ja-JP");

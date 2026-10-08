@@ -163,6 +163,9 @@ const jaJP = {
   "confirm.update.relaunch": "更新を適用するため再起動しますか?",
   "confirm.update.unsavedProceed":
     "未保存の変更があります。保存せずに更新を続けると変更は失われます。続けますか？",
+  "confirm.update.otherWindows":
+    "開いている他の Nicel のウィンドウもすべて閉じます。未保存の変更は先に保存してください。",
+  "confirm.update.proceed": "更新を続けますか？",
   "confirm.update.relaunchUnsaved":
     "未保存の変更があります。保存せずに再起動すると変更は失われます。再起動しますか？",
   "confirm.discardUnsaved.continue":
@@ -600,6 +603,9 @@ const enUS: Record<StringKey, string> = {
   "confirm.update.relaunch": "Restart now to apply the update?",
   "confirm.update.unsavedProceed":
     "You have unsaved changes. Continuing the update without saving will lose them. Continue?",
+  "confirm.update.otherWindows":
+    "All other open Nicel windows will also close. Save any unsaved changes in them first.",
+  "confirm.update.proceed": "Continue with the update?",
   "confirm.update.relaunchUnsaved":
     "You have unsaved changes. Restarting without saving will lose them. Restart now?",
   "confirm.discardUnsaved.continue":

@@ -39,6 +39,7 @@
 // flow offers nothing, while a manual "Check for Updates" still works.
 
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../i18n/locale";
 
 export type UpdateChannel = "stable" | "beta";
 
@@ -713,4 +714,15 @@ export async function downloadAndInstall(
 export async function relaunchApp(): Promise<void> {
   const mod = await import("@tauri-apps/plugin-process");
   await mod.relaunch();
+}
+
+/** Message for the confirmation shown before an update starts. The Windows
+ *  installer closes every running nicel.exe of this user without asking, so
+ *  the other-windows line is always included, with or without unsaved changes
+ *  in the current window. */
+export function updateStartConfirmMessage(isDirty: boolean): string {
+  const otherWindows = t("confirm.update.otherWindows");
+  return isDirty
+    ? `${otherWindows}\n\n${t("confirm.update.unsavedProceed")}`
+    : `${otherWindows}\n\n${t("confirm.update.proceed")}`;
 }

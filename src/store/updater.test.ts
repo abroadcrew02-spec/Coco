@@ -13,7 +13,9 @@ import {
   checkForUpdate,
   downloadAndInstall,
   isInRolloutBucket,
+  updateStartConfirmMessage,
 } from "./updater";
+import { getLocale, setLocale } from "../i18n/locale";
 
 function fakeUpdate(version = "0.8.5") {
   return {
@@ -122,5 +124,30 @@ describe("checkForUpdate — manifest through updater_fetch_manifest (#359)", ()
     checkMock.mockResolvedValue(null);
     expect(await checkForUpdate()).toEqual({ available: false });
     expect(invokeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateStartConfirmMessage (#418)", () => {
+  const previous = getLocale();
+  beforeEach(() => setLocale("ja-JP"));
+  afterEach(() => setLocale(previous));
+
+  it("always warns that the other Nicel windows will close, even with nothing unsaved", () => {
+    expect(updateStartConfirmMessage(false)).toBe(
+      "開いている他の Nicel のウィンドウもすべて閉じます。未保存の変更は先に保存してください。\n\n更新を続けますか？",
+    );
+  });
+
+  it("keeps the unsaved-changes warning and adds the other-windows line", () => {
+    expect(updateStartConfirmMessage(true)).toBe(
+      "開いている他の Nicel のウィンドウもすべて閉じます。未保存の変更は先に保存してください。\n\n未保存の変更があります。保存せずに更新を続けると変更は失われます。続けますか？",
+    );
+  });
+
+  it("has an English message with the same structure", () => {
+    setLocale("en-US");
+    expect(updateStartConfirmMessage(false)).toBe(
+      "All other open Nicel windows will also close. Save any unsaved changes in them first.\n\nContinue with the update?",
+    );
   });
 });

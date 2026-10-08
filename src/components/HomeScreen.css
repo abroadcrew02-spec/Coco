@@ -622,6 +622,7 @@
 
 .recent-kind--xlsx { background: #e8f5e9; color: #2e7d32; }
 .recent-kind--xlsm { background: #fff3e0; color: #ef6c00; }
+.recent-kind--xls  { background: #f1f8e9; color: #558b2f; }
 .recent-kind--csv  { background: #fff8e1; color: #f57f17; }
 .recent-kind--tsv  { background: #fff8e1; color: #f57f17; }
 /* Legacy .coco recents fall through to the neutral default styling. */

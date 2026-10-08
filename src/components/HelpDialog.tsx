@@ -165,6 +165,7 @@ export default function HelpDialog({ onClose }: Props) {
             <ul className="help-list">
               <li><b>.xlsx</b> — Excel ワークブック（作業形式）</li>
               <li><b>.xlsm</b> — マクロ付き Excel ワークブック（読み込みのみ、マクロは破棄）</li>
+              <li><b>.xls</b> — Excel 97-2003 ブック（値と数式を読み込み、保存は .xlsx）</li>
               <li>
                 <b>.csv / .tsv</b> — UTF-8 BOM / UTF-8 / Shift_JIS を入出力で対応。
                 インポートは文字コード・区切り文字を自動検出、エクスポートの

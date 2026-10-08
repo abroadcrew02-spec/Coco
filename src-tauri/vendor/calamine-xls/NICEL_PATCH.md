@@ -34,6 +34,11 @@ references come out wrong.
 | 11 | Defined names (Lbl) | Name read by bytes (`合計数量` became `合計`); 3D refs always absolute, sheet unquoted | Name read by characters; `push_ref` / `push_sheet` |
 | 12 | `push_sheet` | | Also quotes names that read as a cell address: A1 style (`R5`, `H30`, `FY2024`) and R1C1 style (`R`, `C`, `RC`, `R5C3`) |
 | 13 | SupBook (0x01AE) | Not read; an XTI pointing at another workbook resolved against this workbook's sheets (`=[other.xls]Data!A1` became `=Sheet1!A1`) | SupBook records are collected; XTIs whose SupBook is not this workbook (`cch == 0x0401`) resolve to `#REF`, so the formula is reported as unreadable and the cached value is kept |
+| 22 | `push_ref` column letters | `utils::push_column` drops the leading letter from column 26 on (`=AA1` became `=A1`, `=IV1` became `=V1`, `SUM(Z1:AB1)` became `SUM(Z1:B1)`) | New `push_col` in xls.rs (bijective base 26); `utils.rs` is left as upstream. Upstream fix belongs in `utils::push_column` |
+| 23 | ExternSheet (0x0017) | `itab_last` ignored; a sheet span (`SUM('Jan:Mar'!B2)`) resolved to its first sheet only (`SUM('Jan'!B2)`, a different result) | An XTI with `itab_first != itab_last` resolves to `#REF`, like an external one: the formula keeps its cached value, a defined name on a span is dropped |
+| 24 | PtgFuncVar `User` (iftab 255) | Functions newer than BIFF8 came out as `User(_xlfn.IFERROR,1/0,"x")`, which recalculates to `#NAME?` | When the first argument is `_xlfn.NAME` and NAME is in `XLFN_FUNCTIONS` (functions the Nicel engine evaluates; source in the comment), written as `NAME(args)`. Any other `User` call (VBA, add-in, unknown `_xlfn.`) is `XlsError::Unrecognized`, so the cached value is kept. Nicel-specific: upstream would only drop the `User(_xlfn.` wrapper |
+| 25 | PtgStr (0x17) | A `"` inside the literal was written as is (`="say "hi""`), which does not parse | Written twice (`="say ""hi"""`) |
+| 26 | PtgFunc (0x21) | `iftab > FTAB_LEN` let `iftab == FTAB_LEN` index past `FTAB_ARGC` (a panic that loses the whole workbook) | `iftab >= FTAB_LEN` is `XlsError::IfTab` |
 
 ### xls.rs: allocation bounds
 
@@ -47,6 +52,14 @@ be caught).
 | 15 | DIMENSIONS (0x0200) | `reserve(rows * cols)` from file values; `end - start` can underflow | `saturating_sub`, reservation capped at 65,536 |
 | 16 | Before `Range::from_sparse` | Cells passed in file order; `from_sparse` assumes the first and last cells bound the rows. Out-of-order rows underflow `row_end - row_start` (panic in debug, huge allocation and abort in release) | Cells and formulas stably sorted by row first |
 | 17 | SST (0x00FC) | `with_capacity(count)` from the file; a negative count panics in `unwrap` | Negative count is `XlsError::Len`; reservation capped at 65,536 |
+| 27 | Before `Range::from_sparse`, whole workbook | Each BoundSheet allocates its bounding rectangle (up to 2^24 cells, about 0.5 GB of values); many sheets with a cell in A1 and IV65536, or many BoundSheet records pointing at one such sheet, multiply that | The value and formula rectangles of every sheet are added up; past `MAX_WORKBOOK_CELLS` (2^25: one full sheet of values plus one of formulas) the reader returns the new `XlsError::TooManyCells` before allocating that sheet |
+| 28 | `Reader::worksheet_range` / `worksheet_formula` | Return clones, so the caller briefly holds two copies of a large sheet | New `Xls::take_worksheet` moves both ranges out; `xls_io.rs` uses it |
+
+### xls.rs: VBA
+
+| # | Place | Upstream behavior | Change |
+|---|---|---|---|
+| 29 | `Xls::new_with_options` | `VbaProject::from_cfb` reads and decompresses the whole VBA project; `decompress_stream` has no output limit, and a project that fails to parse makes the workbook fail to open | Only `cfb.has_directory("_VBA_PROJECT_CUR")` is recorded, exposed as `Xls::has_vba_project()`. `vba_project()` returns `None`. VBA code is never read |
 
 ### cfb.rs: allocation bounds
 
@@ -60,8 +73,10 @@ be caught).
 Normal files read the same as before: real files never reference sectors
 outside themselves and their counts are far below the caps.
 
-Not changed (known): `decompress_stream` (VBA source decompression) has no
-output limit. A crafted VBA stream can still expand far beyond the file size.
+Not changed (known): `decompress_stream` (VBA source decompression) still has
+no output limit, but the .xls path no longer reaches it (29). What is left for
+#422 is the overall memory bound: a legitimate full-size sheet still takes
+about 0.5 GB, and the xlsx import (registry calamine) has no cell budget.
 
 ## Upstream
 
@@ -71,7 +86,8 @@ Upstream locations in 0.24.0 `src/xls.rs`: `parse_formula`,
 `parse_defined_names`, `read_unicode_string_no_cch`, `parse_workbook`
 (Lbl, ExternSheet, DIMENSIONS, `Range::from_sparse`), `parse_sst`. In
 `src/cfb.rs`: `Cfb::new`, `Header::from_reader`, `Sectors::get`,
-`Sectors::get_chain`.
+`Sectors::get_chain`. Items 22-29 were added later and have not been checked
+against 0.36.1 yet; for 22 the upstream location is `utils::push_column`.
 
 ## Verifying
 
@@ -84,16 +100,19 @@ diff -rq --strip-trailing-cr \
   vendor/calamine-xls/src
 
 # Regression tests (Excel-made fixtures plus byte-patched crafted files)
-cargo test --test xls_import
+cargo test --test xls_import --test xls_contract
 ```
 
-Fixtures are regenerated with `tests/fixtures/xls/make_fixtures.ps1`
-(needs desktop Excel).
+Fixtures are regenerated with `tests/fixtures/xls/make_fixtures.ps1` and
+`make_more_fixtures.ps1` (need desktop Excel).
 
 ## Getting out
 
 When upstream fixes the formula decoder: delete `vendor/calamine-xls`, remove
 the `calamine_xls` line from `Cargo.toml`, change `use calamine_xls::` to
 `use calamine::` in `src/commands/xls_io.rs`, and run `cargo test --test
-xls_import`. Check the allocation bounds (14-21) upstream as well before
-dropping the copy.
+xls_import`. Check the allocation bounds (14-21, 27) and the VBA change (29)
+upstream as well before dropping the copy. `xls_io.rs` calls
+`take_worksheet` and `has_vba_project`, which upstream does not have; switch
+back to `worksheet_range` / `worksheet_formula` / `vba_project().is_some()`
+(and accept that reading the VBA project can fail the import again).

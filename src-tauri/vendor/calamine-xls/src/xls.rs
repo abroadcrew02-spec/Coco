@@ -15,9 +15,11 @@ use crate::formats::{
 };
 #[cfg(feature = "picture")]
 use crate::utils::read_usize;
-use crate::utils::{push_column, read_f64, read_i16, read_i32, read_u16, read_u32};
+use crate::utils::{read_f64, read_i16, read_i32, read_u16, read_u32};
 use crate::vba::VbaProject;
-use crate::{Cell, CellErrorType, Data, Metadata, Range, Reader, Sheet, SheetType, SheetVisible};
+use crate::{
+    Cell, CellErrorType, CellType, Data, Metadata, Range, Reader, Sheet, SheetType, SheetVisible,
+};
 
 #[derive(Debug)]
 /// An enum to handle Xls specific errors
@@ -70,6 +72,14 @@ pub enum XlsError {
     Art(&'static str),
     /// Worksheet not found
     WorksheetNotFound(String),
+    /// The cell ranges of the workbook's sheets together would need more cells
+    /// than the reader allocates (see `MAX_WORKBOOK_CELLS`)
+    TooManyCells {
+        /// cells the ranges would need, counted up to the sheet that crossed the limit
+        found: u64,
+        /// the limit
+        limit: u64,
+    },
 }
 
 from_err!(std::io::Error, XlsError, Io);
@@ -107,6 +117,9 @@ impl std::fmt::Display for XlsError {
             #[cfg(feature = "picture")]
             XlsError::Art(s) => write!(f, "Invalid art record '{s}'"),
             XlsError::WorksheetNotFound(name) => write!(f, "Worksheet '{name}' not found"),
+            XlsError::TooManyCells { found, limit } => {
+                write!(f, "Cell ranges need {found} cells, more than the limit of {limit}")
+            }
         }
     }
 }
@@ -140,7 +153,7 @@ pub struct XlsOptions {
 /// A struct representing an old xls format file (CFB)
 pub struct Xls<RS> {
     sheets: BTreeMap<String, (Range<Data>, Range<String>)>,
-    vba: Option<VbaProject>,
+    has_vba: bool,
     metadata: Metadata,
     marker: PhantomData<RS>,
     options: XlsOptions,
@@ -167,7 +180,7 @@ impl<RS: Read + Seek> Xls<RS> {
     /// # fn main() { assert!(run().is_err()); }
     /// ```
     pub fn new_with_options(mut reader: RS, options: XlsOptions) -> Result<Self, XlsError> {
-        let mut cfb = {
+        let cfb = {
             let offset_end = reader.seek(SeekFrom::End(0))? as usize;
             reader.seek(SeekFrom::Start(0))?;
             Cfb::new(&mut reader, offset_end)?
@@ -175,18 +188,14 @@ impl<RS: Read + Seek> Xls<RS> {
 
         debug!("cfb loaded");
 
-        // Reads vba once for all (better than reading all worksheets once for all)
-        let vba = if cfb.has_directory("_VBA_PROJECT_CUR") {
-            Some(VbaProject::from_cfb(&mut reader, &mut cfb)?)
-        } else {
-            None
-        };
-
-        debug!("vba ok");
+        // Only the presence of a VBA project is recorded. Its streams are not
+        // read: `decompress_stream` has no output bound, so a crafted project
+        // could expand far beyond the file size.
+        let has_vba = cfb.has_directory("_VBA_PROJECT_CUR");
 
         let mut xls = Xls {
             sheets: BTreeMap::new(),
-            vba,
+            has_vba,
             marker: PhantomData,
             metadata: Metadata::default(),
             options,
@@ -202,6 +211,18 @@ impl<RS: Read + Seek> Xls<RS> {
 
         Ok(xls)
     }
+
+    /// True when the file carries a VBA project (`_VBA_PROJECT_CUR` storage).
+    /// The project itself is never parsed, so `vba_project()` returns `None`.
+    pub fn has_vba_project(&self) -> bool {
+        self.has_vba
+    }
+
+    /// Moves a worksheet's value and formula ranges out of the reader, so the
+    /// caller does not hold a second copy of a large sheet.
+    pub fn take_worksheet(&mut self, name: &str) -> Option<(Range<Data>, Range<String>)> {
+        self.sheets.remove(name)
+    }
 }
 
 impl<RS: Read + Seek> Reader<RS> for Xls<RS> {
@@ -212,7 +233,8 @@ impl<RS: Read + Seek> Reader<RS> for Xls<RS> {
     }
 
     fn vba_project(&mut self) -> Option<Result<Cow<'_, VbaProject>, XlsError>> {
-        self.vba.as_ref().map(|vba| Ok(Cow::Borrowed(vba)))
+        // Not parsed (see `new_with_options`); use `has_vba_project`.
+        None
     }
 
     /// Parses Workbook stream, no need for the relationships variable
@@ -253,12 +275,86 @@ const BIFF8_MAX_COLS: u32 = 256;
 const MAX_RESERVE: usize = 1 << 16;
 /// SupBook `cch` value that marks the self-referencing (this workbook) entry.
 const SUPBOOK_SELF: u16 = 0x0401;
+/// Cells `Range::from_sparse` may allocate for the whole workbook, counting
+/// the bounding rectangle of each sheet's values and of its formulas. One full
+/// BIFF8 sheet is 65,536 x 256 = 2^24 cells; the budget holds a full sheet of
+/// values plus a full sheet of formulas (about 0.5 GB + 0.4 GB), so every
+/// single-sheet file Excel can write still opens. Several BoundSheet records
+/// pointing at one large sheet, or many sheets with a cell in A1 and IV65536,
+/// fail here instead of multiplying the allocation.
+pub const MAX_WORKBOOK_CELLS: u64 = 1 << 25;
+/// `iftab` of the `User` entry in FTAB: a call whose first argument names the
+/// function (a VBA or add-in function, or a `_xlfn.` function newer than BIFF8).
+const IFTAB_USER: usize = 255;
+
+/// Functions newer than BIFF8 that Excel stores in .xls as
+/// `User(_xlfn.NAME, args)` and that the Nicel formula engine evaluates.
+/// Only these are rewritten to `NAME(args)`; any other `User` call is reported
+/// as unrecognized, so the cell keeps Excel's cached value.
+///
+/// Source: the function maps exported by `@univerjs/engine-formula` 0.24.0
+/// (`functionLogical`, `functionMath`, `functionStatistical`, ...), checked on
+/// 2026-10-08 by listing every `[implementation, name]` pair with
+/// `node -e "const m=require('@univerjs/engine-formula'); ..."` and keeping
+/// the names Excel writes with `_xlfn.`. Left out although Univer has them:
+/// functions that return arrays (FILTER, SORT, SORTBY, UNIQUE, SEQUENCE,
+/// RANDARRAY, TEXTSPLIT, ...) and LAMBDA / LET, whose parameter names Excel
+/// stores with a `_xlpm.` prefix.
+const XLFN_FUNCTIONS: &[&str] = &[
+    "ACOT", "ACOTH", "AGGREGATE", "ARABIC", "ARRAYTOTEXT", "AVERAGEIF", "AVERAGEIFS", "BASE",
+    "BETA.DIST", "BETA.INV", "BINOM.DIST", "BINOM.DIST.RANGE", "BINOM.INV", "BITAND",
+    "BITLSHIFT", "BITOR", "BITRSHIFT", "BITXOR", "CEILING.MATH", "CEILING.PRECISE",
+    "CHISQ.DIST", "CHISQ.DIST.RT", "CHISQ.INV", "CHISQ.INV.RT", "CHISQ.TEST", "COMBINA",
+    "CONCAT", "CONFIDENCE.NORM", "CONFIDENCE.T", "COT", "COTH", "COUNTIFS", "COVARIANCE.P",
+    "COVARIANCE.S", "CSC", "CSCH", "DAYS", "DECIMAL", "ERF.PRECISE", "ERFC.PRECISE",
+    "EXPON.DIST", "F.DIST", "F.DIST.RT", "F.INV", "F.INV.RT", "F.TEST", "FLOOR.MATH",
+    "FLOOR.PRECISE", "FORECAST.LINEAR", "FORMULATEXT", "GAMMA", "GAMMA.DIST", "GAMMA.INV",
+    "GAMMALN.PRECISE", "GAUSS", "HYPGEOM.DIST", "IFERROR", "IFNA", "IFS", "IMCOSH", "IMCOT",
+    "IMCSC", "IMCSCH", "IMSEC", "IMSECH", "IMSINH", "IMTAN", "ISFORMULA", "ISOWEEKNUM",
+    "LOGNORM.DIST", "LOGNORM.INV", "MAXIFS", "MINIFS", "MODE.SNGL", "NEGBINOM.DIST",
+    "NETWORKDAYS.INTL", "NORM.DIST", "NORM.INV", "NORM.S.DIST", "NORM.S.INV", "NUMBERVALUE",
+    "PDURATION", "PERCENTILE.EXC", "PERCENTILE.INC", "PERCENTRANK.EXC", "PERCENTRANK.INC",
+    "PERMUTATIONA", "PHI", "POISSON.DIST", "QUARTILE.EXC", "QUARTILE.INC", "RANK.AVG",
+    "RANK.EQ", "RRI", "SEC", "SECH", "SHEET", "SHEETS", "SKEW.P", "STDEV.P", "STDEV.S",
+    "SUMIFS", "SWITCH", "T.DIST", "T.DIST.2T", "T.DIST.RT", "T.INV", "T.INV.2T", "T.TEST",
+    "TEXTAFTER", "TEXTBEFORE", "TEXTJOIN", "UNICHAR", "UNICODE", "VALUETOTEXT", "VAR.P",
+    "VAR.S", "WEIBULL.DIST", "WORKDAY.INTL", "XLOOKUP", "XMATCH", "XOR", "Z.TEST",
+];
+
+/// `_xlfn.IFERROR` -> `IFERROR` when the function is in `XLFN_FUNCTIONS`.
+fn xlfn_builtin(name: &str) -> Option<&'static str> {
+    let name = name.trim();
+    if !name.get(..6)?.eq_ignore_ascii_case("_xlfn.") {
+        return None;
+    }
+    let rest = &name[6..];
+    XLFN_FUNCTIONS
+        .iter()
+        .copied()
+        .find(|f| f.eq_ignore_ascii_case(rest))
+}
 
 #[derive(Debug, Clone, Copy)]
 struct Xti {
     isup_book: u16,
     itab_first: i16,
-    _itab_last: i16,
+    itab_last: i16,
+}
+
+/// Cells `Range::from_sparse` allocates for `cells`, which must already be
+/// sorted by row (it takes the first and last cell as the row bounds).
+fn sparse_area<T: CellType>(cells: &[Cell<T>]) -> u64 {
+    let (Some(first), Some(last)) = (cells.first(), cells.last()) else {
+        return 0;
+    };
+    let (mut c0, mut c1) = (u32::MAX, 0);
+    for c in cells {
+        c0 = c0.min(c.pos.1);
+        c1 = c1.max(c.pos.1);
+    }
+    let rows = u64::from(last.pos.0.saturating_sub(first.pos.0)) + 1;
+    let cols = u64::from(c1.saturating_sub(c0)) + 1;
+    rows.saturating_mul(cols)
 }
 
 impl<RS: Read + Seek> Xls<RS> {
@@ -341,7 +437,7 @@ impl<RS: Read + Seek> Xls<RS> {
                         xtis.extend(r.data[2..].chunks(6).take(cxti).map(|xti| Xti {
                             isup_book: read_u16(&xti[..2]),
                             itab_first: read_i16(&xti[2..4]),
-                            _itab_last: read_i16(&xti[4..]),
+                            itab_last: read_i16(&xti[4..]),
                         }));
                     }
                     0x01AE => {
@@ -378,8 +474,12 @@ impl<RS: Read + Seek> Xls<RS> {
         // book's sheets, so resolving it against our sheet list would silently
         // turn `[other.xls]Sheet1!A1` into a reference to our first sheet.
         // Mark those entries unresolvable so they render as `#REF`.
+        // A sheet span (`'Jan:Mar'!B2`, itab_first != itab_last) cannot be
+        // written as one sheet name either; resolving it to the first sheet
+        // would silently drop the others, so it becomes `#REF` too.
         for xti in xtis.iter_mut() {
-            if supbooks.get(xti.isup_book as usize) != Some(&true) {
+            let local = supbooks.get(xti.isup_book as usize) == Some(&true);
+            if !local || xti.itab_first != xti.itab_last {
                 xti.itab_first = -1;
             }
         }
@@ -403,6 +503,7 @@ impl<RS: Read + Seek> Xls<RS> {
         debug!("defined_names: {:?}", defined_names);
 
         let mut sheets = BTreeMap::new();
+        let mut workbook_cells: u64 = 0;
         let fmla_sheet_names = sheet_names
             .iter()
             .map(|(_, n)| n.clone())
@@ -497,6 +598,17 @@ impl<RS: Read + Seek> Xls<RS> {
             // the same position still wins.
             cells.sort_by_key(|c| c.pos.0);
             formulas.sort_by_key(|c| c.pos.0);
+            // Counted per BoundSheet: several of them pointing at the same
+            // substream are each parsed and allocated.
+            workbook_cells = workbook_cells
+                .saturating_add(sparse_area(&cells))
+                .saturating_add(sparse_area(&formulas));
+            if workbook_cells > MAX_WORKBOOK_CELLS {
+                return Err(XlsError::TooManyCells {
+                    found: workbook_cells,
+                    limit: MAX_WORKBOOK_CELLS,
+                });
+            }
             let range = Range::from_sparse(cells);
             let formula = Range::from_sparse(formulas);
             sheets.insert(name, (range, formula));
@@ -1126,12 +1238,28 @@ fn parse_defined_names(rgce: &[u8]) -> Result<(Option<usize>, String), XlsError>
     Ok(res)
 }
 
+/// Column letters for a zero-based column: 0 -> A, 25 -> Z, 26 -> AA,
+/// 255 -> IV. `utils::push_column` drops the leading letter from column 26 on
+/// (AA -> A, IV -> V), so references use this instead.
+fn push_col(f: &mut String, col: u32) {
+    let mut buf = [0u8; 8];
+    let mut i = buf.len();
+    let mut n = u64::from(col) + 1;
+    while n > 0 {
+        n -= 1;
+        i -= 1;
+        buf[i] = b'A' + (n % 26) as u8;
+        n /= 26;
+    }
+    f.extend(buf[i..].iter().map(|&b| b as char));
+}
+
 fn push_ref(f: &mut String, row: u16, col_raw: u16) {
     // ColRelU: col (14 bits), colRelative (bit 14), rowRelative (bit 15)
     if col_raw & 0x4000 == 0 {
         f.push('$');
     }
-    push_column((col_raw & 0x3FFF) as u32, f);
+    push_col(f, (col_raw & 0x3FFF) as u32);
     if col_raw & 0x8000 == 0 {
         f.push('$');
     }
@@ -1291,11 +1419,14 @@ fn parse_formula(
                 stack.push(formula.len());
             }
             0x17 => {
+                // PtgStr: a quote inside the literal is written twice.
                 stack.push(formula.len());
-                formula.push('\"');
                 let cch = rgce[0] as usize;
-                let used = read_unicode_string_no_cch(encoding, &rgce[1..], &cch, &mut formula);
-                formula.push('\"');
+                let mut lit = String::with_capacity(cch);
+                let used = read_unicode_string_no_cch(encoding, &rgce[1..], &cch, &mut lit);
+                formula.push('"');
+                formula.push_str(&lit.replace('"', "\"\""));
+                formula.push('"');
                 rgce = &rgce[1 + used..];
             }
             0x18 => {
@@ -1391,7 +1522,7 @@ fn parse_formula(
                     }
                     _ => {
                         let iftab = read_u16(rgce) as usize;
-                        if iftab > crate::utils::FTAB_LEN {
+                        if iftab >= crate::utils::FTAB_LEN {
                             return Err(XlsError::IfTab(iftab));
                         }
                         rgce = &rgce[2..];
@@ -1412,6 +1543,22 @@ fn parse_formula(
                     let fargs = formula.split_off(start);
                     stack.push(formula.len());
                     args.push(fargs.len());
+                    if iftab == IFTAB_USER {
+                        // The first argument is the function's name. Only a
+                        // known `_xlfn.` function becomes a direct call; VBA
+                        // and add-in functions cannot be evaluated here.
+                        let name = &fargs[args[0]..args[1]];
+                        let Some(builtin) = xlfn_builtin(name) else {
+                            return Err(XlsError::Unrecognized {
+                                typ: "user-defined function",
+                                val: IFTAB_USER as u8,
+                            });
+                        };
+                        let rest: Vec<&str> =
+                            args[1..].windows(2).map(|w| &fargs[w[0]..w[1]]).collect();
+                        write!(&mut formula, "{}({})", builtin, rest.join(",")).unwrap();
+                        continue;
+                    }
                     formula.push_str(
                         crate::utils::FTAB
                             .get(iftab)

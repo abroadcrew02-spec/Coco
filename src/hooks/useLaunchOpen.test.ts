@@ -108,6 +108,15 @@ describe("startLaunchOpen", () => {
     expect(importCsv).not.toHaveBeenCalled();
   });
 
+  it("opens a launched .xls workbook through importXlsx", async () => {
+    const path = "C:/Users/テスト/売上.XLS";
+    invokeMock.mockResolvedValue([path]);
+    await startLaunchOpen();
+    expect(importXlsx).toHaveBeenCalledWith(path);
+    expect(importCsv).not.toHaveBeenCalled();
+    expect(openNicel).not.toHaveBeenCalled();
+  });
+
   it("does nothing when the launch list is empty", async () => {
     invokeMock.mockResolvedValue([]);
     await startLaunchOpen();

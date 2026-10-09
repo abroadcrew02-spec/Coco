@@ -282,6 +282,18 @@ fn basic_dates_get_default_formats() {
 }
 
 #[test]
+fn basic_date_formula_keeps_cached_value_and_grid_format() {
+    let r = import_xls_core(path_str(&fixture("basic.xls"))).unwrap();
+    let snap = snapshot(&r);
+    let date_formula = cell(sheet(&snap, "売上"), 8, 0);
+    assert_eq!(date_formula["f"], json!("=A6+1"));
+    assert_eq!(date_formula["v"].as_f64(), Some(45307.0));
+    assert_eq!(date_formula["_fmt"], json!("yyyy/m/d"));
+    let style_id = date_formula["s"].as_str().unwrap();
+    assert_eq!(snap["styles"][style_id]["n"]["pattern"], json!("yyyy/m/d"));
+}
+
+#[test]
 fn basic_hidden_sheet_state_and_absolute_keys() {
     let r = import_xls_core(path_str(&fixture("basic.xls"))).unwrap();
     let snap = snapshot(&r);

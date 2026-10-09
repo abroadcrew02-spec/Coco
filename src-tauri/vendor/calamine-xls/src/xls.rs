@@ -554,6 +554,13 @@ impl<RS: Read + Seek> Xls<RS> {
                         if let Some(val) = parse_formula_value(&r.data[6..14])? {
                             // If the value is a string
                             // it will appear in 0x0207 record coming next
+                            let val = match val {
+                                Data::Float(v) => {
+                                    let format = self.formats.get(read_u16(&r.data[4..]) as usize);
+                                    format_excel_f64(v, format, self.is_1904)
+                                }
+                                val => val,
+                            };
                             cells.push(Cell::new(fmla_pos, val));
                         }
                         let fmla = parse_formula(

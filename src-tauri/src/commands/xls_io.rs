@@ -502,8 +502,6 @@ fn xls_value_to_cell(v: &Data) -> Option<Value> {
             // lengths of time and need no shift.
             // A serial below 1 is a time of day without a date: it reads the
             // same in both systems and must not turn into 1904-01-01.
-            // Known gap: a formula's cached value never carries a date format
-            // in calamine, so a 1904 date produced by a formula is not shifted.
             if is_1904 && !is_duration && serial >= 1.0 {
                 serial += DAYS_1904_TO_1900;
             }

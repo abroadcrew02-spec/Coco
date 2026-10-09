@@ -1572,8 +1572,18 @@ fn parse_formula(
                     formula.pop();
                     formula.push(')');
                 } else {
+                    if iftab == IFTAB_USER {
+                        return Err(XlsError::Unrecognized {
+                            typ: "user-defined function",
+                            val: IFTAB_USER as u8,
+                        });
+                    }
                     stack.push(formula.len());
-                    formula.push_str(crate::utils::FTAB[iftab]);
+                    formula.push_str(
+                        crate::utils::FTAB
+                            .get(iftab)
+                            .ok_or(XlsError::IfTab(iftab))?,
+                    );
                     formula.push_str("()");
                 }
             }

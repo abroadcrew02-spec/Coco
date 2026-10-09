@@ -38,7 +38,7 @@ references come out wrong.
 | 23 | ExternSheet (0x0017) | `itab_last` ignored; a sheet span (`SUM('Jan:Mar'!B2)`) resolved to its first sheet only (`SUM('Jan'!B2)`, a different result) | An XTI with `itab_first != itab_last` resolves to `#REF`, like an external one: the formula keeps its cached value, a defined name on a span is dropped |
 | 24 | PtgFuncVar `User` (iftab 255) | Functions newer than BIFF8 came out as `User(_xlfn.IFERROR,1/0,"x")`, which recalculates to `#NAME?` | When the first argument is `_xlfn.NAME` and NAME is in `XLFN_FUNCTIONS` (functions the Nicel engine evaluates; source in the comment), written as `NAME(args)`. Any other `User` call (VBA, add-in, unknown `_xlfn.`) is `XlsError::Unrecognized`, so the cached value is kept. Nicel-specific: upstream would only drop the `User(_xlfn.` wrapper |
 | 25 | PtgStr (0x17) | A `"` inside the literal was written as is (`="say "hi""`), which does not parse | Written twice (`="say ""hi"""`) |
-| 26 | PtgFunc (0x21) | `iftab > FTAB_LEN` let `iftab == FTAB_LEN` index past `FTAB_ARGC` (a panic that loses the whole workbook) | `iftab >= FTAB_LEN` is `XlsError::IfTab` |
+| 26 | PtgFunc (0x21), zero-argument PtgFuncVar (0x22) | `iftab > FTAB_LEN` let `iftab == FTAB_LEN` index past `FTAB_ARGC`; a zero-argument variable call indexed `FTAB` unchecked (Excel 4.0 macro `FILE.CLOSE()` uses iftab 0x8090). Either panic loses the whole workbook | `iftab >= FTAB_LEN` or `FTAB.get(iftab)` returns `XlsError::IfTab`; a zero-argument `IFTAB_USER` is `Unrecognized` |
 
 ### xls.rs: allocation bounds
 

@@ -789,6 +789,21 @@ fn function_index_at_the_table_end_is_unreadable_not_a_panic() {
     assert!(r.warnings[0].message.contains("読み取れない数式 1 個"));
 }
 
+#[test]
+fn excel4_macro_sheet_is_skipped_without_losing_worksheet() {
+    let r = import_xls_core(path_str(&fixture("xlm.xls"))).unwrap();
+    let snap = snapshot(&r);
+    assert_eq!(sheet_names(&snap), vec!["S"]);
+    assert_eq!(cell(sheet(&snap, "S"), 0, 0)["v"].as_f64(), Some(5.0));
+    assert!(
+        r.warnings[0]
+            .message
+            .contains("グラフシートなど 1 枚は読み込みません。"),
+        "{}",
+        r.warnings[0].message
+    );
+}
+
 // ── Macros: presence only ────────────────────────────────────────────────────
 
 #[test]

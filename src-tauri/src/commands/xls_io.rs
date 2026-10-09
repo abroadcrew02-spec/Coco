@@ -334,7 +334,12 @@ fn import_ole_inner(bytes: Vec<u8>) -> Result<ImportWorkbookResult, String> {
         "name": "Imported Workbook",
         "appVersion": "0.1.0",
         "locale": "enUS",
-        "styles": {},
+        "styles": {
+            "s1": { "n": { "pattern": "yyyy/m/d" } },
+            "s2": { "n": { "pattern": "h:mm:ss" } },
+            "s3": { "n": { "pattern": "yyyy/m/d h:mm:ss" } },
+            "s4": { "n": { "pattern": "[h]:mm:ss" } },
+        },
         "sheetOrder": sheet_order,
         "sheets": Value::Object(sheets_map),
         "namedRanges": named_ranges,
@@ -502,7 +507,15 @@ fn xls_value_to_cell(v: &Data) -> Option<Value> {
             if is_1904 && !is_duration && serial >= 1.0 {
                 serial += DAYS_1904_TO_1900;
             }
-            Some(json!({ "v": serial, "_fmt": default_date_format(serial, is_duration) }))
+            let fmt = default_date_format(serial, is_duration);
+            let style_id = match fmt {
+                "yyyy/m/d" => "s1",
+                "h:mm:ss" => "s2",
+                "yyyy/m/d h:mm:ss" => "s3",
+                "[h]:mm:ss" => "s4",
+                _ => unreachable!(),
+            };
+            Some(json!({ "v": serial, "_fmt": fmt, "s": style_id }))
         }
         // The Xls reader does not produce these; keep the text if it ever does.
         Data::DateTimeIso(s) | Data::DurationIso(s) => Some(json!({ "v": s })),

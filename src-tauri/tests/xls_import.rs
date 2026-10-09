@@ -274,6 +274,11 @@ fn basic_dates_get_default_formats() {
     assert_eq!(cell(s, 7, 0)["_fmt"], json!("yyyy/m/d h:mm:ss"));
     assert_eq!(cell(s, 9, 0)["v"].as_f64(), Some(1.0));
     assert_eq!(cell(s, 9, 0)["_fmt"], json!("[h]:mm:ss"));
+    for row in [5, 6, 7, 9] {
+        let date_cell = cell(s, row, 0);
+        let style_id = date_cell["s"].as_str().unwrap();
+        assert_eq!(snap["styles"][style_id]["n"]["pattern"], date_cell["_fmt"]);
+    }
 }
 
 #[test]

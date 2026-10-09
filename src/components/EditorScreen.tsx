@@ -474,6 +474,7 @@ import {
   type UpdaterState,
   checkForUpdate,
   downloadAndInstall,
+  updateStartConfirmMessage,
   relaunchApp,
   isAutoCheckEnabled,
   getSkippedVersion,
@@ -10956,8 +10957,10 @@ export default function EditorScreen() {
           onUpdate={() => {
             // The Windows updater terminates the app while it installs, and
             // that path does not go through the close-requested guard, so
-            // refuse to start with unsaved edits instead of losing them.
-            if (isWorkbookDirty() && !window.confirm(t("confirm.update.unsavedProceed"))) {
+            // refuse to start with unsaved edits instead of losing them. The
+            // installer also closes every other Nicel window of this user
+            // without asking, so the confirmation always says so.
+            if (!window.confirm(updateStartConfirmMessage(isWorkbookDirty()))) {
               return;
             }
             // Capture the target version so progress events can label it.

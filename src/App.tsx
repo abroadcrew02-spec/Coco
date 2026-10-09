@@ -16,6 +16,7 @@ import {
 } from "./hooks/useGlobalShortcuts";
 import { useWindowTitle } from "./hooks/useWindowTitle";
 import { useFileDrop } from "./hooks/useFileDrop";
+import { useLaunchOpen } from "./hooks/useLaunchOpen";
 import { useCloseGuard, onCloseRequest } from "./hooks/useCloseGuard";
 import { useMenuActions } from "./hooks/useMenuActions";
 import { useLocale } from "./hooks/useLocale";
@@ -116,6 +117,7 @@ export default function App() {
   useCloseGuard();
   useMenuActions();
   const { isHovering: isDropHovering } = useFileDrop();
+  useLaunchOpen();
 
   useEffect(() => {
     const u1 = onHelpRequested(() => setHelpOpen(true));

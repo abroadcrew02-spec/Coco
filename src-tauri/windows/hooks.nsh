@@ -182,6 +182,20 @@
   ; until every listener has handled the event, and the auto-updater runs
   ; this installer unattended (/P), where a hung listener would stall it.
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+
+  ; The template's GetOptions strips matching outer quotes from /ARGS before
+  ; restarting the app. Keep quoted file paths intact by making a switch the
+  ; last argument; launch_candidates ignores it. Check the original command
+  ; line because PREINSTALL may clear $UpdateMode during legacy migration.
+  Push $R0
+  ${GetOptions} $CMDLINE "/UPDATE" $R0
+  ${IfNot} ${Errors}
+    ${GetOptions} $CMDLINE "/ARGS" $R0
+    ${IfNot} ${Errors}
+      StrCpy $CMDLINE "$CMDLINE --nicel-update-relaunch"
+    ${EndIf}
+  ${EndIf}
+  Pop $R0
 !macroend
 
 ; POSTUNINSTALL, not PREUNINSTALL: the template asks "Nicel is running" right

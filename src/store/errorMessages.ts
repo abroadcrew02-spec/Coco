@@ -1,5 +1,5 @@
 // Maps Rust-side error codes to user-facing messages.
-// Codes are emitted by xlsx_io / csv_io / workbook / recovery commands.
+// Codes are emitted by xlsx_io / xls_io / csv_io / workbook / recovery commands.
 // Unknown codes fall through unchanged so debugging info isn't lost.
 //
 // #179: messages are localized. `friendlyError` resolves the active locale
@@ -18,6 +18,13 @@ const FRIENDLY: Record<Locale, Record<string, string>> = {
     XLSX_BUILD_FAILED: "xlsx の構築中にエラーが発生しました。",
     XLSX_WRITE_FAILED: "xlsx の書き込みに失敗しました。ディスク容量や権限を確認してください。",
     XLSX_SECURITY_BLOCKED: "セキュリティ上の制限を超えているため、ファイルを開けません。",
+
+    // xls (Excel 97-2003) import — commands/xls_io.rs. Exact-match codes carry no tail.
+    XLS_PASSWORD_PROTECTED:
+      "パスワードで保護された .xls は開けません。Excel でパスワードを解除して保存し直してください。",
+    XLS_NO_WORKSHEETS: "読み込めるワークシートがありません。",
+    XLS_TOO_MANY_CELLS:
+      "この .xls は大きすぎて開けません。データの入っている範囲が上限を超えています。Excel で不要な行や列を削除してから開いてください。",
 
     // csv import/export
     CSV_INVALID_EXTENSION: "拡張子が .csv / .tsv ではありません。",
@@ -40,6 +47,12 @@ const FRIENDLY: Record<Locale, Record<string, string>> = {
     XLSX_SECURITY_BLOCKED:
       "The file cannot be opened because it exceeds a security limit.",
 
+    XLS_PASSWORD_PROTECTED:
+      "A password-protected .xls file cannot be opened. Remove the password in Excel and save it again.",
+    XLS_NO_WORKSHEETS: "There are no worksheets that can be read.",
+    XLS_TOO_MANY_CELLS:
+      "This .xls file is too large to open. The range that holds data exceeds the limit. Delete unused rows or columns in Excel, then open it again.",
+
     CSV_INVALID_EXTENSION: "The file extension is not .csv / .tsv.",
     CSV_EMPTY_WORKBOOK: "No sheets were found to export.",
     CSV_TOO_LARGE: "The CSV exceeds the cell-count limit (5 million).",
@@ -49,6 +62,39 @@ const FRIENDLY: Record<Locale, Record<string, string>> = {
 };
 
 type PrefixFormatter = (rest: string) => string;
+
+// XLS_NOT_EXCEL97 hints come from the Rust sniffer: html | xml | text | empty | unknown.
+// Unknown hints fall back to the plain sentence so a new hint never leaks raw text.
+function xlsNotExcel97Ja(hint: string): string {
+  const head = "このファイルは Excel 97-2003 形式ではありません。";
+  switch (hint) {
+    case "html":
+      return `${head}中身は Web ページ（HTML）です。Excel で開いて .xlsx として保存し直してください。`;
+    case "xml":
+      return `${head}中身は XML スプレッドシート 2003 です。Excel で開いて .xlsx として保存し直してください。`;
+    case "text":
+      return `${head}中身はテキスト（CSV / TSV など）のようです。拡張子を .csv か .tsv に変えて開いてください。`;
+    default:
+      return head;
+  }
+}
+
+function xlsNotExcel97En(hint: string): string {
+  const head = "This file is not in Excel 97-2003 format.";
+  switch (hint) {
+    case "html":
+      return `${head} Its content is a web page (HTML). Open it in Excel and save it again as .xlsx.`;
+    case "xml":
+      return `${head} Its content is an XML Spreadsheet 2003. Open it in Excel and save it again as .xlsx.`;
+    case "text":
+      return `${head} It looks like text (CSV / TSV). Change the extension to .csv or .tsv and open it again.`;
+    default:
+      return head;
+  }
+}
+
+/** "XLS_TOO_LARGE: <MB>" — tolerate a trailing "MB" unit in the detail. */
+const xlsSizeMb = (rest: string): string => rest.trim().replace(/\s*MB$/i, "");
 
 const PREFIX_FRIENDLY: Record<Locale, Array<[string, PrefixFormatter]>> = {
   "ja-JP": [
@@ -79,6 +125,12 @@ const PREFIX_FRIENDLY: Record<Locale, Array<[string, PrefixFormatter]>> = {
     ["Invalid xlsx (zip):", (rest) => `xlsx として開けません。ZIP 構造が不正です（${rest.trim()}）`],
     // "REVEAL_SPAWN_FAILED: <io error>" — reveal_in_file_manager couldn't spawn explorer/open/xdg-open
     ["REVEAL_SPAWN_FAILED:", (rest) => `ファイルマネージャを起動できませんでした（${rest.trim()}）`],
+    // xls_io.rs — "<CODE>: <detail>" (colon + one space). Every XLS_NOT_EXCEL97
+    // sentence contains "Excel 97-2003 形式ではありません".
+    ["XLS_NOT_EXCEL97:", (rest) => xlsNotExcel97Ja(rest.trim())],
+    ["XLS_TOO_LARGE:", (rest) => `.xls のファイルサイズが上限（50 MB）を超えています（${xlsSizeMb(rest)} MB）。`],
+    ["XLS_CORRUPT:", (rest) => `.xls を読み取れませんでした。ファイルが壊れているか、対応していない形式です（${rest.trim()}）。`],
+    ["XLS_READ_FAILED:", (rest) => `ファイルを読み込めませんでした（${rest.trim()}）。`],
   ],
   "en-US": [
     ["CSV_TOO_LARGE", (_rest) => "The CSV exceeds the cell-count limit (5 million)."],
@@ -94,6 +146,10 @@ const PREFIX_FRIENDLY: Record<Locale, Array<[string, PrefixFormatter]>> = {
     ["Snapshot not found:", (rest) => `The snapshot was not found (${rest.trim()}). It may have been reverted to the latest version.`],
     ["Invalid xlsx (zip):", (rest) => `The xlsx file cannot be opened — its ZIP structure is invalid (${rest.trim()}).`],
     ["REVEAL_SPAWN_FAILED:", (rest) => `Could not launch the file manager (${rest.trim()}).`],
+    ["XLS_NOT_EXCEL97:", (rest) => xlsNotExcel97En(rest.trim())],
+    ["XLS_TOO_LARGE:", (rest) => `The .xls file exceeds the size limit (50 MB) (${xlsSizeMb(rest)} MB).`],
+    ["XLS_CORRUPT:", (rest) => `Could not read the .xls file. It may be corrupted or in an unsupported format (${rest.trim()}).`],
+    ["XLS_READ_FAILED:", (rest) => `Could not read the file (${rest.trim()}).`],
   ],
 };
 

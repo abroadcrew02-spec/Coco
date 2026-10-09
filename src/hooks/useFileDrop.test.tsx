@@ -96,6 +96,26 @@ describe("useFileDrop", () => {
       expect(invokeMock).toHaveBeenCalledWith("workbook_import_xlsx", { path: "/tmp/macros.xlsm" });
     });
 
+    it("routes .xls and .XLS to workbook_import_xls (#417)", async () => {
+      render(<Probe />);
+      await fireDrop("/tmp/old.xls");
+      expect(invokeMock).toHaveBeenCalledWith("workbook_import_xls", { path: "/tmp/old.xls" });
+      invokeMock.mockClear();
+      await fireDrop("C:\\data\\OLD.XLS");
+      expect(invokeMock).toHaveBeenCalledWith("workbook_import_xls", { path: "C:\\data\\OLD.XLS" });
+      expect(invokeMock).not.toHaveBeenCalledWith("workbook_import_xlsx", expect.anything());
+    });
+
+    it("does not mistake .xlsb for .xls and lists .xls in the unsupported-format hint (#417)", async () => {
+      render(<Probe />);
+      await fireDrop("/tmp/binary.xlsb");
+      expect(invokeMock).not.toHaveBeenCalledWith("workbook_import_xls", expect.anything());
+      expect(invokeMock).not.toHaveBeenCalledWith("workbook_import_xlsx", expect.anything());
+      const err = useWorkbookStore.getState().lastError ?? "";
+      expect(err).toContain(".xlsb");
+      expect(err).toContain(".xls /");
+    });
+
     it("routes .coco to workbook_open_nicel", async () => {
       render(<Probe />);
       await fireDrop("/tmp/wb.coco");

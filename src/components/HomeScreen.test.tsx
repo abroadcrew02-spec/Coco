@@ -261,6 +261,43 @@ describe("HomeScreen", () => {
       expect(importCall).toBeTruthy();
     });
 
+    it("ファイルを参照 + selecting a .xls dispatches workbook_import_xls (#417)", async () => {
+      openMock.mockResolvedValue("/tmp/legacy.xls");
+      invokeMock.mockResolvedValue({
+        handle: {
+          workbookId: "wb",
+          path: "/tmp/legacy.xls",
+          sourceType: "xlsx",
+          snapshotJson: "{}",
+          requiresSaveAsOnFirstSave: true,
+        },
+        warnings: [],
+      });
+      const user = await gotoOpenView();
+      await user.click(screen.getByRole("button", { name: /ファイルを参照/ }));
+      const xlsCall = invokeMock.mock.calls.find((c) => c[0] === "workbook_import_xls");
+      expect(xlsCall?.[1]).toEqual({ path: "/tmp/legacy.xls" });
+      expect(invokeMock.mock.calls.find((c) => c[0] === "workbook_import_xlsx")).toBeUndefined();
+    });
+
+    it("the open dialog filters offer .xls alongside .xlsx / .xlsm (#417)", async () => {
+      openMock.mockResolvedValue(null);
+      const user = await gotoOpenView();
+      await user.click(screen.getByRole("button", { name: /ファイルを参照/ }));
+      const opts = openMock.mock.calls[0][0] as {
+        filters: Array<{ name: string; extensions: string[] }>;
+      };
+      const all = opts.filters.find((f) => f.name.startsWith("Excel /"));
+      const excel = opts.filters.find((f) => f.name === "Excel Files");
+      expect(all?.extensions).toContain("xls");
+      expect(excel?.extensions).toEqual(["xlsx", "xlsm", "xls"]);
+    });
+
+    it("the supported-format hint mentions xls (#417)", async () => {
+      await gotoOpenView();
+      expect(screen.getByText(/xlsx \/ xlsm \/ xls \/ csv \/ tsv に対応/)).toBeTruthy();
+    });
+
     it("ファイルを参照 + selecting a .coco dispatches workbook_open_nicel", async () => {
       openMock.mockResolvedValue("/tmp/wb.coco");
       invokeMock.mockResolvedValue({
@@ -313,6 +350,30 @@ describe("HomeScreen", () => {
       expect(badges[0].textContent).toBe("xlsx");
       expect(badges[1].textContent).toBe("csv");
       expect(badges[2].textContent).toBe("coco");
+    });
+
+    it("shows an xls badge (recent-kind--xls) for a .xls recent and opens it via workbook_import_xls (#417)", async () => {
+      const user = userEvent.setup();
+      useWorkbookStore.setState({
+        recentFiles: [
+          { path: "/tmp/old.xls", name: "old.xls", lastOpened: "2026-05-13T10:00:00Z", exists: true },
+          { path: "/tmp/OLD2.XLS", name: "OLD2.XLS", lastOpened: "2026-05-12T10:00:00Z", exists: true },
+        ],
+      });
+      invokeMock.mockResolvedValue({
+        handle: { workbookId: "wb", path: "/tmp/old.xls", sourceType: "xlsx", snapshotJson: "{}" },
+        warnings: [],
+      });
+      const { container } = render(<HomeScreen />);
+      const badges = container.querySelectorAll(".recent-kind");
+      expect(badges).toHaveLength(2);
+      expect(badges[0].textContent).toBe("xls");
+      expect(badges[0].className).toContain("recent-kind--xls");
+      expect(badges[1].textContent).toBe("xls");
+      await user.click(container.querySelector(".recent-list .recent-item")!);
+      const call = invokeMock.mock.calls.find((c) => c[0] === "workbook_import_xls");
+      expect(call?.[1]).toEqual({ path: "/tmp/old.xls" });
+      expect(invokeMock.mock.calls.find((c) => c[0] === "workbook_open_nicel")).toBeUndefined();
     });
 
     it("flags missing files with 見つかりません badge", () => {

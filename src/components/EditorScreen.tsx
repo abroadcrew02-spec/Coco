@@ -7343,8 +7343,8 @@ export default function EditorScreen() {
     const selected = await openDialog({
       multiple: false,
       filters: [
-        { name: "Excel / CSV / TSV", extensions: ["xlsx", "xlsm", "csv", "tsv"] },
-        { name: "Excel Files", extensions: ["xlsx", "xlsm"] },
+        { name: "Excel / CSV / TSV", extensions: ["xlsx", "xlsm", "xls", "csv", "tsv"] },
+        { name: "Excel Files", extensions: ["xlsx", "xlsm", "xls"] },
         { name: "CSV / TSV Files", extensions: ["csv", "tsv"] },
       ],
     });

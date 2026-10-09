@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, cleanup, fireEvent } from "@testing-library/react";
+import { render, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
 const { invokeMock, openDialogMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
@@ -116,6 +116,23 @@ describe("useGlobalShortcuts keyboard handler", () => {
     render(<Probe />);
     fireEvent.keyDown(window, { key: "n", ctrlKey: true });
     expect(invokeMock).toHaveBeenCalledWith("workbook_new");
+  });
+
+  it("Ctrl+O offers .xls in the dialog filters and routes a picked .xls to workbook_import_xls (#417)", async () => {
+    openDialogMock.mockResolvedValue("/tmp/legacy.xls");
+    invokeMock.mockResolvedValue({
+      handle: { workbookId: "wb", path: "/tmp/legacy.xls", sourceType: "xlsx", snapshotJson: "{}" },
+      warnings: [],
+    });
+    render(<Probe />);
+    fireEvent.keyDown(window, { key: "o", ctrlKey: true });
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("workbook_import_xls", { path: "/tmp/legacy.xls" }),
+    );
+    const filters = openDialogMock.mock.calls[0][0].filters as Array<{ name: string; extensions: string[] }>;
+    expect(filters[0].extensions).toContain("xls");
+    expect(filters.find((f) => f.name === "Excel Files")?.extensions).toEqual(["xlsx", "xlsm", "xls"]);
+    expect(invokeMock).not.toHaveBeenCalledWith("workbook_import_xlsx", expect.anything());
   });
 
   it("unmounting cleans up the keydown listener", () => {

@@ -199,8 +199,8 @@ export default function HomeScreen() {
     const selected = await open({
       multiple: false,
       filters: [
-        { name: "Excel / CSV / TSV / JSON", extensions: ["xlsx", "xlsm", "csv", "tsv", "json", "jsonl", "ndjson"] },
-        { name: "Excel Files", extensions: ["xlsx", "xlsm"] },
+        { name: "Excel / CSV / TSV / JSON", extensions: ["xlsx", "xlsm", "xls", "csv", "tsv", "json", "jsonl", "ndjson"] },
+        { name: "Excel Files", extensions: ["xlsx", "xlsm", "xls"] },
         { name: "CSV / TSV Files", extensions: ["csv", "tsv"] },
         { name: "JSON / JSONL", extensions: ["json", "jsonl", "ndjson"] },
       ],
@@ -307,6 +307,8 @@ export default function HomeScreen() {
             route.kind === "xlsx"
               ? f.path.toLowerCase().endsWith(".xlsm")
                 ? "xlsm"
+                : f.path.toLowerCase().endsWith(".xls")
+                ? "xls"
                 : "xlsx"
               : route.kind === "csv"
               ? f.path.toLowerCase().endsWith(".tsv")
@@ -748,7 +750,7 @@ export default function HomeScreen() {
                   ファイルを参照…
                 </button>
                 <span className="home-open-hint">
-                  xlsx / xlsm / csv / tsv に対応
+                  xlsx / xlsm / xls / csv / tsv に対応
                 </span>
               </div>
             </section>

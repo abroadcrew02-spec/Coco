@@ -122,6 +122,21 @@ describe("useMenuActions", () => {
       expect(invokeMock).toHaveBeenCalledWith("workbook_import_xlsx", { path: "/tmp/book.xlsx" });
     });
 
+    it("'open' offers .xls in the dialog filters and routes a picked .xls to workbook_import_xls (#417)", async () => {
+      openMock.mockResolvedValue("/tmp/legacy.xls");
+      invokeMock.mockResolvedValue({
+        handle: { workbookId: "wb", path: "/tmp/legacy.xls", sourceType: "xlsx", snapshotJson: "{}" },
+        warnings: [],
+      });
+      render(<Probe />);
+      await fireMenu("open");
+      expect(invokeMock).toHaveBeenCalledWith("workbook_import_xls", { path: "/tmp/legacy.xls" });
+      expect(invokeMock).not.toHaveBeenCalledWith("workbook_import_xlsx", expect.anything());
+      const filters = openMock.mock.calls[0][0].filters as Array<{ name: string; extensions: string[] }>;
+      expect(filters[0].extensions).toContain("xls");
+      expect(filters.find((f) => f.name === "Excel Files")?.extensions).toEqual(["xlsx", "xlsm", "xls"]);
+    });
+
     it("'open' routes .csv to workbook_import_csv with current encoding", async () => {
       useWorkbookStore.setState({ csvImportEncoding: "utf8" });
       openMock.mockResolvedValue("/tmp/data.csv");

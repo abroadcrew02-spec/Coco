@@ -17,4 +17,5 @@ pub mod updater;
 pub mod workbook;
 pub mod workspace_bundle;
 pub mod ws_fetch;
+pub mod xls_io;
 pub mod xlsx_io;
